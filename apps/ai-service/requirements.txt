@@ -1,0 +1,3 @@
+# 骨架占位：按需补充版本
+fastapi
+uvicorn[standard]

@@ -1,0 +1,16 @@
+{
+  "name": "cees-ai",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "dev": "pnpm --parallel --filter @cees/api --filter @cees/desktop dev",
+    "build": "pnpm -r --if-present build",
+    "test": "pnpm -r --if-present test",
+    "lint": "pnpm -r --if-present lint",
+    "contracts:gen": "pnpm --filter @cees/contracts generate",
+    "infra:up": "docker compose --env-file .env -f infra/docker-compose.yml up -d --build",
+    "infra:down": "docker compose --env-file .env -f infra/docker-compose.yml down",
+    "infra:logs": "docker compose --env-file .env -f infra/docker-compose.yml logs -f"
+  }
+}

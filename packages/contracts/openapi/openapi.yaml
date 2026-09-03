@@ -1,0 +1,30 @@
+openapi: 3.1.0
+info:
+  title: CEES AI API
+  version: 0.1.0
+  description: 以本文件为唯一事实源的公开 API 契约。资源与操作按 docs/api 约定补充。
+
+servers:
+  - url: http://localhost:3000/api/v1
+
+paths:
+  /health:
+    get:
+      summary: 健康检查
+      operationId: health
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer

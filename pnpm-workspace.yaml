@@ -1,0 +1,7 @@
+packages:
+  - apps/api
+  - apps/desktop
+  - packages/*
+
+# 注意：apps/ai-service（Python）与 apps/mobile（Flutter）不使用 pnpm，
+# 保留各自独立工具链，仅通过 packages/contracts 与 TS 世界对齐。

@@ -1,0 +1,12 @@
+{
+  "name": "@cees/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "concurrently -k \"vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "build": "tsc -b && vite build && tsc -p electron/tsconfig.json"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}
