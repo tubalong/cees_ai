@@ -1,0 +1,18 @@
+name: cees-ai-development
+
+services:
+  postgres:
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_development_data:/var/lib/postgresql/data
+
+  redis:
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_development_data:/data
+
+volumes:
+  postgres_development_data:
+  redis_development_data:

@@ -26,3 +26,5 @@ pnpm --filter @cees/api dev
 ```
 
 Swagger 文档地址（骨架就绪后）：`http://localhost:3000/api/docs`。
+
+文件上传涉及租户权限、COS、配额、审计与 AI 处理，设计草案见 [docs/architecture/file-upload.md](../../docs/architecture/file-upload.md)。公开接口必须先落入 OpenAPI 契约，再由本应用实现。
