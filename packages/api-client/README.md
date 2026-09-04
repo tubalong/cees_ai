@@ -4,4 +4,4 @@
 
 - 本目录为生成物，**禁止手改**；
 - 契约变更后重新生成并提交；
-- 生成脚本待接入 `packages/contracts`（根命令 `pnpm contracts:gen`）。
+- 根目录执行 `pnpm contracts:generate` 重新生成。

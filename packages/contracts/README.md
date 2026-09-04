@@ -17,4 +17,8 @@ openapi/
 3. 重新生成客户端：TS → `packages/api-client`；Dart/Python → 各端生成目录；
 4. 破坏性变更提升契约版本并在 `docs/api` 记录迁移说明。
 
-生成脚本待接入（可挂到根 `contracts:gen`）。
+TypeScript 客户端生成命令：
+
+```text
+pnpm contracts:generate
+```

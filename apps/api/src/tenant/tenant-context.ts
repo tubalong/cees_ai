@@ -4,7 +4,9 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 export interface RequestTenantContext {
     tenantId: string;
     userId: string;
+    membershipId: string;
     requestId: string;
+    roles: string[];
     permissions: string[];
 }
 

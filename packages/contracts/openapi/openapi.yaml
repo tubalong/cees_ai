@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CEES AI API
-  version: 0.1.0
+  version: 0.4.0
   description: 以本文件为唯一事实源的公开 API 契约。资源与操作按 docs/api 约定补充。
 
 servers:
@@ -12,6 +12,7 @@ paths:
     get:
       summary: 健康检查
       operationId: health
+      security: []
       responses:
         "200":
           description: OK
@@ -23,8 +24,1555 @@ paths:
                   status:
                     type: string
 
+  /auth/login:
+    post:
+      summary: 使用租户编码、邮箱和密码登录
+      operationId: authLogin
+      security: []
+      tags:
+        - Auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: 登录成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponseEnvelope"
+        "400":
+          description: 请求字段校验失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "401":
+          description: 登录凭证无效或账户不可用
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /auth/refresh:
+    post:
+      summary: 使用 Refresh Token 轮换访问令牌和刷新令牌
+      operationId: authRefresh
+      security: []
+      tags:
+        - Auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshTokenRequest"
+      responses:
+        "200":
+          description: 令牌轮换成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenPairResponseEnvelope"
+        "400":
+          description: 请求字段校验失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "401":
+          description: Refresh Token 无效、过期或已被使用
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /auth/logout:
+    post:
+      summary: 撤销当前登录会话
+      operationId: authLogout
+      tags:
+        - Auth
+      security:
+        - bearerAuth: []
+      responses:
+        "204":
+          description: 当前会话已撤销
+        "401":
+          description: Access Token 无效或 Session 已失效
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /auth/me:
+    get:
+      summary: 获取当前用户、租户、角色和权限
+      operationId: authMe
+      tags:
+        - Auth
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 当前认证上下文
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MeResponseEnvelope"
+        "401":
+          description: Access Token 无效或 Session 已失效
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /tenants/current:
+    get:
+      summary: 获取当前租户
+      operationId: tenantGetCurrent
+      tags:
+        - Tenant
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 当前租户
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantResponseEnvelope"
+        "401":
+          description: 登录状态无效或已过期
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "403":
+          description: 缺少 tenant.read 权限
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+    patch:
+      summary: 修改当前租户
+      operationId: tenantUpdateCurrent
+      tags:
+        - Tenant
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateTenantRequest"
+      responses:
+        "200":
+          description: 修改后的租户
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantResponseEnvelope"
+        "400":
+          description: 请求字段校验失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "401":
+          description: 登录状态无效或已过期
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "403":
+          description: 缺少 tenant.update 权限
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "409":
+          description: 版本冲突
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /tenants/current/members:
+    get:
+      summary: 查询当前租户成员
+      operationId: tenantListMembers
+      tags:
+        - Tenant
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: keyword
+          in: query
+          schema:
+            type: string
+            maxLength: 100
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/MemberStatus"
+        - name: roleId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: cursor
+          in: query
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 当前租户成员列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantMemberListResponseEnvelope"
+        "400":
+          description: 查询参数校验失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "401":
+          description: 登录状态无效或已过期
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "403":
+          description: 缺少 member.read 权限
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /tenants/current/members/{membershipId}:
+    parameters:
+      - name: membershipId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      summary: 获取当前租户成员详情
+      operationId: tenantGetMember
+      tags:
+        - Tenant
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 成员详情
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantMemberResponseEnvelope"
+        "401":
+          description: 登录状态无效或已过期
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "403":
+          description: 缺少 member.read 权限
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "404":
+          description: 当前租户内成员不存在
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+    patch:
+      summary: 修改当前租户成员
+      operationId: tenantUpdateMember
+      tags:
+        - Tenant
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateTenantMemberRequest"
+      responses:
+        "200":
+          description: 修改后的成员
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantMemberResponseEnvelope"
+        "400":
+          description: 请求字段校验失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "401":
+          description: 登录状态无效或已过期
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "403":
+          description: 缺少 member.update 权限
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "404":
+          description: 当前租户内成员或部门不存在
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "409":
+          description: 最后一名管理员、自操作或版本冲突
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+    delete:
+      summary: 移除当前租户成员
+      operationId: tenantRemoveMember
+      tags:
+        - Tenant
+      security:
+        - bearerAuth: []
+      responses:
+        "204":
+          description: 成员已移除且相关 Session 已撤销
+        "401":
+          description: 登录状态无效或已过期
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "403":
+          description: 缺少 member.remove 权限
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "404":
+          description: 当前租户内成员不存在
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "409":
+          description: 不能移除自己或最后一名管理员
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /tenants/current/members/{membershipId}/roles:
+    parameters:
+      - name: membershipId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    put:
+      summary: 替换当前租户成员的角色集合
+      operationId: tenantReplaceMemberRoles
+      tags:
+        - Tenant
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReplaceTenantMemberRolesRequest"
+      responses:
+        "200":
+          description: 更新角色后的成员
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantMemberResponseEnvelope"
+        "400":
+          description: 请求字段校验失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "401":
+          description: 登录状态无效或已过期
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "403":
+          description: 缺少 role.assign 权限
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "404":
+          description: 当前租户内成员或角色不存在
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "409":
+          description: 最后一名管理员或版本冲突
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /permissions:
+    get:
+      summary: 获取平台预置权限目录
+      operationId: rbacListPermissions
+      tags: [RBAC]
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 权限目录
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PermissionListResponseEnvelope"
+        "401":
+          description: 登录状态无效或已过期
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "403":
+          description: 缺少 role.read 权限
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /roles:
+    get:
+      summary: 获取当前租户角色列表
+      operationId: rbacListRoles
+      tags: [RBAC]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: keyword
+          in: query
+          schema:
+            type: string
+            maxLength: 100
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: cursor
+          in: query
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 当前租户角色列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoleListResponseEnvelope"
+        "401":
+          description: 登录状态无效或已过期
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "403":
+          description: 缺少 role.read 权限
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+    post:
+      summary: 创建当前租户角色
+      operationId: rbacCreateRole
+      tags: [RBAC]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRoleRequest"
+      responses:
+        "201":
+          description: 已创建角色
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoleResponseEnvelope"
+        "400":
+          description: 请求字段校验失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "401":
+          description: 登录状态无效或已过期
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "403":
+          description: 缺少 role.create 权限
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "409":
+          description: 角色编码已存在
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /roles/{roleId}:
+    parameters:
+      - name: roleId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      summary: 获取当前租户角色详情
+      operationId: rbacGetRole
+      tags: [RBAC]
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 角色详情
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoleResponseEnvelope"
+        "401":
+          description: 登录状态无效或已过期
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "403":
+          description: 缺少 role.read 权限
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "404":
+          description: 当前租户内角色不存在
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+    patch:
+      summary: 修改当前租户角色
+      operationId: rbacUpdateRole
+      tags: [RBAC]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateRoleRequest"
+      responses:
+        "200":
+          description: 修改后的角色
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoleResponseEnvelope"
+        "400":
+          description: 请求字段校验失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "401":
+          description: 登录状态无效或已过期
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "403":
+          description: 缺少 role.update 权限
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "404":
+          description: 当前租户内角色不存在
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "409":
+          description: 系统角色不可修改或版本冲突
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+    delete:
+      summary: 删除当前租户角色
+      operationId: rbacDeleteRole
+      tags: [RBAC]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: version
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "204":
+          description: 角色已删除
+        "400":
+          description: 请求字段校验失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "401":
+          description: 登录状态无效或已过期
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "403":
+          description: 缺少 role.delete 权限
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "404":
+          description: 当前租户内角色不存在
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "409":
+          description: 系统角色、角色正在使用或版本冲突
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /roles/{roleId}/permissions:
+    parameters:
+      - name: roleId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    put:
+      summary: 替换当前租户角色权限集合
+      operationId: rbacReplaceRolePermissions
+      tags: [RBAC]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReplaceRolePermissionsRequest"
+      responses:
+        "200":
+          description: 权限替换后的角色
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoleResponseEnvelope"
+        "400":
+          description: 请求字段校验失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "401":
+          description: 登录状态无效或已过期
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "403":
+          description: 缺少 role.update 权限
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "404":
+          description: 当前租户内角色或权限不存在
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "409":
+          description: 系统角色不可修改或版本冲突
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /audit-events:
+    get:
+      summary: 查询当前租户审计事件
+      operationId: auditListEvents
+      tags: [Audit]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: action
+          in: query
+          schema:
+            type: string
+            maxLength: 100
+        - name: outcome
+          in: query
+          schema:
+            $ref: "#/components/schemas/AuditOutcome"
+        - name: actorId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: membershipId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: resourceType
+          in: query
+          schema:
+            type: string
+            maxLength: 100
+        - name: resourceId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: requestId
+          in: query
+          schema:
+            type: string
+            maxLength: 128
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+        - name: cursor
+          in: query
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 当前租户审计事件列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditEventListResponseEnvelope"
+        "400":
+          description: 查询参数或分页游标无效
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "401":
+          description: 登录状态无效或已过期
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "403":
+          description: 缺少 audit.read 权限
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /audit-events/{auditEventId}:
+    parameters:
+      - name: auditEventId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      summary: 获取当前租户审计事件详情
+      operationId: auditGetEvent
+      tags: [Audit]
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 审计事件详情
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditEventResponseEnvelope"
+        "401":
+          description: 登录状态无效或已过期
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "403":
+          description: 缺少 audit.read 权限
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "404":
+          description: 当前租户内审计事件不存在
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
 components:
   securitySchemes:
     bearerAuth:
       type: http
       scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - tenantCode
+        - email
+        - password
+      properties:
+        tenantCode:
+          type: string
+          minLength: 2
+          maxLength: 64
+          pattern: ^[a-zA-Z0-9][a-zA-Z0-9_-]*$
+        email:
+          type: string
+          format: email
+          maxLength: 320
+        password:
+          type: string
+          minLength: 8
+          maxLength: 128
+          format: password
+        deviceName:
+          type: string
+          minLength: 1
+          maxLength: 100
+
+    RefreshTokenRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - refreshToken
+      properties:
+        refreshToken:
+          type: string
+          minLength: 32
+          maxLength: 512
+
+    AuthUser:
+      type: object
+      required:
+        - id
+        - email
+        - displayName
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        displayName:
+          type: string
+
+    AuthTenant:
+      type: object
+      required:
+        - id
+        - code
+        - name
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+
+    AuthMembership:
+      type: object
+      required:
+        - id
+        - status
+        - roles
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum:
+            - ACTIVE
+        roles:
+          type: array
+          items:
+            type: string
+
+    MemberStatus:
+      type: string
+      enum:
+        - ACTIVE
+        - DISABLED
+
+    TenantDetail:
+      type: object
+      required:
+        - id
+        - code
+        - name
+        - status
+        - version
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+        status:
+          type: string
+          enum:
+            - ACTIVE
+            - SUSPENDED
+        version:
+          type: integer
+          minimum: 1
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    UpdateTenantRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - version
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        version:
+          type: integer
+          minimum: 1
+
+    TenantMemberRole:
+      type: object
+      required:
+        - id
+        - code
+        - name
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+
+    TenantMember:
+      type: object
+      required:
+        - id
+        - user
+        - status
+        - roles
+        - joinedAt
+        - version
+      properties:
+        id:
+          type: string
+          format: uuid
+        user:
+          $ref: "#/components/schemas/AuthUser"
+        departmentId:
+          type:
+            - string
+            - "null"
+          format: uuid
+        status:
+          $ref: "#/components/schemas/MemberStatus"
+        roles:
+          type: array
+          items:
+            $ref: "#/components/schemas/TenantMemberRole"
+        joinedAt:
+          type: string
+          format: date-time
+        version:
+          type: integer
+          minimum: 1
+
+    TenantMemberList:
+      type: object
+      required:
+        - items
+        - nextCursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/TenantMember"
+        nextCursor:
+          type:
+            - string
+            - "null"
+          format: uuid
+
+    UpdateTenantMemberRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - version
+      properties:
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 120
+        departmentId:
+          type:
+            - string
+            - "null"
+          format: uuid
+        status:
+          $ref: "#/components/schemas/MemberStatus"
+        version:
+          type: integer
+          minimum: 1
+
+    ReplaceTenantMemberRolesRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - roleIds
+        - version
+      properties:
+        roleIds:
+          type: array
+          uniqueItems: true
+          maxItems: 100
+          items:
+            type: string
+            format: uuid
+        version:
+          type: integer
+          minimum: 1
+
+    DataScope:
+      type: string
+      enum: [SELF, DEPARTMENT, DEPARTMENT_TREE, PROJECT, CUSTOM, TENANT]
+
+    Permission:
+      type: object
+      required: [id, code, name]
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+
+    PermissionList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Permission"
+
+    Role:
+      type: object
+      required: [id, code, name, description, dataScope, isSystem, permissions, memberCount, version, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+        description:
+          type: [string, "null"]
+        dataScope:
+          $ref: "#/components/schemas/DataScope"
+        isSystem:
+          type: boolean
+        permissions:
+          type: array
+          items:
+            $ref: "#/components/schemas/Permission"
+        memberCount:
+          type: integer
+          minimum: 0
+        version:
+          type: integer
+          minimum: 1
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    RoleList:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Role"
+        nextCursor:
+          type: [string, "null"]
+          format: uuid
+
+    CreateRoleRequest:
+      type: object
+      additionalProperties: false
+      required: [code, name, dataScope]
+      properties:
+        code:
+          type: string
+          minLength: 2
+          maxLength: 64
+          pattern: ^[a-z][a-z0-9_:-]*$
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        description:
+          type: [string, "null"]
+          maxLength: 500
+        dataScope:
+          $ref: "#/components/schemas/DataScope"
+
+    UpdateRoleRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 2
+      required: [version]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        description:
+          type: [string, "null"]
+          maxLength: 500
+        dataScope:
+          $ref: "#/components/schemas/DataScope"
+        version:
+          type: integer
+          minimum: 1
+
+    ReplaceRolePermissionsRequest:
+      type: object
+      additionalProperties: false
+      required: [permissionIds, version]
+      properties:
+        permissionIds:
+          type: array
+          uniqueItems: true
+          maxItems: 100
+          items:
+            type: string
+            format: uuid
+        version:
+          type: integer
+          minimum: 1
+
+    AuditOutcome:
+      type: string
+      enum: [SUCCESS, FAILURE]
+
+    AuditEvent:
+      type: object
+      required:
+        - id
+        - action
+        - outcome
+        - actorUserId
+        - actorMembershipId
+        - resourceType
+        - resourceId
+        - requestId
+        - ipAddress
+        - userAgent
+        - metadata
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        action:
+          type: string
+        outcome:
+          $ref: "#/components/schemas/AuditOutcome"
+        actorUserId:
+          type: [string, "null"]
+          format: uuid
+        actorMembershipId:
+          type: [string, "null"]
+          format: uuid
+        resourceType:
+          type: string
+        resourceId:
+          type: [string, "null"]
+          format: uuid
+        requestId:
+          type: string
+        ipAddress:
+          type: [string, "null"]
+        userAgent:
+          type: [string, "null"]
+        metadata:
+          type: [object, "null"]
+          additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
+
+    AuditEventList:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditEvent"
+        nextCursor:
+          type: [string, "null"]
+          format: uuid
+
+    LoginResponse:
+      type: object
+      required:
+        - accessToken
+        - accessTokenExpiresIn
+        - refreshToken
+        - refreshTokenExpiresIn
+        - user
+        - tenant
+        - membership
+      properties:
+        accessToken:
+          type: string
+        accessTokenExpiresIn:
+          type: integer
+          minimum: 1
+        refreshToken:
+          type: string
+        refreshTokenExpiresIn:
+          type: integer
+          minimum: 1
+        user:
+          $ref: "#/components/schemas/AuthUser"
+        tenant:
+          $ref: "#/components/schemas/AuthTenant"
+        membership:
+          $ref: "#/components/schemas/AuthMembership"
+
+    TokenPairResponse:
+      type: object
+      required:
+        - accessToken
+        - accessTokenExpiresIn
+        - refreshToken
+        - refreshTokenExpiresIn
+      properties:
+        accessToken:
+          type: string
+        accessTokenExpiresIn:
+          type: integer
+          minimum: 1
+        refreshToken:
+          type: string
+        refreshTokenExpiresIn:
+          type: integer
+          minimum: 1
+
+    MeResponse:
+      type: object
+      required:
+        - user
+        - tenant
+        - membership
+        - permissions
+      properties:
+        user:
+          $ref: "#/components/schemas/AuthUser"
+        tenant:
+          $ref: "#/components/schemas/AuthTenant"
+        membership:
+          $ref: "#/components/schemas/AuthMembership"
+        permissions:
+          type: array
+          items:
+            type: string
+
+    LoginResponseEnvelope:
+      type: object
+      required:
+        - success
+        - data
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: "#/components/schemas/LoginResponse"
+        requestId:
+          type:
+            - string
+            - "null"
+
+    TokenPairResponseEnvelope:
+      type: object
+      required:
+        - success
+        - data
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: "#/components/schemas/TokenPairResponse"
+        requestId:
+          type:
+            - string
+            - "null"
+
+    MeResponseEnvelope:
+      type: object
+      required:
+        - success
+        - data
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: "#/components/schemas/MeResponse"
+        requestId:
+          type:
+            - string
+            - "null"
+
+    TenantResponseEnvelope:
+      type: object
+      required:
+        - success
+        - data
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: "#/components/schemas/TenantDetail"
+        requestId:
+          type:
+            - string
+            - "null"
+
+    TenantMemberResponseEnvelope:
+      type: object
+      required:
+        - success
+        - data
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: "#/components/schemas/TenantMember"
+        requestId:
+          type:
+            - string
+            - "null"
+
+    TenantMemberListResponseEnvelope:
+      type: object
+      required:
+        - success
+        - data
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: "#/components/schemas/TenantMemberList"
+        requestId:
+          type:
+            - string
+            - "null"
+
+    PermissionListResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: "#/components/schemas/PermissionList"
+        requestId:
+          type: [string, "null"]
+
+    RoleResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: "#/components/schemas/Role"
+        requestId:
+          type: [string, "null"]
+
+    RoleListResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: "#/components/schemas/RoleList"
+        requestId:
+          type: [string, "null"]
+
+    AuditEventResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: "#/components/schemas/AuditEvent"
+        requestId:
+          type: [string, "null"]
+
+    AuditEventListResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: "#/components/schemas/AuditEventList"
+        requestId:
+          type: [string, "null"]
+
+    ApiErrorDetail:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details: {}
+
+    ErrorResponseEnvelope:
+      type: object
+      required:
+        - success
+        - error
+      properties:
+        success:
+          type: boolean
+          const: false
+        error:
+          $ref: "#/components/schemas/ApiErrorDetail"
+        requestId:
+          type:
+            - string
+            - "null"

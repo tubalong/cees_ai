@@ -1,7 +1,8 @@
 import { Module, Type } from '@nestjs/common';
+import { AuditModule } from './audit/audit.module';
+import { RbacModule } from './rbac/rbac.module';
 
 @Module({}) export class OrganizationModule { }
-@Module({}) export class RbacModule { }
 @Module({}) export class UserModule { }
 @Module({}) export class ProjectModule { }
 @Module({}) export class TaskModule { }
@@ -13,7 +14,6 @@ import { Module, Type } from '@nestjs/common';
 @Module({}) export class DashboardModule { }
 @Module({}) export class AiOrchestrationModule { }
 @Module({}) export class IntegrationModule { }
-@Module({}) export class AuditModule { }
 @Module({}) export class CommonModule { }
 @Module({}) export class JobsModule { }
 
