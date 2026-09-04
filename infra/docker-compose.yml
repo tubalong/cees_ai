@@ -1,4 +1,4 @@
-name: cees-ai
+name: ai-enterprise-workbench
 
 services:
   postgres:
@@ -13,7 +13,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./scripts/init-pgvector.sql:/docker-entrypoint-initdb.d/01-pgvector.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}" ]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -23,7 +23,7 @@ services:
     ports:
       - "6379:6379"
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: [ "CMD", "redis-cli", "ping" ]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -40,7 +40,7 @@ services:
     volumes:
       - minio_data:/data
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      test: [ "CMD", "mc", "ready", "local" ]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -59,7 +59,7 @@ services:
       ai-service:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/v1/health"]
+      test: [ "CMD", "wget", "-qO-", "http://localhost:3000/api/v1/health" ]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -76,7 +76,7 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
       interval: 10s
       timeout: 5s
       retries: 10

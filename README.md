@@ -1,32 +1,24 @@
-# CEES AI
+# AI Enterprise Workbench
 
-企业级 AI 协同工作平台 monorepo（工程骨架）。
+面向销售型中小企业的 AI 工作协同平台。仓库采用模块化单体业务后端，并将正式业务写入与 AI 建议生成严格分离。
 
-## 技术栈与仓库布局
+## 服务职责
 
-| 目录 | 职责 | 工具链 |
-| --- | --- | --- |
-| `apps/api` | NestJS 业务事实源：认证、租户、RBAC、业务写入、统计、审计 | pnpm / TypeScript |
-| `apps/ai-service` | Python FastAPI AI 服务：草稿、建议、RAG，不直接写业务数据 | uv / pip / Python |
-| `apps/desktop` | Electron + React 桌面端 | pnpm / TypeScript |
-| `apps/mobile` | Flutter 移动端 | pub / Dart |
-| `packages/contracts` | OpenAPI 契约：全仓唯一跨语言桥 | 纯 YAML |
-| `packages/*` | TS 共享包：api-client、ui-kit、config | pnpm / TypeScript |
-| `infra` | 本地基础设施编排（PostgreSQL/pgvector、Redis、MinIO） | Docker Compose |
-| `docs` | 架构、API、数据库、安全、产品文档 | Markdown |
+- `apps/api`：NestJS 企业业务事实源，负责认证、租户、权限、业务写入、统计和审计。
+- `apps/ai-service`：FastAPI AI 建议服务，仅返回草稿、结构化提取与权限过滤后的 RAG 结果。
+- `apps/desktop`：Electron 管理桌面端。
+- `apps/mobile`：Flutter 一线员工移动端。
+- `packages/*`：共享类型、API Client、UI、工程配置与 OpenAPI 文件。
+- `infra`：PostgreSQL/pgvector、Redis、MinIO 与本地容器编排。
 
-## 边界规则
+## 快速启动
 
-- 三套工具链完全隔离：pnpm（api、desktop、packages）、Python（ai-service）、Flutter（mobile）。
-- 跨语言只通过 `packages/contracts` 对齐；禁止任何一端 import 另一端的实现代码。
-- NestJS 是业务数据唯一事实源；AI 服务只返回经 Schema 校验的草稿与建议，正式写入由 NestJS 执行。
-- 客户端不复制服务端状态机，只消费契约与 API。
+1. 将 `.env.example` 复制为 `.env`，修改所有 `change_me` 值。
+2. 安装 Node.js 20、pnpm 9、Docker Desktop；移动端开发另需 Flutter SDK。
+3. 执行 `pnpm install`。
+4. 执行 `pnpm infra:up`。
+5. NestJS Swagger：`http://localhost:3000/api/docs`。
+6. FastAPI 文档：`http://localhost:8000/docs`。
+7. MinIO Console：`http://localhost:9001`。
 
-## 快速启动（骨架就绪后）
-
-1. `Copy-Item .env.example .env`，把 `change_me` 全部替换。
-2. `pnpm install`
-3. `pnpm infra:up` 启动依赖服务。
-4. NestJS Swagger：`http://localhost:3000/api/docs`；FastAPI 文档：`http://localhost:8000/docs`。
-
-详细约定见 [AGENTS.md](AGENTS.md) 与 [docs](docs/README.md)。
+详见 [架构说明](docs/architecture/overview.md)。
