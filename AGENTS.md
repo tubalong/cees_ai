@@ -35,8 +35,8 @@
 - 采用 Conventional Commits：`type(scope): subject`。
 - type 使用 `feat/fix/docs/style/refactor/perf/test/build/ci/chore/revert/security`。
 - scope 使用 `api/ai-service/desktop/mobile/contracts/ui-kit/config/infra`。
-- subject 应简洁具体且不以句号结尾；一个 commit 只包含一个逻辑目标，避免 `update`、`fix bug`、`wip` 等模糊描述。
-- 破坏性变更使用 `!` 并同步提供版本与迁移说明，例如 `feat(contracts)!: rename customer status field`。
+- subject 尽量使用简体中文，应简洁具体且不以句号结尾；一个 commit 只包含一个逻辑目标，避免“更新”“修复问题”“进行中”等模糊描述。
+- 破坏性变更使用 `!` 并同步提供版本与迁移说明，例如 `feat(contracts)!: 重命名客户状态字段`。
 
 ## 6. 验证矩阵
 
