@@ -168,6 +168,51 @@ jobs:
               body: 'No unresolved Git conflict was found against the current base SHA. No AI candidate PR was created; refresh the PR and rerun CI instead.',
             });
 
+      - name: Prepare the trusted DeepSeek model catalog
+        if: steps.merge.outputs.has_conflicts == 'true'
+        env:
+          CODEX_HOME_PATH: ${{ runner.temp }}/deepseek-codex-home
+          EXPECTED_CATALOG_SHA256: 05817ab8db7bf290de989ed10f7d8605532d27a455639196272b95280ce90ab9
+          PR_BASE_SHA: ${{ steps.request.outputs.base_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          install -d -m 0700 "$CODEX_HOME_PATH"
+          git show "$PR_BASE_SHA:.github/codex/deepseek-models.json" > "$CODEX_HOME_PATH/models.json"
+
+          actual_catalog_sha256="$(sha256sum "$CODEX_HOME_PATH/models.json" | cut -d ' ' -f 1)"
+          if [ "$actual_catalog_sha256" != "$EXPECTED_CATALOG_SHA256" ]; then
+            echo "::error::The trusted DeepSeek model catalog checksum does not match the workflow configuration."
+            exit 1
+          fi
+
+          python3 - "$CODEX_HOME_PATH/models.json" <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          catalog = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+          model = next(
+              (item for item in catalog.get("models", []) if item.get("slug") == "deepseek-v4-pro"),
+              None,
+          )
+          if model is None:
+              raise SystemExit("deepseek-v4-pro is missing from the trusted model catalog")
+          if model.get("minimal_client_version") != "0.144.0":
+              raise SystemExit("unexpected minimum Codex client version for deepseek-v4-pro")
+          if model.get("apply_patch_tool_type") != "freeform":
+              raise SystemExit("deepseek-v4-pro must use the freeform apply_patch tool")
+          reasoning_levels = {
+              entry.get("effort") for entry in model.get("supported_reasoning_levels", [])
+          }
+          if "high" not in reasoning_levels:
+              raise SystemExit("deepseek-v4-pro does not advertise high reasoning effort")
+          PY
+
+          printf 'model_catalog_json = "%s/models.json"\n' "$CODEX_HOME_PATH" \
+            > "$CODEX_HOME_PATH/config.toml"
+
       - name: Resolve eligible conflicts with Codex
         id: codex
         if: steps.merge.outputs.has_conflicts == 'true'
@@ -176,6 +221,8 @@ jobs:
           # The input name is fixed by codex-action; the credential is a DeepSeek API key.
           openai-api-key: ${{ secrets.DEEPSEEK_API_KEY }}
           responses-api-endpoint: https://api.deepseek.com/responses
+          codex-version: "0.144.0"
+          codex-home: ${{ runner.temp }}/deepseek-codex-home
           model: deepseek-v4-pro
           effort: high
           sandbox: workspace-write

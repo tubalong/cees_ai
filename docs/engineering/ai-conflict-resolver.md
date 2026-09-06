@@ -1,7 +1,9 @@
 # AI 合并冲突修复助手
 
 > 状态：**已落地（半自动候选 PR 模式）**。工作流定义位于
-> [`.github/workflows/ai-conflict-resolver.yml`](../../.github/workflows/ai-conflict-resolver.yml)。
+> [`.github/workflows/ai-conflict-resolver.yml`](../../.github/workflows/ai-conflict-resolver.yml)，
+> DeepSeek 模型目录快照位于
+> [`.github/codex/deepseek-models.json`](../../.github/codex/deepseek-models.json)。
 
 ## 目标与边界
 
@@ -27,6 +29,25 @@
 4. 确认 `main` 的 Ruleset/branch protection 仍要求现有 CI 检查和人工 Review；不要把该工作流本身配置成可绕过这些规则的 required check。
 
 模型配置固定为 DeepSeek Responses API 地址 `https://api.deepseek.com/responses`、`deepseek-v4-pro` 和 `high` reasoning effort，PR 内容不能覆盖这些值。`openai-api-key` 只是 `openai/codex-action` 的输入参数名称。
+
+## DeepSeek 模型目录
+
+仓库保存了 DeepSeek 官方 Codex 接入文档在 **2026-09-06** 提供的 `models.json` 快照。当前文件 SHA-256 为：
+
+```text
+05817ab8db7bf290de989ed10f7d8605532d27a455639196272b95280ce90ab9
+```
+
+目录包含 `deepseek-v4-flash`、`deepseek-v4-pro` 与实验性视觉模型的官方元数据，但工作流的 `model` 输入固定为 `deepseek-v4-pro`。该元数据声明了 1,048,576 token context window、`freeform` apply-patch 工具以及所支持的 reasoning effort。
+
+工作流将 Codex CLI 固定为官方目录要求的最低版本 `0.144.0`。运行时不会直接信任 PR head 中的目录文件，而是从触发时记录的 base SHA 提取 `.github/codex/deepseek-models.json`，校验上述 SHA-256、模型名称、最低客户端版本、apply-patch 类型和 `high` reasoning effort 后，再写入 runner 临时 `CODEX_HOME`。`openai/codex-action` 通过 `codex-home` 读取该目录。
+
+更新模型目录时，必须同时：
+
+1. 从 DeepSeek 官方 Codex 接入文档获取新的完整 `models.json`；
+2. 更新仓库文件及工作流中的预期 SHA-256；
+3. 核对 `deepseek-v4-pro` 的 `minimal_client_version` 并同步 `codex-version`；
+4. 重新运行 `actionlint`，并由 CI/安全 owner 审查目录和工作流变更。
 
 若要立即停用，禁用该 GitHub Actions workflow 或删除 `DEEPSEEK_API_KEY` Secret；两者都不会影响主 CI。
 
@@ -78,7 +99,8 @@ AI job 只做不执行项目代码的结构检查：Git index 无冲突、受保
 ## 安全设计
 
 - 触发器使用 `issue_comment` 与 `pull_request_target`，但在签出任何 PR 代码前先验证触发者权限、PR 状态以及同仓库来源。
-- Codex 使用 `openai/codex-action@v1` 调用 DeepSeek Responses API，模型固定为 `deepseek-v4-pro` 且 reasoning effort 为 `high`；同时启用 `workspace-write` sandbox 与 `drop-sudo` safety strategy，其 job 只有仓库读取和 PR 留言权限。
+- Codex 使用 `openai/codex-action@v1` 调用 DeepSeek Responses API，模型固定为 `deepseek-v4-pro` 且 reasoning effort 为 `high`；Codex CLI 固定为 `0.144.0`，同时启用 `workspace-write` sandbox 与 `drop-sudo` safety strategy，其 job 只有仓库读取和 PR 留言权限。
+- DeepSeek 模型目录从受信任的 base SHA 提取并进行内容哈希和关键能力校验；PR head 不能替换模型元数据或降低 apply-patch/推理配置。
 - 具有 `contents: write` 的 GitHub token 只存在于发布 job；Codex job 不具备该权限。发布 job 从 artifact 接收已验证的 patch，在不运行项目代码的情况下重新应用、重新校验、提交并推送唯一候选分支。
 - PR 标题、评论、源码、fixture 和日志都被视为不可信数据，不能覆盖工作流中固定的 Codex 任务、DeepSeek 模型配置与受保护路径规则。
 - 冲突上下文和模型完成任务所需的相关仓库内容会发送到 DeepSeek API；私有代码启用前必须满足团队的第三方模型与数据合规要求。
