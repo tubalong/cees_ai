@@ -23,15 +23,20 @@
 
 ## 4. 分支与 PR
 
-- `main` 始终可发布；任务分支短生命周期（`feat/xxx`、`fix/xxx`），完成后经 PR squash 合入。
-- PR 必须通过 CI 与对应目录 owner 评审；CI 按路径触发。
-- 只有真实契约依赖才约束相关 PR 的合并顺序。
+- `main` 是唯一长期分支并始终可发布；所有变更通过短生命周期任务分支和 PR squash 合入。
+- 分支格式为 `<type>/<description>`，有任务编号时使用 `<type>/<ticket-id>-<description>`。
+- 分支常用 type：`feat/fix/docs/refactor/test/ci/chore/security`；名称使用英文小写和连字符。
+- 一个分支对应一个工作项和一个 PR，合并后删除；不建立个人、模块或 `develop` 长期分支。
+- PR 必须通过 CI 与对应目录 owner 评审；只有真实契约依赖才约束相关 PR 的合并顺序。
+- 完整规范见 `docs/engineering/git-conventions.md`。
 
 ## 5. 提交信息
 
-采用 Conventional Commits：`type(scope): subject`。
-type 使用 `feat/fix/docs/style/refactor/perf/test/build/ci/chore/revert/security`。
-scope 使用 `api/ai-service/desktop/mobile/contracts/ui-kit/config/infra`。
+- 采用 Conventional Commits：`type(scope): subject`。
+- type 使用 `feat/fix/docs/style/refactor/perf/test/build/ci/chore/revert/security`。
+- scope 使用 `api/ai-service/desktop/mobile/contracts/ui-kit/config/infra`。
+- subject 应简洁具体且不以句号结尾；一个 commit 只包含一个逻辑目标，避免 `update`、`fix bug`、`wip` 等模糊描述。
+- 破坏性变更使用 `!` 并同步提供版本与迁移说明，例如 `feat(contracts)!: rename customer status field`。
 
 ## 6. 验证矩阵
 

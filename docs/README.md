@@ -11,5 +11,6 @@
 
 ## 工程实践
 
+- [Git 协作规范](engineering/git-conventions.md)：分支与 Conventional Commit 命名规范。
 - [持续集成（CI）](engineering/ci.md)：GitHub Actions 触发条件、必需检查与本地验证命令。
 - [AI 合并冲突修复助手](engineering/ai-conflict-resolver.md)：维护者触发的半自动冲突修复、候选 PR、限制与安全边界。
