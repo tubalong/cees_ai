@@ -1,0 +1,48 @@
+# Development defaults. Production must point AI_MODEL_CONFIG_PATH at a deployment-owned file.
+[profiles.mock]
+provider = "mock"
+model = "mock-text-v1"
+enabled = true
+modes = ["text"]
+temperature = 0.0
+default_max_output_tokens = 1024
+max_output_tokens_limit = 4096
+timeout_seconds = 30.0
+max_retries = 0
+structured_output_method = "function_calling"
+
+# Example profiles are disabled until their API key environment variables are configured.
+[profiles.primary]
+provider = "openai_compatible"
+model = "change_me"
+base_url = "https://change_me/v1"
+api_key_env = "PRIMARY_LLM_API_KEY"
+enabled = false
+modes = ["text", "json_schema"]
+temperature = 0.0
+default_max_output_tokens = 2048
+max_output_tokens_limit = 32768
+timeout_seconds = 60.0
+max_retries = 2
+structured_output_method = "function_calling"
+
+[profiles.backup]
+provider = "openai_compatible"
+model = "change_me"
+base_url = "https://change_me/v1"
+api_key_env = "BACKUP_LLM_API_KEY"
+enabled = false
+modes = ["text", "json_schema"]
+temperature = 0.0
+default_max_output_tokens = 2048
+max_output_tokens_limit = 32768
+timeout_seconds = 60.0
+max_retries = 1
+structured_output_method = "function_calling"
+
+[roles]
+default = ["mock"]
+# Enable real profiles before binding production roles:
+# structured = ["primary", "backup"]
+# reasoning = ["primary", "backup"]
+# rag = ["primary", "backup"]

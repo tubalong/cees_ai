@@ -6,7 +6,7 @@
 
 | 资源 | 位置 | 说明 |
 | --- | --- | --- |
-| 公共配置 | `docker-compose.yml` | PostgreSQL/pgvector、Redis 镜像、认证与健康检查 |
+| 公共配置 | `docker-compose.yml` | PostgreSQL、Redis 镜像、认证与健康检查 |
 | 开发覆盖 | `docker-compose.dev.yml` | 开放本机端口并使用开发环境持久卷 |
 | 测试覆盖 | `docker-compose.test.yml` | 使用独立端口和 tmpfs 临时数据 |
 | 生产覆盖 | `docker-compose.prod.yml` | 不开放数据端口，启用重启策略和生产持久卷 |

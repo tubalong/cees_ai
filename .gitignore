@@ -1,5 +1,6 @@
 node_modules/
 .pnpm-store/
+.uv-cache/
 dist/
 coverage/
 .env
@@ -9,6 +10,7 @@ coverage/
 .venv/
 __pycache__/
 .pytest_cache/
+.ruff_cache/
 *.pyc
 apps/mobile/.dart_tool/
 apps/mobile/build/

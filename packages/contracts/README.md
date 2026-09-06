@@ -1,20 +1,26 @@
 # packages/contracts — 全仓唯一跨语言契约
 
-存放 OpenAPI 契约与相关 JSON Schema，是前端（TS/Dart）与后端（TS/Python）之间唯一合法对齐点。
-
-## 目录
+跨语言 HTTP 行为只在本目录定义：
 
 ```text
 openapi/
-├── openapi.yaml       # 主契约文件
-└── components/        # 共享 Schema 组件
+├── openapi.yaml                 # NestJS 公开 API
+└── ai-service.openapi.yaml      # NestJS -> ai-service 内部 API
 ```
+
+`ai-service.openapi.yaml` 当前只定义 health、ready 和受内部 Token 保护的通用 LLM invoke，不包含具体业务接口。
 
 ## 变更流程
 
-1. 修改 `openapi.yaml`（兼容新增默认可选项）；
-2. 校验契约（CI 强制）；
-3. 重新生成客户端：TS → `packages/api-client`；Dart/Python → 各端生成目录；
-4. 破坏性变更提升契约版本并在 `docs/api` 记录迁移说明。
+1. 先修改对应 OpenAPI 文件；
+2. 执行 `pnpm contracts:lint`；
+3. 执行 `pnpm contracts:gen` 更新生成客户端和 Pydantic 模型；
+4. 执行 `pnpm contracts:check` 确认生成物无漂移；
+5. 更新调用方、测试和对应架构/API 文档。
 
-生成脚本待接入（可挂到根 `contracts:gen`）。
+生成物包括：
+
+- TypeScript：`packages/ai-service-client/src/generated`；
+- Python：`apps/ai-service/app/api/generated/models.py`。
+
+生成目录禁止手改。契约相关 PR 必须由契约负责人评审。

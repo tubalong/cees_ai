@@ -129,7 +129,7 @@ Idempotency-Key: <client-generated-key>
 
 ```json
 {
-  "purpose": "knowledge_document",
+  "purpose": "attachment",
   "fileName": "项目方案.pptx",
   "contentType": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   "sizeBytes": 28377120,
@@ -203,7 +203,6 @@ DELETE /api/v1/files/{fileId}
 | 用途 | v1 建议格式 | 处理方式 |
 | --- | --- | --- |
 | `avatar` | JPEG、PNG、WebP | 校验尺寸并生成缩略图 |
-| `knowledge_document` | PDF、DOCX、PPTX、XLSX、TXT、Markdown、CSV | 安全检查后异步提取、OCR 或向量化 |
 | `scanned_document` | JPEG、PNG、PDF | 异步 OCR，受套餐能力控制 |
 | `attachment` | PDF、现代 Office、图片、纯文本 | 可以只保存，不强制进入 AI |
 | `data_import` | CSV、XLSX、JSON | 独立的数据导入校验流程，不按普通附件处理 |
@@ -242,7 +241,7 @@ FileAsset             正式文件元数据
 UploadSession         上传会话、过期时间和预期大小
 StorageReservation    并发上传的额度预占
 TenantStorageUsage    租户已用和已预占字节数
-FileBinding           文件与知识库或业务资源的关联
+FileBinding           文件与业务资源的关联
 TenantEntitlement     套餐最终计算出的有效权益
 ```
 
@@ -291,7 +290,7 @@ usedBytes + reservedBytes + requestedBytes <= effectiveLimitBytes
 
 套餐降级导致现有用量超过新额度时，建议保留已有文件的读取能力，但阻止新上传，并提供宽限期或扩容入口。
 
-建议用户可见额度计算原始上传文件和用户明确保存的导出文件。缩略图、OCR 中间结果、提取文本和向量等系统派生数据应单独统计运营成本，避免用户上传一个文件后看到难以解释的额度增长。
+建议用户可见额度计算原始上传文件和用户明确保存的导出文件。缩略图、OCR 中间结果和提取文本等系统派生数据应单独统计运营成本，避免用户上传一个文件后看到难以解释的额度增长。
 
 ## 10. 权限与审计前置条件
 
@@ -302,7 +301,6 @@ file.upload
 file.read
 file.delete
 file.manage
-knowledge.ingest
 ```
 
 必须满足：

@@ -1,0 +1,16 @@
+.git
+.github
+node_modules
+**/node_modules
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+**/dist
+**/coverage
+.env
+.env.*
+!.env.example
+!.env.*.example
+apps/mobile/.dart_tool
+apps/mobile/build

@@ -1,41 +1,25 @@
 # 持续集成（CI）
 
-主 CI 工作流位于 `.github/workflows/ci.yml`，覆盖仓库中的三套独立工具链。
-
-## 触发方式
-
-CI 在以下场景运行：
-
-- 向 `main` 发起或更新 Pull Request；
-- GitHub Merge Queue 创建待验证合并组时；
-- 在 GitHub Actions 页面手动运行。
-
-同一 PR 有新提交时，旧的未完成运行会自动取消，减少 Actions 时间消耗。
-
-GitHub 不会为已经存在 Git merge conflict 的 PR 生成可验证的合并结果；对这类 PR，可由维护者使用 [AI 合并冲突修复助手](ai-conflict-resolver.md) 创建一个需人工审查的草稿替代 PR。该助手不是 CI 的必需检查，也不能绕过分支保护。
+主 CI 工作流位于 `.github/workflows/ci.yml`，覆盖 pnpm、Python/uv、契约生成和 Flutter 工具链。
 
 ## 必需检查
 
-工作流包含三个稳定命名的检查：
-
 | GitHub 检查名称 | 验证内容 |
 | --- | --- |
-| `CI / Node (API + desktop)` | 安装 pnpm 依赖、生成 Prisma Client、API Jest、API 构建、桌面端生产构建 |
-| `CI / Python (AI service)` | 安装 Python 依赖并运行 pytest |
-| `CI / Flutter (mobile)` | 获取 Flutter 依赖、静态分析并运行 Flutter tests |
+| `CI / Node (API + desktop)` | 锁定安装、生成 AI 客户端构建、Prisma Client、NestJS Jest/build、桌面端 build |
+| `CI / Python (AI service)` | Python 3.14、uv 锁定安装、Ruff、应用导入、pytest |
+| `CI / Contracts` | OpenAPI lint、TypeScript/Pydantic 生成物漂移检查 |
+| `CI / Flutter (mobile)` | Flutter 依赖、静态分析和存在测试时的 flutter test |
 
-如果组织套餐支持私有仓库 Ruleset，应将以上三个检查配置为 `main` 的 required status checks。修改 workflow 或 job 的 `name` 后，也必须同步更新 GitHub Ruleset 中的检查名称。
-
-## 手动运行
-
-进入仓库的 `Actions` 页面，选择 `CI`，点击 `Run workflow`，选择要验证的分支后运行。
+仓库 Ruleset 应使用上述稳定名称。修改 workflow/job 名称时必须同步更新 required status checks。
 
 ## 本地等价验证
 
-Node.js 与 pnpm：
-
 ```bash
 pnpm install --frozen-lockfile
+pnpm contracts:lint
+pnpm contracts:check
+pnpm --filter @workbench/ai-service-client build
 pnpm --filter @workbench/api prisma:generate
 pnpm --filter @workbench/api test
 pnpm --filter @workbench/api build
@@ -46,8 +30,9 @@ AI 服务：
 
 ```bash
 cd apps/ai-service
-python -m pip install -r requirements.txt pytest
-python -m pytest -q
+uv sync --locked
+uv run ruff check app tests
+uv run pytest -q
 ```
 
 移动端：
@@ -59,12 +44,8 @@ flutter analyze
 flutter test
 ```
 
-## 契约验证现状
-
-当前 `packages/contracts` 和 `packages/api-client` 尚未提供可执行的契约校验及客户端生成命令，因此 CI 暂未添加虚假的契约检查。接入根命令 `contracts:lint`、`contracts:gen` 和 `contracts:check` 后，应新增独立的 `CI / Contracts` job，并通过 `git diff --exit-code` 确认生成物已提交。
+Prisma 基线可在空测试数据库上通过 `pnpm --filter @workbench/api prisma:migrate reset --force` 验证。数据库 URL 和所有 Secret 只从测试环境变量或平台 Secrets 注入。
 
 ## 权限与安全
 
-主 CI 工作流只授予 `contents: read` 权限，checkout 也不保留 Git 凭据，因此 CI 无法直接向仓库或 `main` 推送代码。第三方 Flutter Action 后续可进一步固定到完整 commit SHA，并通过 Dependabot 定期更新。
-
-AI 冲突修复助手是独立的、按维护者指令触发的工作流。它只有发布草稿候选 PR 的受限写权限；完整配置、限制与关闭方式见 [AI 合并冲突修复助手](ai-conflict-resolver.md)。
+主 CI 只授予 `contents: read`，checkout 不保留 Git 凭据。契约检查只重新生成并检查 diff，不会提交或推送代码。
