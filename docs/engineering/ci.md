@@ -12,6 +12,8 @@ CI 在以下场景运行：
 
 同一 PR 有新提交时，旧的未完成运行会自动取消，减少 Actions 时间消耗。
 
+GitHub 不会为已经存在 Git merge conflict 的 PR 生成可验证的合并结果；对这类 PR，可由维护者使用 [AI 合并冲突修复助手](ai-conflict-resolver.md) 创建一个需人工审查的草稿替代 PR。该助手不是 CI 的必需检查，也不能绕过分支保护。
+
 ## 必需检查
 
 工作流包含三个稳定命名的检查：
@@ -63,4 +65,6 @@ flutter test
 
 ## 权限与安全
 
-工作流只授予 `contents: read` 权限，checkout 也不保留 Git 凭据，因此 CI 无法直接向仓库或 `main` 推送代码。第三方 Flutter Action 后续可进一步固定到完整 commit SHA，并通过 Dependabot 定期更新。
+主 CI 工作流只授予 `contents: read` 权限，checkout 也不保留 Git 凭据，因此 CI 无法直接向仓库或 `main` 推送代码。第三方 Flutter Action 后续可进一步固定到完整 commit SHA，并通过 Dependabot 定期更新。
+
+AI 冲突修复助手是独立的、按维护者指令触发的工作流。它只有发布草稿候选 PR 的受限写权限；完整配置、限制与关闭方式见 [AI 合并冲突修复助手](ai-conflict-resolver.md)。
