@@ -21,10 +21,22 @@
 - 桌面端和移动端中的部分菜单仍为 UI 原型，不代表后端已有对应能力。
 - Secret 只通过环境变量或平台 Secrets 注入。
 
+## Node.js 与 pnpm（Windows）
+
+1. 从 [Node.js 下载页](https://nodejs.org/en/download) 下载 Node.js 24 LTS 的 `Windows Installer (.msi)`（通常选择 x64）并完成安装。
+2. 重新打开 PowerShell；若 Node.js 安装在 `Program Files` 且 `corepack enable pnpm` 报权限错误，请以管理员身份运行 PowerShell。执行：
+
+	```powershell
+	corepack enable pnpm
+	pnpm -v
+	```
+
+	项目根目录的 `packageManager` 字段会将 pnpm 固定为 `12.3.4`。
+
 ## 快速启动
 
 1. 本地开发将 `.env.example` 复制为 `.env`；共享测试服务器使用 `.env.staging.example`；生产服务器使用 `.env.production.example`。实际文件均不提交。
-2. 安装 Node.js 22、pnpm 9.15、uv、Python 3.14 和 Docker Desktop；移动端开发另需 Flutter SDK。
+2. 安装 Node.js 24 LTS、pnpm 12.3.4、uv、Python 3.14 和 Docker Desktop；移动端开发另需 Flutter SDK。
 3. 执行 `pnpm install --frozen-lockfile`。
 4. 在 `apps/ai-service` 执行 `uv sync --locked`。
 5. 本地执行 `pnpm infra:up`；Staging 执行 `pnpm infra:staging:up`；Production 执行 `pnpm infra:prod:up`。
