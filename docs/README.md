@@ -8,3 +8,7 @@
 | [api](api/README.md) | 契约与 API 约定 |
 | [database](database/README.md) | 数据模型与迁移约定 |
 | [security](security/README.md) | 安全模型、租户隔离与审计 |
+
+## 工程实践
+
+- [持续集成（CI）](engineering/ci.md)：GitHub Actions 触发条件、必需检查与本地验证命令。

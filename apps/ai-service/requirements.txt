@@ -1,3 +1,6 @@
-# 骨架占位：按需补充版本
+# AI 服务运行依赖
 fastapi
 uvicorn[standard]
+asyncpg
+pydantic-settings
+langgraph
