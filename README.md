@@ -39,7 +39,7 @@
 2. 安装 Node.js 24 LTS、pnpm 12.3.4、uv、Python 3.14 和 Docker Desktop；移动端开发另需 Flutter SDK。
 3. 执行 `pnpm install --frozen-lockfile`。
 4. 在 `apps/ai-service` 执行 `uv sync --locked`。
-5. 本地执行 `pnpm infra:up`；Staging 执行 `pnpm infra:staging:up`；Production 执行 `pnpm infra:prod:up`。
+5. 本地执行 `pnpm infra:up`；Staging/Production 可使用对应 pnpm 命令，Linux 服务器也可执行 `bash scripts/compose-deploy.sh staging` 或 `bash scripts/compose-deploy.sh production`。
 6. 本地分别启动 NestJS 和 ai-service；Staging/Production 由 Compose 启动完整服务。
 
 NestJS Swagger：`http://localhost:3000/api/docs`；FastAPI 文档：`http://localhost:8000/docs`。

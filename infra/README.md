@@ -22,6 +22,33 @@
 
 实际 `.env` 文件不提交。仓库只提交 `.env.example`、`.env.staging.example` 和 `.env.production.example`。
 
+## Linux 服务器部署脚本
+
+服务器可以使用仓库内的 `scripts/compose-deploy.sh` 直接管理 Staging 和 Production，不需要为了运行部署入口额外安装 Node.js 或 pnpm。脚本始终从仓库根目录解析 Compose 文件，并在启动前验证 Docker Compose、环境文件、`change_me` 占位符和 AI 模型配置文件。
+
+```bash
+# 首次使用可以显式通过 Bash 执行，不依赖 Git 可执行位
+bash scripts/compose-deploy.sh production validate
+bash scripts/compose-deploy.sh production
+
+# 常用运维命令
+bash scripts/compose-deploy.sh production ps
+bash scripts/compose-deploy.sh production logs
+bash scripts/compose-deploy.sh production logs api
+bash scripts/compose-deploy.sh production down
+```
+
+第一个参数可使用 `staging`、`production` 或 `prod`；第二个参数支持 `up`、`down`、`logs`、`ps` 和 `validate`，省略时默认为 `up`。`up` 会验证配置并使用 `--build` 构建当前检出的源码；脚本不会自动执行 `git pull`，也不会使用 `down -v` 删除数据卷。
+
+在 Linux 上赋予可执行权限后，也可以省略 `bash`：
+
+```bash
+chmod +x scripts/compose-deploy.sh
+./scripts/compose-deploy.sh production
+```
+
+Secret 仍只保存在未提交的 `.env.staging`、`.env.production` 或平台 Secret 管理器中，不得写入部署脚本。生产发布前应明确检出目标 commit/tag，并完成数据库备份。
+
 ## 本地开发
 
 ```powershell
@@ -61,7 +88,13 @@ Copy-Item apps/ai-service/config/models.staging.example.toml apps/ai-service/con
 pnpm infra:staging:up
 ```
 
-该命令会构建 API/ai-service 镜像、启动 PostgreSQL/Redis、执行 `prisma migrate deploy`，等待 ai-service readiness 后启动 API。
+Linux 测试服务器也可以直接使用部署脚本：
+
+```bash
+bash scripts/compose-deploy.sh staging
+```
+
+上述入口会构建 API/ai-service 镜像、启动 PostgreSQL/Redis、执行 `prisma migrate deploy`，等待 ai-service readiness 后启动 API。
 
 日志和关闭：
 
@@ -78,6 +111,14 @@ pnpm infra:staging:down
 pnpm infra:prod:up
 pnpm infra:prod:logs
 pnpm infra:prod:down
+```
+
+Linux 生产服务器推荐使用部署脚本，确保根据当前检出的源码重新构建镜像：
+
+```bash
+bash scripts/compose-deploy.sh production validate
+bash scripts/compose-deploy.sh production
+bash scripts/compose-deploy.sh production logs
 ```
 
 生产模型配置默认从 `/opt/cees/config/ai-models.production.toml` 挂载到 ai-service 的 `/run/config/ai-models.toml`。Production 与 Staging 不得共享数据库、Redis、COS 前缀、JWT Secret、内部 Token 或模型 API Key。
