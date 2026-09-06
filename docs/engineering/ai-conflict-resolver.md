@@ -5,7 +5,7 @@
 
 ## 目标与边界
 
-此功能在 PR 与当前基线分支产生 Git 文本冲突时，使用 Codex 生成一个**草稿替代 PR**。它的职责是减少机械冲突处理工作，不是代替维护者决定产品、契约、数据或安全语义。
+此功能在 PR 与当前基线分支产生 Git 文本冲突时，通过 Codex 执行框架调用 DeepSeek `deepseek-v4-pro` 生成一个**草稿替代 PR**。它的职责是减少机械冲突处理工作，不是代替维护者决定产品、契约、数据或安全语义。
 
 工作流不会：
 
@@ -21,12 +21,14 @@
 
 仓库管理员需要完成以下一次性设置：
 
-1. 在 GitHub Actions secrets 中创建 `OPENAI_API_KEY`。该值只保存于 GitHub Secret，绝不提交 `.env` 或工作流文件。
+1. 在 GitHub Actions secrets 中创建 `DEEPSEEK_API_KEY`。该值只保存于 GitHub Secret，绝不提交 `.env` 或工作流文件。工作流将它传给 `openai/codex-action` 的固定输入名 `openai-api-key`，但不会调用 OpenAI API。
 2. 在仓库 **Settings → Actions → General** 允许工作流申请 `contents: write` 权限。该权限只授予工作流的 `publish` job，用于新建 `ai/conflict-pr-*` 分支和草稿 PR；分支保护仍应禁止直接推送 `main`。
 3. 创建标签 `ai:resolve-conflict`（建议颜色 `D93F0B`）。
 4. 确认 `main` 的 Ruleset/branch protection 仍要求现有 CI 检查和人工 Review；不要把该工作流本身配置成可绕过这些规则的 required check。
 
-若要立即停用，禁用该 GitHub Actions workflow 或删除 `OPENAI_API_KEY` Secret；两者都不会影响主 CI。
+模型配置固定为 DeepSeek Responses API 地址 `https://api.deepseek.com/responses`、`deepseek-v4-pro` 和 `high` reasoning effort，PR 内容不能覆盖这些值。`openai-api-key` 只是 `openai/codex-action` 的输入参数名称。
+
+若要立即停用，禁用该 GitHub Actions workflow 或删除 `DEEPSEEK_API_KEY` Secret；两者都不会影响主 CI。
 
 ## 使用方法
 
@@ -76,9 +78,10 @@ AI job 只做不执行项目代码的结构检查：Git index 无冲突、受保
 ## 安全设计
 
 - 触发器使用 `issue_comment` 与 `pull_request_target`，但在签出任何 PR 代码前先验证触发者权限、PR 状态以及同仓库来源。
-- Codex 使用 `openai/codex-action@v1`、`workspace-write` sandbox 与 `drop-sudo` safety strategy；其 job 只有仓库读取和 PR 留言权限。
+- Codex 使用 `openai/codex-action@v1` 调用 DeepSeek Responses API，模型固定为 `deepseek-v4-pro` 且 reasoning effort 为 `high`；同时启用 `workspace-write` sandbox 与 `drop-sudo` safety strategy，其 job 只有仓库读取和 PR 留言权限。
 - 具有 `contents: write` 的 GitHub token 只存在于发布 job；Codex job 不具备该权限。发布 job 从 artifact 接收已验证的 patch，在不运行项目代码的情况下重新应用、重新校验、提交并推送唯一候选分支。
-- PR 标题、评论、源码、fixture 和日志都被视为不可信数据，不能覆盖工作流中固定的 Codex 任务与受保护路径规则。
+- PR 标题、评论、源码、fixture 和日志都被视为不可信数据，不能覆盖工作流中固定的 Codex 任务、DeepSeek 模型配置与受保护路径规则。
+- 冲突上下文和模型完成任务所需的相关仓库内容会发送到 DeepSeek API；私有代码启用前必须满足团队的第三方模型与数据合规要求。
 - 使用 GitHub-hosted 的一次性 Linux runner；不要把此工作流直接迁移到长驻 self-hosted runner，除非重新完成 runner 隔离审计。
 
 该模式是第二道辅助，不是安全边界替代品：branch protection、CODEOWNERS、CI、Secret scanning 与人工审查必须继续启用。
