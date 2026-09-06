@@ -23,8 +23,9 @@ Bucket 中使用以下顶层对象前缀：
 
 ```text
 cees/
-├── test/   # development 与 test 共用的非生产区域
-└── prod/   # production 区域
+├── local/     # 本地开发区域
+├── staging/   # 共享测试服务器区域
+└── prod/      # 生产区域
 ```
 
 推荐的完整对象键：
@@ -36,14 +37,15 @@ cees/{environment}/tenants/{tenantId}/files/{yyyy}/{mm}/{fileId}/source
 例如：
 
 ```text
-cees/test/tenants/tenant_123/files/2026/09/file_456/source
-cees/prod/tenants/tenant_123/files/2026/09/file_789/source
+cees/local/tenants/tenant_123/files/2026/09/file_456/source
+cees/staging/tenants/tenant_123/files/2026/09/file_789/source
+cees/prod/tenants/tenant_123/files/2026/09/file_999/source
 ```
 
 自动化测试应继续增加运行标识，避免清理测试数据时影响开发文件：
 
 ```text
-cees/test/runs/{testRunId}/tenants/{tenantId}/files/{fileId}/source
+cees/staging/runs/{testRunId}/tenants/{tenantId}/files/{fileId}/source
 ```
 
 原始文件名只保存在数据库中，不直接作为 COS 对象键。派生文件放在同一 `fileId` 下：
@@ -59,14 +61,15 @@ cees/test/runs/{testRunId}/tenants/{tenantId}/files/{fileId}/source
 
 ## 3. 环境与凭据隔离
 
-development 与 test 都写入 `cees/test`，production 写入 `cees/prod`。同一个 Bucket 下的前缀隔离必须同时由 CAM 权限约束：
+本地、Staging 和 Production 分别写入 `cees/local`、`cees/staging` 和 `cees/prod`。同一个 Bucket 下的前缀隔离必须同时由 CAM 权限约束：
 
-- 开发/测试凭据只能访问 `cees/test/*`；
+- 本地凭据只能访问 `cees/local/*`；
+- Staging 凭据只能访问 `cees/staging/*`；
 - 生产凭据只能访问 `cees/prod/*`；
-- 两套环境不得共享同一 SecretId/SecretKey；
+- 三套环境不得共享同一 SecretId/SecretKey；
 - 长期凭据只注入 NestJS API，不注入桌面端、移动端或 AI 服务。
 
-对应策略模板为 [非生产 CAM 策略](../../infra/tencent-cos/cam-policy.nonprod.example.json) 和 [生产 CAM 策略](../../infra/tencent-cos/cam-policy.prod.example.json)。两者操作集合相同，但授权资源前缀不同。
+对应策略模板为 [本地 CAM 策略](../../infra/tencent-cos/cam-policy.local.example.json)、[Staging CAM 策略](../../infra/tencent-cos/cam-policy.staging.example.json) 和 [生产 CAM 策略](../../infra/tencent-cos/cam-policy.prod.example.json)。三者操作集合相同，但授权资源前缀不同。
 
 COS 中的“文件夹”本质上是对象键前缀，因此仅依赖代码拼接前缀并不足以形成安全隔离。
 
@@ -315,8 +318,8 @@ file.manage
 
 ### 已完成的基础准备
 
-1. 补充 COS 的 `cees/test`、`cees/prod` 前缀配置；
-2. 为 test/prod 创建独立、按前缀收窄的 CAM 策略；
+1. 补充 COS 的 `cees/local`、`cees/staging`、`cees/prod` 前缀约定；
+2. 为三套环境创建独立、按前缀收窄的 CAM 策略模板；
 
 ### 下一步实施
 
@@ -333,14 +336,13 @@ file.manage
 - 权限检查接口可用；
 - 额度能够事务性预占和释放；
 - 审计服务可用；
-- COS 凭据已按 test/prod 前缀隔离。
+- COS 凭据已按 local/staging/prod 前缀隔离。
 
 ### 后续能力
 
 - 分片上传和断点续传；
 - 病毒扫描、内容安全和隔离区；
 - Office/PDF 预览与 OCR；
-- AI 提取、切块和向量化；
 - 文件版本、保留期和回收站；
 - COS 用量对账、告警和成本分析。
 

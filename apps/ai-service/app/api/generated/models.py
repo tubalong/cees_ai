@@ -102,6 +102,7 @@ class TokenUsage(BaseModel):
 class Provider(StrEnum):
     mock = 'mock'
     openai_compatible = 'openai_compatible'
+    deepseek = 'deepseek'
 
 
 class ExecutionMetadata(BaseModel):

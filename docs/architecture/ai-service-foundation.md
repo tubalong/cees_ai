@@ -22,7 +22,7 @@ ai-service 只提供：
 
 ## 3. 多模型配置
 
-`apps/ai-service/config/models.toml` 定义命名 profile 和 `default`、`structured`、`reasoning`、`rag` 角色。Secret 不进入 TOML，`api_key_env` 只保存环境变量名称。
+`apps/ai-service/config/models.toml` 定义 `mock`、`openai_compatible`、`deepseek` 命名 profile 和 `default`、`structured`、`reasoning`、`rag` 角色。Secret 不进入 TOML，`api_key_env` 只保存环境变量名称。
 
 - 未指定 profile：按角色候选顺序执行；
 - 连接、超时、限流和 provider 5xx：允许切换下一候选；

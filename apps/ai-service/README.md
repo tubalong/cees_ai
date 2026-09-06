@@ -19,6 +19,8 @@ FastAPI 内部服务，负责受控 LLM 调用与未来 AI 工作流的运行时
 
 ## 环境与依赖
 
+本地开发统一读取仓库根目录 `.env`；Staging 和 Production 由 Compose/平台注入环境变量。模型配置的相对路径始终以 `apps/ai-service` 为基准解析。
+
 在本目录执行：
 
 ```powershell

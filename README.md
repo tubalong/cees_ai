@@ -23,12 +23,12 @@
 
 ## 快速启动
 
-1. 将 `.env.example` 复制为 `.env` 并替换所有 `change_me`。
+1. 本地开发将 `.env.example` 复制为 `.env`；共享测试服务器使用 `.env.staging.example`；生产服务器使用 `.env.production.example`。实际文件均不提交。
 2. 安装 Node.js 22、pnpm 9.15、uv、Python 3.14 和 Docker Desktop；移动端开发另需 Flutter SDK。
 3. 执行 `pnpm install --frozen-lockfile`。
 4. 在 `apps/ai-service` 执行 `uv sync --locked`。
-5. 执行 `pnpm infra:up` 启动 PostgreSQL 与 Redis。
-6. 启动 NestJS 和 ai-service。
+5. 本地执行 `pnpm infra:up`；Staging 执行 `pnpm infra:staging:up`；Production 执行 `pnpm infra:prod:up`。
+6. 本地分别启动 NestJS 和 ai-service；Staging/Production 由 Compose 启动完整服务。
 
 NestJS Swagger：`http://localhost:3000/api/docs`；FastAPI 文档：`http://localhost:8000/docs`。
 

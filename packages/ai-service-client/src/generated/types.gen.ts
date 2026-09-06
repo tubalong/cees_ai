@@ -73,7 +73,7 @@ export type TokenUsage = {
 
 export type ExecutionMetadata = {
     profile: string;
-    provider: 'mock' | 'openai_compatible';
+    provider: 'mock' | 'openai_compatible' | 'deepseek';
     model: string;
     fallback_count: number;
     latency_ms: number;

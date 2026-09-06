@@ -27,7 +27,7 @@ cees_ai/
 - 未来业务 AI 功能必须由 NestJS 建立可信租户/用户上下文，并在契约中定义专用输入输出，不能让客户端直接调用通用 invoke。
 - COS 长期凭据只由 NestJS 持有；客户端和 ai-service 不持有长期 COS 密钥。
 - 桌面端和移动端中的部分菜单仍是 UI 原型，占位入口不构成后端需求或可用能力。
-- Docker 环境采用公共 Compose 与 dev/test/prod 覆盖文件组合；连接地址和密钥来自环境变量或平台 Secrets。
+- Docker 环境采用公共 Compose 与 local/staging/production 覆盖组合；连接地址和密钥来自环境变量或平台 Secrets。
 
 ## 契约与调用链路
 

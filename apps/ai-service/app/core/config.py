@@ -10,6 +10,13 @@ from typing import Literal
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+SERVICE_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = (
+    SERVICE_ROOT.parents[1]
+    if SERVICE_ROOT.parent.name == "apps"
+    else SERVICE_ROOT
+)
+
 
 class ModelRole(StrEnum):
     default = "default"
@@ -24,7 +31,7 @@ class OutputMode(StrEnum):
 
 
 class ModelProfile(BaseModel):
-    provider: Literal["mock", "openai_compatible"]
+    provider: Literal["mock", "openai_compatible", "deepseek"]
     model: str = Field(min_length=1)
     base_url: str | None = None
     api_key_env: str | None = None
@@ -43,8 +50,8 @@ class ModelProfile(BaseModel):
     def validate_provider_settings(self) -> ModelProfile:
         if self.default_max_output_tokens > self.max_output_tokens_limit:
             raise ValueError("default_max_output_tokens exceeds max_output_tokens_limit")
-        if self.provider == "openai_compatible" and (not self.base_url or not self.api_key_env):
-            raise ValueError("openai_compatible profiles require base_url and api_key_env")
+        if self.provider != "mock" and (not self.base_url or not self.api_key_env):
+            raise ValueError("non-mock profiles require base_url and api_key_env")
         return self
 
 
@@ -62,12 +69,19 @@ class ModelCatalog(BaseModel):
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore", case_sensitive=False)
+    model_config = SettingsConfigDict(
+        env_file=REPO_ROOT / ".env", extra="ignore", case_sensitive=False
+    )
 
     node_env: Literal["development", "test", "production"] = "development"
     ai_internal_token: str | None = None
-    ai_model_config_path: Path = Path("config/models.toml")
+    ai_model_config_path: Path = SERVICE_ROOT / "config/models.toml"
     log_level: str = "INFO"
+
+    @field_validator("ai_model_config_path", mode="after")
+    @classmethod
+    def resolve_model_config_path(cls, value: Path) -> Path:
+        return value if value.is_absolute() else SERVICE_ROOT / value
 
 
 @lru_cache
@@ -112,7 +126,7 @@ def validate_readiness(settings: Settings, catalog: ModelCatalog) -> list[str]:
                 errors.append(f"role {role.value} uses mock profile {profile_name} in production")
 
     for name, profile in catalog.profiles.items():
-        if not profile.enabled or profile.provider != "openai_compatible":
+        if not profile.enabled or profile.provider == "mock":
             continue
         assert profile.api_key_env is not None
         key = os.getenv(profile.api_key_env)
@@ -123,6 +137,14 @@ def validate_readiness(settings: Settings, catalog: ModelCatalog) -> list[str]:
             )
         elif settings.node_env == "production" and key == "change_me":
             errors.append(f"enabled profile {name} uses an example API key in production")
+        if settings.node_env == "production" and profile.model == "change_me":
+            errors.append(f"enabled profile {name} uses an example model in production")
+        if (
+            settings.node_env == "production"
+            and profile.base_url
+            and "change_me" in profile.base_url
+        ):
+            errors.append(f"enabled profile {name} uses an example base URL in production")
 
     return errors
 

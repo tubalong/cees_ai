@@ -14,7 +14,7 @@
         "name/cos:AbortMultipartUpload"
       ],
       "resource": [
-        "qcs::cos:ap-chengdu:uid/1403013862:cees-ai-1403013862/cees/test/*"
+        "qcs::cos:ap-chengdu:uid/1403013862:cees-ai-1403013862/cees/staging/*"
       ]
     }
   ]

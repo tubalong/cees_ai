@@ -16,3 +16,5 @@ apps/mobile/.dart_tool/
 apps/mobile/build/
 apps/mobile/.flutter-plugins*
 infra/data/
+apps/ai-service/config/models.*.toml
+!apps/ai-service/config/models.*.example.toml

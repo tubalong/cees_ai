@@ -101,7 +101,7 @@ def create_provider(profile: ModelProfile, api_key: str | None = None) -> LLMPro
     if profile.provider == "mock":
         return MockLLMProvider(profile)
     if api_key is None:
-        raise ValueError("api_key is required for openai_compatible providers")
+        raise ValueError("api_key is required for non-mock providers")
     return OpenAICompatibleProvider(profile, api_key)
 
 

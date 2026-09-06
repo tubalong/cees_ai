@@ -235,7 +235,7 @@ components:
           type: string
         provider:
           type: string
-          enum: [mock, openai_compatible]
+          enum: [mock, openai_compatible, deepseek]
         model:
           type: string
         fallback_count:
