@@ -13,6 +13,14 @@ services:
     volumes:
       - redis_production_data:/data
 
+  ai-service:
+    restart: unless-stopped
+
+  api:
+    restart: unless-stopped
+    ports:
+      - "${API_PORT:-3000}:3000"
+
 volumes:
   postgres_production_data:
   redis_production_data:

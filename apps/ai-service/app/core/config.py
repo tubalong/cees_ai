@@ -1,18 +1,157 @@
-from functools import lru_cache
+from __future__ import annotations
 
+import os
+import tomllib
+from enum import StrEnum
+from functools import lru_cache
+from pathlib import Path
+from typing import Literal
+
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+SERVICE_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = (
+    SERVICE_ROOT.parents[1]
+    if SERVICE_ROOT.parent.name == "apps"
+    else SERVICE_ROOT
+)
+
+
+class ModelRole(StrEnum):
+    default = "default"
+    structured = "structured"
+    reasoning = "reasoning"
+    rag = "rag"
+
+
+class OutputMode(StrEnum):
+    text = "text"
+    json_schema = "json_schema"
+
+
+class ModelProfile(BaseModel):
+    provider: Literal["mock", "openai_compatible", "deepseek"]
+    model: str = Field(min_length=1)
+    base_url: str | None = None
+    api_key_env: str | None = None
+    enabled: bool = True
+    modes: set[OutputMode] = Field(min_length=1)
+    temperature: float = Field(default=0.0, ge=0.0, le=2.0)
+    default_max_output_tokens: int = Field(default=2048, ge=1, le=32768)
+    max_output_tokens_limit: int = Field(default=32768, ge=1, le=32768)
+    timeout_seconds: float = Field(default=60.0, gt=0.0, le=600.0)
+    max_retries: int = Field(default=2, ge=0, le=10)
+    structured_output_method: Literal["function_calling", "json_mode", "json_schema"] = (
+        "function_calling"
+    )
+
+    @model_validator(mode="after")
+    def validate_provider_settings(self) -> ModelProfile:
+        if self.default_max_output_tokens > self.max_output_tokens_limit:
+            raise ValueError("default_max_output_tokens exceeds max_output_tokens_limit")
+        if self.provider != "mock" and (not self.base_url or not self.api_key_env):
+            raise ValueError("non-mock profiles require base_url and api_key_env")
+        return self
+
+
+class ModelCatalog(BaseModel):
+    profiles: dict[str, ModelProfile] = Field(min_length=1)
+    roles: dict[ModelRole, list[str]] = Field(default_factory=dict)
+
+    @field_validator("profiles")
+    @classmethod
+    def validate_profile_names(cls, value: dict[str, ModelProfile]) -> dict[str, ModelProfile]:
+        for name in value:
+            if not name or len(name) > 128:
+                raise ValueError("profile names must contain 1-128 characters")
+        return value
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=REPO_ROOT / ".env", extra="ignore", case_sensitive=False
+    )
 
-    database_url: str = "postgresql://workbench:change_me@postgres:5432/workbench"
-    llm_provider: str = "mock"
-    llm_model: str = "mock-structured-v1"
-    ai_internal_token: str = "development-only"
-    rag_confidence_threshold: float = 0.65
+    node_env: Literal["development", "test", "production"] = "development"
+    ai_internal_token: str | None = None
+    ai_model_config_path: Path = SERVICE_ROOT / "config/models.toml"
+    log_level: str = "INFO"
+
+    @field_validator("ai_model_config_path", mode="after")
+    @classmethod
+    def resolve_model_config_path(cls, value: Path) -> Path:
+        return value if value.is_absolute() else SERVICE_ROOT / value
 
 
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+def load_model_catalog(path: Path) -> ModelCatalog:
+    with path.open("rb") as file:
+        return ModelCatalog.model_validate(tomllib.load(file))
+
+
+def validate_readiness(settings: Settings, catalog: ModelCatalog) -> list[str]:
+    errors: list[str] = []
+    token = settings.ai_internal_token
+    if not token:
+        errors.append("AI_INTERNAL_TOKEN is required")
+    elif settings.node_env == "production" and token == "change_me":
+        errors.append("AI_INTERNAL_TOKEN must not use the example value in production")
+
+    for role, candidates in catalog.roles.items():
+        if not candidates:
+            errors.append(f"role {role.value} must contain at least one profile")
+            continue
+        for profile_name in candidates:
+            profile = catalog.profiles.get(profile_name)
+            if profile is None:
+                errors.append(f"role {role.value} references unknown profile {profile_name}")
+                continue
+            if not profile.enabled:
+                errors.append(f"role {role.value} references disabled profile {profile_name}")
+                continue
+            required_mode = (
+                OutputMode.json_schema if role == ModelRole.structured else OutputMode.text
+            )
+            if required_mode not in profile.modes:
+                errors.append(
+                    f"role {role.value} profile {profile_name} does not support "
+                    f"{required_mode.value}"
+                )
+            if settings.node_env == "production" and profile.provider == "mock":
+                errors.append(f"role {role.value} uses mock profile {profile_name} in production")
+
+    for name, profile in catalog.profiles.items():
+        if not profile.enabled or profile.provider == "mock":
+            continue
+        assert profile.api_key_env is not None
+        key = os.getenv(profile.api_key_env)
+        if not key:
+            errors.append(
+                f"enabled profile {name} is missing environment variable "
+                f"{profile.api_key_env}"
+            )
+        elif settings.node_env == "production" and key == "change_me":
+            errors.append(f"enabled profile {name} uses an example API key in production")
+        if settings.node_env == "production" and profile.model == "change_me":
+            errors.append(f"enabled profile {name} uses an example model in production")
+        if (
+            settings.node_env == "production"
+            and profile.base_url
+            and "change_me" in profile.base_url
+        ):
+            errors.append(f"enabled profile {name} uses an example base URL in production")
+
+    return errors
+
+
+def load_catalog_safely(settings: Settings) -> tuple[ModelCatalog | None, list[str]]:
+    try:
+        catalog = load_model_catalog(settings.ai_model_config_path)
+    except (OSError, tomllib.TOMLDecodeError, ValidationError) as exc:
+        return None, [f"model catalog could not be loaded: {type(exc).__name__}"]
+    return catalog, validate_readiness(settings, catalog)

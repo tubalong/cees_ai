@@ -4,8 +4,9 @@
 | --- | --- |
 | [product](product/README.md) | 产品范围、版本目标与验收口径 |
 | [architecture](architecture/overview.md) | 总体架构、目录树、边界与数据流 |
+| [ai-service-foundation](architecture/ai-service-foundation.md) | 通用 LLM、多模型路由、LangGraph 与 LlamaIndex 基础设施 |
 | [file-upload](architecture/file-upload.md) | 文件上传、COS、权限、状态与额度设计草案 |
-| [api](api/README.md) | 契约与 API 约定 |
+| [api](api/README.md) | 公开与内部契约及生成客户端约定 |
 | [database](database/README.md) | 数据模型与迁移约定 |
 | [security](security/README.md) | 安全模型、租户隔离与审计 |
 

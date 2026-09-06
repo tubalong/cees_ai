@@ -41,14 +41,6 @@ enum DraftStatus {
   FAILED
 }
 
-enum VisibilityScope {
-  PRIVATE
-  DEPARTMENT
-  PROJECT
-  TENANT
-  CUSTOM
-}
-
 model Tenant {
   id String @id @default(uuid()) @db.Uuid
   name String
@@ -265,24 +257,6 @@ model TaskActivity {
   @@map("task_activities")
 }
 
-model WorkReport {
-  id String @id @default(uuid()) @db.Uuid
-  tenantId String @map("tenant_id") @db.Uuid
-  userId String @map("user_id") @db.Uuid
-  reportType String @map("report_type")
-  reportDate DateTime @map("report_date")
-  content Json
-  sourceDraftId String? @map("source_draft_id") @db.Uuid
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  createdBy String? @map("created_by") @db.Uuid
-  updatedBy String? @map("updated_by") @db.Uuid
-  deletedAt DateTime? @map("deleted_at")
-  version Int @default(1)
-  @@index([tenantId, userId, reportDate])
-  @@map("work_reports")
-}
-
 model FileObject {
   id String @id @default(uuid()) @db.Uuid
   tenantId String @map("tenant_id") @db.Uuid
@@ -298,143 +272,6 @@ model FileObject {
   version Int @default(1)
   @@index([tenantId])
   @@map("file_objects")
-}
-
-model KnowledgeBase {
-  id String @id @default(uuid()) @db.Uuid
-  tenantId String @map("tenant_id") @db.Uuid
-  name String
-  description String?
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  createdBy String? @map("created_by") @db.Uuid
-  updatedBy String? @map("updated_by") @db.Uuid
-  deletedAt DateTime? @map("deleted_at")
-  version Int @default(1)
-  @@index([tenantId])
-  @@map("knowledge_bases")
-}
-
-model KnowledgeBaseMember {
-  id String @id @default(uuid()) @db.Uuid
-  tenantId String @map("tenant_id") @db.Uuid
-  knowledgeBaseId String @map("knowledge_base_id") @db.Uuid
-  userId String @map("user_id") @db.Uuid
-  permission String
-  createdAt DateTime @default(now()) @map("created_at")
-  @@unique([tenantId, knowledgeBaseId, userId])
-  @@map("knowledge_base_members")
-}
-
-model Document {
-  id String @id @default(uuid()) @db.Uuid
-  tenantId String @map("tenant_id") @db.Uuid
-  knowledgeBaseId String @map("knowledge_base_id") @db.Uuid
-  fileObjectId String @map("file_object_id") @db.Uuid
-  name String
-  status String @default("PENDING")
-  departmentId String? @map("department_id") @db.Uuid
-  projectId String? @map("project_id") @db.Uuid
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  createdBy String? @map("created_by") @db.Uuid
-  updatedBy String? @map("updated_by") @db.Uuid
-  deletedAt DateTime? @map("deleted_at")
-  version Int @default(1)
-  @@index([tenantId, knowledgeBaseId])
-  @@map("documents")
-}
-
-model DocumentVersion {
-  id String @id @default(uuid()) @db.Uuid
-  tenantId String @map("tenant_id") @db.Uuid
-  documentId String @map("document_id") @db.Uuid
-  fileObjectId String @map("file_object_id") @db.Uuid
-  versionNumber Int @map("version_number")
-  createdAt DateTime @default(now()) @map("created_at")
-  createdBy String? @map("created_by") @db.Uuid
-  @@unique([tenantId, documentId, versionNumber])
-  @@map("document_versions")
-}
-
-model DocumentChunk {
-  id String @id @default(uuid()) @db.Uuid
-  tenantId String @map("tenant_id") @db.Uuid
-  knowledgeBaseId String @map("knowledge_base_id") @db.Uuid
-  documentId String @map("document_id") @db.Uuid
-  departmentId String? @map("department_id") @db.Uuid
-  projectId String? @map("project_id") @db.Uuid
-  visibilityScope VisibilityScope @map("visibility_scope")
-  content String @db.Text
-  embedding Unsupported("vector")
-  metadata Json
-  chunkIndex Int @map("chunk_index")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  createdBy String? @map("created_by") @db.Uuid
-  updatedBy String? @map("updated_by") @db.Uuid
-  deletedAt DateTime? @map("deleted_at")
-  version Int @default(1)
-  @@index([tenantId, knowledgeBaseId, documentId])
-  @@map("document_chunks")
-}
-
-model KnowledgeQueryLog {
-  id String @id @default(uuid()) @db.Uuid
-  tenantId String @map("tenant_id") @db.Uuid
-  userId String @map("user_id") @db.Uuid
-  query String
-  answer String?
-  citations Json?
-  requestId String @map("request_id")
-  createdAt DateTime @default(now()) @map("created_at")
-  @@index([tenantId, userId, createdAt])
-  @@map("knowledge_query_logs")
-}
-
-model Meeting {
-  id String @id @default(uuid()) @db.Uuid
-  tenantId String @map("tenant_id") @db.Uuid
-  title String
-  startsAt DateTime @map("starts_at")
-  durationMinutes Int @map("duration_minutes")
-  departmentId String? @map("department_id") @db.Uuid
-  agenda Json?
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  createdBy String? @map("created_by") @db.Uuid
-  updatedBy String? @map("updated_by") @db.Uuid
-  deletedAt DateTime? @map("deleted_at")
-  version Int @default(1)
-  @@index([tenantId, startsAt])
-  @@map("meetings")
-}
-
-model MeetingParticipant {
-  id String @id @default(uuid()) @db.Uuid
-  tenantId String @map("tenant_id") @db.Uuid
-  meetingId String @map("meeting_id") @db.Uuid
-  userId String @map("user_id") @db.Uuid
-  status String @default("INVITED")
-  createdAt DateTime @default(now()) @map("created_at")
-  @@unique([tenantId, meetingId, userId])
-  @@map("meeting_participants")
-}
-
-model MeetingMinutes {
-  id String @id @default(uuid()) @db.Uuid
-  tenantId String @map("tenant_id") @db.Uuid
-  meetingId String @map("meeting_id") @db.Uuid
-  content Json
-  status String @default("DRAFT")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  createdBy String? @map("created_by") @db.Uuid
-  updatedBy String? @map("updated_by") @db.Uuid
-  deletedAt DateTime? @map("deleted_at")
-  version Int @default(1)
-  @@index([tenantId, meetingId])
-  @@map("meeting_minutes")
 }
 
 model Notification {

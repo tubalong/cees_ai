@@ -1,68 +1,93 @@
 # 基础设施
 
-`infra` 只负责本地依赖编排与云基础设施配置，不承载应用业务代码。
+仓库只保留三套部署环境：本地开发、共享测试服务器（Staging）和生产服务器。自动化测试由 CI 直接注入变量，不再维护第四套部署环境文件或 Compose 覆盖。
 
-## 组成
+## Compose 文件
 
-| 资源 | 位置 | 说明 |
-| --- | --- | --- |
-| 公共配置 | `docker-compose.yml` | PostgreSQL/pgvector、Redis 镜像、认证与健康检查 |
-| 开发覆盖 | `docker-compose.dev.yml` | 开放本机端口并使用开发环境持久卷 |
-| 测试覆盖 | `docker-compose.test.yml` | 使用独立端口和 tmpfs 临时数据 |
-| 生产覆盖 | `docker-compose.prod.yml` | 不开放数据端口，启用重启策略和生产持久卷 |
-| 腾讯云 COS | `tencent-cos/` | 外部托管对象存储，不在本地启动兼容服务 |
+| 文件 | 作用 |
+| --- | --- |
+| `docker-compose.yml` | PostgreSQL、Redis 公共定义 |
+| `docker-compose.dev.yml` | 本地端口和本地持久化卷 |
+| `docker-compose.deploy.yml` | API、ai-service、迁移任务和内部健康检查 |
+| `docker-compose.staging.yml` | Staging 持久化卷、重启策略和 API 暴露端口 |
+| `docker-compose.prod.yml` | Production 持久化卷、重启策略和 API 暴露端口 |
 
-## 环境切换
+## 环境对应关系
 
-| 环境 | Compose 组合 | 环境变量文件 | 数据特性 |
+| 环境 | 环境文件 | Compose 组合 | 运行方式 |
 | --- | --- | --- | --- |
-| 开发 | `docker-compose.yml` + `docker-compose.dev.yml` | `.env` | 持久化，可从宿主机访问 |
-| 测试 | `docker-compose.yml` + `docker-compose.test.yml` | `.env.test` | 临时数据，默认端口 55432/56379 |
-| 生产 | `docker-compose.yml` + `docker-compose.prod.yml` | `.env.production` | 持久化，不向宿主机公开数据库端口 |
+| 本地开发 | `.env` | base + dev | Docker 只运行 PostgreSQL/Redis；API 和 ai-service 在宿主机运行 |
+| Staging | `.env.staging` | base + deploy + staging | 完整容器化部署，使用持久化非生产数据 |
+| Production | `.env.production` | base + deploy + prod | 完整容器化部署，使用生产数据和 Secrets |
 
-环境地址不写死在 YAML 中。Docker 网络内使用服务名 `postgres`、`redis`；宿主机开发和测试使用 `localhost` 与对应映射端口。未来改用云数据库或云 Redis 时，只需替换生产环境连接 URL。
+实际 `.env` 文件不提交。仓库只提交 `.env.example`、`.env.staging.example` 和 `.env.production.example`。
 
-## 启动命令
-
-在仓库根目录执行：
+## 本地开发
 
 ```powershell
 Copy-Item .env.example .env
-# 替换所有 change_me，并填写真实的腾讯云 COS 配置
 pnpm infra:up
 ```
 
-测试环境：
+查看和关闭：
 
 ```powershell
-Copy-Item .env.test.example .env.test
-# 填写只能访问 cees/test 前缀的非生产 CAM 凭据
-pnpm infra:test:up
-```
-
-生产环境使用 Compose 部署时：
-
-```powershell
-Copy-Item .env.production.example .env.production
-# 必须替换所有 change_me；真实部署优先由平台 Secrets 生成该文件
-pnpm infra:prod:up
-```
-
-对应停止和日志命令：
-
-```text
 pnpm infra:logs
 pnpm infra:down
-pnpm infra:dev:logs
-pnpm infra:dev:down
-pnpm infra:test:logs
-pnpm infra:test:down
+```
+
+本地 PostgreSQL 和 Redis 从宿主机通过 `.env` 中的端口访问。API 与 ai-service 使用本地进程启动，以保留热更新和调试能力。
+
+## Staging
+
+首次在测试服务器准备配置：
+
+```powershell
+Copy-Item .env.staging.example .env.staging
+Copy-Item apps/ai-service/config/models.staging.example.toml apps/ai-service/config/models.staging.toml
+```
+
+必须替换所有 `change_me`，并确保：
+
+- Staging 使用独立 PostgreSQL、Redis、COS 前缀和模型 Key；
+- `NODE_ENV=production`，以验证生产安全约束；
+- 模型配置不绑定 Mock；
+- `AI_MODEL_CONFIG_HOST_PATH` 指向服务器上的实际模型 TOML；
+- 只公开 API 端口，ai-service 仅在 Compose 网络内暴露。
+
+启动：
+
+```powershell
+pnpm infra:staging:up
+```
+
+该命令会构建 API/ai-service 镜像、启动 PostgreSQL/Redis、执行 `prisma migrate deploy`，等待 ai-service readiness 后启动 API。
+
+日志和关闭：
+
+```powershell
+pnpm infra:staging:logs
+pnpm infra:staging:down
+```
+
+## Production
+
+生产服务器从 `.env.production.example` 创建部署配置，并以 `apps/ai-service/config/models.production.example.toml` 为生产模型配置模板；真实 Secret 应优先由平台 Secret 管理器注入：
+
+```powershell
+pnpm infra:prod:up
 pnpm infra:prod:logs
 pnpm infra:prod:down
 ```
 
-宿主机应用使用 `.env` 中指向 `localhost` 的 `DATABASE_URL` 与 `REDIS_URL`。容器化部署应用时，应由部署平台分别注入容器网络地址和最小权限 Secret。
+生产模型配置默认从 `/opt/cees/config/ai-models.production.toml` 挂载到 ai-service 的 `/run/config/ai-models.toml`。Production 与 Staging 不得共享数据库、Redis、COS 前缀、JWT Secret、内部 Token 或模型 API Key。
 
-如果数据库或 Redis 密码包含 `@`、`:`、`/` 等字符，写入连接 URL 前必须进行 URL 编码。
+## 网络与迁移
 
-腾讯云 COS 是外部服务，因此不会出现在 Docker Compose 中。接入与权限约定见 [tencent-cos/README.md](tencent-cos/README.md)。
+- 本地宿主机地址使用 `localhost`。
+- Staging/Production 容器内部使用 `postgres`、`redis`、`ai-service` 服务名。
+- `migrate` 是一次性服务；迁移成功后 API 才启动。
+- PostgreSQL/Redis 不在 Staging/Production 暴露宿主机端口。
+- ai-service 不暴露宿主机端口，只允许 API 通过内部网络访问。
+
+腾讯云 COS 不在 Compose 中启动，配置与最小权限策略见 [tencent-cos/README.md](tencent-cos/README.md)。

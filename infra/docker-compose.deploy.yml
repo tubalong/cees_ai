@@ -1,0 +1,90 @@
+services:
+  migrate:
+    image: "${API_IMAGE:-cees-api}:${IMAGE_TAG:-latest}"
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    command:
+      - node
+      - node_modules/prisma/build/index.js
+      - migrate
+      - deploy
+      - --schema
+      - prisma/schema.prisma
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  ai-service:
+    image: "${AI_SERVICE_IMAGE:-cees-ai-service}:${IMAGE_TAG:-latest}"
+    build:
+      context: ../apps/ai-service
+      dockerfile: Dockerfile
+    environment:
+      NODE_ENV: ${NODE_ENV}
+      AI_INTERNAL_TOKEN: ${AI_INTERNAL_TOKEN}
+      AI_MODEL_CONFIG_PATH: /run/config/ai-models.toml
+      PRIMARY_LLM_API_KEY: ${PRIMARY_LLM_API_KEY}
+      BACKUP_LLM_API_KEY: ${BACKUP_LLM_API_KEY}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - type: bind
+        source: ${AI_MODEL_CONFIG_HOST_PATH}
+        target: /run/config/ai-models.toml
+        read_only: true
+    expose:
+      - "8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://localhost:8000/ready', timeout=3)
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  api:
+    image: "${API_IMAGE:-cees-api}:${IMAGE_TAG:-latest}"
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    environment:
+      NODE_ENV: ${NODE_ENV}
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      REDIS_KEY_PREFIX: ${REDIS_KEY_PREFIX}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      JWT_ACCESS_TTL: ${JWT_ACCESS_TTL}
+      JWT_REFRESH_TTL: ${JWT_REFRESH_TTL}
+      TENCENT_COS_SECRET_ID: ${TENCENT_COS_SECRET_ID}
+      TENCENT_COS_SECRET_KEY: ${TENCENT_COS_SECRET_KEY}
+      TENCENT_COS_REGION: ${TENCENT_COS_REGION}
+      TENCENT_COS_BUCKET: ${TENCENT_COS_BUCKET}
+      TENCENT_COS_OBJECT_PREFIX: ${TENCENT_COS_OBJECT_PREFIX}
+      TENCENT_COS_SIGNED_URL_TTL_SECONDS: ${TENCENT_COS_SIGNED_URL_TTL_SECONDS}
+      AI_SERVICE_URL: http://ai-service:8000
+      AI_INTERNAL_TOKEN: ${AI_INTERNAL_TOKEN}
+      API_PORT: "3000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      ai-service:
+        condition: service_healthy
+    expose:
+      - "3000"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - wget -qO- http://localhost:3000/api/v1/health >/dev/null || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s

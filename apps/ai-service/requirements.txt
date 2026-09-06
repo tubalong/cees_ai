@@ -1,6 +1,0 @@
-# AI 服务运行依赖
-fastapi
-uvicorn[standard]
-asyncpg
-pydantic-settings
-langgraph
