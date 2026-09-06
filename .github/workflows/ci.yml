@@ -112,6 +112,24 @@ jobs:
         working-directory: apps/mobile
         run: flutter analyze
 
-      - name: Run tests
+      - name: Detect Flutter tests
+        id: mobile_tests
+        working-directory: apps/mobile
+        shell: bash
+        run: |
+          test_file=""
+          if [ -d test ]; then
+            test_file="$(find test -type f -name '*_test.dart' -print -quit)"
+          fi
+          if [ -n "$test_file" ]; then
+            echo "has_tests=true" >> "$GITHUB_OUTPUT"
+            echo "Found Flutter test: $test_file"
+          else
+            echo "has_tests=false" >> "$GITHUB_OUTPUT"
+            echo "No Flutter tests found; skipping flutter test."
+          fi
+
+      - name: Run Flutter tests
+        if: steps.mobile_tests.outputs.has_tests == 'true'
         working-directory: apps/mobile
         run: flutter test
