@@ -1,7 +1,7 @@
 # IAM、租户、RBAC、ACL 与审计 API 设计草案
 
-> 状态：第一期 Auth、Tenant、Member、RBAC、Document、ACL 与 Audit 共 28 个接口已实现
-> 版本：0.5.0
+> 状态：身份、租户、RBAC、ACL、审计和租户账号激活能力已在契约 `0.7.0` 落地
+> 版本：0.7.0
 > 更新日期：2026-09-07
 > 适用范围：CEES AI 第一期身份认证与授权基础能力
 
@@ -102,7 +102,7 @@ Token 中不保存完整权限列表。服务端根据 Membership、Role 和 Per
 ```json
 {
   code: AUTH_INVALID_CREDENTIALS,
-  message: 邮箱或密码错误,
+  message: 账号或密码错误,
   requestId: request-id,
   details: null
 }
@@ -197,12 +197,13 @@ GET /audit-events/{auditEventId}
 
 | 方法 | 路径 | 鉴权 | 用途 |
 | --- | --- | --- | --- |
-| `POST` | `/auth/login` | 公开 | 租户编码、邮箱、密码登录 |
+| `POST` | `/auth/login` | 公开 | 租户编码、账号、密码登录 |
+| `POST` | `/auth/activate` | 公开 | 使用一次性令牌设置租户账号密码 |
 | `POST` | `/auth/refresh` | Refresh Token | 轮换令牌 |
 | `POST` | `/auth/logout` | Access Token | 撤销当前 Session |
 | `GET` | `/auth/me` | Access Token | 当前用户、租户、角色和权限 |
 
-登录请求包含 `tenantCode`、`email`、`password` 和可选 `deviceName`。响应包含 Access Token、Refresh Token、User、Tenant 和 Membership。
+登录请求包含 `tenantCode`、`account`、`password` 和可选 `deviceName`。账号只允许 3～32 位英文字母和数字，比较时统一转小写。响应包含 Access Token、Refresh Token、User、Tenant 和 Membership。
 
 密码使用 Argon2id；Refresh Token 只保存 Hash；登录失败使用统一错误；刷新时必须轮换 Token；登录、失败、刷新和退出均写入审计。
 
@@ -377,6 +378,8 @@ DELETE /permissions/{permissionId}
 
 ## 14. 第二期候选接口
 
+以下能力已于 2026-09-07 实现，详细设计见 [平台租户管理与租户账号激活](platform-tenant-administration.md)：平台认证、平台租户创建/停用/恢复、租户管理员设置、拼音账号建议、账号激活、账号修改、凭证重置和平台审计。
+
 ```text
 GET    /auth/sessions
 DELETE /auth/sessions/{sessionId}
@@ -385,18 +388,13 @@ GET    /auth/tenants
 POST   /auth/switch-tenant
 POST   /auth/change-password
 
-GET    /tenants/current/invitations
-POST   /tenants/current/invitations
-DELETE /tenants/current/invitations/{invitationId}
-POST   /tenant-invitations/accept
-
 PATCH  /resources/{resourceId}/access-policy
 GET    /resources/{resourceId}/effective-permissions
 POST   /resources/{resourceId}/transfer-ownership
 POST   /audit-events/export
 ```
 
-平台级租户创建、停用和恢复接口应与租户业务 API 分离，并使用独立 Platform Admin 权限体系。
+平台级租户接口已经与租户业务 API 分离，并使用独立 Platform Admin 身份、Session 和权限体系。
 
 ## 15. 第一期验收链路
 

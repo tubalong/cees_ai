@@ -4,7 +4,7 @@
 /* eslint-disable */
 export type LoginRequest = {
     tenantCode: string;
-    email: string;
+    account: string;
     password: string;
     deviceName?: string;
 };

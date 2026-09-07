@@ -2,4 +2,7 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
-export type AuditOutcome = 'SUCCESS' | 'FAILURE';
+export enum AuditOutcome {
+    SUCCESS = 'SUCCESS',
+    FAILURE = 'FAILURE',
+}

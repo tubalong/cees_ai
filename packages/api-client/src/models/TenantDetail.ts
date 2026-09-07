@@ -2,11 +2,12 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
+import type { TenantStatus } from './TenantStatus';
 export type TenantDetail = {
     id: string;
     code: string;
     name: string;
-    status: 'ACTIVE' | 'SUSPENDED';
+    status: TenantStatus;
     version: number;
     createdAt: string;
     updatedAt: string;

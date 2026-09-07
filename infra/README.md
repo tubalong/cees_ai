@@ -132,3 +132,6 @@ bash scripts/compose-deploy.sh production logs
 - ai-service 不暴露宿主机端口，只允许 API 通过内部网络访问。
 
 腾讯云 COS 不在 Compose 中启动，配置与最小权限策略见 [tencent-cos/README.md](tencent-cos/README.md)。
+# 基础设施
+
+PostgreSQL 使用 `pgvector/pgvector:pg16`，因为 Prisma 模型中的 `DocumentChunk.embedding` 依赖 `vector` 类型。迁移 `0002_schema_with_auth` 会执行 `CREATE EXTENSION IF NOT EXISTS vector`；托管 PostgreSQL 环境必须提前确认允许启用 pgvector。

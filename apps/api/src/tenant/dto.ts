@@ -5,15 +5,18 @@ import {
     IsArray,
     IsEnum,
     IsInt,
+    IsIn,
     IsOptional,
     IsString,
     IsUUID,
+    Matches,
     Max,
     MaxLength,
     Min,
     MinLength,
 } from 'class-validator';
 import { MembershipStatus } from '@prisma/client';
+import { ACCOUNT_MAX_LENGTH, ACCOUNT_MIN_LENGTH, ACCOUNT_PATTERN } from '../auth/account';
 
 export class UpdateTenantDto {
     @IsString()
@@ -64,8 +67,27 @@ export class UpdateTenantMemberDto {
     departmentId?: string | null;
 
     @IsOptional()
-    @IsEnum(MembershipStatus)
+    @IsIn([MembershipStatus.ACTIVE, MembershipStatus.DISABLED])
     status?: MembershipStatus;
+
+    @IsInt()
+    @Min(1)
+    version!: number;
+}
+
+export class AccountSuggestionDto {
+    @IsString()
+    @MinLength(1)
+    @MaxLength(120)
+    displayName!: string;
+}
+
+export class UpdateTenantMemberAccountDto {
+    @IsString()
+    @MinLength(ACCOUNT_MIN_LENGTH)
+    @MaxLength(ACCOUNT_MAX_LENGTH)
+    @Matches(ACCOUNT_PATTERN)
+    account!: string;
 
     @IsInt()
     @Min(1)

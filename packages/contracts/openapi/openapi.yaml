@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CEES AI API
-  version: 0.5.0
+  version: 0.7.0
   description: 以本文件为唯一事实源的公开 API 契约。资源与操作按 docs/api 约定补充。
 
 servers:
@@ -26,7 +26,7 @@ paths:
 
   /auth/login:
     post:
-      summary: 使用租户编码、邮箱和密码登录
+      summary: 使用租户编码、账号和密码登录
       operationId: authLogin
       security: []
       tags:
@@ -85,6 +85,32 @@ paths:
                 $ref: "#/components/schemas/ErrorResponseEnvelope"
         "401":
           description: Refresh Token 无效、过期或已被使用
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /auth/activate:
+    post:
+      summary: 使用一次性激活令牌设置租户账号密码
+      operationId: authActivate
+      security: []
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AcceptTenantInvitationRequest"
+      responses:
+        200:
+          description: 租户账号激活成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantInvitationAcceptanceResponseEnvelope"
+        401:
+          description: 激活令牌无效、过期或已使用
           content:
             application/json:
               schema:
@@ -442,6 +468,89 @@ paths:
                 $ref: "#/components/schemas/ErrorResponseEnvelope"
         "409":
           description: 最后一名管理员或版本冲突
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /tenants/current/account-suggestions:
+    post:
+      summary: 根据成员姓名生成当前租户可用账号建议
+      operationId: tenantSuggestAccount
+      tags: [Tenant]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AccountSuggestionRequest"
+      responses:
+        200:
+          description: 账号建议
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountSuggestionResponseEnvelope"
+
+  /tenants/current/members/{membershipId}/account:
+    patch:
+      summary: 修改租户成员登录账号并撤销其现有会话
+      operationId: tenantUpdateMemberAccount
+      tags: [Tenant]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: membershipId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateTenantMemberAccountRequest"
+      responses:
+        200:
+          description: 修改账号后的成员
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantMemberResponseEnvelope"
+        409:
+          description: 账号已存在或版本冲突
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /tenants/current/members/{membershipId}/credential-reset:
+    post:
+      summary: 重置租户成员凭证并签发一次性激活令牌
+      operationId: tenantResetMemberCredential
+      tags: [Tenant]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: membershipId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        201:
+          description: 凭证重置成功；激活令牌只在本次响应返回
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantInvitationCreatedResponseEnvelope"
+        409:
+          description: 不能重置自己或最后一名有效管理员
           content:
             application/json:
               schema:
@@ -1262,20 +1371,895 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponseEnvelope"
 
+  /platform/auth/login:
+    post:
+      summary: 平台管理员登录
+      operationId: platformAuthLogin
+      security: []
+      tags: [Platform Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlatformLoginRequest"
+      responses:
+        "200":
+          description: 平台管理员登录成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformLoginResponseEnvelope"
+        "400":
+          description: 请求字段校验失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "401":
+          description: 登录凭证无效或平台管理员不可用
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /platform/auth/refresh:
+    post:
+      summary: 轮换平台管理员令牌
+      operationId: platformAuthRefresh
+      security: []
+      tags: [Platform Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshTokenRequest"
+      responses:
+        "200":
+          description: 平台管理员令牌轮换成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenPairResponseEnvelope"
+        "401":
+          description: Refresh Token 无效、过期或已被使用
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /platform/auth/logout:
+    post:
+      summary: 撤销当前平台管理员会话
+      operationId: platformAuthLogout
+      tags: [Platform Auth]
+      security:
+        - platformBearerAuth: []
+      responses:
+        "204":
+          description: 当前平台管理员会话已撤销
+        "401":
+          description: 平台登录状态无效或已过期
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /platform/auth/me:
+    get:
+      summary: 获取当前平台管理员身份
+      operationId: platformAuthMe
+      tags: [Platform Auth]
+      security:
+        - platformBearerAuth: []
+      responses:
+        "200":
+          description: 当前平台管理员身份和权限
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformMeResponseEnvelope"
+        "401":
+          description: 平台登录状态无效或已过期
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /platform/tenants:
+    get:
+      summary: 查询平台租户列表
+      operationId: platformTenantList
+      tags: [Platform Tenant]
+      security:
+        - platformBearerAuth: []
+      parameters:
+        - in: query
+          name: keyword
+          schema:
+            type: string
+            maxLength: 100
+        - in: query
+          name: status
+          schema:
+            $ref: "#/components/schemas/TenantStatus"
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - in: query
+          name: cursor
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 平台租户列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformTenantListResponseEnvelope"
+        "403":
+          description: 缺少平台租户读取权限
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+    post:
+      summary: 创建租户并设置首位租户管理员
+      operationId: platformTenantCreate
+      tags: [Platform Tenant]
+      security:
+        - platformBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePlatformTenantRequest"
+      responses:
+        "201":
+          description: 租户创建并完成初始化
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformTenantProvisioningResponseEnvelope"
+        "409":
+          description: 租户编码或管理员关系冲突
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /platform/tenants/{tenantId}:
+    parameters:
+      - in: path
+        name: tenantId
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      summary: 获取平台租户详情
+      operationId: platformTenantGet
+      tags: [Platform Tenant]
+      security:
+        - platformBearerAuth: []
+      responses:
+        "200":
+          description: 平台租户详情
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformTenantResponseEnvelope"
+        "404":
+          description: 租户不存在
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+    patch:
+      summary: 修改平台租户资料
+      operationId: platformTenantUpdate
+      tags: [Platform Tenant]
+      security:
+        - platformBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdatePlatformTenantRequest"
+      responses:
+        "200":
+          description: 修改后的平台租户
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformTenantResponseEnvelope"
+        "409":
+          description: 乐观锁版本冲突
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /platform/tenants/{tenantId}/suspend:
+    post:
+      summary: 停用租户并撤销全部租户会话
+      operationId: platformTenantSuspend
+      tags: [Platform Tenant]
+      security:
+        - platformBearerAuth: []
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SuspendPlatformTenantRequest"
+      responses:
+        "200":
+          description: 已停用的租户
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformTenantResponseEnvelope"
+
+  /platform/tenants/{tenantId}/restore:
+    post:
+      summary: 恢复租户
+      operationId: platformTenantRestore
+      tags: [Platform Tenant]
+      security:
+        - platformBearerAuth: []
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VersionRequest"
+      responses:
+        "200":
+          description: 已恢复的租户
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformTenantResponseEnvelope"
+        "409":
+          description: 租户尚无有效管理员或版本冲突
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /platform/tenants/{tenantId}/administrators:
+    get:
+      summary: 查询租户管理员
+      operationId: platformTenantListAdministrators
+      tags: [Platform Tenant]
+      security:
+        - platformBearerAuth: []
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 租户管理员列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformTenantAdministratorListResponseEnvelope"
+    post:
+      summary: 设置租户管理员
+      operationId: platformTenantAssignAdministrator
+      tags: [Platform Tenant]
+      security:
+        - platformBearerAuth: []
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AssignPlatformTenantAdministratorRequest"
+      responses:
+        "200":
+          description: 已设置管理员或创建管理员邀请
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformTenantAdministratorAssignmentResponseEnvelope"
+
+  /platform/tenants/{tenantId}/administrators/{membershipId}:
+    delete:
+      summary: 取消租户管理员角色
+      operationId: platformTenantRemoveAdministrator
+      tags: [Platform Tenant]
+      security:
+        - platformBearerAuth: []
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: path
+          name: membershipId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: 已取消租户管理员角色
+        "409":
+          description: 不能移除最后一名有效租户管理员
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /platform/audit-events:
+    get:
+      summary: 查询平台审计事件
+      operationId: platformAuditList
+      tags: [Platform Audit]
+      security:
+        - platformBearerAuth: []
+      parameters:
+        - in: query
+          name: action
+          schema:
+            type: string
+            maxLength: 100
+        - in: query
+          name: outcome
+          schema:
+            $ref: "#/components/schemas/AuditOutcome"
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - in: query
+          name: cursor
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 平台审计事件列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformAuditEventListResponseEnvelope"
+
+  /platform/audit-events/{auditEventId}:
+    get:
+      summary: 获取平台审计事件详情
+      operationId: platformAuditGet
+      tags: [Platform Audit]
+      security:
+        - platformBearerAuth: []
+      parameters:
+        - in: path
+          name: auditEventId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 平台审计事件详情
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformAuditEventResponseEnvelope"
+
+  /tenants/current/invitations:
+    get:
+      summary: 查询当前租户成员邀请
+      operationId: tenantInvitationList
+      tags: [Tenant]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: status
+          schema:
+            $ref: "#/components/schemas/TenantInvitationStatus"
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - in: query
+          name: cursor
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 当前租户邀请列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantInvitationListResponseEnvelope"
+    post:
+      summary: 邀请成员加入当前租户
+      operationId: tenantInvitationCreate
+      tags: [Tenant]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTenantInvitationRequest"
+      responses:
+        "201":
+          description: 邀请已创建；令牌只在本次响应返回
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantInvitationCreatedResponseEnvelope"
+        "409":
+          description: 用户已是成员或已存在有效邀请
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /tenants/current/invitations/{invitationId}:
+    delete:
+      summary: 撤销当前租户成员邀请
+      operationId: tenantInvitationRevoke
+      tags: [Tenant]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: invitationId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: 邀请已撤销
+
 components:
   securitySchemes:
     bearerAuth:
       type: http
       scheme: bearer
       bearerFormat: JWT
+    platformBearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
 
   schemas:
-    LoginRequest:
+    TenantStatus:
+      type: string
+      enum:
+        - PENDING_ACTIVATION
+        - ACTIVE
+        - SUSPENDED
+
+    PlatformRole:
+      type: string
+      enum:
+        - SUPER_ADMIN
+
+    PlatformLoginRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - account
+        - password
+      properties:
+        account:
+          type: string
+          minLength: 3
+          maxLength: 32
+          pattern: ^[a-zA-Z0-9]+$
+        password:
+          type: string
+          format: password
+          minLength: 8
+          maxLength: 128
+        deviceName:
+          type: string
+          minLength: 1
+          maxLength: 100
+
+    PlatformAdministratorIdentity:
+      type: object
+      required:
+        - id
+        - account
+        - user
+        - role
+        - permissions
+      properties:
+        id:
+          type: string
+          format: uuid
+        account:
+          type: string
+        user:
+          $ref: "#/components/schemas/AuthUser"
+        role:
+          $ref: "#/components/schemas/PlatformRole"
+        permissions:
+          type: array
+          items:
+            type: string
+
+    PlatformLoginResponse:
+      allOf:
+        - $ref: "#/components/schemas/TokenPairResponse"
+        - type: object
+          required:
+            - administrator
+          properties:
+            administrator:
+              $ref: "#/components/schemas/PlatformAdministratorIdentity"
+
+    PlatformMeResponse:
+      type: object
+      required:
+        - administrator
+      properties:
+        administrator:
+          $ref: "#/components/schemas/PlatformAdministratorIdentity"
+
+    InitialTenantAdministratorRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - displayName
+      properties:
+        account:
+          type: string
+          minLength: 3
+          maxLength: 32
+          pattern: ^[a-zA-Z0-9]+$
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 120
+
+    CreatePlatformTenantRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - name
+        - initialAdministrator
+      properties:
+        code:
+          type: string
+          minLength: 2
+          maxLength: 64
+          pattern: ^[a-zA-Z0-9][a-zA-Z0-9_-]*$
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        initialAdministrator:
+          $ref: "#/components/schemas/InitialTenantAdministratorRequest"
+
+    UpdatePlatformTenantRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - version
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        version:
+          type: integer
+          minimum: 1
+
+    SuspendPlatformTenantRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - reason
+        - version
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+        version:
+          type: integer
+          minimum: 1
+
+    VersionRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - version
+      properties:
+        version:
+          type: integer
+          minimum: 1
+
+    AssignPlatformTenantAdministratorRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - account
+      properties:
+        account:
+          type: string
+          minLength: 3
+          maxLength: 32
+          pattern: ^[a-zA-Z0-9]+$
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 120
+
+    PlatformTenantDetail:
+      type: object
+      required:
+        - id
+        - code
+        - name
+        - status
+        - activeAdministratorCount
+        - pendingInvitationCount
+        - version
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+        status:
+          $ref: "#/components/schemas/TenantStatus"
+        activeAdministratorCount:
+          type: integer
+          minimum: 0
+        pendingInvitationCount:
+          type: integer
+          minimum: 0
+        version:
+          type: integer
+          minimum: 1
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    PlatformTenantList:
+      type: object
+      required:
+        - items
+        - nextCursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlatformTenantDetail"
+        nextCursor:
+          type: [string, "null"]
+          format: uuid
+
+    PlatformTenantAdministrator:
+      type: object
+      required:
+        - membershipId
+        - account
+        - user
+        - status
+        - joinedAt
+      properties:
+        membershipId:
+          type: string
+          format: uuid
+        account:
+          type: string
+        user:
+          $ref: "#/components/schemas/AuthUser"
+        status:
+          $ref: "#/components/schemas/MemberStatus"
+        joinedAt:
+          type: string
+          format: date-time
+
+    PlatformTenantAdministratorList:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlatformTenantAdministrator"
+
+    TenantAdministratorAssignmentStatus:
+      type: string
+      enum:
+        - ASSIGNED
+        - INVITED
+
+    PlatformTenantAdministratorAssignment:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          $ref: "#/components/schemas/TenantAdministratorAssignmentStatus"
+        administrator:
+          $ref: "#/components/schemas/PlatformTenantAdministrator"
+        invitation:
+          $ref: "#/components/schemas/TenantInvitation"
+        invitationToken:
+          type: string
+          minLength: 32
+
+    PlatformTenantProvisioningResponse:
+      type: object
+      required:
+        - tenant
+        - administratorAssignment
+      properties:
+        tenant:
+          $ref: "#/components/schemas/PlatformTenantDetail"
+        administratorAssignment:
+          $ref: "#/components/schemas/PlatformTenantAdministratorAssignment"
+
+    TenantInvitationStatus:
+      type: string
+      enum:
+        - PENDING
+        - ACCEPTED
+        - REVOKED
+        - EXPIRED
+
+    TenantInvitation:
+      type: object
+      required:
+        - id
+        - tenantId
+        - account
+        - status
+        - isInitialAdministrator
+        - roleIds
+        - expiresAt
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenantId:
+          type: string
+          format: uuid
+        account:
+          type: string
+        displayName:
+          type: [string, "null"]
+        status:
+          $ref: "#/components/schemas/TenantInvitationStatus"
+        isInitialAdministrator:
+          type: boolean
+        roleIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        expiresAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+
+    TenantInvitationCreated:
+      type: object
+      required:
+        - invitation
+        - invitationToken
+      properties:
+        invitation:
+          $ref: "#/components/schemas/TenantInvitation"
+        invitationToken:
+          type: string
+          minLength: 32
+
+    TenantInvitationList:
+      type: object
+      required:
+        - items
+        - nextCursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/TenantInvitation"
+        nextCursor:
+          type: [string, "null"]
+          format: uuid
+
+    CreateTenantInvitationRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - displayName
+        - roleIds
+      properties:
+        account:
+          type: string
+          minLength: 3
+          maxLength: 32
+          pattern: ^[a-zA-Z0-9]+$
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 120
+        roleIds:
+          type: array
+          uniqueItems: true
+          maxItems: 100
+          items:
+            type: string
+            format: uuid
+
+    AcceptTenantInvitationRequest:
       type: object
       additionalProperties: false
       required:
         - tenantCode
-        - email
+        - account
+        - invitationToken
         - password
       properties:
         tenantCode:
@@ -1283,10 +2267,105 @@ components:
           minLength: 2
           maxLength: 64
           pattern: ^[a-zA-Z0-9][a-zA-Z0-9_-]*$
-        email:
+        account:
           type: string
-          format: email
-          maxLength: 320
+          minLength: 3
+          maxLength: 32
+          pattern: ^[a-zA-Z0-9]+$
+        invitationToken:
+          type: string
+          minLength: 32
+          maxLength: 512
+        password:
+          type: string
+          format: password
+          minLength: 8
+          maxLength: 128
+
+    TenantInvitationAcceptance:
+      type: object
+      required:
+        - tenant
+        - membership
+      properties:
+        tenant:
+          $ref: "#/components/schemas/AuthTenant"
+        membership:
+          $ref: "#/components/schemas/TenantMember"
+
+    PlatformAuditEvent:
+      type: object
+      required:
+        - id
+        - action
+        - outcome
+        - resourceType
+        - requestId
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        action:
+          type: string
+        outcome:
+          $ref: "#/components/schemas/AuditOutcome"
+        actorUserId:
+          type: [string, "null"]
+          format: uuid
+        actorPlatformAdministratorId:
+          type: [string, "null"]
+          format: uuid
+        resourceType:
+          type: string
+        resourceId:
+          type: [string, "null"]
+          format: uuid
+        requestId:
+          type: string
+        ipAddress:
+          type: [string, "null"]
+        userAgent:
+          type: [string, "null"]
+        metadata:
+          type: [object, "null"]
+          additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
+
+    PlatformAuditEventList:
+      type: object
+      required:
+        - items
+        - nextCursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlatformAuditEvent"
+        nextCursor:
+          type: [string, "null"]
+          format: uuid
+
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - tenantCode
+        - account
+        - password
+      properties:
+        tenantCode:
+          type: string
+          minLength: 2
+          maxLength: 64
+          pattern: ^[a-zA-Z0-9][a-zA-Z0-9_-]*$
+        account:
+          type: string
+          minLength: 3
+          maxLength: 32
+          pattern: ^[a-zA-Z0-9]+$
         password:
           type: string
           minLength: 8
@@ -1312,15 +2391,11 @@ components:
       type: object
       required:
         - id
-        - email
         - displayName
       properties:
         id:
           type: string
           format: uuid
-        email:
-          type: string
-          format: email
         displayName:
           type: string
 
@@ -1343,12 +2418,15 @@ components:
       type: object
       required:
         - id
+        - account
         - status
         - roles
       properties:
         id:
           type: string
           format: uuid
+        account:
+          type: string
         status:
           type: string
           enum:
@@ -1361,6 +2439,7 @@ components:
     MemberStatus:
       type: string
       enum:
+        - PENDING_ACTIVATION
         - ACTIVE
         - DISABLED
 
@@ -1383,10 +2462,7 @@ components:
         name:
           type: string
         status:
-          type: string
-          enum:
-            - ACTIVE
-            - SUSPENDED
+          $ref: "#/components/schemas/TenantStatus"
         version:
           type: integer
           minimum: 1
@@ -1431,6 +2507,7 @@ components:
       type: object
       required:
         - id
+        - account
         - user
         - status
         - roles
@@ -1440,6 +2517,8 @@ components:
         id:
           type: string
           format: uuid
+        account:
+          type: string
         user:
           $ref: "#/components/schemas/AuthUser"
         departmentId:
@@ -1492,7 +2571,45 @@ components:
             - "null"
           format: uuid
         status:
-          $ref: "#/components/schemas/MemberStatus"
+          type: string
+          enum: [ACTIVE, DISABLED]
+        version:
+          type: integer
+          minimum: 1
+
+    AccountSuggestionRequest:
+      type: object
+      additionalProperties: false
+      required: [displayName]
+      properties:
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 120
+
+    AccountSuggestion:
+      type: object
+      required: [suggestedAccount, available, alternatives]
+      properties:
+        suggestedAccount:
+          type: string
+        available:
+          type: boolean
+        alternatives:
+          type: array
+          items:
+            type: string
+
+    UpdateTenantMemberAccountRequest:
+      type: object
+      additionalProperties: false
+      required: [account, version]
+      properties:
+        account:
+          type: string
+          minLength: 3
+          maxLength: 32
+          pattern: ^[a-zA-Z0-9]+$
         version:
           type: integer
           minimum: 1
@@ -2155,6 +3272,162 @@ components:
           const: true
         data:
           $ref: "#/components/schemas/AuditEventList"
+        requestId:
+          type: [string, "null"]
+
+    PlatformLoginResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: "#/components/schemas/PlatformLoginResponse"
+        requestId:
+          type: [string, "null"]
+
+    PlatformMeResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: "#/components/schemas/PlatformMeResponse"
+        requestId:
+          type: [string, "null"]
+
+    PlatformTenantResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: "#/components/schemas/PlatformTenantDetail"
+        requestId:
+          type: [string, "null"]
+
+    PlatformTenantListResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: "#/components/schemas/PlatformTenantList"
+        requestId:
+          type: [string, "null"]
+
+    PlatformTenantProvisioningResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: "#/components/schemas/PlatformTenantProvisioningResponse"
+        requestId:
+          type: [string, "null"]
+
+    PlatformTenantAdministratorListResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: "#/components/schemas/PlatformTenantAdministratorList"
+        requestId:
+          type: [string, "null"]
+
+    PlatformTenantAdministratorAssignmentResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: "#/components/schemas/PlatformTenantAdministratorAssignment"
+        requestId:
+          type: [string, "null"]
+
+    TenantInvitationCreatedResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: "#/components/schemas/TenantInvitationCreated"
+        requestId:
+          type: [string, "null"]
+
+    TenantInvitationListResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: "#/components/schemas/TenantInvitationList"
+        requestId:
+          type: [string, "null"]
+
+    AccountSuggestionResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: "#/components/schemas/AccountSuggestion"
+        requestId:
+          type: [string, "null"]
+
+    TenantInvitationAcceptanceResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: "#/components/schemas/TenantInvitationAcceptance"
+        requestId:
+          type: [string, "null"]
+
+    PlatformAuditEventResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: "#/components/schemas/PlatformAuditEvent"
+        requestId:
+          type: [string, "null"]
+
+    PlatformAuditEventListResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: "#/components/schemas/PlatformAuditEventList"
         requestId:
           type: [string, "null"]
 

@@ -2,17 +2,19 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
+import type { AcceptTenantInvitationRequest } from '../models/AcceptTenantInvitationRequest';
 import type { LoginRequest } from '../models/LoginRequest';
 import type { LoginResponseEnvelope } from '../models/LoginResponseEnvelope';
 import type { MeResponseEnvelope } from '../models/MeResponseEnvelope';
 import type { RefreshTokenRequest } from '../models/RefreshTokenRequest';
+import type { TenantInvitationAcceptanceResponseEnvelope } from '../models/TenantInvitationAcceptanceResponseEnvelope';
 import type { TokenPairResponseEnvelope } from '../models/TokenPairResponseEnvelope';
 import type { CancelablePromise } from '../core/CancelablePromise';
 import { OpenAPI } from '../core/OpenAPI';
 import { request as __request } from '../core/request';
 export class AuthService {
     /**
-     * 使用租户编码、邮箱和密码登录
+     * 使用租户编码、账号和密码登录
      * @returns LoginResponseEnvelope 登录成功
      * @throws ApiError
      */
@@ -50,6 +52,26 @@ export class AuthService {
             errors: {
                 400: `请求字段校验失败`,
                 401: `Refresh Token 无效、过期或已被使用`,
+            },
+        });
+    }
+    /**
+     * 使用一次性激活令牌设置租户账号密码
+     * @returns TenantInvitationAcceptanceResponseEnvelope 租户账号激活成功
+     * @throws ApiError
+     */
+    public static authActivate({
+        requestBody,
+    }: {
+        requestBody: AcceptTenantInvitationRequest,
+    }): CancelablePromise<TenantInvitationAcceptanceResponseEnvelope> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/auth/activate',
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                401: `激活令牌无效、过期或已使用`,
             },
         });
     }

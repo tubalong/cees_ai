@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEmail, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
+import { IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
+import { ACCOUNT_MAX_LENGTH, ACCOUNT_MIN_LENGTH, ACCOUNT_PATTERN } from './account';
 
 export class LoginDto {
     @ApiProperty({ example: 'cees' })
@@ -9,10 +10,12 @@ export class LoginDto {
     @Matches(/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/)
     tenantCode!: string;
 
-    @ApiProperty({ example: 'admin@example.com' })
-    @IsEmail()
-    @MaxLength(320)
-    email!: string;
+    @ApiProperty({ example: 'zhangsan' })
+    @IsString()
+    @MinLength(ACCOUNT_MIN_LENGTH)
+    @MaxLength(ACCOUNT_MAX_LENGTH)
+    @Matches(ACCOUNT_PATTERN)
+    account!: string;
 
     @ApiProperty({ format: 'password', minLength: 8, maxLength: 128 })
     @IsString()

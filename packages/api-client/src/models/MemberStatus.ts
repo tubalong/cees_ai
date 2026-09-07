@@ -2,4 +2,8 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
-export type MemberStatus = 'ACTIVE' | 'DISABLED';
+export enum MemberStatus {
+    PENDING_ACTIVATION = 'PENDING_ACTIVATION',
+    ACTIVE = 'ACTIVE',
+    DISABLED = 'DISABLED',
+}

@@ -7,6 +7,7 @@ import type { MemberStatus } from './MemberStatus';
 import type { TenantMemberRole } from './TenantMemberRole';
 export type TenantMember = {
     id: string;
+    account: string;
     user: AuthUser;
     departmentId?: string | null;
     status: MemberStatus;

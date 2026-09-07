@@ -4,7 +4,13 @@
 /* eslint-disable */
 export type AuthMembership = {
     id: string;
-    status: 'ACTIVE';
+    account: string;
+    status: AuthMembership.status;
     roles: Array<string>;
 };
+export namespace AuthMembership {
+    export enum status {
+        ACTIVE = 'ACTIVE',
+    }
+}
 

@@ -10,7 +10,7 @@ export interface AuthenticatedPrincipal {
     tenantId: string;
     membershipId: string;
     sessionId: string;
-    email: string;
+    account: string;
     displayName: string;
     tenantCode: string;
     tenantName: string;
@@ -28,7 +28,6 @@ export interface AuthTokenPair {
 export interface AuthContextResult {
     user: {
         id: string;
-        email: string;
         displayName: string;
     };
     tenant: {
@@ -38,6 +37,7 @@ export interface AuthContextResult {
     };
     membership: {
         id: string;
+        account: string;
         status: 'ACTIVE';
         roles: string[];
     };

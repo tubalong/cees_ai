@@ -5,6 +5,7 @@ import { HealthController } from './health.controller';
 import { DatabaseModule } from './database/database.module';
 import { TenantModule } from './tenant/tenant.module';
 import { AuthModule } from './auth/auth.module';
+import { PlatformTenantModule } from './platform-tenant/platform-tenant.module';
 import { BusinessModules } from './modules';
 
 @Module({
@@ -16,6 +17,7 @@ import { BusinessModules } from './modules';
         DatabaseModule,
         TenantModule,
         AuthModule,
+        PlatformTenantModule,
         ...BusinessModules,
     ],
     controllers: [HealthController],

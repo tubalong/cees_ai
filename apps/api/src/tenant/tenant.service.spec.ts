@@ -121,6 +121,27 @@ describe('TenantService', () => {
             data: expect.objectContaining({ action: 'MEMBER_ROLES_REPLACED' }),
         });
     });
+
+    it('changes a member account and revokes existing sessions', async () => {
+        const prisma = createPrismaMock();
+        prisma.tenantMembership.findFirst
+            .mockResolvedValueOnce(memberRecord())
+            .mockResolvedValueOnce(memberRecord({ account: 'member2', normalizedAccount: 'member2', version: 2 }));
+        prisma.tenantMembership.findUnique.mockResolvedValue(null);
+        prisma.tenantMembership.updateMany.mockResolvedValue({ count: 1 });
+        const service = createService(prisma);
+
+        const result = await service.updateMemberAccount(MEMBER_ID, { account: 'Member2', version: 1 });
+
+        expect(result.account).toBe('member2');
+        expect(prisma.authSession.updateMany).toHaveBeenCalledWith({
+            where: { tenantId: TENANT_ID, membershipId: MEMBER_ID, revokedAt: null },
+            data: { revokedAt: expect.any(Date) },
+        });
+        expect(prisma.auditLog.create).toHaveBeenCalledWith({
+            data: expect.objectContaining({ action: 'TENANT_MEMBER_ACCOUNT_CHANGED' }),
+        });
+    });
 });
 
 const TENANT_ID = '10000000-0000-0000-0000-000000000001';
@@ -149,6 +170,7 @@ function createPrismaMock(): Record<string, any> {
         tenant: { findFirst: jest.fn(), updateMany: jest.fn() },
         tenantMembership: {
             findFirst: jest.fn(),
+            findUnique: jest.fn(),
             findMany: jest.fn(),
             updateMany: jest.fn(),
             count: jest.fn(),
@@ -184,13 +206,18 @@ function memberRecord(overrides: Record<string, unknown> = {}): Record<string, u
         userId: USER_ID,
         departmentId: null,
         displayName: 'Tenant Member',
+        account: 'member1',
+        normalizedAccount: 'member1',
+        passwordHash: 'password-hash',
+        failedLoginCount: 0,
+        lockedUntil: null,
+        lastLoginAt: null,
         status: MembershipStatus.ACTIVE,
         joinedAt: new Date('2026-09-04T00:00:00.000Z'),
         version: 1,
         deletedAt: null,
         user: {
             id: USER_ID,
-            email: 'member@example.com',
             displayName: 'Global Member',
         },
         membershipRoles: [roleAssignment('20000000-0000-0000-0000-000000000003', 'member', '普通成员')],

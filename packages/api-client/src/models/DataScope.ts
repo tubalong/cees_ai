@@ -2,4 +2,11 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
-export type DataScope = 'SELF' | 'DEPARTMENT' | 'DEPARTMENT_TREE' | 'PROJECT' | 'CUSTOM' | 'TENANT';
+export enum DataScope {
+    SELF = 'SELF',
+    DEPARTMENT = 'DEPARTMENT',
+    DEPARTMENT_TREE = 'DEPARTMENT_TREE',
+    PROJECT = 'PROJECT',
+    CUSTOM = 'CUSTOM',
+    TENANT = 'TENANT',
+}

@@ -1,7 +1,7 @@
 # 数据库约定
 
 - `apps/api/prisma/schema.prisma` 是数据模型唯一事实源，迁移提交 `prisma/migrations`。
-- 向量检索：pgvector，由 `infra/scripts/init-pgvector.sql` 初始化扩展。
+- 向量检索使用 pgvector；Compose 使用 `pgvector/pgvector:pg16`，迁移 `0002_schema_with_auth` 创建 `vector` 扩展。
 - AI 服务对业务库只读；正式写入统一经 NestJS。
 - 业务模型落地前，先在此文档维护实体与关系草图。
 
@@ -16,11 +16,29 @@ User
               └── Role
 ```
 
-- User 是全局登录身份，`normalizedEmail` 全局唯一；
-- TenantMembership 表示用户在特定租户中的成员身份和状态；
+- User 是内部人员资料，使用 UUID 作为技术主键，邮箱字段暂时保留为可空兼容字段；
+- TenantMembership 表示用户在特定租户中的账号、凭证、成员身份和状态；
+- 租户账号业务唯一约束为 `tenantId + normalizedAccount`，登录时使用 `tenantCode + account`；
 - AuthSession 必须同时绑定 User、Tenant 和 TenantMembership；
 - MembershipRole 负责成员与租户角色的关联；
 - 迁移 `0003_tenant_membership` 会从旧的 tenant-scoped User 回填成员关系。
+
+## 平台管理员与邀请
+
+```text
+User
+├── PlatformAdministrator
+│   └── PlatformAuthSession
+└── TenantInvitation --accept--> TenantMembership
+```
+
+- PlatformAdministrator 是独立于租户 Role 的平台身份，第一期只支持 `SUPER_ADMIN`；
+- PlatformAuthSession 使用独立平台 JWT 和 Refresh Token Hash；
+- PlatformAdministrator 保存全局唯一平台账号和独立密码、锁定状态；
+- TenantInvitation 保存租户账号、Token Hash、过期时间和待分配角色，不保存明文 Token；
+- 新租户首位管理员不存在时，Tenant 状态为 `PENDING_ACTIVATION`，接受邀请后切换为 `ACTIVE`；
+- PlatformAuditLog 保存无租户上下文的平台登录和跨租户管理事件；
+- 迁移 `0007_platform_tenant_administration` 创建上述模型，并为已有 `tenant_admin` 增加账号邀请、账号修改和凭证重置权限。
 
 ## RBAC 角色模型
 

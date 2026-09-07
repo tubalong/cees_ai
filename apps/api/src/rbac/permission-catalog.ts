@@ -1,0 +1,24 @@
+export const TENANT_PERMISSION_DEFINITIONS = [
+    ['tenant.read', '查看当前租户'],
+    ['tenant.update', '修改当前租户'],
+    ['member.read', '查看租户成员'],
+    ['member.invite', '邀请租户成员'],
+    ['member.update', '修改租户成员'],
+    ['member.account.update', '修改租户成员账号'],
+    ['member.credential.reset', '重置租户成员凭证'],
+    ['member.remove', '移除租户成员'],
+    ['role.read', '查看权限和角色'],
+    ['role.create', '创建租户角色'],
+    ['role.update', '修改角色及权限'],
+    ['role.delete', '删除租户角色'],
+    ['role.assign', '为成员分配角色'],
+    ['document.create', '创建文档'],
+    ['document.read', '读取授权范围内文档'],
+    ['document.update', '修改授权范围内文档'],
+    ['document.delete', '删除授权范围内文档'],
+    ['document.share', '管理文档资源级授权'],
+    ['document.manage_all', '管理当前租户全部文档'],
+    ['audit.read', '查询当前租户审计事件'],
+] as const;
+
+export const TENANT_ADMIN_ROLE_CODE = 'tenant_admin';

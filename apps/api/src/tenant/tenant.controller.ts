@@ -8,6 +8,7 @@ import {
     Param,
     ParseUUIDPipe,
     Patch,
+    Post,
     Put,
     Query,
     UseGuards,
@@ -15,17 +16,22 @@ import {
 } from '@nestjs/common';
 import {
     ApiBearerAuth,
+    ApiCreatedResponse,
     ApiNoContentResponse,
     ApiOkResponse,
     ApiTags,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PermissionGuard, RequirePermissions } from '../rbac/permission.guard';
+import { TenantInvitationService } from '../tenant-invitation/tenant-invitation.service';
+import { AccountSuggestionResult, TenantInvitationCreatedResult } from '../tenant-invitation/tenant-invitation.types';
 import {
+    AccountSuggestionDto,
     ListTenantMembersQueryDto,
     ReplaceTenantMemberRolesDto,
     UpdateTenantDto,
     UpdateTenantMemberDto,
+    UpdateTenantMemberAccountDto,
 } from './dto';
 import { TenantContextInterceptor } from './tenant-context.interceptor';
 import { TenantGuard } from './tenant.guard';
@@ -38,7 +44,10 @@ import { TenantMemberListResult, TenantMemberResult, TenantResult } from './tena
 @UseGuards(JwtAuthGuard, TenantGuard, PermissionGuard)
 @UseInterceptors(TenantContextInterceptor)
 export class TenantController {
-    constructor(private readonly tenantService: TenantService) { }
+    constructor(
+        private readonly tenantService: TenantService,
+        private readonly tenantInvitationService: TenantInvitationService,
+    ) { }
 
     @Get()
     @RequirePermissions('tenant.read')
@@ -61,6 +70,13 @@ export class TenantController {
         return this.tenantService.listMembers(query);
     }
 
+    @Post('account-suggestions')
+    @RequirePermissions('member.invite')
+    @ApiOkResponse({ description: '当前租户账号建议' })
+    suggestAccount(@Body() input: AccountSuggestionDto): Promise<AccountSuggestionResult> {
+        return this.tenantInvitationService.suggestAccount(input.displayName);
+    }
+
     @Get('members/:membershipId')
     @RequirePermissions('member.read')
     @ApiOkResponse({ description: '当前租户成员详情' })
@@ -76,6 +92,25 @@ export class TenantController {
         @Body() input: UpdateTenantMemberDto,
     ): Promise<TenantMemberResult> {
         return this.tenantService.updateMember(membershipId, input);
+    }
+
+    @Patch('members/:membershipId/account')
+    @RequirePermissions('member.account.update')
+    @ApiOkResponse({ description: '修改账号后的当前租户成员' })
+    updateMemberAccount(
+        @Param('membershipId', new ParseUUIDPipe()) membershipId: string,
+        @Body() input: UpdateTenantMemberAccountDto,
+    ): Promise<TenantMemberResult> {
+        return this.tenantService.updateMemberAccount(membershipId, input);
+    }
+
+    @Post('members/:membershipId/credential-reset')
+    @RequirePermissions('member.credential.reset')
+    @ApiCreatedResponse({ description: '凭证已重置；激活令牌只在本次响应返回' })
+    resetMemberCredential(
+        @Param('membershipId', new ParseUUIDPipe()) membershipId: string,
+    ): Promise<TenantInvitationCreatedResult> {
+        return this.tenantInvitationService.resetCredential(membershipId);
     }
 
     @Delete('members/:membershipId')

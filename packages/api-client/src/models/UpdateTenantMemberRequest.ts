@@ -2,11 +2,16 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
-import type { MemberStatus } from './MemberStatus';
 export type UpdateTenantMemberRequest = {
     displayName?: string;
     departmentId?: string | null;
-    status?: MemberStatus;
+    status?: UpdateTenantMemberRequest.status;
     version: number;
 };
+export namespace UpdateTenantMemberRequest {
+    export enum status {
+        ACTIVE = 'ACTIVE',
+        DISABLED = 'DISABLED',
+    }
+}
 

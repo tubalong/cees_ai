@@ -7,7 +7,10 @@
 ```text
 src/
 ├── auth/             # 登录、JWT、刷新令牌
+├── platform-auth/    # 平台管理员登录、JWT 与权限守卫
+├── platform-tenant/  # 平台租户生命周期、管理员和平台审计
 ├── tenant/           # 租户上下文与守卫
+├── tenant-invitation/# 租户账号邀请、激活与凭证重置
 ├── rbac/             # 权限与数据范围
 ├── resource/         # 资源级授权计算与 ACL
 ├── document/         # 第一种受控业务资源
@@ -34,12 +37,15 @@ pnpm --filter @cees/api prisma:seed
 ```
 
 默认开发登录信息来自仓库根目录 `.env` 中的 `SEED_TENANT_CODE`、
-`SEED_ADMIN_EMAIL` 和 `SEED_ADMIN_PASSWORD`，部署前必须替换 `change_me`。
+`SEED_ADMIN_ACCOUNT` 和 `SEED_ADMIN_PASSWORD`，部署前必须替换 `change_me`。
+平台超级管理员使用独立账号，可通过 `SEED_PLATFORM_ADMIN_ACCOUNT`、
+`SEED_PLATFORM_ADMIN_PASSWORD` 和 `SEED_PLATFORM_ADMIN_DISPLAY_NAME` 单独配置。
 
 认证接口：
 
 ```text
 POST /api/v1/auth/login
+POST /api/v1/auth/activate
 POST /api/v1/auth/refresh
 POST /api/v1/auth/logout
 GET  /api/v1/auth/me
@@ -51,6 +57,9 @@ GET    /api/v1/tenants/current/members/{membershipId}
 PATCH  /api/v1/tenants/current/members/{membershipId}
 DELETE /api/v1/tenants/current/members/{membershipId}
 PUT    /api/v1/tenants/current/members/{membershipId}/roles
+POST   /api/v1/tenants/current/account-suggestions
+PATCH  /api/v1/tenants/current/members/{membershipId}/account
+POST   /api/v1/tenants/current/members/{membershipId}/credential-reset
 
 GET    /api/v1/permissions
 GET    /api/v1/roles
@@ -72,9 +81,32 @@ DELETE /api/v1/resources/{resourceId}/acl/{aclEntryId}?version={version}
 
 GET /api/v1/audit-events
 GET /api/v1/audit-events/{auditEventId}
+
+POST /api/v1/platform/auth/login
+POST /api/v1/platform/auth/refresh
+POST /api/v1/platform/auth/logout
+GET  /api/v1/platform/auth/me
+
+GET    /api/v1/platform/tenants
+POST   /api/v1/platform/tenants
+GET    /api/v1/platform/tenants/{tenantId}
+PATCH  /api/v1/platform/tenants/{tenantId}
+POST   /api/v1/platform/tenants/{tenantId}/suspend
+POST   /api/v1/platform/tenants/{tenantId}/restore
+GET    /api/v1/platform/tenants/{tenantId}/administrators
+POST   /api/v1/platform/tenants/{tenantId}/administrators
+DELETE /api/v1/platform/tenants/{tenantId}/administrators/{membershipId}
+
+GET    /api/v1/tenants/current/invitations
+POST   /api/v1/tenants/current/invitations
+DELETE /api/v1/tenants/current/invitations/{invitationId}
+POST   /api/v1/auth/activate
+
+GET /api/v1/platform/audit-events
+GET /api/v1/platform/audit-events/{auditEventId}
 ```
 
-截至 2026-09-07，第一期身份、租户、RBAC、Document、ACL 和审计共 28 个接口均已实现。
+截至 2026-09-07，身份、租户、权限、审计、平台租户管理和租户账号激活接口均已实现。
 
 Refresh Token 采用单次轮换；`logout` 会撤销当前数据库 Session，之后对应的
 Access Token 即使尚未到 JWT 过期时间也不能继续访问受保护接口。
@@ -91,6 +123,10 @@ TenantMembership 关联租户；旧 Token 需要重新登录获取。
 执行 `0006_resource_acl_documents` 后，Resource 作为统一授权根，ManagedDocument
 与 Resource 共用 ID。Document 操作先检查 RBAC，再按 Owner、`TENANT` 可见性、
 Membership ACL、Role ACL 或 `document.manage_all` 判断资源范围；ACL 不能绕过 RBAC。
+
+执行 `0007_platform_tenant_administration` 后，平台超级管理员使用独立平台 JWT 和
+PlatformAuthSession；平台可创建、停用、恢复租户并设置管理员。新用户通过一次性
+TenantInvitation 设置密码并加入租户，首位管理员接受邀请后激活待激活租户。
 
 从宿主机运行 API、Prisma migration 或 seed 时，`DATABASE_URL` 的主机名使用
 `localhost`；在 Docker Compose 容器内运行时使用服务名 `postgres`。
