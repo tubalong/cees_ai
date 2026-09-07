@@ -108,22 +108,28 @@ GET /api/v1/platform/audit-events/{auditEventId}
 
 截至 2026-09-07，身份、租户、权限、审计、平台租户管理和租户账号激活接口均已实现。
 
+> 数据库使用 `prisma/migrations/0001_init` 作为当前完整的空库基线，其中会先启用 pgvector，再创建与 `schema.prisma` 一致的全部业务表。
+
 Refresh Token 采用单次轮换；`logout` 会撤销当前数据库 Session，之后对应的
 Access Token 即使尚未到 JWT 过期时间也不能继续访问受保护接口。
 
-执行 `0003_tenant_membership` 后，User 是全局身份，登录和权限分配通过真实的
-TenantMembership 关联租户；旧 Token 需要重新登录获取。
+User 是全局身份，登录和权限分配通过真实的
+TenantMembership 关联租户。
 
-执行 `0004_rbac_role_metadata` 后，Role 使用不可变 `code` 和展示 `name`；
+Role 使用不可变 `code` 和展示 `name`；
 `tenant_admin` 是受保护的系统角色，角色修改与权限替换会立即影响后续请求授权。
 
-执行 `0005_audit_query_fields` 后，审计事件可以按结果、操作者成员、资源、请求 ID
+审计事件可以按结果、操作者成员、资源、请求 ID
 和时间范围查询；所有查询始终限制在当前租户并要求 `audit.read` 权限。
 
-执行 `0006_resource_acl_documents` 后，Resource 作为统一授权根，ManagedDocument
+Resource 作为统一授权根，ManagedDocument
 与 Resource 共用 ID。Document 操作先检查 RBAC，再按 Owner、`TENANT` 可见性、
 Membership ACL、Role ACL 或 `document.manage_all` 判断资源范围；ACL 不能绕过 RBAC。
 
+本地开发从宿主机运行 API、Prisma migration 或 seed 时，`DATABASE_URL` 使用
+`localhost:5432`。共享环境的 API 和 migration 位于独立应用服务器，通过腾讯云
+VPC 连接数据库服务器 `172.27.0.3`：Staging 使用端口 `15432`，Production 使用
+端口 `25432`。共享环境不得再使用只适用于同机 Compose 的 `postgres` 服务名。
 执行 `0007_platform_tenant_administration` 后，平台超级管理员使用独立平台 JWT 和
 PlatformAuthSession；平台可创建、停用、恢复租户并设置管理员。新用户通过一次性
 TenantInvitation 设置密码并加入租户，首位管理员接受邀请后激活待激活租户。

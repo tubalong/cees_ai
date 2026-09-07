@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import json
+from collections.abc import Sequence
+
 from fastapi.testclient import TestClient
 
 from app.core.config import ModelRole, OutputMode, Settings
+from app.core.errors import ProviderTransientError
 from app.core.runtime import AppRuntime
 from app.llm.router import LLMRouter
+from app.llm.types import ProviderStreamChunk, TokenUsageData
 from app.main import create_app
 from tests.helpers import StubProvider, catalog, profile, ready_runtime, result
 
@@ -13,11 +18,12 @@ def build_client(
     *,
     structured: bool = False,
     settings: Settings | None = None,
+    stream_outcomes: Sequence[Sequence[object]] = (),
 ) -> tuple[TestClient, StubProvider]:
     modes = {OutputMode.text, OutputMode.json_schema} if structured else {OutputMode.text}
     model_profile = profile(modes=modes)
     outcome = result({"answer": 42}) if structured else result("hello")
-    provider = StubProvider(model_profile, [outcome])
+    provider = StubProvider(model_profile, [outcome], stream_outcomes=stream_outcomes)
     role = ModelRole.structured if structured else ModelRole.default
     model_catalog = catalog({"primary": model_profile}, {role: ["primary"]})
     router = LLMRouter(model_catalog, lambda _name, _profile: provider)
@@ -33,6 +39,26 @@ def text_payload() -> dict[str, object]:
         "messages": [{"role": "user", "content": "hello"}],
         "response_format": {"type": "text"},
     }
+
+
+def stream_payload() -> dict[str, object]:
+    payload = text_payload()
+    payload.pop("response_format")
+    return payload
+
+
+def parse_sse_events(body: str) -> list[tuple[str, dict[str, object]]]:
+    blocks = body.replace("\r\n", "\n").strip().split("\n\n")
+    events = []
+    for block in blocks:
+        lines = block.splitlines()
+        events.append(
+            (
+                lines[0].removeprefix("event: "),
+                json.loads(lines[1].removeprefix("data: ")),
+            )
+        )
+    return events
 
 
 def test_health_and_readiness_do_not_require_authentication() -> None:
@@ -64,6 +90,7 @@ def test_text_invocation_returns_execution_metadata() -> None:
     body = response.json()
     assert body["output"] == {"type": "text", "text": "hello"}
     assert body["execution"]["profile"] == "primary"
+    assert body["execution"]["finish_reason"] == "stop"
     assert body["execution"]["token_usage"]["total_tokens"] == 5
     assert provider.calls[0][1].max_output_tokens == 128
 
@@ -123,6 +150,16 @@ def test_message_total_size_is_limited() -> None:
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "INVALID_INVOCATION_REQUEST"
 
+    payload.pop("response_format")
+    with client:
+        stream_response = client.post(
+            "/internal/v1/llm/stream",
+            headers={"X-AI-Internal-Token": "secret"},
+            json=payload,
+        )
+    assert stream_response.status_code == 422
+    assert stream_response.json()["error"]["code"] == "INVALID_INVOCATION_REQUEST"
+
 
 def test_not_ready_runtime_rejects_invocation() -> None:
     runtime = AppRuntime(
@@ -139,9 +176,16 @@ def test_not_ready_runtime_rejects_invocation() -> None:
             headers={"X-AI-Internal-Token": "secret"},
             json=text_payload(),
         )
+        stream_response = client.post(
+            "/internal/v1/llm/stream",
+            headers={"X-AI-Internal-Token": "secret"},
+            json=stream_payload(),
+        )
     assert readiness.status_code == 503
     assert response.status_code == 503
     assert response.json()["error"]["code"] == "AI_SERVICE_NOT_READY"
+    assert stream_response.status_code == 503
+    assert stream_response.json()["error"]["code"] == "AI_SERVICE_NOT_READY"
 
 
 def test_docs_are_enabled_for_staging_configuration() -> None:
@@ -194,3 +238,82 @@ def test_docs_are_disabled_by_default_in_production() -> None:
     assert openapi.status_code == 404
     assert health.status_code == 200
     assert invocation.status_code == 200
+
+
+def test_stream_requires_internal_token() -> None:
+    client, _ = build_client()
+    with client:
+        response = client.post("/internal/v1/llm/stream", json=stream_payload())
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "INTERNAL_AUTH_FAILED"
+
+
+def test_stream_returns_ordered_sse_events() -> None:
+    client, provider = build_client(
+        stream_outcomes=[
+            [
+                ProviderStreamChunk(text="hel"),
+                ProviderStreamChunk(text="lo"),
+                ProviderStreamChunk(
+                    token_usage=TokenUsageData(
+                        input_tokens=3,
+                        output_tokens=2,
+                        total_tokens=5,
+                    ),
+                    finish_reason="length",
+                ),
+            ]
+        ]
+    )
+    with client:
+        response = client.post(
+            "/internal/v1/llm/stream",
+            headers={"X-AI-Internal-Token": "secret"},
+            json={**stream_payload(), "temperature": 0.4, "max_output_tokens": 128},
+        )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert response.headers["cache-control"] == "no-cache"
+    assert response.headers["x-accel-buffering"] == "no"
+    events = parse_sse_events(response.text)
+    assert [name for name, _data in events] == [
+        "started",
+        "content_delta",
+        "content_delta",
+        "usage",
+        "completed",
+    ]
+    assert events[0][1]["execution"]["profile"] == "primary"
+    assert [events[1][1]["text"], events[2][1]["text"]] == ["hel", "lo"]
+    assert events[3][1]["token_usage"]["total_tokens"] == 5
+    assert isinstance(events[4][1]["latency_ms"], int)
+    assert events[4][1]["finish_reason"] == "length"
+    assert provider.stream_calls[0][1].max_output_tokens == 128
+
+
+def test_stream_emits_error_after_partial_output() -> None:
+    client, _ = build_client(
+        stream_outcomes=[
+            [
+                ProviderStreamChunk(text="partial"),
+                ProviderTransientError("disconnected"),
+            ]
+        ]
+    )
+    with client:
+        response = client.post(
+            "/internal/v1/llm/stream",
+            headers={"X-AI-Internal-Token": "secret"},
+            json=stream_payload(),
+        )
+
+    assert response.status_code == 200
+    events = parse_sse_events(response.text)
+    assert [name for name, _data in events] == ["started", "content_delta", "error"]
+    assert events[-1][1]["error"] == {
+        "code": "LLM_STREAM_INTERRUPTED",
+        "message": "The provider stream was interrupted",
+        "request_id": "req-api-1",
+        "retryable": True,
+    }

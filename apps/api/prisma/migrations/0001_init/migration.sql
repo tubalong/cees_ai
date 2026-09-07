@@ -1,6 +1,33 @@
 -- CreateSchema
 CREATE SCHEMA IF NOT EXISTS "public";
 
+-- EnableExtension
+CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public;
+
+-- CreateEnum
+CREATE TYPE "TenantStatus" AS ENUM ('ACTIVE', 'SUSPENDED');
+
+-- CreateEnum
+CREATE TYPE "UserStatus" AS ENUM ('ACTIVE', 'LOCKED', 'DISABLED');
+
+-- CreateEnum
+CREATE TYPE "MembershipStatus" AS ENUM ('ACTIVE', 'DISABLED');
+
+-- CreateEnum
+CREATE TYPE "AuditOutcome" AS ENUM ('SUCCESS', 'FAILURE');
+
+-- CreateEnum
+CREATE TYPE "ResourceType" AS ENUM ('DOCUMENT');
+
+-- CreateEnum
+CREATE TYPE "AclSubjectType" AS ENUM ('MEMBERSHIP', 'ROLE');
+
+-- CreateEnum
+CREATE TYPE "DocumentVisibility" AS ENUM ('PRIVATE', 'TENANT');
+
+-- CreateEnum
+CREATE TYPE "VisibilityScope" AS ENUM ('PRIVATE', 'DEPARTMENT', 'PROJECT', 'TENANT', 'CUSTOM');
+
 -- CreateEnum
 CREATE TYPE "DataScope" AS ENUM ('SELF', 'DEPARTMENT', 'DEPARTMENT_TREE', 'PROJECT', 'CUSTOM', 'TENANT');
 
@@ -16,7 +43,9 @@ CREATE TYPE "DraftStatus" AS ENUM ('DRAFT', 'PENDING_CONFIRMATION', 'CONFIRMED',
 -- CreateTable
 CREATE TABLE "tenants" (
     "id" UUID NOT NULL,
+    "code" TEXT NOT NULL,
     "name" TEXT NOT NULL,
+    "status" "TenantStatus" NOT NULL DEFAULT 'ACTIVE',
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL,
     "deleted_at" TIMESTAMP(3),
@@ -28,11 +57,14 @@ CREATE TABLE "tenants" (
 -- CreateTable
 CREATE TABLE "users" (
     "id" UUID NOT NULL,
-    "tenant_id" UUID NOT NULL,
-    "department_id" UUID,
     "email" TEXT NOT NULL,
+    "normalized_email" TEXT NOT NULL,
     "password_hash" TEXT NOT NULL,
     "display_name" TEXT NOT NULL,
+    "status" "UserStatus" NOT NULL DEFAULT 'ACTIVE',
+    "failed_login_count" INTEGER NOT NULL DEFAULT 0,
+    "locked_until" TIMESTAMP(3),
+    "last_login_at" TIMESTAMP(3),
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL,
     "created_by" UUID,
@@ -41,6 +73,44 @@ CREATE TABLE "users" (
     "version" INTEGER NOT NULL DEFAULT 1,
 
     CONSTRAINT "users_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "tenant_memberships" (
+    "id" UUID NOT NULL,
+    "tenant_id" UUID NOT NULL,
+    "user_id" UUID NOT NULL,
+    "department_id" UUID,
+    "display_name" TEXT,
+    "status" "MembershipStatus" NOT NULL DEFAULT 'ACTIVE',
+    "joined_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+    "created_by" UUID,
+    "updated_by" UUID,
+    "deleted_at" TIMESTAMP(3),
+    "version" INTEGER NOT NULL DEFAULT 1,
+
+    CONSTRAINT "tenant_memberships_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "auth_sessions" (
+    "id" UUID NOT NULL,
+    "tenant_id" UUID NOT NULL,
+    "user_id" UUID NOT NULL,
+    "membership_id" UUID NOT NULL,
+    "refresh_token_hash" TEXT NOT NULL,
+    "device_name" TEXT,
+    "ip_address" TEXT,
+    "user_agent" TEXT,
+    "expires_at" TIMESTAMP(3) NOT NULL,
+    "last_used_at" TIMESTAMP(3),
+    "revoked_at" TIMESTAMP(3),
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "auth_sessions_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -63,7 +133,10 @@ CREATE TABLE "departments" (
 CREATE TABLE "roles" (
     "id" UUID NOT NULL,
     "tenant_id" UUID NOT NULL,
+    "code" TEXT NOT NULL,
     "name" TEXT NOT NULL,
+    "description" TEXT,
+    "is_system" BOOLEAN NOT NULL DEFAULT false,
     "data_scope" "DataScope" NOT NULL DEFAULT 'SELF',
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL,
@@ -87,14 +160,14 @@ CREATE TABLE "permissions" (
 );
 
 -- CreateTable
-CREATE TABLE "user_roles" (
+CREATE TABLE "membership_roles" (
     "id" UUID NOT NULL,
     "tenant_id" UUID NOT NULL,
-    "user_id" UUID NOT NULL,
+    "membership_id" UUID NOT NULL,
     "role_id" UUID NOT NULL,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    CONSTRAINT "user_roles_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "membership_roles_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -112,11 +185,11 @@ CREATE TABLE "role_permissions" (
 CREATE TABLE "resource_acls" (
     "id" UUID NOT NULL,
     "tenant_id" UUID NOT NULL,
-    "resource_type" TEXT NOT NULL,
     "resource_id" UUID NOT NULL,
-    "subject_type" TEXT NOT NULL,
+    "subject_type" "AclSubjectType" NOT NULL,
     "subject_id" UUID NOT NULL,
-    "permission" TEXT NOT NULL,
+    "permission_codes" TEXT[],
+    "expires_at" TIMESTAMP(3),
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL,
     "created_by" UUID,
@@ -125,6 +198,39 @@ CREATE TABLE "resource_acls" (
     "version" INTEGER NOT NULL DEFAULT 1,
 
     CONSTRAINT "resource_acls_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "resources" (
+    "id" UUID NOT NULL,
+    "tenant_id" UUID NOT NULL,
+    "type" "ResourceType" NOT NULL,
+    "owner_membership_id" UUID NOT NULL,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+    "created_by" UUID,
+    "updated_by" UUID,
+    "deleted_at" TIMESTAMP(3),
+    "version" INTEGER NOT NULL DEFAULT 1,
+
+    CONSTRAINT "resources_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "managed_documents" (
+    "id" UUID NOT NULL,
+    "tenant_id" UUID NOT NULL,
+    "title" TEXT NOT NULL,
+    "content" TEXT NOT NULL,
+    "visibility" "DocumentVisibility" NOT NULL DEFAULT 'PRIVATE',
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+    "created_by" UUID,
+    "updated_by" UUID,
+    "deleted_at" TIMESTAMP(3),
+    "version" INTEGER NOT NULL DEFAULT 1,
+
+    CONSTRAINT "managed_documents_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -256,6 +362,152 @@ CREATE TABLE "file_objects" (
 );
 
 -- CreateTable
+CREATE TABLE "knowledge_bases" (
+    "id" UUID NOT NULL,
+    "tenant_id" UUID NOT NULL,
+    "name" TEXT NOT NULL,
+    "description" TEXT,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+    "created_by" UUID,
+    "updated_by" UUID,
+    "deleted_at" TIMESTAMP(3),
+    "version" INTEGER NOT NULL DEFAULT 1,
+
+    CONSTRAINT "knowledge_bases_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "knowledge_base_members" (
+    "id" UUID NOT NULL,
+    "tenant_id" UUID NOT NULL,
+    "knowledge_base_id" UUID NOT NULL,
+    "user_id" UUID NOT NULL,
+    "permission" TEXT NOT NULL,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "knowledge_base_members_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "documents" (
+    "id" UUID NOT NULL,
+    "tenant_id" UUID NOT NULL,
+    "knowledge_base_id" UUID NOT NULL,
+    "file_object_id" UUID NOT NULL,
+    "name" TEXT NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'PENDING',
+    "department_id" UUID,
+    "project_id" UUID,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+    "created_by" UUID,
+    "updated_by" UUID,
+    "deleted_at" TIMESTAMP(3),
+    "version" INTEGER NOT NULL DEFAULT 1,
+
+    CONSTRAINT "documents_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "document_versions" (
+    "id" UUID NOT NULL,
+    "tenant_id" UUID NOT NULL,
+    "document_id" UUID NOT NULL,
+    "file_object_id" UUID NOT NULL,
+    "version_number" INTEGER NOT NULL,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "created_by" UUID,
+
+    CONSTRAINT "document_versions_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "document_chunks" (
+    "id" UUID NOT NULL,
+    "tenant_id" UUID NOT NULL,
+    "knowledge_base_id" UUID NOT NULL,
+    "document_id" UUID NOT NULL,
+    "department_id" UUID,
+    "project_id" UUID,
+    "visibility_scope" "VisibilityScope" NOT NULL,
+    "content" TEXT NOT NULL,
+    "embedding" vector NOT NULL,
+    "metadata" JSONB NOT NULL,
+    "chunk_index" INTEGER NOT NULL,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+    "created_by" UUID,
+    "updated_by" UUID,
+    "deleted_at" TIMESTAMP(3),
+    "version" INTEGER NOT NULL DEFAULT 1,
+
+    CONSTRAINT "document_chunks_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "knowledge_query_logs" (
+    "id" UUID NOT NULL,
+    "tenant_id" UUID NOT NULL,
+    "user_id" UUID NOT NULL,
+    "query" TEXT NOT NULL,
+    "answer" TEXT,
+    "citations" JSONB,
+    "request_id" TEXT NOT NULL,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "knowledge_query_logs_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "meetings" (
+    "id" UUID NOT NULL,
+    "tenant_id" UUID NOT NULL,
+    "title" TEXT NOT NULL,
+    "starts_at" TIMESTAMP(3) NOT NULL,
+    "duration_minutes" INTEGER NOT NULL,
+    "department_id" UUID,
+    "agenda" JSONB,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+    "created_by" UUID,
+    "updated_by" UUID,
+    "deleted_at" TIMESTAMP(3),
+    "version" INTEGER NOT NULL DEFAULT 1,
+
+    CONSTRAINT "meetings_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "meeting_participants" (
+    "id" UUID NOT NULL,
+    "tenant_id" UUID NOT NULL,
+    "meeting_id" UUID NOT NULL,
+    "user_id" UUID NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'INVITED',
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "meeting_participants_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "meeting_minutes" (
+    "id" UUID NOT NULL,
+    "tenant_id" UUID NOT NULL,
+    "meeting_id" UUID NOT NULL,
+    "content" JSONB NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'DRAFT',
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+    "created_by" UUID,
+    "updated_by" UUID,
+    "deleted_at" TIMESTAMP(3),
+    "version" INTEGER NOT NULL DEFAULT 1,
+
+    CONSTRAINT "meeting_minutes_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "notifications" (
     "id" UUID NOT NULL,
     "tenant_id" UUID NOT NULL,
@@ -330,7 +582,9 @@ CREATE TABLE "audit_logs" (
     "id" UUID NOT NULL,
     "tenant_id" UUID NOT NULL,
     "actor_user_id" UUID,
+    "actor_membership_id" UUID,
     "action" TEXT NOT NULL,
+    "outcome" "AuditOutcome" NOT NULL DEFAULT 'SUCCESS',
     "resource_type" TEXT NOT NULL,
     "resource_id" UUID,
     "request_id" TEXT NOT NULL,
@@ -343,31 +597,70 @@ CREATE TABLE "audit_logs" (
 );
 
 -- CreateIndex
-CREATE INDEX "users_tenant_id_department_id_idx" ON "users"("tenant_id", "department_id");
+CREATE UNIQUE INDEX "tenants_code_key" ON "tenants"("code");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "users_tenant_id_email_key" ON "users"("tenant_id", "email");
+CREATE UNIQUE INDEX "users_normalized_email_key" ON "users"("normalized_email");
+
+-- CreateIndex
+CREATE INDEX "tenant_memberships_tenant_id_department_id_idx" ON "tenant_memberships"("tenant_id", "department_id");
+
+-- CreateIndex
+CREATE INDEX "tenant_memberships_tenant_id_status_idx" ON "tenant_memberships"("tenant_id", "status");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "tenant_memberships_tenant_id_user_id_key" ON "tenant_memberships"("tenant_id", "user_id");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "auth_sessions_refresh_token_hash_key" ON "auth_sessions"("refresh_token_hash");
+
+-- CreateIndex
+CREATE INDEX "auth_sessions_tenant_id_user_id_idx" ON "auth_sessions"("tenant_id", "user_id");
+
+-- CreateIndex
+CREATE INDEX "auth_sessions_tenant_id_membership_id_idx" ON "auth_sessions"("tenant_id", "membership_id");
+
+-- CreateIndex
+CREATE INDEX "auth_sessions_expires_at_idx" ON "auth_sessions"("expires_at");
 
 -- CreateIndex
 CREATE INDEX "departments_tenant_id_parent_id_idx" ON "departments"("tenant_id", "parent_id");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "roles_tenant_id_name_key" ON "roles"("tenant_id", "name");
+CREATE INDEX "roles_tenant_id_deleted_at_idx" ON "roles"("tenant_id", "deleted_at");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "roles_tenant_id_code_key" ON "roles"("tenant_id", "code");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "permissions_code_key" ON "permissions"("code");
 
 -- CreateIndex
-CREATE INDEX "user_roles_tenant_id_user_id_idx" ON "user_roles"("tenant_id", "user_id");
+CREATE INDEX "membership_roles_tenant_id_membership_id_idx" ON "membership_roles"("tenant_id", "membership_id");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "user_roles_tenant_id_user_id_role_id_key" ON "user_roles"("tenant_id", "user_id", "role_id");
+CREATE UNIQUE INDEX "membership_roles_tenant_id_membership_id_role_id_key" ON "membership_roles"("tenant_id", "membership_id", "role_id");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "role_permissions_tenant_id_role_id_permission_id_key" ON "role_permissions"("tenant_id", "role_id", "permission_id");
 
 -- CreateIndex
-CREATE INDEX "resource_acls_tenant_id_resource_type_resource_id_idx" ON "resource_acls"("tenant_id", "resource_type", "resource_id");
+CREATE INDEX "resource_acls_tenant_id_resource_id_idx" ON "resource_acls"("tenant_id", "resource_id");
+
+-- CreateIndex
+CREATE INDEX "resource_acls_tenant_id_subject_type_subject_id_idx" ON "resource_acls"("tenant_id", "subject_type", "subject_id");
+
+-- CreateIndex
+CREATE INDEX "resource_acls_permission_codes_idx" ON "resource_acls" USING GIN ("permission_codes");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "resource_acls_tenant_id_resource_id_subject_type_subject_id_key" ON "resource_acls"("tenant_id", "resource_id", "subject_type", "subject_id");
+
+-- CreateIndex
+CREATE INDEX "resources_tenant_id_type_owner_membership_id_idx" ON "resources"("tenant_id", "type", "owner_membership_id");
+
+-- CreateIndex
+CREATE INDEX "managed_documents_tenant_id_visibility_created_at_idx" ON "managed_documents"("tenant_id", "visibility", "created_at");
 
 -- CreateIndex
 CREATE INDEX "projects_tenant_id_department_id_idx" ON "projects"("tenant_id", "department_id");
@@ -403,6 +696,33 @@ CREATE INDEX "task_activities_tenant_id_task_id_idx" ON "task_activities"("tenan
 CREATE INDEX "file_objects_tenant_id_idx" ON "file_objects"("tenant_id");
 
 -- CreateIndex
+CREATE INDEX "knowledge_bases_tenant_id_idx" ON "knowledge_bases"("tenant_id");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "knowledge_base_members_tenant_id_knowledge_base_id_user_id_key" ON "knowledge_base_members"("tenant_id", "knowledge_base_id", "user_id");
+
+-- CreateIndex
+CREATE INDEX "documents_tenant_id_knowledge_base_id_idx" ON "documents"("tenant_id", "knowledge_base_id");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "document_versions_tenant_id_document_id_version_number_key" ON "document_versions"("tenant_id", "document_id", "version_number");
+
+-- CreateIndex
+CREATE INDEX "document_chunks_tenant_id_knowledge_base_id_document_id_idx" ON "document_chunks"("tenant_id", "knowledge_base_id", "document_id");
+
+-- CreateIndex
+CREATE INDEX "knowledge_query_logs_tenant_id_user_id_created_at_idx" ON "knowledge_query_logs"("tenant_id", "user_id", "created_at");
+
+-- CreateIndex
+CREATE INDEX "meetings_tenant_id_starts_at_idx" ON "meetings"("tenant_id", "starts_at");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "meeting_participants_tenant_id_meeting_id_user_id_key" ON "meeting_participants"("tenant_id", "meeting_id", "user_id");
+
+-- CreateIndex
+CREATE INDEX "meeting_minutes_tenant_id_meeting_id_idx" ON "meeting_minutes"("tenant_id", "meeting_id");
+
+-- CreateIndex
 CREATE INDEX "notifications_tenant_id_created_at_idx" ON "notifications"("tenant_id", "created_at");
 
 -- CreateIndex
@@ -415,13 +735,79 @@ CREATE INDEX "ai_action_drafts_tenant_id_user_id_status_idx" ON "ai_action_draft
 CREATE INDEX "ai_invocation_logs_tenant_id_request_id_idx" ON "ai_invocation_logs"("tenant_id", "request_id");
 
 -- CreateIndex
-CREATE INDEX "audit_logs_tenant_id_created_at_idx" ON "audit_logs"("tenant_id", "created_at");
+CREATE INDEX "audit_logs_tenant_id_created_at_id_idx" ON "audit_logs"("tenant_id", "created_at", "id");
+
+-- CreateIndex
+CREATE INDEX "audit_logs_tenant_id_action_created_at_idx" ON "audit_logs"("tenant_id", "action", "created_at");
+
+-- CreateIndex
+CREATE INDEX "audit_logs_tenant_id_outcome_created_at_idx" ON "audit_logs"("tenant_id", "outcome", "created_at");
+
+-- CreateIndex
+CREATE INDEX "audit_logs_tenant_id_actor_membership_id_created_at_idx" ON "audit_logs"("tenant_id", "actor_membership_id", "created_at");
+
+-- CreateIndex
+CREATE INDEX "audit_logs_tenant_id_request_id_idx" ON "audit_logs"("tenant_id", "request_id");
 
 -- CreateIndex
 CREATE INDEX "audit_logs_tenant_id_resource_type_resource_id_idx" ON "audit_logs"("tenant_id", "resource_type", "resource_id");
 
 -- AddForeignKey
-ALTER TABLE "users" ADD CONSTRAINT "users_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "tenants"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "tenant_memberships" ADD CONSTRAINT "tenant_memberships_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "tenants"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "tenant_memberships" ADD CONSTRAINT "tenant_memberships_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "tenant_memberships" ADD CONSTRAINT "tenant_memberships_department_id_fkey" FOREIGN KEY ("department_id") REFERENCES "departments"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "auth_sessions" ADD CONSTRAINT "auth_sessions_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "tenants"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "auth_sessions" ADD CONSTRAINT "auth_sessions_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "auth_sessions" ADD CONSTRAINT "auth_sessions_membership_id_fkey" FOREIGN KEY ("membership_id") REFERENCES "tenant_memberships"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "departments" ADD CONSTRAINT "departments_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "tenants"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "roles" ADD CONSTRAINT "roles_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "tenants"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "membership_roles" ADD CONSTRAINT "membership_roles_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "tenants"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "membership_roles" ADD CONSTRAINT "membership_roles_membership_id_fkey" FOREIGN KEY ("membership_id") REFERENCES "tenant_memberships"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "membership_roles" ADD CONSTRAINT "membership_roles_role_id_fkey" FOREIGN KEY ("role_id") REFERENCES "roles"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "role_permissions" ADD CONSTRAINT "role_permissions_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "tenants"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "role_permissions" ADD CONSTRAINT "role_permissions_role_id_fkey" FOREIGN KEY ("role_id") REFERENCES "roles"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "role_permissions" ADD CONSTRAINT "role_permissions_permission_id_fkey" FOREIGN KEY ("permission_id") REFERENCES "permissions"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "resource_acls" ADD CONSTRAINT "resource_acls_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "tenants"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "resource_acls" ADD CONSTRAINT "resource_acls_resource_id_fkey" FOREIGN KEY ("resource_id") REFERENCES "resources"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "resources" ADD CONSTRAINT "resources_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "tenants"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "resources" ADD CONSTRAINT "resources_owner_membership_id_fkey" FOREIGN KEY ("owner_membership_id") REFERENCES "tenant_memberships"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "managed_documents" ADD CONSTRAINT "managed_documents_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "tenants"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "managed_documents" ADD CONSTRAINT "managed_documents_id_fkey" FOREIGN KEY ("id") REFERENCES "resources"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

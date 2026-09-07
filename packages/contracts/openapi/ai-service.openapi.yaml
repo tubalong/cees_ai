@@ -13,6 +13,8 @@ tags:
     description: Process liveness and configuration readiness checks.
   - name: llm
     description: Internal LLM invocation endpoints available only to trusted CEES services.
+  - name: documents
+    description: Domain-neutral document composition and deterministic DOCX rendering.
 paths:
   /health:
     get:
@@ -168,6 +170,204 @@ paths:
           $ref: "#/components/responses/InvalidProviderOutput"
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
+  /internal/v1/llm/stream:
+    post:
+      tags: [llm]
+      operationId: streamLlm
+      summary: Stream a configured LLM profile
+      description: |
+        Streams Server-Sent Events in this order: `started`, zero or more
+        `content_delta` events, an optional `usage` event, and `completed`.
+        If a provider fails after streaming starts, an `error` event terminates
+        the stream. Each SSE `data` field contains one `StreamEvent` JSON object.
+      security:
+        - internalToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StreamRequest"
+            example:
+              request_id: req-example-stream-001
+              tenant_id: tenant-example
+              user_id: user-example
+              messages:
+                - role: user
+                  content: Draft a concise project update.
+              role: default
+              temperature: 0.3
+              max_output_tokens: 512
+      responses:
+        "200":
+          description: Invocation events are streamed
+          content:
+            text/event-stream:
+              schema:
+                $ref: "#/components/schemas/StreamEvent"
+              examples:
+                contentDelta:
+                  summary: Text content delta
+                  value:
+                    type: content_delta
+                    text: The project
+
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "502":
+          $ref: "#/components/responses/InvalidProviderOutput"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /internal/v1/documents/compose:
+    post:
+      tags: [documents]
+      operationId: composeDocument
+      summary: Compose a structured document draft
+      description: Generates and validates a domain-neutral DocumentSpec without creating a file.
+      security:
+        - internalToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ComposeDocumentRequest"
+            example:
+              request_id: req-document-compose-001
+              tenant_id: tenant-example
+              user_id: user-example
+              instruction: Create a concise project implementation plan from the supplied material.
+              source_materials:
+                - id: requirements
+                  title: Requirements
+                  content: The first release must support controlled document composition.
+              document_options:
+                title: Project implementation plan
+                locale: en-US
+                template_id: business-standard
+                include_toc: false
+              temperature: 0.2
+              max_output_tokens: 4096
+      responses:
+        "200":
+          description: Document draft composed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ComposeDocumentResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "502":
+          $ref: "#/components/responses/InvalidProviderOutput"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /internal/v1/documents/render-docx:
+    post:
+      tags: [documents]
+      operationId: renderDocumentDocx
+      summary: Render a DocumentSpec as DOCX
+      description: Deterministically renders a validated DocumentSpec without invoking an LLM.
+      security:
+        - internalToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RenderDocxRequest"
+      responses:
+        "200":
+          description: DOCX document rendered
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Content-Disposition:
+              description: Attachment filename with ASCII fallback and RFC 5987 UTF-8 filename.
+              schema:
+                type: string
+            X-Request-Id:
+              schema:
+                type: string
+          content:
+            application/vnd.openxmlformats-officedocument.wordprocessingml.document:
+              schema:
+                type: string
+                format: binary
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /internal/v1/documents/generate-docx:
+    post:
+      tags: [documents]
+      operationId: generateDocumentDocx
+      summary: Compose and render a DOCX document
+      description: Composes a DocumentSpec and returns its deterministic DOCX rendering in one call.
+      security:
+        - internalToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ComposeDocumentRequest"
+      responses:
+        "200":
+          description: DOCX document generated
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Content-Disposition:
+              description: Attachment filename with ASCII fallback and RFC 5987 UTF-8 filename.
+              schema:
+                type: string
+            X-Request-Id:
+              schema:
+                type: string
+            X-AI-Profile:
+              schema:
+                type: string
+            X-AI-Model:
+              schema:
+                type: string
+            X-AI-Finish-Reason:
+              schema:
+                type: string
+          content:
+            application/vnd.openxmlformats-officedocument.wordprocessingml.document:
+              schema:
+                type: string
+                format: binary
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "502":
+          $ref: "#/components/responses/InvalidProviderOutput"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
 components:
   securitySchemes:
     internalToken:
@@ -293,6 +493,401 @@ components:
             mapping:
               text: "#/components/schemas/TextResponseFormat"
               json_schema: "#/components/schemas/JsonSchemaResponseFormat"
+    StreamRequest:
+      type: object
+      additionalProperties: false
+      required: [request_id, tenant_id, user_id, messages]
+      properties:
+        request_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        tenant_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        user_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        messages:
+          type: array
+          minItems: 1
+          maxItems: 64
+          items:
+            $ref: "#/components/schemas/InvokeMessage"
+        role:
+          $ref: "#/components/schemas/ModelRole"
+        llm_profile:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 128
+        temperature:
+          type: [number, "null"]
+          minimum: 0
+          maximum: 2
+        max_output_tokens:
+          type: [integer, "null"]
+          minimum: 1
+          maximum: 32768
+    StreamExecutionMetadata:
+      type: object
+      additionalProperties: false
+      required: [profile, provider, model, fallback_count]
+      properties:
+        profile:
+          type: string
+        provider:
+          type: string
+          enum: [mock, openai_compatible, deepseek]
+        model:
+          type: string
+        fallback_count:
+          type: integer
+          minimum: 0
+    StreamStartedEvent:
+      type: object
+      additionalProperties: false
+      required: [type, request_id, execution]
+      properties:
+        type:
+          type: string
+          const: started
+        request_id:
+          type: string
+        execution:
+          $ref: "#/components/schemas/StreamExecutionMetadata"
+    ContentDeltaEvent:
+      type: object
+      additionalProperties: false
+      required: [type, text]
+      properties:
+        type:
+          type: string
+          const: content_delta
+        text:
+          type: string
+    UsageEvent:
+      type: object
+      additionalProperties: false
+      required: [type, token_usage]
+      properties:
+        type:
+          type: string
+          const: usage
+        token_usage:
+          $ref: "#/components/schemas/TokenUsage"
+    StreamCompletedEvent:
+      type: object
+      additionalProperties: false
+      required: [type, latency_ms]
+      properties:
+        type:
+          type: string
+          const: completed
+        latency_ms:
+          type: integer
+          minimum: 0
+        finish_reason:
+          type: [string, "null"]
+          description: Provider completion reason. `length` indicates the output token limit was reached.
+    StreamErrorEvent:
+      type: object
+      additionalProperties: false
+      required: [type, error]
+      properties:
+        type:
+          type: string
+          const: error
+        error:
+          $ref: "#/components/schemas/ErrorDetail"
+    StreamEvent:
+      oneOf:
+        - $ref: "#/components/schemas/StreamStartedEvent"
+        - $ref: "#/components/schemas/ContentDeltaEvent"
+        - $ref: "#/components/schemas/UsageEvent"
+        - $ref: "#/components/schemas/StreamCompletedEvent"
+        - $ref: "#/components/schemas/StreamErrorEvent"
+      discriminator:
+        propertyName: type
+        mapping:
+          started: "#/components/schemas/StreamStartedEvent"
+          content_delta: "#/components/schemas/ContentDeltaEvent"
+          usage: "#/components/schemas/UsageEvent"
+          completed: "#/components/schemas/StreamCompletedEvent"
+          error: "#/components/schemas/StreamErrorEvent"
+    DocumentSourceMaterial:
+      type: object
+      additionalProperties: false
+      required: [id, content]
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        title:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 256
+        content:
+          type: string
+          minLength: 1
+          maxLength: 131072
+    DocumentOptions:
+      type: object
+      additionalProperties: false
+      properties:
+        title:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 256
+          default: null
+        locale:
+          type: string
+          minLength: 2
+          maxLength: 32
+          default: zh-CN
+        template_id:
+          type: string
+          enum: [business-standard]
+          default: business-standard
+        include_toc:
+          type: boolean
+          default: false
+    ParagraphBlock:
+      type: object
+      additionalProperties: false
+      required: [type, text]
+      properties:
+        type:
+          type: string
+          const: paragraph
+        text:
+          type: string
+          minLength: 1
+          maxLength: 20000
+    BulletListBlock:
+      type: object
+      additionalProperties: false
+      required: [type, items]
+      properties:
+        type:
+          type: string
+          const: bullet_list
+        items:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            type: string
+            minLength: 1
+            maxLength: 4000
+    NumberedListBlock:
+      type: object
+      additionalProperties: false
+      required: [type, items]
+      properties:
+        type:
+          type: string
+          const: numbered_list
+        items:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            type: string
+            minLength: 1
+            maxLength: 4000
+    TableBlock:
+      type: object
+      additionalProperties: false
+      required: [type, columns, rows]
+      properties:
+        type:
+          type: string
+          const: table
+        columns:
+          type: array
+          minItems: 1
+          maxItems: 12
+          items:
+            type: string
+            minLength: 1
+            maxLength: 256
+        rows:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            type: array
+            minItems: 1
+            maxItems: 12
+            items:
+              type: string
+              maxLength: 4000
+    QuoteBlock:
+      type: object
+      additionalProperties: false
+      required: [type, text]
+      properties:
+        type:
+          type: string
+          const: quote
+        text:
+          type: string
+          minLength: 1
+          maxLength: 10000
+        attribution:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 256
+    PageBreakBlock:
+      type: object
+      additionalProperties: false
+      required: [type]
+      properties:
+        type:
+          type: string
+          const: page_break
+    DocumentBlock:
+      oneOf:
+        - $ref: "#/components/schemas/ParagraphBlock"
+        - $ref: "#/components/schemas/BulletListBlock"
+        - $ref: "#/components/schemas/NumberedListBlock"
+        - $ref: "#/components/schemas/TableBlock"
+        - $ref: "#/components/schemas/QuoteBlock"
+        - $ref: "#/components/schemas/PageBreakBlock"
+      discriminator:
+        propertyName: type
+        mapping:
+          paragraph: "#/components/schemas/ParagraphBlock"
+          bullet_list: "#/components/schemas/BulletListBlock"
+          numbered_list: "#/components/schemas/NumberedListBlock"
+          table: "#/components/schemas/TableBlock"
+          quote: "#/components/schemas/QuoteBlock"
+          page_break: "#/components/schemas/PageBreakBlock"
+    DocumentSection:
+      type: object
+      additionalProperties: false
+      required: [heading, level, blocks]
+      properties:
+        heading:
+          type: string
+          minLength: 1
+          maxLength: 256
+        level:
+          type: integer
+          minimum: 1
+          maximum: 3
+        blocks:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/DocumentBlock"
+    DocumentSpec:
+      type: object
+      additionalProperties: false
+      required: [schema_version, title, sections, source_refs]
+      properties:
+        schema_version:
+          type: string
+          const: "1.0"
+        title:
+          type: string
+          minLength: 1
+          maxLength: 256
+        subtitle:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 512
+        sections:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            $ref: "#/components/schemas/DocumentSection"
+        source_refs:
+          type: array
+          maxItems: 100
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+            maxLength: 128
+    ComposeDocumentRequest:
+      type: object
+      additionalProperties: false
+      required: [request_id, tenant_id, user_id, instruction, source_materials, document_options]
+      properties:
+        request_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        tenant_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        user_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        instruction:
+          type: string
+          minLength: 1
+          maxLength: 8192
+        source_materials:
+          type: array
+          maxItems: 16
+          items:
+            $ref: "#/components/schemas/DocumentSourceMaterial"
+        document_options:
+          $ref: "#/components/schemas/DocumentOptions"
+        llm_profile:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 128
+        temperature:
+          type: [number, "null"]
+          minimum: 0
+          maximum: 2
+        max_output_tokens:
+          type: [integer, "null"]
+          minimum: 1
+          maximum: 32768
+    ComposeDocumentResponse:
+      type: object
+      additionalProperties: false
+      required: [request_id, document, execution]
+      properties:
+        request_id:
+          type: string
+        document:
+          $ref: "#/components/schemas/DocumentSpec"
+        execution:
+          $ref: "#/components/schemas/ExecutionMetadata"
+    RenderDocxRequest:
+      type: object
+      additionalProperties: false
+      required: [request_id, tenant_id, user_id, document, document_options]
+      properties:
+        request_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        tenant_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        user_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        document:
+          $ref: "#/components/schemas/DocumentSpec"
+        document_options:
+          $ref: "#/components/schemas/DocumentOptions"
     TextOutput:
       type: object
       additionalProperties: false
@@ -346,6 +941,9 @@ components:
         latency_ms:
           type: integer
           minimum: 0
+        finish_reason:
+          type: [string, "null"]
+          description: Provider completion reason. `length` indicates the output token limit was reached.
         token_usage:
           $ref: "#/components/schemas/TokenUsage"
     InvokeResponse:

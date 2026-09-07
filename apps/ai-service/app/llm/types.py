@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
@@ -32,6 +33,14 @@ class TokenUsageData:
 class ProviderResult:
     output: str | dict[str, Any]
     token_usage: TokenUsageData = TokenUsageData()
+    finish_reason: str | None = None
+
+
+@dataclass(frozen=True)
+class ProviderStreamChunk:
+    text: str = ""
+    token_usage: TokenUsageData | None = None
+    finish_reason: str | None = None
 
 
 class LLMProvider(Protocol):
@@ -40,3 +49,7 @@ class LLMProvider(Protocol):
     async def invoke(
         self, messages: list[ChatMessage], options: InvocationOptions
     ) -> ProviderResult: ...
+
+    def stream(
+        self, messages: list[ChatMessage], options: InvocationOptions
+    ) -> AsyncIterator[ProviderStreamChunk]: ...

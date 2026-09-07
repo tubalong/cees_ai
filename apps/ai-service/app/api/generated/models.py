@@ -2,9 +2,9 @@
 #   filename:  ai-service.openapi.yaml
 
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, confloat, conint, constr
+from pydantic import BaseModel, ConfigDict, Field, RootModel, confloat, conint, constr
 
 
 class HealthResponse(BaseModel):
@@ -74,6 +74,199 @@ class InvokeRequest(BaseModel):
     )
 
 
+class StreamRequest(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    request_id: constr(min_length=1, max_length=128)
+    tenant_id: constr(min_length=1, max_length=128)
+    user_id: constr(min_length=1, max_length=128)
+    messages: list[InvokeMessage] = Field(..., max_length=64, min_length=1)
+    role: ModelRole | None = None
+    llm_profile: constr(min_length=1, max_length=128) | None = None
+    temperature: confloat(ge=0.0, le=2.0) | None = None
+    max_output_tokens: conint(ge=1, le=32768) | None = None
+
+
+class Provider(StrEnum):
+    mock = 'mock'
+    openai_compatible = 'openai_compatible'
+    deepseek = 'deepseek'
+
+
+class StreamExecutionMetadata(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    profile: str
+    provider: Provider
+    model: str
+    fallback_count: conint(ge=0)
+
+
+class StreamStartedEvent(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['started']
+    request_id: str
+    execution: StreamExecutionMetadata
+
+
+class ContentDeltaEvent(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['content_delta']
+    text: str
+
+
+class StreamCompletedEvent(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['completed']
+    latency_ms: conint(ge=0)
+    finish_reason: str | None = Field(
+        None,
+        description='Provider completion reason. `length` indicates the output token limit was reached.',
+    )
+
+
+class DocumentSourceMaterial(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    id: constr(pattern=r'^[A-Za-z0-9][A-Za-z0-9._:-]*$', min_length=1, max_length=128)
+    title: constr(min_length=1, max_length=256) | None = None
+    content: constr(min_length=1, max_length=131072)
+
+
+class TemplateId(StrEnum):
+    business_standard = 'business-standard'
+
+
+class DocumentOptions(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    title: constr(min_length=1, max_length=256) | None = None
+    locale: constr(min_length=2, max_length=32) | None = 'zh-CN'
+    template_id: TemplateId | None = 'business-standard'
+    include_toc: bool | None = False
+
+
+class ParagraphBlock(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['paragraph']
+    text: constr(min_length=1, max_length=20000)
+
+
+class BulletListBlock(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['bullet_list']
+    items: list[constr(min_length=1, max_length=4000)] = Field(
+        ..., max_length=100, min_length=1
+    )
+
+
+class NumberedListBlock(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['numbered_list']
+    items: list[constr(min_length=1, max_length=4000)] = Field(
+        ..., max_length=100, min_length=1
+    )
+
+
+class TableBlock(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['table']
+    columns: list[constr(min_length=1, max_length=256)] = Field(
+        ..., max_length=12, min_length=1
+    )
+    rows: list[list[constr(max_length=4000)]] = Field(..., max_length=100, min_length=1)
+
+
+class QuoteBlock(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['quote']
+    text: constr(min_length=1, max_length=10000)
+    attribution: constr(min_length=1, max_length=256) | None = None
+
+
+class PageBreakBlock(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['page_break']
+
+
+class DocumentSection(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    heading: constr(min_length=1, max_length=256)
+    level: conint(ge=1, le=3)
+    blocks: list[
+        Annotated[
+            ParagraphBlock
+            | BulletListBlock
+            | NumberedListBlock
+            | TableBlock
+            | QuoteBlock
+            | PageBreakBlock,
+            Field(discriminator='type'),
+        ]
+    ] = Field(..., max_length=100, min_length=1)
+
+
+class DocumentSpec(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    schema_version: Literal['1.0']
+    title: constr(min_length=1, max_length=256)
+    subtitle: constr(min_length=1, max_length=512) | None = None
+    sections: list[DocumentSection] = Field(..., max_length=50, min_length=1)
+    source_refs: list[constr(min_length=1, max_length=128)] = Field(..., max_length=100)
+
+
+class ComposeDocumentRequest(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    request_id: constr(min_length=1, max_length=128)
+    tenant_id: constr(min_length=1, max_length=128)
+    user_id: constr(min_length=1, max_length=128)
+    instruction: constr(min_length=1, max_length=8192)
+    source_materials: list[DocumentSourceMaterial] = Field(..., max_length=16)
+    document_options: DocumentOptions
+    llm_profile: constr(min_length=1, max_length=128) | None = None
+    temperature: confloat(ge=0.0, le=2.0) | None = None
+    max_output_tokens: conint(ge=1, le=32768) | None = None
+
+
+class RenderDocxRequest(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    request_id: constr(min_length=1, max_length=128)
+    tenant_id: constr(min_length=1, max_length=128)
+    user_id: constr(min_length=1, max_length=128)
+    document: DocumentSpec
+    document_options: DocumentOptions
+
+
 class TextOutput(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
@@ -99,12 +292,6 @@ class TokenUsage(BaseModel):
     total_tokens: conint(ge=0) | None
 
 
-class Provider(StrEnum):
-    mock = 'mock'
-    openai_compatible = 'openai_compatible'
-    deepseek = 'deepseek'
-
-
 class ExecutionMetadata(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
@@ -114,6 +301,10 @@ class ExecutionMetadata(BaseModel):
     model: str
     fallback_count: conint(ge=0)
     latency_ms: conint(ge=0)
+    finish_reason: str | None = Field(
+        None,
+        description='Provider completion reason. `length` indicates the output token limit was reached.',
+    )
     token_usage: TokenUsage
 
 
@@ -151,3 +342,46 @@ class ReadinessResponse(BaseModel):
     service: Literal['ai-service']
     configured_roles: list[ModelRole]
     errors: list[str]
+
+
+class UsageEvent(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['usage']
+    token_usage: TokenUsage
+
+
+class StreamErrorEvent(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['error']
+    error: ErrorDetail
+
+
+class StreamEvent(
+    RootModel[
+        StreamStartedEvent
+        | ContentDeltaEvent
+        | UsageEvent
+        | StreamCompletedEvent
+        | StreamErrorEvent
+    ]
+):
+    root: (
+        StreamStartedEvent
+        | ContentDeltaEvent
+        | UsageEvent
+        | StreamCompletedEvent
+        | StreamErrorEvent
+    ) = Field(..., discriminator='type')
+
+
+class ComposeDocumentResponse(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    request_id: str
+    document: DocumentSpec
+    execution: ExecutionMetadata

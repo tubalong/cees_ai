@@ -53,6 +53,164 @@ export type InvokeRequest = {
     } & JsonSchemaResponseFormat);
 };
 
+export type StreamRequest = {
+    request_id: string;
+    tenant_id: string;
+    user_id: string;
+    messages: Array<InvokeMessage>;
+    role?: ModelRole;
+    llm_profile?: string | null;
+    temperature?: number | null;
+    max_output_tokens?: number | null;
+};
+
+export type StreamExecutionMetadata = {
+    profile: string;
+    provider: 'mock' | 'openai_compatible' | 'deepseek';
+    model: string;
+    fallback_count: number;
+};
+
+export type StreamStartedEvent = {
+    type: 'started';
+    request_id: string;
+    execution: StreamExecutionMetadata;
+};
+
+export type ContentDeltaEvent = {
+    type: 'content_delta';
+    text: string;
+};
+
+export type UsageEvent = {
+    type: 'usage';
+    token_usage: TokenUsage;
+};
+
+export type StreamCompletedEvent = {
+    type: 'completed';
+    latency_ms: number;
+    /**
+     * Provider completion reason. `length` indicates the output token limit was reached.
+     */
+    finish_reason?: string | null;
+};
+
+export type StreamErrorEvent = {
+    type: 'error';
+    error: ErrorDetail;
+};
+
+export type StreamEvent = ({
+    type: 'started';
+} & StreamStartedEvent) | ({
+    type: 'content_delta';
+} & ContentDeltaEvent) | ({
+    type: 'usage';
+} & UsageEvent) | ({
+    type: 'completed';
+} & StreamCompletedEvent) | ({
+    type: 'error';
+} & StreamErrorEvent);
+
+export type DocumentSourceMaterial = {
+    id: string;
+    title?: string | null;
+    content: string;
+};
+
+export type DocumentOptions = {
+    title?: string | null;
+    locale?: string;
+    template_id?: 'business-standard';
+    include_toc?: boolean;
+};
+
+export type ParagraphBlock = {
+    type: 'paragraph';
+    text: string;
+};
+
+export type BulletListBlock = {
+    type: 'bullet_list';
+    items: Array<string>;
+};
+
+export type NumberedListBlock = {
+    type: 'numbered_list';
+    items: Array<string>;
+};
+
+export type TableBlock = {
+    type: 'table';
+    columns: Array<string>;
+    rows: Array<Array<string>>;
+};
+
+export type QuoteBlock = {
+    type: 'quote';
+    text: string;
+    attribution?: string | null;
+};
+
+export type PageBreakBlock = {
+    type: 'page_break';
+};
+
+export type DocumentBlock = ({
+    type: 'paragraph';
+} & ParagraphBlock) | ({
+    type: 'bullet_list';
+} & BulletListBlock) | ({
+    type: 'numbered_list';
+} & NumberedListBlock) | ({
+    type: 'table';
+} & TableBlock) | ({
+    type: 'quote';
+} & QuoteBlock) | ({
+    type: 'page_break';
+} & PageBreakBlock);
+
+export type DocumentSection = {
+    heading: string;
+    level: number;
+    blocks: Array<DocumentBlock>;
+};
+
+export type DocumentSpec = {
+    schema_version: '1.0';
+    title: string;
+    subtitle?: string | null;
+    sections: Array<DocumentSection>;
+    source_refs: Array<string>;
+};
+
+export type ComposeDocumentRequest = {
+    request_id: string;
+    tenant_id: string;
+    user_id: string;
+    instruction: string;
+    source_materials: Array<DocumentSourceMaterial>;
+    document_options: DocumentOptions;
+    llm_profile?: string | null;
+    temperature?: number | null;
+    max_output_tokens?: number | null;
+};
+
+export type ComposeDocumentResponse = {
+    request_id: string;
+    document: DocumentSpec;
+    execution: ExecutionMetadata;
+};
+
+export type RenderDocxRequest = {
+    request_id: string;
+    tenant_id: string;
+    user_id: string;
+    document: DocumentSpec;
+    document_options: DocumentOptions;
+};
+
 export type TextOutput = {
     type: 'text';
     text: string;
@@ -77,6 +235,10 @@ export type ExecutionMetadata = {
     model: string;
     fallback_count: number;
     latency_ms: number;
+    /**
+     * Provider completion reason. `length` indicates the output token limit was reached.
+     */
+    finish_reason?: string | null;
     token_usage: TokenUsage;
 };
 
@@ -186,3 +348,171 @@ export type InvokeLlmResponses = {
 };
 
 export type InvokeLlmResponse = InvokeLlmResponses[keyof InvokeLlmResponses];
+
+export type StreamLlmData = {
+    body: StreamRequest;
+    path?: never;
+    query?: never;
+    url: '/internal/v1/llm/stream';
+};
+
+export type StreamLlmErrors = {
+    /**
+     * Invalid profile or unsupported output mode
+     */
+    400: ErrorResponse;
+    /**
+     * Internal authentication failed
+     */
+    401: ErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ErrorResponse;
+    /**
+     * Unexpected internal service error
+     */
+    500: ErrorResponse;
+    /**
+     * Provider output did not match the requested schema
+     */
+    502: ErrorResponse;
+    /**
+     * Service or configured providers unavailable
+     */
+    503: ErrorResponse;
+};
+
+export type StreamLlmError = StreamLlmErrors[keyof StreamLlmErrors];
+
+export type StreamLlmResponses = {
+    /**
+     * Invocation events are streamed
+     */
+    200: StreamEvent;
+};
+
+export type StreamLlmResponse = StreamLlmResponses[keyof StreamLlmResponses];
+
+export type ComposeDocumentData = {
+    body: ComposeDocumentRequest;
+    path?: never;
+    query?: never;
+    url: '/internal/v1/documents/compose';
+};
+
+export type ComposeDocumentErrors = {
+    /**
+     * Invalid profile or unsupported output mode
+     */
+    400: ErrorResponse;
+    /**
+     * Internal authentication failed
+     */
+    401: ErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ErrorResponse;
+    /**
+     * Unexpected internal service error
+     */
+    500: ErrorResponse;
+    /**
+     * Provider output did not match the requested schema
+     */
+    502: ErrorResponse;
+    /**
+     * Service or configured providers unavailable
+     */
+    503: ErrorResponse;
+};
+
+export type ComposeDocumentError = ComposeDocumentErrors[keyof ComposeDocumentErrors];
+
+export type ComposeDocumentResponses = {
+    /**
+     * Document draft composed
+     */
+    200: ComposeDocumentResponse;
+};
+
+export type ComposeDocumentResponse2 = ComposeDocumentResponses[keyof ComposeDocumentResponses];
+
+export type RenderDocumentDocxData = {
+    body: RenderDocxRequest;
+    path?: never;
+    query?: never;
+    url: '/internal/v1/documents/render-docx';
+};
+
+export type RenderDocumentDocxErrors = {
+    /**
+     * Internal authentication failed
+     */
+    401: ErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ErrorResponse;
+    /**
+     * Unexpected internal service error
+     */
+    500: ErrorResponse;
+};
+
+export type RenderDocumentDocxError = RenderDocumentDocxErrors[keyof RenderDocumentDocxErrors];
+
+export type RenderDocumentDocxResponses = {
+    /**
+     * DOCX document rendered
+     */
+    200: Blob | File;
+};
+
+export type RenderDocumentDocxResponse = RenderDocumentDocxResponses[keyof RenderDocumentDocxResponses];
+
+export type GenerateDocumentDocxData = {
+    body: ComposeDocumentRequest;
+    path?: never;
+    query?: never;
+    url: '/internal/v1/documents/generate-docx';
+};
+
+export type GenerateDocumentDocxErrors = {
+    /**
+     * Invalid profile or unsupported output mode
+     */
+    400: ErrorResponse;
+    /**
+     * Internal authentication failed
+     */
+    401: ErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ErrorResponse;
+    /**
+     * Unexpected internal service error
+     */
+    500: ErrorResponse;
+    /**
+     * Provider output did not match the requested schema
+     */
+    502: ErrorResponse;
+    /**
+     * Service or configured providers unavailable
+     */
+    503: ErrorResponse;
+};
+
+export type GenerateDocumentDocxError = GenerateDocumentDocxErrors[keyof GenerateDocumentDocxErrors];
+
+export type GenerateDocumentDocxResponses = {
+    /**
+     * DOCX document generated
+     */
+    200: Blob | File;
+};
+
+export type GenerateDocumentDocxResponse = GenerateDocumentDocxResponses[keyof GenerateDocumentDocxResponses];
