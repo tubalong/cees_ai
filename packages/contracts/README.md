@@ -26,4 +26,9 @@ openapi/
 
 FastAPI `/docs` 直接展示生成的 OpenAPI JSON；测试会另外根据 Python 路由生成运行时 OpenAPI，并对路径、方法、operationId、标签、认证、响应状态和主要 Schema 字段执行契约漂移检查。
 
+TypeScript 客户端生成命令：
+
+```text
+pnpm contracts:generate
+```
 生成目录禁止手改。契约相关 PR 必须由契约负责人评审。
