@@ -1,7 +1,7 @@
 [profiles.primary]
-provider = "openai_compatible"
-model = "change_me"
-base_url = "https://change_me/v1"
+provider = "deepseek"
+model = "deepseek-v4-flash"
+base_url = "https://api.deepseek.com"
 api_key_env = "PRIMARY_LLM_API_KEY"
 enabled = true
 modes = ["text", "json_schema"]
@@ -12,22 +12,8 @@ timeout_seconds = 60.0
 max_retries = 2
 structured_output_method = "function_calling"
 
-[profiles.backup]
-provider = "openai_compatible"
-model = "change_me"
-base_url = "https://change_me/v1"
-api_key_env = "BACKUP_LLM_API_KEY"
-enabled = true
-modes = ["text", "json_schema"]
-temperature = 0.0
-default_max_output_tokens = 2048
-max_output_tokens_limit = 8192
-timeout_seconds = 60.0
-max_retries = 1
-structured_output_method = "function_calling"
-
 [roles]
-default = ["primary", "backup"]
-structured = ["primary", "backup"]
-reasoning = ["primary", "backup"]
-rag = ["primary", "backup"]
+default = ["primary"]
+structured = ["primary"]
+reasoning = ["primary"]
+rag = ["primary"]

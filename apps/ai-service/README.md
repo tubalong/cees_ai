@@ -35,7 +35,7 @@ FastAPI 的 `/docs`、`/redoc` 和 `/openapi.json` 直接展示由正式 YAML �
 文档开关由 `AI_DOCS_ENABLED` 控制：
 
 - Development：示例配置为 `true`，文档可查看、可调用；
-- Staging：示例配置为 `true`，并通过 `AI_SERVICE_PORT` 映射服务端口，文档可查看、可调用，但仍只应开放给内部开发和运维人员；
+- Staging：示例配置为 `true`，但容器不映射宿主机端口；文档仅供容器内诊断，不作为远程入口；
 - Production：示例配置为 `false`，禁用 `/docs`、`/redoc` 和 `/openapi.json`；未显式配置时，`NODE_ENV=production` 也默认禁用文档。
 
 Swagger 中执行 invoke 或 stream 会直接调用模型，应只使用非生产内部 Token 和测试数据。桌面端、移动端和第三方客户端必须调用 NestJS 公开 API，不得使用此内部文档作为客户端 API 入口。
@@ -66,6 +66,8 @@ BACKUP_LLM_API_KEY=change_me
 
 `models.toml` 只保存非敏感 profile 与角色映射。API Key 通过 profile 的 `api_key_env` 从环境变量读取。生产环境不得将任何角色绑定到 Mock profile。
 
+Staging 示例默认只启用 `deepseek-v4-flash` 主模型，并通过 `PRIMARY_LLM_API_KEY` 注入密钥；初始测试环境不配置备用模型。需要增加备用模型时，应同时修改模型 profile、角色候选顺序和对应环境变量。
+
 ## 验证
 
 ```powershell
@@ -80,7 +82,7 @@ pnpm contracts:lint
 pnpm contracts:check
 ```
 
-本地 FastAPI 文档：`http://localhost:8000/docs`。Staging 默认映射为 `http://<staging-host>:18000/docs`，可通过 `AI_SERVICE_PORT` 调整端口；部署网络应使用防火墙或 VPN 限制访问。
+本地 FastAPI 文档：`http://localhost:8000/docs`。Staging/Production 中 ai-service 只在应用 Compose 网络内监听，不映射应用服务器宿主机端口。
 
 容器构建使用 ai-service 目录作为上下文：
 

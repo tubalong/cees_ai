@@ -1,55 +1,68 @@
 # 基础设施
 
-仓库只保留三套部署环境：本地开发、共享测试服务器（Staging）和生产服务器。自动化测试由 CI 直接注入变量，不再维护第四套部署环境文件或 Compose 覆盖。
+CEES AI 的共享测试环境（Staging）和生产环境（Production）部署在两台职责分离的腾讯云服务器上。两台服务器位于同一 VPC，服务间只使用内网地址通信。
 
-## Compose 文件
-
-| 文件 | 作用 |
-| --- | --- |
-| `docker-compose.yml` | PostgreSQL、Redis 公共定义 |
-| `docker-compose.dev.yml` | 本地端口和本地持久化卷 |
-| `docker-compose.deploy.yml` | API、ai-service、迁移任务和内部健康检查 |
-| `docker-compose.staging.yml` | Staging 持久化卷、重启策略和 API 暴露端口 |
-| `docker-compose.prod.yml` | Production 持久化卷、重启策略和 API 暴露端口 |
-
-## 环境对应关系
-
-| 环境 | 环境文件 | Compose 组合 | 运行方式 |
+| 服务器 | 公网 IP | 内网 IP | 职责 |
 | --- | --- | --- | --- |
-| 本地开发 | `.env` | base + dev | Docker 只运行 PostgreSQL/Redis；API 和 ai-service 在宿主机运行 |
-| Staging | `.env.staging` | base + deploy + staging | 完整容器化部署，使用持久化非生产数据 |
-| Production | `.env.production` | base + deploy + prod | 完整容器化部署，使用生产数据和 Secrets |
+| 应用服务器 | `1.14.103.59` | `172.27.0.2` | API、ai-service；Staging 与 Production 分别运行 |
+| 数据库服务器 | `45.40.251.151` | `172.27.0.3` | PostgreSQL、Redis；Staging 与 Production 分别运行 |
 
-实际 `.env` 文件不提交。仓库只提交 `.env.example`、`.env.staging.example` 和 `.env.production.example`。
+公网 IP 只用于 SSH、HTTPS 和受控运维入口。应用访问 PostgreSQL/Redis 时必须使用数据库服务器内网 IP `172.27.0.3`。
 
-## Linux 服务器部署脚本
+## 物理部署与环境隔离
 
-服务器可以使用仓库内的 `scripts/compose-deploy.sh` 直接管理 Staging 和 Production，不需要为了运行部署入口额外安装 Node.js 或 pnpm。脚本始终从仓库根目录解析 Compose 文件，并在启动前验证 Docker Compose、环境文件、`change_me` 占位符和 AI 模型配置文件。
+```text
+应用服务器 1.14.103.59 / 172.27.0.2
+├── /opt/cees-ai/staging/       -> cees-ai-staging Compose 项目
+└── /opt/cees-ai/production/    -> cees-ai-production Compose 项目
 
-```bash
-# 首次使用可以显式通过 Bash 执行，不依赖 Git 可执行位
-bash scripts/compose-deploy.sh production validate
-bash scripts/compose-deploy.sh production
-
-# 常用运维命令
-bash scripts/compose-deploy.sh production ps
-bash scripts/compose-deploy.sh production logs
-bash scripts/compose-deploy.sh production logs api
-bash scripts/compose-deploy.sh production down
+数据库服务器 45.40.251.151 / 172.27.0.3
+└── /opt/cees-db/
+    ├── docker-compose.yml       -> PostgreSQL/Redis 唯一公共定义
+    ├── docker-compose.server.yml
+    ├── manage.sh
+    ├── staging/.env             -> cees-ai-db-staging Compose 项目
+    └── production/.env          -> cees-ai-db-production Compose 项目
 ```
 
-第一个参数可使用 `staging`、`production` 或 `prod`；第二个参数支持 `up`、`down`、`logs`、`ps` 和 `validate`，省略时默认为 `up`。`up` 会验证配置并使用 `--build` 构建当前检出的源码；脚本不会自动执行 `git pull`，也不会使用 `down -v` 删除数据卷。
+同一物理服务器上的 Staging 与 Production 共享 Docker daemon 和主机资源，但必须使用独立的：
 
-在 Linux 上赋予可执行权限后，也可以省略 `bash`：
+- 代码目录或环境配置目录；
+- Compose 项目名称和网络；
+- PostgreSQL、Redis 容器；
+- Docker 数据卷；
+- 数据库、账号、密码和 Redis 密码；
+- 宿主机端口、日志和备份。
 
-```bash
-chmod +x scripts/compose-deploy.sh
-./scripts/compose-deploy.sh production
-```
+数据库服务器最终运行四个长期容器：Staging PostgreSQL、Staging Redis、Production PostgreSQL、Production Redis。两个环境不得合并为同一 PostgreSQL 数据库实例或同一 Redis 实例。
 
-Secret 仍只保存在未提交的 `.env.staging`、`.env.production` 或平台 Secret 管理器中，不得写入部署脚本。生产发布前应明确检出目标 commit/tag，并完成数据库备份。
+## 部署文件
+
+| 文件 | 部署位置 | 作用 |
+| --- | --- | --- |
+| `database/docker-compose.yml` | 本地开发、数据库服务器 | PostgreSQL/pgvector 和 Redis 的唯一公共定义；精确镜像标签只在此维护 |
+| `database/docker-compose.server.yml` | 数据库服务器 | 内网端口、持久化卷和重启策略 |
+| `database/manage.sh` | 数据库服务器 | 按环境固定 Compose 项目名并管理数据库容器 |
+| `docker-compose.dev.yml` | 开发电脑 | 本地开发端口和开发数据卷 |
+| `docker-compose.deploy.yml` | 应用服务器 | migration、API 和 ai-service 公共定义 |
+| `docker-compose.staging.yml` | 应用服务器 | Staging 重启策略与 API 端口 |
+| `docker-compose.prod.yml` | 应用服务器 | Production 重启策略与 API 端口 |
+
+数据库服务器部署单元及其环境文件见 [database/README.md](database/README.md)。
+
+## 环境与连接关系
+
+| 环境 | 应用环境文件 | 数据库环境文件 | PostgreSQL | Redis |
+| --- | --- | --- | --- | --- |
+| 本地开发 | 根目录 `.env` | 同一个 `.env` | `localhost:5432` | `localhost:6379` |
+| Staging | 应用目录 `.env.staging` | `/opt/cees-db/staging/.env` | `172.27.0.3:15432` | `172.27.0.3:16379` |
+| Production | 应用目录 `.env.production` | `/opt/cees-db/production/.env` | `172.27.0.3:25432` | `172.27.0.3:26379` |
+
+表中的端口是仓库环境示例的当前默认值；实际部署值以对应服务器上的未提交 `.env` 为准。修改端口时必须同时更新数据库服务器绑定、应用连接串和腾讯云安全组。
 
 ## 本地开发
+
+本地开发仍由开发电脑运行 PostgreSQL/Redis，API 和 ai-service 作为本地进程启动：
 
 ```powershell
 Copy-Item .env.example .env
@@ -63,72 +76,76 @@ pnpm infra:logs
 pnpm infra:down
 ```
 
-本地 PostgreSQL 和 Redis 从宿主机通过 `.env` 中的端口访问。API 与 ai-service 使用本地进程启动，以保留热更新和调试能力。
+## 数据库服务器
 
-## Staging
+数据库服务器不存放业务源码。将仓库 `infra/database/` 中的部署单元复制为 `/opt/cees-db/`，再分别从示例创建环境文件：
 
-首次在测试服务器准备配置：
-
-```powershell
-Copy-Item .env.staging.example .env.staging
-Copy-Item apps/ai-service/config/models.staging.example.toml apps/ai-service/config/models.staging.toml
+```text
+infra/database/.env.staging.example    -> /opt/cees-db/staging/.env
+infra/database/.env.production.example -> /opt/cees-db/production/.env
 ```
 
-必须替换所有 `change_me`，并确保：
-
-- Staging 使用独立 PostgreSQL、Redis、COS 前缀和模型 Key；
-- `NODE_ENV=production`，以验证生产安全约束；
-- 模型配置不绑定 Mock；
-- `AI_MODEL_CONFIG_HOST_PATH` 指向服务器上的实际模型 TOML；
-- 只公开 API 端口，ai-service 仅在 Compose 网络内暴露。
-
-启动：
-
-```powershell
-pnpm infra:staging:up
-```
-
-Linux 测试服务器也可以直接使用部署脚本：
+真实密码只保存在服务器未提交的 `.env` 或平台 Secret 管理器中，文件权限必须限制为 `600`。常用入口：
 
 ```bash
+cd /opt/cees-db
+bash manage.sh staging validate
+bash manage.sh staging
+bash manage.sh staging ps
+bash manage.sh staging logs postgres
+```
+
+Production 使用同一个 `manage.sh`，但项目名、环境文件、容器、网络和数据卷都与 Staging 分离：
+
+```bash
+bash manage.sh production validate
+bash manage.sh production
+```
+
+管理脚本不会执行 `down -v`，数据库数据卷不能通过日常启停命令删除。
+
+## 应用服务器
+
+应用服务器保留两个独立代码目录，避免构建 Staging 时读取 Production 代码或反向污染：
+
+```text
+/opt/cees-ai/staging/
+/opt/cees-ai/production/
+```
+
+Staging 使用 `.env.staging`，Production 使用 `.env.production`。两个连接串中的密码必须分别与数据库服务器对应环境的 `.env` 一致。应用部署脚本只管理 API、ai-service 和 migration，不会在应用服务器启动 PostgreSQL/Redis。
+
+```bash
+cd /opt/cees-ai/staging
+bash scripts/compose-deploy.sh staging validate
 bash scripts/compose-deploy.sh staging
 ```
 
-上述入口会构建 API/ai-service 镜像、启动 PostgreSQL/Redis、执行 `prisma migrate deploy`，等待 ai-service readiness 后启动 API。
-
-日志和关闭：
-
-```powershell
-pnpm infra:staging:logs
-pnpm infra:staging:down
-```
-
-## Production
-
-生产服务器从 `.env.production.example` 创建部署配置，并以 `apps/ai-service/config/models.production.example.toml` 为生产模型配置模板；真实 Secret 应优先由平台 Secret 管理器注入：
-
-```powershell
-pnpm infra:prod:up
-pnpm infra:prod:logs
-pnpm infra:prod:down
-```
-
-Linux 生产服务器推荐使用部署脚本，确保根据当前检出的源码重新构建镜像：
+Production 必须检出已在 Staging 验证通过的明确 commit/tag，再从独立目录发布：
 
 ```bash
+cd /opt/cees-ai/production
 bash scripts/compose-deploy.sh production validate
 bash scripts/compose-deploy.sh production
-bash scripts/compose-deploy.sh production logs
 ```
 
-生产模型配置默认从 `/opt/cees/config/ai-models.production.toml` 挂载到 ai-service 的 `/run/config/ai-models.toml`。Production 与 Staging 不得共享数据库、Redis、COS 前缀、JWT Secret、内部 Token 或模型 API Key。
+部署脚本不会执行 `git pull`。发布前必须由操作者明确更新代码并核对 `git rev-parse HEAD`。
 
-## 网络与迁移
+## 部署顺序与迁移
 
-- 本地宿主机地址使用 `localhost`。
-- Staging/Production 容器内部使用 `postgres`、`redis`、`ai-service` 服务名。
-- `migrate` 是一次性服务；迁移成功后 API 才启动。
-- PostgreSQL/Redis 不在 Staging/Production 暴露宿主机端口。
-- ai-service 不暴露宿主机端口，只允许 API 通过内部网络访问。
+1. 先启动对应环境的数据库服务器容器并确认健康。
+2. 确认数据库服务器安全组只允许应用服务器内网 IP `172.27.0.2` 访问对应数据库端口。
+3. 在应用服务器执行部署脚本。
+4. 一次性 `migrate` 服务通过内网连接 PostgreSQL 并执行 `prisma migrate deploy`。
+5. migration 成功且 ai-service readiness 通过后，API 才启动。
 
-腾讯云 COS 不在 Compose 中启动，配置与最小权限策略见 [tencent-cos/README.md](tencent-cos/README.md)。
+pgvector 扩展二进制由数据库公共 Compose 中的 PostgreSQL 镜像提供，数据库扩展由 Prisma migration 启用，不使用额外的手工建表或环境专属初始化脚本。
+
+## 网络与安全
+
+- 数据库连接只能使用 `172.27.0.3`，不得使用数据库服务器公网 IP `45.40.251.151`。
+- PostgreSQL/Redis 端口只允许来源 `172.27.0.2`，不得对 `0.0.0.0/0` 放行。
+- Redis 密码提供认证但不提供公网传输加密；依赖 VPC 和安全组隔离。
+- Staging 与 Production 不得共享数据库、Redis、COS 前缀、JWT Secret、内部 Token 或模型 API Key。
+- ai-service 在 Staging/Production 均不映射宿主机端口，只允许同一 Compose 项目内的 API 访问。
+- 腾讯云 COS 不在 Compose 中运行，其最小权限策略见 [tencent-cos/README.md](tencent-cos/README.md)。

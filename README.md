@@ -35,13 +35,13 @@
 
 ## 快速启动
 
-1. 本地开发将 `.env.example` 复制为 `.env`；共享测试服务器使用 `.env.staging.example`；生产服务器使用 `.env.production.example`。实际文件均不提交。
+1. 本地开发将 `.env.example` 复制为 `.env`；应用服务器分别使用 `.env.staging.example` 和 `.env.production.example`；数据库服务器使用 `infra/database/` 下对应的环境示例。实际文件均不提交。
 2. 安装 Node.js 24 LTS、pnpm 12.3.4、uv、Python 3.14 和 Docker Desktop；移动端开发另需 Flutter SDK。
 3. 执行 `pnpm install --frozen-lockfile`。
 4. 在 `apps/ai-service` 执行 `uv sync --locked`。
-5. 本地执行 `pnpm infra:up`；Staging/Production 可使用对应 pnpm 命令，Linux 服务器也可执行 `bash scripts/compose-deploy.sh staging` 或 `bash scripts/compose-deploy.sh production`。
-6. 本地分别启动 NestJS 和 ai-service；Staging/Production 由 Compose 启动完整服务。
+5. 本地执行 `pnpm infra:up`；数据库服务器通过 `infra/database/manage.sh` 管理 PostgreSQL/Redis。
+6. 应用服务器通过 `scripts/compose-deploy.sh` 管理 API、ai-service 和 Prisma migration。数据库与应用必须先后部署，完整说明见 [infra/README.md](infra/README.md)。
 
-NestJS Swagger：`http://localhost:3000/api/docs`；FastAPI 内部文档：本地为 `http://localhost:8000/docs`，Staging 默认映射到 `http://<staging-host>:18000/docs`，Production 禁用。
+NestJS Swagger：`http://localhost:3000/api/docs`；FastAPI 内部文档本地为 `http://localhost:8000/docs`，Staging/Production 不映射 ai-service 宿主机端口。
 
 架构说明见 [docs/architecture/overview.md](docs/architecture/overview.md)，AI 基础设施说明见 [docs/architecture/ai-service-foundation.md](docs/architecture/ai-service-foundation.md)。

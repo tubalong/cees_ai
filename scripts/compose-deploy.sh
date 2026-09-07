@@ -74,6 +74,26 @@ validate_deployment_inputs() {
     echo "Error: AI model configuration still contains change_me placeholders: $resolved_model_config_path" >&2
     exit 1
   fi
+
+  local database_url
+  local redis_url
+  database_url="$(read_env_value DATABASE_URL)"
+  redis_url="$(read_env_value REDIS_URL)"
+
+  if [[ -z "$database_url" || -z "$redis_url" ]]; then
+    echo "Error: DATABASE_URL and REDIS_URL are required in $ENV_FILE." >&2
+    exit 1
+  fi
+
+  if [[ "$database_url" != *"@$EXPECTED_DATABASE_ENDPOINT/"* ]]; then
+    echo "Error: DATABASE_URL must use the $ENVIRONMENT database endpoint $EXPECTED_DATABASE_ENDPOINT." >&2
+    exit 1
+  fi
+
+  if [[ "$redis_url" != *"@$EXPECTED_REDIS_ENDPOINT/"* ]]; then
+    echo "Error: REDIS_URL must use the $ENVIRONMENT Redis endpoint $EXPECTED_REDIS_ENDPOINT." >&2
+    exit 1
+  fi
 }
 
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -86,11 +106,15 @@ case "$ENVIRONMENT" in
   staging)
     ENV_FILE=".env.staging"
     ENV_COMPOSE_FILE="infra/docker-compose.staging.yml"
+    EXPECTED_DATABASE_ENDPOINT="172.27.0.3:15432"
+    EXPECTED_REDIS_ENDPOINT="172.27.0.3:16379"
     ;;
   production | prod)
     ENVIRONMENT="production"
     ENV_FILE=".env.production"
     ENV_COMPOSE_FILE="infra/docker-compose.prod.yml"
+    EXPECTED_DATABASE_ENDPOINT="172.27.0.3:25432"
+    EXPECTED_REDIS_ENDPOINT="172.27.0.3:26379"
     ;;
   -h | --help | help)
     usage
@@ -130,7 +154,6 @@ fi
 COMPOSE=(
   docker compose
   --env-file "$ENV_FILE"
-  -f infra/docker-compose.yml
   -f infra/docker-compose.deploy.yml
   -f "$ENV_COMPOSE_FILE"
 )

@@ -57,7 +57,7 @@ ai-service 只提供：
 内部认证继续使用 `X-AI-Internal-Token`，并在 OpenAPI 中声明为 Header `apiKey` 安全方案。该名称属于现有 NestJS 与 ai-service 内部契约，本次不做破坏性重命名。
 
 - Development：文档开启，可查看、可调用；
-- Staging：通过 `AI_DOCS_ENABLED=true` 开启，并使用 `AI_SERVICE_PORT` 映射 ai-service 端口，可查看、可调用，仅面向内部开发和运维人员；
+- Staging：通过 `AI_DOCS_ENABLED=true` 开启，但不映射宿主机端口，仅用于容器内诊断；
 - Production：通过 `AI_DOCS_ENABLED=false` 关闭；即使未显式配置，`NODE_ENV=production` 也默认关闭文档；
 - 文档开关不影响 `/health`、`/ready` 和受认证的 invoke、stream 本身，生产环境中的 NestJS 仍可正常调用内部接口；
 - 桌面端、移动端和第三方客户端不得通过该 Swagger 绕过 NestJS 的认证、权限、租户、配额和审计边界。

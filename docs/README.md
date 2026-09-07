@@ -10,6 +10,7 @@
 | [api](api/README.md) | 公开与内部契约及生成客户端约定 |
 | [database](database/README.md) | 数据模型与迁移约定 |
 | [security](security/README.md) | 安全模型、租户隔离与审计 |
+| [基础设施](../infra/README.md) | 应用/数据库分离部署、环境隔离与服务器运维入口 |
 
 ## 工程实践
 

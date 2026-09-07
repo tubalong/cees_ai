@@ -54,33 +54,29 @@ GET /api/v1/audit-events/{auditEventId}
 - `me` 返回当前用户、租户、角色和实时计算的权限；
 - `logout` 和 `me` 必须携带 `Authorization: Bearer <access-token>`。
 
-## 0.2.0 迁移说明
+## 身份与会话
 
-- User 调整为全局身份，同一个用户可以通过 TenantMembership 加入多个租户；
-- JWT `mid`、AuthSession 和角色分配现在使用真实 Membership ID；
-- 数据库迁移 `0003_tenant_membership` 会为现有用户回填 Membership；
-- 迁移完成后已有 Access Token 必须重新登录获取；
+- User 是全局身份，同一个用户可以通过 TenantMembership 加入多个租户；
+- JWT `mid`、AuthSession 和角色分配使用真实 Membership ID；
 - 客户端必须将 Membership ID 当作不透明 ID，不得假设它与 User ID 相同。
 
-## 0.3.0 迁移说明
+## RBAC
 
-- Role 新增稳定且租户内唯一的 `code`、展示名称 `name`、描述和系统角色标识；
-- 迁移 `0004_rbac_role_metadata` 会把旧 `name` 转换为 `code`，并回填展示名称；
+- Role 使用稳定且租户内唯一的 `code`、展示名称 `name`、描述和系统角色标识；
 - `tenant_admin` 被标记为系统角色，不能通过公开 API 修改、替换权限或删除；
 - Role 修改、权限替换和删除使用 `version` 做乐观锁控制；
-- TenantMember 返回的角色对象新增 `code` 字段。
+- TenantMember 返回的角色对象包含 `code` 字段。
 
-## 0.4.0 迁移说明
+## 审计
 
-- AuditLog 新增 `outcome` 和 `actorMembershipId` 可查询字段；
-- 迁移 `0005_audit_query_fields` 会从历史 metadata 回填成员 ID，并识别失败事件；
+- AuditLog 使用 `outcome` 和 `actorMembershipId` 作为可查询字段；
 - 审计列表支持动作、结果、操作者、资源、请求 ID、时间范围和游标筛选；
 - 审计查询始终限制在当前 JWT 对应租户，并要求 `audit.read` 权限。
 
-## 0.5.0 迁移说明
+## Document 与 ACL
 
-- 新增 Resource、ManagedDocument 和 ResourceAcl 数据模型及迁移 `0006_resource_acl_documents`；
-- 原知识库 `Document` Prisma 模型更名为 `KnowledgeDocument`，数据库表名仍为 `documents`，外部数据不迁移；
+- Resource、ManagedDocument 和 ResourceAcl 构成文档授权模型；
+- 知识库文档使用 `KnowledgeDocument` Prisma 模型，数据库表名为 `documents`，与 ManagedDocument 分离；
 - Document 访问同时要求对应 RBAC 操作权限和资源范围，资源范围由所有权、`TENANT` 可见性、Membership ACL、Role ACL 或 `document.manage_all` 决定；
 - `TENANT` 可见性只扩展 `document.read` 范围，不自动授予修改、删除或分享权限；
 - ACL 仅支持 `MEMBERSHIP`、`ROLE` 主体和 `document.read/update/delete/share` 权限，可设置过期时间；
