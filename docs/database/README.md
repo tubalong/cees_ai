@@ -5,7 +5,6 @@
 - `apps/api/prisma/schema.prisma` 是数据模型唯一事实源，迁移提交 `prisma/migrations`。
 - PostgreSQL/pgvector 与 Redis 的精确镜像标签只在 `infra/database/docker-compose.yml` 维护。
 - 向量检索使用 pgvector；扩展由 `0001_init` 在创建向量字段前启用，不使用环境专属初始化 SQL。
-- 向量检索使用 pgvector；Compose 使用 `pgvector/pgvector:pg16`，迁移 `0002_schema_with_auth` 创建 `vector` 扩展。
 - AI 服务对业务库只读；正式写入统一经 NestJS。
 - 业务模型落地前，先在此文档维护实体与关系草图。
 
@@ -41,7 +40,7 @@ User
 - TenantInvitation 保存租户账号、Token Hash、过期时间和待分配角色，不保存明文 Token；
 - 新租户首位管理员不存在时，Tenant 状态为 `PENDING_ACTIVATION`，接受邀请后切换为 `ACTIVE`；
 - PlatformAuditLog 保存无租户上下文的平台登录和跨租户管理事件；
-- 迁移 `0007_platform_tenant_administration` 创建上述模型，并为已有 `tenant_admin` 增加账号邀请、账号修改和凭证重置权限。
+- 迁移 `0002_platform_tenant_administration` 创建上述模型，并为已有 `tenant_admin` 增加账号邀请、账号修改和凭证重置权限。
 
 ## RBAC 角色模型
 

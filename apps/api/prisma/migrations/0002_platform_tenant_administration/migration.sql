@@ -1,8 +1,8 @@
--- Extend tenant lifecycle for tenants waiting on their first administrator.
+-- Extend the current main baseline with platform and tenant administration.
 ALTER TYPE "TenantStatus" ADD VALUE IF NOT EXISTS 'PENDING_ACTIVATION' BEFORE 'ACTIVE';
 ALTER TYPE "MembershipStatus" ADD VALUE IF NOT EXISTS 'PENDING_ACTIVATION' BEFORE 'ACTIVE';
 
--- Move tenant credentials from the global user into the tenant membership realm.
+-- Move tenant credentials from the global user realm into each tenant membership.
 ALTER TABLE "users"
     ALTER COLUMN "email" DROP NOT NULL,
     ALTER COLUMN "normalized_email" DROP NOT NULL,

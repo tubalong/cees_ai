@@ -152,4 +152,4 @@ pgvector 扩展二进制由数据库公共 Compose 中的 PostgreSQL 镜像提�
 腾讯云 COS 不在 Compose 中启动，配置与最小权限策略见 [tencent-cos/README.md](tencent-cos/README.md)。
 # 基础设施
 
-PostgreSQL 使用 `pgvector/pgvector:pg16`，因为 Prisma 模型中的 `DocumentChunk.embedding` 依赖 `vector` 类型。迁移 `0002_schema_with_auth` 会执行 `CREATE EXTENSION IF NOT EXISTS vector`；托管 PostgreSQL 环境必须提前确认允许启用 pgvector。
+PostgreSQL 使用 `pgvector/pgvector:pg16`，因为 Prisma 模型中的 `DocumentChunk.embedding` 依赖 `vector` 类型。完整基线迁移 `0001_init` 会执行 `CREATE EXTENSION IF NOT EXISTS vector`；托管 PostgreSQL 环境必须提前确认允许启用 pgvector。

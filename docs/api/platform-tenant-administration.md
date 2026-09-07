@@ -182,7 +182,7 @@ TENANT_MEMBER_CREDENTIAL_ACTIVATED
 
 ## 9. 数据库与配置
 
-- Prisma migration：`0007_platform_tenant_administration`；
+- Prisma migration：`0002_platform_tenant_administration`；
 - TenantMembership 新增租户账号、密码和锁定字段；
 - PlatformAdministrator 新增独立平台账号、密码和锁定字段；
 - TenantInvitation 改为保存账号、姓名和可选目标成员；

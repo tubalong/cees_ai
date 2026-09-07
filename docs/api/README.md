@@ -118,7 +118,7 @@ GET /api/v1/platform/audit-events/{auditEventId}
 - 新增 TenantInvitation 与公开接受邀请接口，新用户接受时设置密码；
 - TenantStatus 新增 `PENDING_ACTIVATION`；首位管理员接受邀请后自动激活租户；
 - 新增 PlatformAuditLog，平台操作与租户审计保持隔离；
-- 数据库迁移为 `0007_platform_tenant_administration`，契约版本提升为 `0.6.0`。
+- 数据库迁移为 `0002_platform_tenant_administration`，契约版本提升为 `0.6.0`。
 
 ## 0.7.0 迁移说明
 
@@ -129,7 +129,7 @@ GET /api/v1/platform/audit-events/{auditEventId}
 - TenantInvitation 从邮箱邀请改为账号激活和凭证重置令牌；
 - 新增拼音账号建议、账号修改和管理员凭证重置接口；
 - 手机和邮箱绑定、自助密码找回暂不实现；忘记密码由租户管理员签发新激活令牌；
-- 数据库迁移仍在未发布的 `0007_platform_tenant_administration` 中同步调整，契约版本提升为 `0.7.0`。
+- 数据库迁移仍在未发布的 `0002_platform_tenant_administration` 中同步调整，契约版本提升为 `0.7.0`。
 - `packages/contracts/openapi/openapi.yaml` 是 NestJS 公开 API 的事实源。
 - `packages/contracts/openapi/ai-service.openapi.yaml` 是 NestJS 调用 ai-service 的内部契约。
 - 桌面端和移动端不得调用 ai-service 的通用 invoke 或 stream。
