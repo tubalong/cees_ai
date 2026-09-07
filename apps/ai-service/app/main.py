@@ -55,7 +55,7 @@ def create_app(
         openapi_tags=contract.get("tags"),
         servers=contract.get("servers"),
         docs_url="/docs" if docs_enabled else None,
-        redoc_url=None, #"/redoc" if docs_enabled else None,
+        redoc_url="/redoc" if docs_enabled else None,
         openapi_url="/openapi.json" if docs_enabled else None,
         lifespan=lifespan,
     )
