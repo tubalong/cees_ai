@@ -13,7 +13,13 @@ export class PermissionGuard implements CanActivate {
         const required = this.reflector.getAllAndOverride<string[]>(PERMISSIONS_KEY, [context.getHandler(), context.getClass()]) ?? [];
         const request = context.switchToHttp().getRequest<{ user?: { permissions?: string[] } }>();
         const granted = new Set(request.user?.permissions ?? []);
-        if (!required.every((permission) => granted.has(permission))) throw new ForbiddenException('Permission denied');
+        if (!required.every((permission) => granted.has(permission))) {
+            throw new ForbiddenException({
+                code: 'AUTH_PERMISSION_DENIED',
+                message: '权限不足',
+                details: { required },
+            });
+        }
         return true;
     }
 }
