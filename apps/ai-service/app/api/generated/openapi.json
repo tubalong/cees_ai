@@ -260,6 +260,84 @@
           }
         }
       }
+    },
+    "/internal/v1/llm/stream": {
+      "post": {
+        "tags": [
+          "llm"
+        ],
+        "operationId": "streamLlm",
+        "summary": "Stream a configured LLM profile",
+        "description": "Streams Server-Sent Events in this order: `started`, zero or more\n`content_delta` events, an optional `usage` event, and `completed`.\nIf a provider fails after streaming starts, an `error` event terminates\nthe stream. Each SSE `data` field contains one `StreamEvent` JSON object.\n",
+        "security": [
+          {
+            "internalToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StreamRequest"
+              },
+              "example": {
+                "request_id": "req-example-stream-001",
+                "tenant_id": "tenant-example",
+                "user_id": "user-example",
+                "messages": [
+                  {
+                    "role": "user",
+                    "content": "Draft a concise project update."
+                  }
+                ],
+                "role": "default",
+                "temperature": 0.3,
+                "max_output_tokens": 512
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Invocation events are streamed",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/StreamEvent"
+                },
+                "examples": {
+                  "contentDelta": {
+                    "summary": "Text content delta",
+                    "value": {
+                      "type": "content_delta",
+                      "text": "The project"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "502": {
+            "$ref": "#/components/responses/InvalidProviderOutput"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -475,6 +553,217 @@
                 "json_schema": "#/components/schemas/JsonSchemaResponseFormat"
               }
             }
+          }
+        }
+      },
+      "StreamRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "request_id",
+          "tenant_id",
+          "user_id",
+          "messages"
+        ],
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "tenant_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "user_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "messages": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 64,
+            "items": {
+              "$ref": "#/components/schemas/InvokeMessage"
+            }
+          },
+          "role": {
+            "$ref": "#/components/schemas/ModelRole"
+          },
+          "llm_profile": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "temperature": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 2
+          },
+          "max_output_tokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 32768
+          }
+        }
+      },
+      "StreamExecutionMetadata": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "profile",
+          "provider",
+          "model",
+          "fallback_count"
+        ],
+        "properties": {
+          "profile": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "mock",
+              "openai_compatible",
+              "deepseek"
+            ]
+          },
+          "model": {
+            "type": "string"
+          },
+          "fallback_count": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "StreamStartedEvent": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "request_id",
+          "execution"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "started"
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "execution": {
+            "$ref": "#/components/schemas/StreamExecutionMetadata"
+          }
+        }
+      },
+      "ContentDeltaEvent": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "text"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "content_delta"
+          },
+          "text": {
+            "type": "string"
+          }
+        }
+      },
+      "UsageEvent": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "token_usage"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "usage"
+          },
+          "token_usage": {
+            "$ref": "#/components/schemas/TokenUsage"
+          }
+        }
+      },
+      "StreamCompletedEvent": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "latency_ms"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "completed"
+          },
+          "latency_ms": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "StreamErrorEvent": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "error"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "error"
+          },
+          "error": {
+            "$ref": "#/components/schemas/ErrorDetail"
+          }
+        }
+      },
+      "StreamEvent": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/StreamStartedEvent"
+          },
+          {
+            "$ref": "#/components/schemas/ContentDeltaEvent"
+          },
+          {
+            "$ref": "#/components/schemas/UsageEvent"
+          },
+          {
+            "$ref": "#/components/schemas/StreamCompletedEvent"
+          },
+          {
+            "$ref": "#/components/schemas/StreamErrorEvent"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "type",
+          "mapping": {
+            "started": "#/components/schemas/StreamStartedEvent",
+            "content_delta": "#/components/schemas/ContentDeltaEvent",
+            "usage": "#/components/schemas/UsageEvent",
+            "completed": "#/components/schemas/StreamCompletedEvent",
+            "error": "#/components/schemas/StreamErrorEvent"
           }
         }
       },

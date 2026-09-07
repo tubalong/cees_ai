@@ -4,7 +4,7 @@ import json
 import logging
 import os
 import time
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -19,7 +19,13 @@ from app.core.errors import (
     ProviderTransientError,
 )
 from app.llm.providers import create_provider
-from app.llm.types import ChatMessage, InvocationOptions, LLMProvider, ProviderResult
+from app.llm.types import (
+    ChatMessage,
+    InvocationOptions,
+    LLMProvider,
+    ProviderResult,
+    ProviderStreamChunk,
+)
 
 logger = logging.getLogger(__name__)
 ProviderBuilder = Callable[[str, ModelProfile], LLMProvider]
@@ -32,6 +38,15 @@ class RoutingResult:
     provider_result: ProviderResult
     fallback_count: int
     latency_ms: int
+
+
+@dataclass(frozen=True)
+class StreamingRoutingResult:
+    profile_name: str
+    profile: ModelProfile
+    chunks: AsyncIterator[ProviderStreamChunk]
+    fallback_count: int
+    started_at: float
 
 
 class LLMRouter:
@@ -68,18 +83,13 @@ class LLMRouter:
 
         for index, profile_name in enumerate(candidates):
             profile = self.catalog.profiles[profile_name]
-            effective_max_tokens = max_output_tokens or profile.default_max_output_tokens
-            if effective_max_tokens > profile.max_output_tokens_limit:
-                raise AIServiceError(
-                    "INVALID_INVOCATION_REQUEST",
-                    f"max_output_tokens exceeds the limit for profile {profile_name}",
-                    status_code=422,
-                    request_id=request_id,
-                )
-            options = InvocationOptions(
-                temperature=profile.temperature if temperature is None else temperature,
-                max_output_tokens=effective_max_tokens,
+            options = self._build_options(
+                profile_name=profile_name,
+                profile=profile,
                 output_mode=output_mode,
+                temperature=temperature,
+                max_output_tokens=max_output_tokens,
+                request_id=request_id,
                 schema_name=schema_name,
                 json_schema=json_schema,
             )
@@ -154,6 +164,92 @@ class LLMRouter:
             request_id=request_id,
         ) from last_transient_error
 
+    async def start_stream(
+        self,
+        *,
+        request_id: str,
+        tenant_id: str,
+        user_id: str,
+        messages: list[ChatMessage],
+        role: ModelRole,
+        profile_override: str | None,
+        temperature: float | None,
+        max_output_tokens: int | None,
+    ) -> StreamingRoutingResult:
+        candidates = self._resolve_candidates(
+            role, profile_override, OutputMode.text, request_id
+        )
+        started_at = time.perf_counter()
+        last_transient_error: ProviderTransientError | None = None
+
+        for index, profile_name in enumerate(candidates):
+            profile = self.catalog.profiles[profile_name]
+            options = self._build_options(
+                profile_name=profile_name,
+                profile=profile,
+                output_mode=OutputMode.text,
+                temperature=temperature,
+                max_output_tokens=max_output_tokens,
+                request_id=request_id,
+            )
+            provider = self._get_provider(profile_name, profile)
+            chunks = provider.stream(messages, options).__aiter__()
+            try:
+                first_chunk = await anext(chunks, None)
+                logger.info(
+                    "llm stream started",
+                    extra={
+                        "request_id": request_id,
+                        "tenant_id": tenant_id,
+                        "user_id": user_id,
+                        "role": role.value,
+                        "profile": profile_name,
+                        "provider": profile.provider,
+                        "model": profile.model,
+                        "fallback_count": index,
+                    },
+                )
+                return StreamingRoutingResult(
+                    profile_name=profile_name,
+                    profile=profile,
+                    chunks=_prepend_chunk(first_chunk, chunks),
+                    fallback_count=index,
+                    started_at=started_at,
+                )
+            except ProviderTransientError as exc:
+                last_transient_error = exc
+                logger.warning(
+                    "llm provider failed before streaming started",
+                    extra={
+                        "request_id": request_id,
+                        "tenant_id": tenant_id,
+                        "user_id": user_id,
+                        "role": role.value,
+                        "profile": profile_name,
+                        "provider": profile.provider,
+                        "model": profile.model,
+                        "attempt": index + 1,
+                        "error_category": type(exc).__name__,
+                    },
+                )
+                if profile_override is not None:
+                    break
+            except ProviderPermanentError as exc:
+                raise AIServiceError(
+                    "LLM_UNAVAILABLE",
+                    "The selected provider rejected the streaming invocation",
+                    status_code=503,
+                    request_id=request_id,
+                ) from exc
+
+        raise AIServiceError(
+            "LLM_UNAVAILABLE",
+            "No configured LLM profile started the invocation stream",
+            status_code=503,
+            retryable=True,
+            request_id=request_id,
+        ) from last_transient_error
+
     def get_langchain_model(self, profile_name: str) -> Any:
         profile = self.catalog.profiles.get(profile_name)
         if profile is None or not profile.enabled:
@@ -217,6 +313,34 @@ class LLMRouter:
         return provider
 
     @staticmethod
+    def _build_options(
+        *,
+        profile_name: str,
+        profile: ModelProfile,
+        output_mode: OutputMode,
+        temperature: float | None,
+        max_output_tokens: int | None,
+        request_id: str,
+        schema_name: str | None = None,
+        json_schema: dict[str, Any] | None = None,
+    ) -> InvocationOptions:
+        effective_max_tokens = max_output_tokens or profile.default_max_output_tokens
+        if effective_max_tokens > profile.max_output_tokens_limit:
+            raise AIServiceError(
+                "INVALID_INVOCATION_REQUEST",
+                f"max_output_tokens exceeds the limit for profile {profile_name}",
+                status_code=422,
+                request_id=request_id,
+            )
+        return InvocationOptions(
+            temperature=profile.temperature if temperature is None else temperature,
+            max_output_tokens=effective_max_tokens,
+            output_mode=output_mode,
+            schema_name=schema_name,
+            json_schema=json_schema,
+        )
+
+    @staticmethod
     def _build_provider(profile_name: str, profile: ModelProfile) -> LLMProvider:
         api_key = os.getenv(profile.api_key_env) if profile.api_key_env else None
         try:
@@ -228,6 +352,21 @@ class LLMRouter:
                 status_code=503,
                 retryable=True,
             ) from exc
+
+
+async def _prepend_chunk(
+    first_chunk: ProviderStreamChunk | None,
+    remaining_chunks: AsyncIterator[ProviderStreamChunk],
+) -> AsyncIterator[ProviderStreamChunk]:
+    try:
+        if first_chunk is not None:
+            yield first_chunk
+        async for chunk in remaining_chunks:
+            yield chunk
+    finally:
+        close = getattr(remaining_chunks, "aclose", None)
+        if close is not None:
+            await close()
 
 
 def _validate_json_schema(schema: dict[str, Any] | None, request_id: str) -> None:

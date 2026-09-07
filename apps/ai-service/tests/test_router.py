@@ -5,7 +5,7 @@ import pytest
 from app.core.config import ModelRole, OutputMode
 from app.core.errors import AIServiceError, ProviderPermanentError, ProviderTransientError
 from app.llm.router import LLMRouter
-from app.llm.types import ChatMessage
+from app.llm.types import ChatMessage, ProviderStreamChunk, TokenUsageData
 from tests.helpers import StubProvider, catalog, profile, result
 
 
@@ -229,3 +229,98 @@ async def test_rejects_structured_output_that_does_not_match_schema() -> None:
         )
 
     assert raised.value.code == "LLM_OUTPUT_INVALID"
+
+
+@pytest.mark.asyncio
+async def test_stream_falls_back_only_before_first_chunk() -> None:
+    primary_profile = profile()
+    backup_profile = profile()
+    primary = StubProvider(
+        primary_profile,
+        [],
+        stream_outcomes=[[ProviderTransientError("timeout")]],
+    )
+    backup = StubProvider(
+        backup_profile,
+        [],
+        stream_outcomes=[
+            [
+                ProviderStreamChunk(text="hello"),
+                ProviderStreamChunk(
+                    token_usage=TokenUsageData(
+                        input_tokens=3,
+                        output_tokens=1,
+                        total_tokens=4,
+                    )
+                ),
+            ]
+        ],
+    )
+    providers = {"primary": primary, "backup": backup}
+    router = LLMRouter(
+        catalog(
+            {"primary": primary_profile, "backup": backup_profile},
+            {ModelRole.default: ["primary", "backup"]},
+        ),
+        lambda name, _profile: providers[name],
+    )
+
+    routed = await router.start_stream(
+        request_id="req-stream-1",
+        tenant_id="tenant-1",
+        user_id="user-1",
+        messages=[ChatMessage(role="user", content="hello")],
+        role=ModelRole.default,
+        profile_override=None,
+        temperature=None,
+        max_output_tokens=None,
+    )
+    chunks = [chunk async for chunk in routed.chunks]
+
+    assert routed.profile_name == "backup"
+    assert routed.fallback_count == 1
+    assert [chunk.text for chunk in chunks] == ["hello", ""]
+    assert len(primary.stream_calls) == len(backup.stream_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_stream_does_not_fall_back_after_first_chunk() -> None:
+    primary_profile = profile()
+    backup_profile = profile()
+    primary = StubProvider(
+        primary_profile,
+        [],
+        stream_outcomes=[
+            [ProviderStreamChunk(text="partial"), ProviderTransientError("disconnected")]
+        ],
+    )
+    backup = StubProvider(
+        backup_profile,
+        [],
+        stream_outcomes=[[ProviderStreamChunk(text="unexpected")]],
+    )
+    providers = {"primary": primary, "backup": backup}
+    router = LLMRouter(
+        catalog(
+            {"primary": primary_profile, "backup": backup_profile},
+            {ModelRole.default: ["primary", "backup"]},
+        ),
+        lambda name, _profile: providers[name],
+    )
+
+    routed = await router.start_stream(
+        request_id="req-stream-2",
+        tenant_id="tenant-1",
+        user_id="user-1",
+        messages=[ChatMessage(role="user", content="hello")],
+        role=ModelRole.default,
+        profile_override=None,
+        temperature=None,
+        max_output_tokens=None,
+    )
+    iterator = routed.chunks.__aiter__()
+
+    assert (await anext(iterator)).text == "partial"
+    with pytest.raises(ProviderTransientError, match="disconnected"):
+        await anext(iterator)
+    assert not backup.stream_calls

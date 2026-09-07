@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -13,6 +14,7 @@ from app.llm.types import (
     InvocationOptions,
     LLMProvider,
     ProviderResult,
+    ProviderStreamChunk,
     TokenUsageData,
 )
 
@@ -30,6 +32,16 @@ class MockLLMProvider:
             (message.content for message in reversed(messages) if message.role == "user"), ""
         )
         return ProviderResult(output=f"mock:{last_user_message}")
+
+    async def stream(
+        self, messages: list[ChatMessage], options: InvocationOptions
+    ) -> AsyncIterator[ProviderStreamChunk]:
+        if options.output_mode != OutputMode.text:
+            raise ProviderPermanentError("mock profiles support text output only")
+        last_user_message = next(
+            (message.content for message in reversed(messages) if message.role == "user"), ""
+        )
+        yield ProviderStreamChunk(text=f"mock:{last_user_message}")
 
 
 class OpenAICompatibleProvider:
@@ -96,6 +108,40 @@ class OpenAICompatibleProvider:
         except Exception as exc:
             raise ProviderPermanentError(type(exc).__name__) from exc
 
+    async def stream(
+        self, messages: list[ChatMessage], options: InvocationOptions
+    ) -> AsyncIterator[ProviderStreamChunk]:
+        if options.output_mode != OutputMode.text:
+            raise ProviderPermanentError("streaming supports text output only")
+        langchain_messages = [_to_langchain_message(message) for message in messages]
+        invocation_kwargs = {
+            "temperature": options.temperature,
+            "max_completion_tokens": options.max_output_tokens,
+        }
+        try:
+            async for response in self.chat_model.astream(
+                langchain_messages,
+                stream_usage=True,
+                **invocation_kwargs,
+            ):
+                text = _message_text(response)
+                token_usage = _extract_usage(response)
+                if text or _has_token_usage(token_usage):
+                    yield ProviderStreamChunk(
+                        text=text,
+                        token_usage=token_usage if _has_token_usage(token_usage) else None,
+                    )
+        except (APIConnectionError, APITimeoutError, RateLimitError) as exc:
+            raise ProviderTransientError(type(exc).__name__) from exc
+        except APIStatusError as exc:
+            if exc.status_code >= 500:
+                raise ProviderTransientError(f"provider status {exc.status_code}") from exc
+            raise ProviderPermanentError(f"provider status {exc.status_code}") from exc
+        except ProviderPermanentError:
+            raise
+        except Exception as exc:
+            raise ProviderPermanentError(type(exc).__name__) from exc
+
 
 def create_provider(profile: ModelProfile, api_key: str | None = None) -> LLMProvider:
     if profile.provider == "mock":
@@ -140,4 +186,11 @@ def _extract_usage(message: Any) -> TokenUsageData:
         input_tokens=token_usage.get("prompt_tokens"),
         output_tokens=token_usage.get("completion_tokens"),
         total_tokens=token_usage.get("total_tokens"),
+    )
+
+
+def _has_token_usage(usage: TokenUsageData) -> bool:
+    return any(
+        value is not None
+        for value in (usage.input_tokens, usage.output_tokens, usage.total_tokens)
     )

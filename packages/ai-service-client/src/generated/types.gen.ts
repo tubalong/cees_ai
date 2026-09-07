@@ -53,6 +53,62 @@ export type InvokeRequest = {
     } & JsonSchemaResponseFormat);
 };
 
+export type StreamRequest = {
+    request_id: string;
+    tenant_id: string;
+    user_id: string;
+    messages: Array<InvokeMessage>;
+    role?: ModelRole;
+    llm_profile?: string | null;
+    temperature?: number | null;
+    max_output_tokens?: number | null;
+};
+
+export type StreamExecutionMetadata = {
+    profile: string;
+    provider: 'mock' | 'openai_compatible' | 'deepseek';
+    model: string;
+    fallback_count: number;
+};
+
+export type StreamStartedEvent = {
+    type: 'started';
+    request_id: string;
+    execution: StreamExecutionMetadata;
+};
+
+export type ContentDeltaEvent = {
+    type: 'content_delta';
+    text: string;
+};
+
+export type UsageEvent = {
+    type: 'usage';
+    token_usage: TokenUsage;
+};
+
+export type StreamCompletedEvent = {
+    type: 'completed';
+    latency_ms: number;
+};
+
+export type StreamErrorEvent = {
+    type: 'error';
+    error: ErrorDetail;
+};
+
+export type StreamEvent = ({
+    type: 'started';
+} & StreamStartedEvent) | ({
+    type: 'content_delta';
+} & ContentDeltaEvent) | ({
+    type: 'usage';
+} & UsageEvent) | ({
+    type: 'completed';
+} & StreamCompletedEvent) | ({
+    type: 'error';
+} & StreamErrorEvent);
+
 export type TextOutput = {
     type: 'text';
     text: string;
@@ -186,3 +242,48 @@ export type InvokeLlmResponses = {
 };
 
 export type InvokeLlmResponse = InvokeLlmResponses[keyof InvokeLlmResponses];
+
+export type StreamLlmData = {
+    body: StreamRequest;
+    path?: never;
+    query?: never;
+    url: '/internal/v1/llm/stream';
+};
+
+export type StreamLlmErrors = {
+    /**
+     * Invalid profile or unsupported output mode
+     */
+    400: ErrorResponse;
+    /**
+     * Internal authentication failed
+     */
+    401: ErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ErrorResponse;
+    /**
+     * Unexpected internal service error
+     */
+    500: ErrorResponse;
+    /**
+     * Provider output did not match the requested schema
+     */
+    502: ErrorResponse;
+    /**
+     * Service or configured providers unavailable
+     */
+    503: ErrorResponse;
+};
+
+export type StreamLlmError = StreamLlmErrors[keyof StreamLlmErrors];
+
+export type StreamLlmResponses = {
+    /**
+     * Invocation events are streamed
+     */
+    200: StreamEvent;
+};
+
+export type StreamLlmResponse = StreamLlmResponses[keyof StreamLlmResponses];

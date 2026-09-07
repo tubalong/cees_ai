@@ -14,8 +14,11 @@ FastAPI 内部服务，负责受控 LLM 调用与未来 AI 工作流的运行时
 - `GET /health`：进程存活检查
 - `GET /ready`：配置与密钥就绪检查
 - `POST /internal/v1/llm/invoke`：需要 `X-AI-Internal-Token` 的内部非流式调用
+- `POST /internal/v1/llm/stream`：需要 `X-AI-Internal-Token` 的内部文本 SSE 调用
 
-正式契约位于 `packages/contracts/openapi/ai-service.openapi.yaml`。业务客户端不得直接调用通用 invoke，必须由 NestJS 统一认证、审计和编排。`X-AI-Internal-Token` 是 OpenAPI 中的 `apiKey` 安全方案，并通过 Swagger 的 Authorize 操作设置。
+正式契约位于 `packages/contracts/openapi/ai-service.openapi.yaml`。业务客户端不得直接调用通用 invoke 或 stream，必须由 NestJS 统一认证、审计和编排。`X-AI-Internal-Token` 是 OpenAPI 中的 `apiKey` 安全方案，并通过 Swagger 的 Authorize 操作设置。
+
+`stream` 依次发送 `started`、零个或多个 `content_delta`、可选 `usage` 和 `completed` 事件。首个事件发送前允许在瞬时 Provider 故障时切换候选模型；流开始后的故障发送终止 `error` 事件，不拼接备用模型输出。该接口只传输最终正文增量，不暴露 Provider 原始推理内容。JSON Schema 结构化输出继续使用非流式 `invoke`。
 
 ## OpenAPI 与交互文档
 
@@ -27,7 +30,7 @@ FastAPI 的 `/docs`、`/redoc` 和 `/openapi.json` 直接展示由正式 YAML �
 - Staging：示例配置为 `true`，并通过 `AI_SERVICE_PORT` 映射服务端口，文档可查看、可调用，但仍只应开放给内部开发和运维人员；
 - Production：示例配置为 `false`，禁用 `/docs`、`/redoc` 和 `/openapi.json`；未显式配置时，`NODE_ENV=production` 也默认禁用文档。
 
-Swagger 中执行 invoke 会直接调用模型，应只使用非生产内部 Token 和测试数据。桌面端、移动端和第三方客户端必须调用 NestJS 公开 API，不得使用此内部文档作为客户端 API 入口。
+Swagger 中执行 invoke 或 stream 会直接调用模型，应只使用非生产内部 Token 和测试数据。桌面端、移动端和第三方客户端必须调用 NestJS 公开 API，不得使用此内部文档作为客户端 API 入口。
 
 ## 环境与依赖
 

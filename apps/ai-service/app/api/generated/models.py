@@ -4,7 +4,7 @@
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, confloat, conint, constr
+from pydantic import BaseModel, ConfigDict, Field, RootModel, confloat, conint, constr
 
 
 class HealthResponse(BaseModel):
@@ -74,6 +74,61 @@ class InvokeRequest(BaseModel):
     )
 
 
+class StreamRequest(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    request_id: constr(min_length=1, max_length=128)
+    tenant_id: constr(min_length=1, max_length=128)
+    user_id: constr(min_length=1, max_length=128)
+    messages: list[InvokeMessage] = Field(..., max_length=64, min_length=1)
+    role: ModelRole | None = None
+    llm_profile: constr(min_length=1, max_length=128) | None = None
+    temperature: confloat(ge=0.0, le=2.0) | None = None
+    max_output_tokens: conint(ge=1, le=32768) | None = None
+
+
+class Provider(StrEnum):
+    mock = 'mock'
+    openai_compatible = 'openai_compatible'
+    deepseek = 'deepseek'
+
+
+class StreamExecutionMetadata(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    profile: str
+    provider: Provider
+    model: str
+    fallback_count: conint(ge=0)
+
+
+class StreamStartedEvent(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['started']
+    request_id: str
+    execution: StreamExecutionMetadata
+
+
+class ContentDeltaEvent(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['content_delta']
+    text: str
+
+
+class StreamCompletedEvent(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['completed']
+    latency_ms: conint(ge=0)
+
+
 class TextOutput(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
@@ -97,12 +152,6 @@ class TokenUsage(BaseModel):
     input_tokens: conint(ge=0) | None
     output_tokens: conint(ge=0) | None
     total_tokens: conint(ge=0) | None
-
-
-class Provider(StrEnum):
-    mock = 'mock'
-    openai_compatible = 'openai_compatible'
-    deepseek = 'deepseek'
 
 
 class ExecutionMetadata(BaseModel):
@@ -151,3 +200,37 @@ class ReadinessResponse(BaseModel):
     service: Literal['ai-service']
     configured_roles: list[ModelRole]
     errors: list[str]
+
+
+class UsageEvent(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['usage']
+    token_usage: TokenUsage
+
+
+class StreamErrorEvent(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['error']
+    error: ErrorDetail
+
+
+class StreamEvent(
+    RootModel[
+        StreamStartedEvent
+        | ContentDeltaEvent
+        | UsageEvent
+        | StreamCompletedEvent
+        | StreamErrorEvent
+    ]
+):
+    root: (
+        StreamStartedEvent
+        | ContentDeltaEvent
+        | UsageEvent
+        | StreamCompletedEvent
+        | StreamErrorEvent
+    ) = Field(..., discriminator='type')

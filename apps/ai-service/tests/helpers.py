@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
 
 from app.core.config import ModelCatalog, ModelProfile, ModelRole, OutputMode, Settings
 from app.core.runtime import AppRuntime
@@ -9,15 +9,24 @@ from app.llm.types import (
     ChatMessage,
     InvocationOptions,
     ProviderResult,
+    ProviderStreamChunk,
     TokenUsageData,
 )
 
 
 class StubProvider:
-    def __init__(self, profile: ModelProfile, outcomes: Sequence[object]) -> None:
+    def __init__(
+        self,
+        profile: ModelProfile,
+        outcomes: Sequence[object],
+        *,
+        stream_outcomes: Sequence[Sequence[object]] = (),
+    ) -> None:
         self.profile = profile
         self.outcomes = list(outcomes)
         self.calls: list[tuple[list[ChatMessage], InvocationOptions]] = []
+        self.stream_outcomes = [list(items) for items in stream_outcomes]
+        self.stream_calls: list[tuple[list[ChatMessage], InvocationOptions]] = []
 
     async def invoke(
         self, messages: list[ChatMessage], options: InvocationOptions
@@ -28,6 +37,16 @@ class StubProvider:
             raise outcome
         assert isinstance(outcome, ProviderResult)
         return outcome
+
+    async def stream(
+        self, messages: list[ChatMessage], options: InvocationOptions
+    ) -> AsyncIterator[ProviderStreamChunk]:
+        self.stream_calls.append((messages, options))
+        for outcome in self.stream_outcomes.pop(0):
+            if isinstance(outcome, Exception):
+                raise outcome
+            assert isinstance(outcome, ProviderStreamChunk)
+            yield outcome
 
 
 def profile(
