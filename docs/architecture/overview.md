@@ -48,4 +48,5 @@ flowchart LR
 ## 专题设计
 
 - [AI Service 通用基础设施](ai-service-foundation.md)
+- [通用文档生成](document-generation.md)
 - [文件上传设计草案](file-upload.md)

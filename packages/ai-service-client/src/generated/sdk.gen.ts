@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, ServerSentEventsResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { GetHealthData, GetHealthResponses, GetReadinessData, GetReadinessErrors, GetReadinessResponses, InvokeLlmData, InvokeLlmErrors, InvokeLlmResponses, StreamLlmData, StreamLlmErrors, StreamLlmResponse, StreamLlmResponses } from './types.gen';
+import type { ComposeDocumentData, ComposeDocumentErrors, ComposeDocumentResponses, GenerateDocumentDocxData, GenerateDocumentDocxErrors, GenerateDocumentDocxResponses, GetHealthData, GetHealthResponses, GetReadinessData, GetReadinessErrors, GetReadinessResponses, InvokeLlmData, InvokeLlmErrors, InvokeLlmResponses, RenderDocumentDocxData, RenderDocumentDocxErrors, RenderDocumentDocxResponses, StreamLlmData, StreamLlmErrors, StreamLlmResponse, StreamLlmResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -53,6 +53,51 @@ export const invokeLlm = <ThrowOnError extends boolean = false>(options: Options
 export const streamLlm = <ThrowOnError extends boolean = false>(options: Options<StreamLlmData, ThrowOnError, StreamLlmResponse>): Promise<ServerSentEventsResult<StreamLlmResponses>> => (options.client ?? client).sse.post<StreamLlmResponses, StreamLlmErrors, ThrowOnError>({
     security: [{ name: 'X-AI-Internal-Token', type: 'apiKey' }],
     url: '/internal/v1/llm/stream',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Compose a structured document draft
+ *
+ * Generates and validates a domain-neutral DocumentSpec without creating a file.
+ */
+export const composeDocument = <ThrowOnError extends boolean = false>(options: Options<ComposeDocumentData, ThrowOnError>): RequestResult<ComposeDocumentResponses, ComposeDocumentErrors, ThrowOnError> => (options.client ?? client).post<ComposeDocumentResponses, ComposeDocumentErrors, ThrowOnError>({
+    security: [{ name: 'X-AI-Internal-Token', type: 'apiKey' }],
+    url: '/internal/v1/documents/compose',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Render a DocumentSpec as DOCX
+ *
+ * Deterministically renders a validated DocumentSpec without invoking an LLM.
+ */
+export const renderDocumentDocx = <ThrowOnError extends boolean = false>(options: Options<RenderDocumentDocxData, ThrowOnError>): RequestResult<RenderDocumentDocxResponses, RenderDocumentDocxErrors, ThrowOnError> => (options.client ?? client).post<RenderDocumentDocxResponses, RenderDocumentDocxErrors, ThrowOnError>({
+    security: [{ name: 'X-AI-Internal-Token', type: 'apiKey' }],
+    url: '/internal/v1/documents/render-docx',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Compose and render a DOCX document
+ *
+ * Composes a DocumentSpec and returns its deterministic DOCX rendering in one call.
+ */
+export const generateDocumentDocx = <ThrowOnError extends boolean = false>(options: Options<GenerateDocumentDocxData, ThrowOnError>): RequestResult<GenerateDocumentDocxResponses, GenerateDocumentDocxErrors, ThrowOnError> => (options.client ?? client).post<GenerateDocumentDocxResponses, GenerateDocumentDocxErrors, ThrowOnError>({
+    security: [{ name: 'X-AI-Internal-Token', type: 'apiKey' }],
+    url: '/internal/v1/documents/generate-docx',
     ...options,
     headers: {
         'Content-Type': 'application/json',

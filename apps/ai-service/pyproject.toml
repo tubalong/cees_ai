@@ -13,6 +13,7 @@ dependencies = [
     "llama-index-llms-langchain",
     "openai",
     "pydantic-settings",
+    "python-docx",
     "uvicorn[standard]",
 ]
 

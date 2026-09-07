@@ -89,6 +89,7 @@ GET /api/v1/audit-events/{auditEventId}
 - `packages/contracts/openapi/openapi.yaml` 是 NestJS 公开 API 的事实源。
 - `packages/contracts/openapi/ai-service.openapi.yaml` 是 NestJS 调用 ai-service 的内部契约。
 - 桌面端和移动端不得调用 ai-service 的通用 invoke 或 stream。
+- ai-service 文档接口同样只供 NestJS 内部调用；客户端不得绕过业务权限直接 compose 或 render。
 - ai-service 使用 `X-AI-Internal-Token` 请求头作为 OpenAPI `apiKey` 安全方案；该 Token 只授予可信内部服务。
 - ai-service 的 FastAPI 文档由正式契约生成：Development 和 Staging 可查看、可调用，Production 禁用。
 - TypeScript/Python/OpenAPI 生成物禁止手改，契约变更后必须运行 `contracts:lint`、`contracts:gen` 和 `contracts:check`。

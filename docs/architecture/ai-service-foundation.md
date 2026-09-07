@@ -9,15 +9,17 @@ ai-service 只提供：
 - `/health`：进程存活；
 - `/ready`：模型目录、角色映射、密钥和生产安全策略校验；
 - `/internal/v1/llm/invoke`：供 NestJS 使用的内部非流式模型调用；
-- `/internal/v1/llm/stream`：供 NestJS 使用的内部文本 SSE 模型调用。
+- `/internal/v1/llm/stream`：供 NestJS 使用的内部文本 SSE 模型调用；
+- `/internal/v1/documents/*`：领域无关的 `DocumentSpec` 组合与 DOCX 渲染。
 
-工作记录、会议解析、会议总结、知识问答、管理简报和文档向量化不属于当前范围。桌面端、移动端仍保留的相关页面只是 UI 原型。
+工作记录、会议解析、会议总结、知识问答、管理简报和文档向量化不属于当前范围。通用文档生成不查询这些业务数据，也不创建正式文件记录。桌面端、移动端仍保留的相关页面只是 UI 原型。
 
 ## 2. 框架职责
 
 - LangChain 负责 OpenAI-compatible 模型调用、消息转换和 JSON Schema 结构化输出。
 - LangGraph 不封装业务注册中心，只提供 request-scoped `WorkflowRuntimeContext`；冒烟测试验证异步 Graph 能从 context 获取模型路由器。
 - LlamaIndex 不使用全局 `Settings`；LangChain LLM 和 embedding 通过薄适配按索引或调用显式传入。当前只验证内存索引和检索。
+- python-docx 将受控 `DocumentSpec` 确定性渲染为 DOCX，不执行模型生成的 XML 或模板路径。
 
 本阶段不接入 pgvector、Qdrant、Milvus、外部 embedding 服务、工具调用或业务 Agent。流式接口只传输最终正文和执行元数据，不传输 Provider 原始推理内容。
 
