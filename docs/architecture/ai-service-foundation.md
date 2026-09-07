@@ -46,6 +46,8 @@ ai-service 只提供：
 
 `stream` 只支持文本输出，事件顺序为 `started`、零个或多个 `content_delta`、可选 `usage`、`completed`。首个事件发送前发生瞬时 Provider 故障时可以切换候选 profile；流开始后发生故障则发送终止 `error` 事件，不再切换模型，避免把多个模型的输出拼接为一条回答。客户端断开连接时取消上游异步流。
 
+`invoke` 的 execution 元数据和 `stream` 的 completed 事件均保留可选的 Provider `finish_reason`。其中 `length` 表示达到输出 token 上限，结果可能不完整；未知或未返回的结束原因使用 `null`，不跨 Provider 强制封闭枚举。
+
 ## 5. OpenAPI 与内部文档
 
 `packages/contracts/openapi/ai-service.openapi.yaml` 是 ai-service HTTP 行为的唯一事实源。契约生成 Pydantic 模型、NestJS TypeScript 客户端和随 ai-service 发布的 OpenAPI JSON；FastAPI `/docs`、`/redoc` 与 `/openapi.json` 直接展示该生成契约。测试会另外根据实际 Python 路由生成 OpenAPI，并检查路径、方法、operationId、标签、认证、响应状态与主要 Schema 字段是否漂移。

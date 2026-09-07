@@ -31,7 +31,7 @@ class MockLLMProvider:
         last_user_message = next(
             (message.content for message in reversed(messages) if message.role == "user"), ""
         )
-        return ProviderResult(output=f"mock:{last_user_message}")
+        return ProviderResult(output=f"mock:{last_user_message}", finish_reason="stop")
 
     async def stream(
         self, messages: list[ChatMessage], options: InvocationOptions
@@ -41,7 +41,7 @@ class MockLLMProvider:
         last_user_message = next(
             (message.content for message in reversed(messages) if message.role == "user"), ""
         )
-        yield ProviderStreamChunk(text=f"mock:{last_user_message}")
+        yield ProviderStreamChunk(text=f"mock:{last_user_message}", finish_reason="stop")
 
 
 class OpenAICompatibleProvider:
@@ -60,15 +60,14 @@ class OpenAICompatibleProvider:
         self, messages: list[ChatMessage], options: InvocationOptions
     ) -> ProviderResult:
         langchain_messages = [_to_langchain_message(message) for message in messages]
-        invocation_kwargs = {
-            "temperature": options.temperature,
-            "max_completion_tokens": options.max_output_tokens,
-        }
+        invocation_kwargs = _invocation_kwargs(self.profile, options)
         try:
             if options.output_mode == OutputMode.text:
                 response = await self.chat_model.ainvoke(langchain_messages, **invocation_kwargs)
                 return ProviderResult(
-                    output=_message_text(response), token_usage=_extract_usage(response)
+                    output=_message_text(response),
+                    token_usage=_extract_usage(response),
+                    finish_reason=_extract_finish_reason(response),
                 )
 
             if options.json_schema is None or options.schema_name is None:
@@ -94,6 +93,7 @@ class OpenAICompatibleProvider:
             return ProviderResult(
                 output=parsed,
                 token_usage=_extract_usage(raw) if raw is not None else TokenUsageData(),
+                finish_reason=_extract_finish_reason(raw) if raw is not None else None,
             )
         except (APIConnectionError, APITimeoutError, RateLimitError) as exc:
             raise ProviderTransientError(type(exc).__name__) from exc
@@ -114,10 +114,7 @@ class OpenAICompatibleProvider:
         if options.output_mode != OutputMode.text:
             raise ProviderPermanentError("streaming supports text output only")
         langchain_messages = [_to_langchain_message(message) for message in messages]
-        invocation_kwargs = {
-            "temperature": options.temperature,
-            "max_completion_tokens": options.max_output_tokens,
-        }
+        invocation_kwargs = _invocation_kwargs(self.profile, options)
         try:
             async for response in self.chat_model.astream(
                 langchain_messages,
@@ -126,10 +123,12 @@ class OpenAICompatibleProvider:
             ):
                 text = _message_text(response)
                 token_usage = _extract_usage(response)
-                if text or _has_token_usage(token_usage):
+                finish_reason = _extract_finish_reason(response)
+                if text or _has_token_usage(token_usage) or finish_reason is not None:
                     yield ProviderStreamChunk(
                         text=text,
                         token_usage=token_usage if _has_token_usage(token_usage) else None,
+                        finish_reason=finish_reason,
                     )
         except (APIConnectionError, APITimeoutError, RateLimitError) as exc:
             raise ProviderTransientError(type(exc).__name__) from exc
@@ -157,6 +156,17 @@ def _to_langchain_message(message: ChatMessage) -> SystemMessage | HumanMessage 
     if message.role == "assistant":
         return AIMessage(content=message.content)
     return HumanMessage(content=message.content)
+
+
+def _invocation_kwargs(
+    profile: ModelProfile, options: InvocationOptions
+) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {"temperature": options.temperature}
+    if profile.provider == "deepseek":
+        kwargs["extra_body"] = {"max_tokens": options.max_output_tokens}
+    else:
+        kwargs["max_completion_tokens"] = options.max_output_tokens
+    return kwargs
 
 
 def _message_text(message: Any) -> str:
@@ -187,6 +197,14 @@ def _extract_usage(message: Any) -> TokenUsageData:
         output_tokens=token_usage.get("completion_tokens"),
         total_tokens=token_usage.get("total_tokens"),
     )
+
+
+def _extract_finish_reason(message: Any) -> str | None:
+    metadata = getattr(message, "response_metadata", None)
+    if not isinstance(metadata, dict):
+        return None
+    finish_reason = metadata.get("finish_reason")
+    return finish_reason if isinstance(finish_reason, str) else None
 
 
 def _has_token_usage(usage: TokenUsageData) -> bool:

@@ -112,6 +112,7 @@ async def invoke_llm(payload: InvokeRequest, request: Request) -> InvokeResponse
             model=result.profile.model,
             fallback_count=result.fallback_count,
             latency_ms=result.latency_ms,
+            finish_reason=result.provider_result.finish_reason,
             token_usage=TokenUsage(
                 input_tokens=usage.input_tokens,
                 output_tokens=usage.output_tokens,

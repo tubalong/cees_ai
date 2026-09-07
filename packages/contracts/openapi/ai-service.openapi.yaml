@@ -442,6 +442,9 @@ components:
         latency_ms:
           type: integer
           minimum: 0
+        finish_reason:
+          type: [string, "null"]
+          description: Provider completion reason. `length` indicates the output token limit was reached.
     StreamErrorEvent:
       type: object
       additionalProperties: false
@@ -520,6 +523,9 @@ components:
         latency_ms:
           type: integer
           minimum: 0
+        finish_reason:
+          type: [string, "null"]
+          description: Provider completion reason. `length` indicates the output token limit was reached.
         token_usage:
           $ref: "#/components/schemas/TokenUsage"
     InvokeResponse:

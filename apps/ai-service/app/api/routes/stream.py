@@ -132,12 +132,15 @@ async def _stream_events(
         )
     )
     token_usage: TokenUsageData | None = None
+    finish_reason: str | None = None
     try:
         async for chunk in routed.chunks:
             if chunk.text:
                 yield _encode_sse(ContentDeltaEvent(type="content_delta", text=chunk.text))
             if chunk.token_usage is not None:
                 token_usage = chunk.token_usage
+            if chunk.finish_reason is not None:
+                finish_reason = chunk.finish_reason
     except ProviderTransientError:
         logger.warning(
             "llm stream interrupted by transient provider failure",
@@ -188,7 +191,13 @@ async def _stream_events(
             )
         )
     latency_ms = round((time.perf_counter() - routed.started_at) * 1000)
-    yield _encode_sse(StreamCompletedEvent(type="completed", latency_ms=latency_ms))
+    yield _encode_sse(
+        StreamCompletedEvent(
+            type="completed",
+            latency_ms=latency_ms,
+            finish_reason=finish_reason,
+        )
+    )
     logger.info(
         "llm stream completed",
         extra={
@@ -200,6 +209,7 @@ async def _stream_events(
             "model": routed.profile.model,
             "fallback_count": routed.fallback_count,
             "latency_ms": latency_ms,
+            "finish_reason": finish_reason,
             "input_tokens": token_usage.input_tokens if token_usage else None,
             "output_tokens": token_usage.output_tokens if token_usage else None,
             "total_tokens": token_usage.total_tokens if token_usage else None,

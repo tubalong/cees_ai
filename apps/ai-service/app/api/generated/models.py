@@ -127,6 +127,10 @@ class StreamCompletedEvent(BaseModel):
     )
     type: Literal['completed']
     latency_ms: conint(ge=0)
+    finish_reason: str | None = Field(
+        None,
+        description='Provider completion reason. `length` indicates the output token limit was reached.',
+    )
 
 
 class TextOutput(BaseModel):
@@ -163,6 +167,10 @@ class ExecutionMetadata(BaseModel):
     model: str
     fallback_count: conint(ge=0)
     latency_ms: conint(ge=0)
+    finish_reason: str | None = Field(
+        None,
+        description='Provider completion reason. `length` indicates the output token limit was reached.',
+    )
     token_usage: TokenUsage
 
 

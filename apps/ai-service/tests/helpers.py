@@ -66,7 +66,7 @@ def profile(
         "timeout_seconds": 10,
         "max_retries": 0,
     }
-    if provider == "openai_compatible":
+    if provider != "mock":
         values.update({"base_url": "https://example.invalid/v1", "api_key_env": "TEST_KEY"})
     return ModelProfile.model_validate(values)
 
@@ -92,8 +92,11 @@ def ready_runtime(
     )
 
 
-def result(value: str | dict[str, object]) -> ProviderResult:
+def result(
+    value: str | dict[str, object], finish_reason: str | None = "stop"
+) -> ProviderResult:
     return ProviderResult(
         output=value,
         token_usage=TokenUsageData(input_tokens=3, output_tokens=2, total_tokens=5),
+        finish_reason=finish_reason,
     )

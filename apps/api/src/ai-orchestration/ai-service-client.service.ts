@@ -59,6 +59,7 @@ export class AiServiceClientService {
           profile: response.execution.profile,
           provider: response.execution.provider,
           fallbackCount: response.execution.fallback_count,
+          finishReason: response.execution.finish_reason ?? null,
           totalTokens: response.execution.token_usage.total_tokens,
         },
       },

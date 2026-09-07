@@ -90,6 +90,7 @@ def test_text_invocation_returns_execution_metadata() -> None:
     body = response.json()
     assert body["output"] == {"type": "text", "text": "hello"}
     assert body["execution"]["profile"] == "primary"
+    assert body["execution"]["finish_reason"] == "stop"
     assert body["execution"]["token_usage"]["total_tokens"] == 5
     assert provider.calls[0][1].max_output_tokens == 128
 
@@ -258,7 +259,8 @@ def test_stream_returns_ordered_sse_events() -> None:
                         input_tokens=3,
                         output_tokens=2,
                         total_tokens=5,
-                    )
+                    ),
+                    finish_reason="length",
                 ),
             ]
         ]
@@ -286,6 +288,7 @@ def test_stream_returns_ordered_sse_events() -> None:
     assert [events[1][1]["text"], events[2][1]["text"]] == ["hel", "lo"]
     assert events[3][1]["token_usage"]["total_tokens"] == 5
     assert isinstance(events[4][1]["latency_ms"], int)
+    assert events[4][1]["finish_reason"] == "length"
     assert provider.stream_calls[0][1].max_output_tokens == 128
 
 

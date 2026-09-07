@@ -90,6 +90,10 @@ export type UsageEvent = {
 export type StreamCompletedEvent = {
     type: 'completed';
     latency_ms: number;
+    /**
+     * Provider completion reason. `length` indicates the output token limit was reached.
+     */
+    finish_reason?: string | null;
 };
 
 export type StreamErrorEvent = {
@@ -133,6 +137,10 @@ export type ExecutionMetadata = {
     model: string;
     fallback_count: number;
     latency_ms: number;
+    /**
+     * Provider completion reason. `length` indicates the output token limit was reached.
+     */
+    finish_reason?: string | null;
     token_usage: TokenUsage;
 };
 

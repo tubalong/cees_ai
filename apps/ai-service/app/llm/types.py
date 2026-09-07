@@ -33,12 +33,14 @@ class TokenUsageData:
 class ProviderResult:
     output: str | dict[str, Any]
     token_usage: TokenUsageData = TokenUsageData()
+    finish_reason: str | None = None
 
 
 @dataclass(frozen=True)
 class ProviderStreamChunk:
     text: str = ""
     token_usage: TokenUsageData | None = None
+    finish_reason: str | None = None
 
 
 class LLMProvider(Protocol):
