@@ -113,6 +113,104 @@ export type StreamEvent = ({
     type: 'error';
 } & StreamErrorEvent);
 
+export type DocumentSourceMaterial = {
+    id: string;
+    title?: string | null;
+    content: string;
+};
+
+export type DocumentOptions = {
+    title?: string | null;
+    locale?: string;
+    template_id?: 'business-standard';
+    include_toc?: boolean;
+};
+
+export type ParagraphBlock = {
+    type: 'paragraph';
+    text: string;
+};
+
+export type BulletListBlock = {
+    type: 'bullet_list';
+    items: Array<string>;
+};
+
+export type NumberedListBlock = {
+    type: 'numbered_list';
+    items: Array<string>;
+};
+
+export type TableBlock = {
+    type: 'table';
+    columns: Array<string>;
+    rows: Array<Array<string>>;
+};
+
+export type QuoteBlock = {
+    type: 'quote';
+    text: string;
+    attribution?: string | null;
+};
+
+export type PageBreakBlock = {
+    type: 'page_break';
+};
+
+export type DocumentBlock = ({
+    type: 'paragraph';
+} & ParagraphBlock) | ({
+    type: 'bullet_list';
+} & BulletListBlock) | ({
+    type: 'numbered_list';
+} & NumberedListBlock) | ({
+    type: 'table';
+} & TableBlock) | ({
+    type: 'quote';
+} & QuoteBlock) | ({
+    type: 'page_break';
+} & PageBreakBlock);
+
+export type DocumentSection = {
+    heading: string;
+    level: number;
+    blocks: Array<DocumentBlock>;
+};
+
+export type DocumentSpec = {
+    schema_version: '1.0';
+    title: string;
+    subtitle?: string | null;
+    sections: Array<DocumentSection>;
+    source_refs: Array<string>;
+};
+
+export type ComposeDocumentRequest = {
+    request_id: string;
+    tenant_id: string;
+    user_id: string;
+    instruction: string;
+    source_materials: Array<DocumentSourceMaterial>;
+    document_options: DocumentOptions;
+    llm_profile?: string | null;
+    temperature?: number | null;
+    max_output_tokens?: number | null;
+};
+
+export type ComposeDocumentResponse = {
+    request_id: string;
+    document: DocumentSpec;
+    execution: ExecutionMetadata;
+};
+
+export type RenderDocxRequest = {
+    request_id: string;
+    tenant_id: string;
+    user_id: string;
+    document: DocumentSpec;
+    document_options: DocumentOptions;
+};
+
 export type TextOutput = {
     type: 'text';
     text: string;
@@ -295,3 +393,126 @@ export type StreamLlmResponses = {
 };
 
 export type StreamLlmResponse = StreamLlmResponses[keyof StreamLlmResponses];
+
+export type ComposeDocumentData = {
+    body: ComposeDocumentRequest;
+    path?: never;
+    query?: never;
+    url: '/internal/v1/documents/compose';
+};
+
+export type ComposeDocumentErrors = {
+    /**
+     * Invalid profile or unsupported output mode
+     */
+    400: ErrorResponse;
+    /**
+     * Internal authentication failed
+     */
+    401: ErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ErrorResponse;
+    /**
+     * Unexpected internal service error
+     */
+    500: ErrorResponse;
+    /**
+     * Provider output did not match the requested schema
+     */
+    502: ErrorResponse;
+    /**
+     * Service or configured providers unavailable
+     */
+    503: ErrorResponse;
+};
+
+export type ComposeDocumentError = ComposeDocumentErrors[keyof ComposeDocumentErrors];
+
+export type ComposeDocumentResponses = {
+    /**
+     * Document draft composed
+     */
+    200: ComposeDocumentResponse;
+};
+
+export type ComposeDocumentResponse2 = ComposeDocumentResponses[keyof ComposeDocumentResponses];
+
+export type RenderDocumentDocxData = {
+    body: RenderDocxRequest;
+    path?: never;
+    query?: never;
+    url: '/internal/v1/documents/render-docx';
+};
+
+export type RenderDocumentDocxErrors = {
+    /**
+     * Internal authentication failed
+     */
+    401: ErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ErrorResponse;
+    /**
+     * Unexpected internal service error
+     */
+    500: ErrorResponse;
+};
+
+export type RenderDocumentDocxError = RenderDocumentDocxErrors[keyof RenderDocumentDocxErrors];
+
+export type RenderDocumentDocxResponses = {
+    /**
+     * DOCX document rendered
+     */
+    200: Blob | File;
+};
+
+export type RenderDocumentDocxResponse = RenderDocumentDocxResponses[keyof RenderDocumentDocxResponses];
+
+export type GenerateDocumentDocxData = {
+    body: ComposeDocumentRequest;
+    path?: never;
+    query?: never;
+    url: '/internal/v1/documents/generate-docx';
+};
+
+export type GenerateDocumentDocxErrors = {
+    /**
+     * Invalid profile or unsupported output mode
+     */
+    400: ErrorResponse;
+    /**
+     * Internal authentication failed
+     */
+    401: ErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ErrorResponse;
+    /**
+     * Unexpected internal service error
+     */
+    500: ErrorResponse;
+    /**
+     * Provider output did not match the requested schema
+     */
+    502: ErrorResponse;
+    /**
+     * Service or configured providers unavailable
+     */
+    503: ErrorResponse;
+};
+
+export type GenerateDocumentDocxError = GenerateDocumentDocxErrors[keyof GenerateDocumentDocxErrors];
+
+export type GenerateDocumentDocxResponses = {
+    /**
+     * DOCX document generated
+     */
+    200: Blob | File;
+};
+
+export type GenerateDocumentDocxResponse = GenerateDocumentDocxResponses[keyof GenerateDocumentDocxResponses];

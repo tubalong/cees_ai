@@ -8,6 +8,7 @@ FastAPI 内部服务，负责受控 LLM 调用与未来 AI 工作流的运行时
 - LangChain：模型调用与结构化输出
 - LangGraph：未来业务工作流的原生编排能力
 - LlamaIndex：未来索引与检索能力的薄适配
+- python-docx：受控 `DocumentSpec` 的确定性 DOCX 渲染
 
 ## HTTP 接口
 
@@ -15,12 +16,17 @@ FastAPI 内部服务，负责受控 LLM 调用与未来 AI 工作流的运行时
 - `GET /ready`：配置与密钥就绪检查
 - `POST /internal/v1/llm/invoke`：需要 `X-AI-Internal-Token` 的内部非流式调用
 - `POST /internal/v1/llm/stream`：需要 `X-AI-Internal-Token` 的内部文本 SSE 调用
+- `POST /internal/v1/documents/compose`：生成领域无关的结构化文档草稿
+- `POST /internal/v1/documents/render-docx`：不调用模型，将 `DocumentSpec` 渲染为 DOCX
+- `POST /internal/v1/documents/generate-docx`：组合文档生成与 DOCX 渲染
 
 正式契约位于 `packages/contracts/openapi/ai-service.openapi.yaml`。业务客户端不得直接调用通用 invoke 或 stream，必须由 NestJS 统一认证、审计和编排。`X-AI-Internal-Token` 是 OpenAPI 中的 `apiKey` 安全方案，并通过 Swagger 的 Authorize 操作设置。
 
 `stream` 依次发送 `started`、零个或多个 `content_delta`、可选 `usage` 和 `completed` 事件。首个事件发送前允许在瞬时 Provider 故障时切换候选模型；流开始后的故障发送终止 `error` 事件，不拼接备用模型输出。该接口只传输最终正文增量，不暴露 Provider 原始推理内容。JSON Schema 结构化输出继续使用非流式 `invoke`。
 
 非流式响应的 `execution.finish_reason` 与流式 `completed.finish_reason` 保留 Provider 的结束原因；`length` 表示达到输出 token 上限，调用方应将当前输出视为可能被截断。字段为可选且可空，以兼容未提供结束原因的模型服务。
+
+文档接口只接收内部可信服务准备的生成指令与纯文本材料。模型生成版本化 `DocumentSpec`，渲染器只接受受控段落、列表、表格、引用和分页块，不接受任意 OOXML、宏、外部关系或模板路径。详细设计见 `docs/architecture/document-generation.md`。
 
 ## OpenAPI 与交互文档
 

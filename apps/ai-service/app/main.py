@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 
 from app.api.contract import load_openapi_contract
 from app.api.generated.models import ErrorDetail, ErrorResponse
+from app.api.routes.documents import router as documents_router
 from app.api.routes.invoke import router as invoke_router
 from app.api.routes.stream import router as stream_router
 from app.api.routes.system import router as system_router
@@ -62,6 +63,7 @@ def create_app(
     application.include_router(system_router)
     application.include_router(invoke_router)
     application.include_router(stream_router)
+    application.include_router(documents_router)
 
     @application.exception_handler(AIServiceError)
     async def handle_ai_service_error(

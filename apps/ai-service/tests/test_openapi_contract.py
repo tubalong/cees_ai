@@ -21,6 +21,10 @@ SCHEMAS_TO_COMPARE = {
     "InvokeResponse",
     "ExecutionMetadata",
     "StreamRequest",
+    "ComposeDocumentRequest",
+    "ComposeDocumentResponse",
+    "RenderDocxRequest",
+    "DocumentSpec",
     "ErrorResponse",
 }
 
@@ -164,4 +168,22 @@ def test_runtime_openapi_models_keep_contract_fields() -> None:
         assert set(runtime_schema.get("required", [])) == set(contract_schema.get("required", []))
         assert runtime_schema.get("properties", {}).keys() == contract_schema.get(
             "properties", {}
+        ).keys()
+
+
+def test_document_binary_responses_match_contract_media_types_and_headers() -> None:
+    contract = load_contract()
+    runtime = generate_runtime_openapi()
+
+    for path in (
+        "/internal/v1/documents/render-docx",
+        "/internal/v1/documents/generate-docx",
+    ):
+        contract_response = contract["paths"][path]["post"]["responses"]["200"]
+        runtime_response = runtime["paths"][path]["post"]["responses"]["200"]
+        assert runtime_response.get("content", {}).keys() == contract_response.get(
+            "content", {}
+        ).keys()
+        assert runtime_response.get("headers", {}).keys() == contract_response.get(
+            "headers", {}
         ).keys()
