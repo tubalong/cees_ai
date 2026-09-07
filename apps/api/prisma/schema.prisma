@@ -42,6 +42,14 @@ enum DocumentVisibility {
   TENANT
 }
 
+enum VisibilityScope {
+  PRIVATE
+  DEPARTMENT
+  PROJECT
+  TENANT
+  CUSTOM
+}
+
 enum DataScope {
   SELF
   DEPARTMENT
