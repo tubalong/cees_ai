@@ -34,3 +34,21 @@ User
 - AuditLog 使用 `outcome` 区分成功与失败，并单独保存 `actorMembershipId`；
 - `tenantId` 必须参与所有审计查询条件，禁止跨租户读取；
 - 迁移 `0005_audit_query_fields` 会从旧 metadata 回填成员 ID，并建立时间、动作、结果和操作者索引。
+
+## 受控资源与 ACL 模型
+
+```text
+Resource
+  ├── ownerMembership -> TenantMembership
+  ├── document -> ManagedDocument
+  └── acls -> ResourceAcl[]
+```
+
+- Resource 是受控业务资源的统一授权根，第一期 `type` 仅支持 `DOCUMENT`；
+- ManagedDocument 与 Resource 共用主键，保存标题、正文和 `PRIVATE`/`TENANT` 可见性；
+- ResourceAcl 支持 `MEMBERSHIP` 和 `ROLE` 主体，保存权限编码数组及可选过期时间；
+- 最终授权是 RBAC 操作权限与所有权、可见性、ACL 或 `document.manage_all` 资源范围的交集；
+- `TENANT` 可见性只扩展读取范围，不能授予修改、删除或分享能力；
+- Document 删除会软删除 ManagedDocument、Resource 和 ACL，正常 ACL 撤销采用硬删除以允许后续重新授权；
+- 迁移 `0006_resource_acl_documents` 会重建此前未公开使用的占位 ACL 表；若表中存在旧数据，迁移会中止并要求人工处理；
+- 原知识库文档 Prisma 模型已更名为 KnowledgeDocument，仍映射原 `documents` 表，与 ManagedDocument 分离。

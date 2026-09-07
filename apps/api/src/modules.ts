@@ -1,6 +1,8 @@
 import { Module, Type } from '@nestjs/common';
 import { AuditModule } from './audit/audit.module';
+import { DocumentModule } from './document/document.module';
 import { RbacModule } from './rbac/rbac.module';
+import { ResourceModule } from './resource/resource.module';
 
 @Module({}) export class OrganizationModule { }
 @Module({}) export class UserModule { }
@@ -19,6 +21,6 @@ import { RbacModule } from './rbac/rbac.module';
 
 export const BusinessModules: Type[] = [
     OrganizationModule, RbacModule, UserModule, ProjectModule, TaskModule, WorkReportModule,
-    FileModule, KnowledgeModule, MeetingModule, NotificationModule, DashboardModule,
+    FileModule, KnowledgeModule, ResourceModule, DocumentModule, MeetingModule, NotificationModule, DashboardModule,
     AiOrchestrationModule, IntegrationModule, AuditModule, CommonModule, JobsModule,
 ];

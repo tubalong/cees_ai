@@ -33,9 +33,21 @@ PATCH  /api/v1/roles/{roleId}
 DELETE /api/v1/roles/{roleId}?version={version}
 PUT    /api/v1/roles/{roleId}/permissions
 
+GET    /api/v1/documents
+POST   /api/v1/documents
+GET    /api/v1/documents/{documentId}
+PATCH  /api/v1/documents/{documentId}
+DELETE /api/v1/documents/{documentId}?version={version}
+
+GET    /api/v1/resources/{resourceId}/acl
+POST   /api/v1/resources/{resourceId}/acl
+DELETE /api/v1/resources/{resourceId}/acl/{aclEntryId}?version={version}
+
 GET /api/v1/audit-events
 GET /api/v1/audit-events/{auditEventId}
 ```
+
+截至 2026-09-07，第一期 Auth、Tenant/Member、RBAC、Document、ACL 和 Audit 共 28 个接口均已实现。
 
 - `refresh` 每次成功后都会轮换 Refresh Token，旧 Token 立即失效；
 - `logout` 撤销当前 Access Token 对应的 Session；
@@ -64,3 +76,13 @@ GET /api/v1/audit-events/{auditEventId}
 - 迁移 `0005_audit_query_fields` 会从历史 metadata 回填成员 ID，并识别失败事件；
 - 审计列表支持动作、结果、操作者、资源、请求 ID、时间范围和游标筛选；
 - 审计查询始终限制在当前 JWT 对应租户，并要求 `audit.read` 权限。
+
+## 0.5.0 迁移说明
+
+- 新增 Resource、ManagedDocument 和 ResourceAcl 数据模型及迁移 `0006_resource_acl_documents`；
+- 原知识库 `Document` Prisma 模型更名为 `KnowledgeDocument`，数据库表名仍为 `documents`，外部数据不迁移；
+- Document 访问同时要求对应 RBAC 操作权限和资源范围，资源范围由所有权、`TENANT` 可见性、Membership ACL、Role ACL 或 `document.manage_all` 决定；
+- `TENANT` 可见性只扩展 `document.read` 范围，不自动授予修改、删除或分享权限；
+- ACL 仅支持 `MEMBERSHIP`、`ROLE` 主体和 `document.read/update/delete/share` 权限，可设置过期时间；
+- Document 修改、删除和 ACL 撤销使用 `version` 乐观锁；Document 删除为软删除，ACL 正常撤销为硬删除；
+- Document 与 Resource 共用同一个 ID，创建、修改、删除和 ACL 变更均写入审计日志。

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CEES AI API
-  version: 0.4.0
+  version: 0.5.0
   description: 以本文件为唯一事实源的公开 API 契约。资源与操作按 docs/api 约定补充。
 
 servers:
@@ -755,6 +755,383 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponseEnvelope"
 
+  /documents:
+    get:
+      summary: 查询当前成员可读取的文档
+      operationId: documentList
+      tags: [Document]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: keyword
+          in: query
+          schema:
+            type: string
+            maxLength: 100
+        - name: visibility
+          in: query
+          schema:
+            $ref: "#/components/schemas/DocumentVisibility"
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: cursor
+          in: query
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 授权范围内文档列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentListResponseEnvelope"
+        "400":
+          description: 查询参数或分页游标无效
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "401":
+          description: 登录状态无效或已过期
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "403":
+          description: 缺少 document.read 权限
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+    post:
+      summary: 创建受控文档
+      operationId: documentCreate
+      tags: [Document]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateDocumentRequest"
+      responses:
+        "201":
+          description: 已创建文档
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentResponseEnvelope"
+        "400":
+          description: 请求字段校验失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "401":
+          description: 登录状态无效或已过期
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "403":
+          description: 缺少 document.create 权限
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /documents/{documentId}:
+    parameters:
+      - name: documentId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      summary: 获取授权范围内文档详情
+      operationId: documentGet
+      tags: [Document]
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 文档详情
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentResponseEnvelope"
+        "401":
+          description: 登录状态无效或已过期
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "403":
+          description: 缺少 document.read 权限
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "404":
+          description: 文档不存在或不在授权范围内
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+    patch:
+      summary: 修改授权范围内文档
+      operationId: documentUpdate
+      tags: [Document]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateDocumentRequest"
+      responses:
+        "200":
+          description: 修改后的文档
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentResponseEnvelope"
+        "400":
+          description: 请求字段校验失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "401":
+          description: 登录状态无效或已过期
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "403":
+          description: 缺少 document.update 权限
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "404":
+          description: 文档不存在或不在授权范围内
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "409":
+          description: 数据版本冲突
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+    delete:
+      summary: 删除授权范围内文档
+      operationId: documentDelete
+      tags: [Document]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: version
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "204":
+          description: 文档已软删除
+        "400":
+          description: 请求字段校验失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "401":
+          description: 登录状态无效或已过期
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "403":
+          description: 缺少 document.delete 权限
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "404":
+          description: 文档不存在或不在授权范围内
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "409":
+          description: 数据版本冲突
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /resources/{resourceId}/acl:
+    parameters:
+      - name: resourceId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      summary: 查询资源 ACL
+      operationId: aclList
+      tags: [ACL]
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 资源 ACL 列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResourceAclListResponseEnvelope"
+        "401":
+          description: 登录状态无效或已过期
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "403":
+          description: 缺少 document.share 权限
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "404":
+          description: 资源不存在或不在授权范围内
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+    post:
+      summary: 为资源创建 ACL 授权
+      operationId: aclCreate
+      tags: [ACL]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateResourceAclRequest"
+      responses:
+        "201":
+          description: 已创建 ACL 授权
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResourceAclResponseEnvelope"
+        "400":
+          description: 请求字段或权限编码无效
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "401":
+          description: 登录状态无效或已过期
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "403":
+          description: 缺少 document.share 权限
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "404":
+          description: 资源或授权主体不存在
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "409":
+          description: 相同主体的 ACL 已存在
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /resources/{resourceId}/acl/{aclEntryId}:
+    parameters:
+      - name: resourceId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: aclEntryId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    delete:
+      summary: 撤销资源 ACL 授权
+      operationId: aclDelete
+      tags: [ACL]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: version
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "204":
+          description: ACL 授权已撤销
+        "400":
+          description: 请求字段校验失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "401":
+          description: 登录状态无效或已过期
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "403":
+          description: 缺少 document.share 权限
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "404":
+          description: 资源或 ACL 不存在或不在授权范围内
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "409":
+          description: 数据版本冲突
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
   /audit-events:
     get:
       summary: 查询当前租户审计事件
@@ -1264,6 +1641,190 @@ components:
           type: integer
           minimum: 1
 
+    DocumentVisibility:
+      type: string
+      enum: [PRIVATE, TENANT]
+
+    DocumentSummary:
+      type: object
+      required: [id, resourceId, title, visibility, ownerMembershipId, effectivePermissions, version, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        resourceId:
+          type: string
+          format: uuid
+        title:
+          type: string
+        visibility:
+          $ref: "#/components/schemas/DocumentVisibility"
+        ownerMembershipId:
+          type: string
+          format: uuid
+        effectivePermissions:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+        version:
+          type: integer
+          minimum: 1
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    DocumentDetail:
+      type: object
+      required: [id, resourceId, title, content, visibility, ownerMembershipId, effectivePermissions, version, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        resourceId:
+          type: string
+          format: uuid
+        title:
+          type: string
+        content:
+          type: string
+        visibility:
+          $ref: "#/components/schemas/DocumentVisibility"
+        ownerMembershipId:
+          type: string
+          format: uuid
+        effectivePermissions:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+        version:
+          type: integer
+          minimum: 1
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    DocumentList:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/DocumentSummary"
+        nextCursor:
+          type: [string, "null"]
+          format: uuid
+
+    CreateDocumentRequest:
+      type: object
+      additionalProperties: false
+      required: [title, content, visibility]
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+        content:
+          type: string
+          maxLength: 1000000
+        visibility:
+          $ref: "#/components/schemas/DocumentVisibility"
+
+    UpdateDocumentRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 2
+      required: [version]
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+        content:
+          type: string
+          maxLength: 1000000
+        visibility:
+          $ref: "#/components/schemas/DocumentVisibility"
+        version:
+          type: integer
+          minimum: 1
+
+    AclSubjectType:
+      type: string
+      enum: [MEMBERSHIP, ROLE]
+
+    ResourceAclEntry:
+      type: object
+      required: [id, resourceId, subjectType, subjectId, permissionCodes, expiresAt, version, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        resourceId:
+          type: string
+          format: uuid
+        subjectType:
+          $ref: "#/components/schemas/AclSubjectType"
+        subjectId:
+          type: string
+          format: uuid
+        permissionCodes:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+        expiresAt:
+          type: [string, "null"]
+          format: date-time
+        version:
+          type: integer
+          minimum: 1
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    ResourceAclList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ResourceAclEntry"
+
+    CreateResourceAclRequest:
+      type: object
+      additionalProperties: false
+      required: [subjectType, subjectId, permissionCodes]
+      properties:
+        subjectType:
+          $ref: "#/components/schemas/AclSubjectType"
+        subjectId:
+          type: string
+          format: uuid
+        permissionCodes:
+          type: array
+          minItems: 1
+          maxItems: 20
+          uniqueItems: true
+          items:
+            type: string
+            pattern: ^document\.(read|update|delete|share)$
+        expiresAt:
+          type: [string, "null"]
+          format: date-time
+
     AuditOutcome:
       type: string
       enum: [SUCCESS, FAILURE]
@@ -1522,6 +2083,54 @@ components:
           const: true
         data:
           $ref: "#/components/schemas/RoleList"
+        requestId:
+          type: [string, "null"]
+
+    DocumentResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: "#/components/schemas/DocumentDetail"
+        requestId:
+          type: [string, "null"]
+
+    DocumentListResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: "#/components/schemas/DocumentList"
+        requestId:
+          type: [string, "null"]
+
+    ResourceAclResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: "#/components/schemas/ResourceAclEntry"
+        requestId:
+          type: [string, "null"]
+
+    ResourceAclListResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: "#/components/schemas/ResourceAclList"
         requestId:
           type: [string, "null"]
 

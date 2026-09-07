@@ -9,6 +9,8 @@ src/
 ├── auth/             # 登录、JWT、刷新令牌
 ├── tenant/           # 租户上下文与守卫
 ├── rbac/             # 权限与数据范围
+├── resource/         # 资源级授权计算与 ACL
+├── document/         # 第一种受控业务资源
 ├── common/           # 异常过滤器、响应封装
 ├── audit/            # 审计
 ├── ai-orchestration/ # AI 调用编排、草稿与人工确认
@@ -59,9 +61,21 @@ PATCH  /api/v1/roles/{roleId}
 DELETE /api/v1/roles/{roleId}?version={version}
 PUT    /api/v1/roles/{roleId}/permissions
 
+GET    /api/v1/documents
+POST   /api/v1/documents
+GET    /api/v1/documents/{documentId}
+PATCH  /api/v1/documents/{documentId}
+DELETE /api/v1/documents/{documentId}?version={version}
+
+GET    /api/v1/resources/{resourceId}/acl
+POST   /api/v1/resources/{resourceId}/acl
+DELETE /api/v1/resources/{resourceId}/acl/{aclEntryId}?version={version}
+
 GET /api/v1/audit-events
 GET /api/v1/audit-events/{auditEventId}
 ```
+
+截至 2026-09-07，第一期身份、租户、RBAC、Document、ACL 和审计共 28 个接口均已实现。
 
 Refresh Token 采用单次轮换；`logout` 会撤销当前数据库 Session，之后对应的
 Access Token 即使尚未到 JWT 过期时间也不能继续访问受保护接口。
@@ -74,6 +88,10 @@ TenantMembership 关联租户；旧 Token 需要重新登录获取。
 
 执行 `0005_audit_query_fields` 后，审计事件可以按结果、操作者成员、资源、请求 ID
 和时间范围查询；所有查询始终限制在当前租户并要求 `audit.read` 权限。
+
+执行 `0006_resource_acl_documents` 后，Resource 作为统一授权根，ManagedDocument
+与 Resource 共用 ID。Document 操作先检查 RBAC，再按 Owner、`TENANT` 可见性、
+Membership ACL、Role ACL 或 `document.manage_all` 判断资源范围；ACL 不能绕过 RBAC。
 
 从宿主机运行 API、Prisma migration 或 seed 时，`DATABASE_URL` 的主机名使用
 `localhost`；在 Docker Compose 容器内运行时使用服务名 `postgres`。

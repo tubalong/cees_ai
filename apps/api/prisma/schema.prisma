@@ -28,6 +28,20 @@ enum AuditOutcome {
   FAILURE
 }
 
+enum ResourceType {
+  DOCUMENT
+}
+
+enum AclSubjectType {
+  MEMBERSHIP
+  ROLE
+}
+
+enum DocumentVisibility {
+  PRIVATE
+  TENANT
+}
+
 enum DataScope {
   SELF
   DEPARTMENT
@@ -81,6 +95,9 @@ model Tenant {
   roles Role[]
   membershipRoles MembershipRole[]
   rolePermissions RolePermission[]
+  resources Resource[]
+  managedDocuments ManagedDocument[]
+  resourceAcls ResourceAcl[]
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
   deletedAt DateTime? @map("deleted_at")
@@ -122,6 +139,7 @@ model TenantMembership {
   joinedAt DateTime @default(now()) @map("joined_at")
   authSessions AuthSession[]
   membershipRoles MembershipRole[]
+  ownedResources Resource[]
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
   createdBy String? @map("created_by") @db.Uuid
@@ -236,19 +254,61 @@ model RolePermission {
 model ResourceAcl {
   id String @id @default(uuid()) @db.Uuid
   tenantId String @map("tenant_id") @db.Uuid
-  resourceType String @map("resource_type")
+  tenant Tenant @relation(fields: [tenantId], references: [id])
   resourceId String @map("resource_id") @db.Uuid
-  subjectType String @map("subject_type")
+  resource Resource @relation(fields: [resourceId], references: [id])
+  subjectType AclSubjectType @map("subject_type")
   subjectId String @map("subject_id") @db.Uuid
-  permission String
+  permissionCodes String[] @map("permission_codes")
+  expiresAt DateTime? @map("expires_at")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
   createdBy String? @map("created_by") @db.Uuid
   updatedBy String? @map("updated_by") @db.Uuid
   deletedAt DateTime? @map("deleted_at")
   version Int @default(1)
-  @@index([tenantId, resourceType, resourceId])
+  @@unique([tenantId, resourceId, subjectType, subjectId])
+  @@index([tenantId, resourceId])
+  @@index([tenantId, subjectType, subjectId])
+  @@index([permissionCodes], type: Gin)
   @@map("resource_acls")
+}
+
+model Resource {
+  id String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  type ResourceType
+  ownerMembershipId String @map("owner_membership_id") @db.Uuid
+  ownerMembership TenantMembership @relation(fields: [ownerMembershipId], references: [id])
+  document ManagedDocument?
+  acls ResourceAcl[]
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  createdBy String? @map("created_by") @db.Uuid
+  updatedBy String? @map("updated_by") @db.Uuid
+  deletedAt DateTime? @map("deleted_at")
+  version Int @default(1)
+  @@index([tenantId, type, ownerMembershipId])
+  @@map("resources")
+}
+
+model ManagedDocument {
+  id String @id @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  resource Resource @relation(fields: [id], references: [id])
+  title String
+  content String @db.Text
+  visibility DocumentVisibility @default(PRIVATE)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  createdBy String? @map("created_by") @db.Uuid
+  updatedBy String? @map("updated_by") @db.Uuid
+  deletedAt DateTime? @map("deleted_at")
+  version Int @default(1)
+  @@index([tenantId, visibility, createdAt])
+  @@map("managed_documents")
 }
 
 model Project {
@@ -418,7 +478,7 @@ model KnowledgeBaseMember {
   @@map("knowledge_base_members")
 }
 
-model Document {
+model KnowledgeDocument {
   id String @id @default(uuid()) @db.Uuid
   tenantId String @map("tenant_id") @db.Uuid
   knowledgeBaseId String @map("knowledge_base_id") @db.Uuid
