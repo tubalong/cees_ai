@@ -1,24 +1,47 @@
 # AI Enterprise Workbench
 
-面向销售型中小企业的 AI 工作协同平台。仓库采用模块化单体业务后端，并将正式业务写入与 AI 建议生成严格分离。
+企业协同应用仓库。NestJS 负责业务事实与审计，FastAPI ai-service 只提供与具体业务无关的 AI 运行时基础设施。
 
 ## 服务职责
 
-- `apps/api`：NestJS 企业业务事实源，负责认证、租户、权限、业务写入、统计和审计。
-- `apps/ai-service`：FastAPI AI 建议服务，仅返回草稿、结构化提取与权限过滤后的 RAG 结果。
-- `apps/desktop`：Electron 管理桌面端。
-- `apps/mobile`：Flutter 一线员工移动端。
-- `packages/*`：共享类型、API Client、UI、工程配置与 OpenAPI 文件。
-- `infra`：PostgreSQL/pgvector、Redis、MinIO 与本地容器编排。
+- `apps/api`：认证、租户、权限、正式业务写入和审计。
+- `apps/ai-service`：多模型配置、LangChain 调用、LangGraph/LlamaIndex 集成基础和内部 invoke。
+- `apps/desktop`：Electron + React 桌面端。
+- `apps/mobile`：Flutter 移动端。
+- `packages/contracts`：公开 API 与 ai-service 内部 OpenAPI 契约。
+- `packages/ai-service-client`：由内部契约生成的 TypeScript SDK。
+- `infra`：PostgreSQL、Redis 和腾讯云 COS 配置。
+
+## 边界规则
+
+- pnpm、Python/uv 和 Flutter 三套工具链相互独立。
+- 跨语言只通过 `packages/contracts` 对齐；生成客户端禁止手改。
+- NestJS 是业务数据唯一事实源；ai-service 不直接连接业务数据库或写入正式业务数据。
+- 通用 `/internal/v1/llm/invoke` 只允许 NestJS 使用，不向客户端公开。
+- 桌面端和移动端中的部分菜单仍为 UI 原型，不代表后端已有对应能力。
+- Secret 只通过环境变量或平台 Secrets 注入。
+
+## Node.js 与 pnpm（Windows）
+
+1. 从 [Node.js 下载页](https://nodejs.org/en/download) 下载 Node.js 24 LTS 的 `Windows Installer (.msi)`（通常选择 x64）并完成安装。
+2. 重新打开 PowerShell；若 Node.js 安装在 `Program Files` 且 `corepack enable pnpm` 报权限错误，请以管理员身份运行 PowerShell。执行：
+
+	```powershell
+	corepack enable pnpm
+	pnpm -v
+	```
+
+	项目根目录的 `packageManager` 字段会将 pnpm 固定为 `12.3.4`。
 
 ## 快速启动
 
-1. 将 `.env.example` 复制为 `.env`，修改所有 `change_me` 值。
-2. 安装 Node.js 20、pnpm 9、Docker Desktop；移动端开发另需 Flutter SDK。
-3. 执行 `pnpm install`。
-4. 执行 `pnpm infra:up`。
-5. NestJS Swagger：`http://localhost:3000/api/docs`。
-6. FastAPI 文档：`http://localhost:8000/docs`。
-7. MinIO Console：`http://localhost:9001`。
+1. 本地开发将 `.env.example` 复制为 `.env`；共享测试服务器使用 `.env.staging.example`；生产服务器使用 `.env.production.example`。实际文件均不提交。
+2. 安装 Node.js 24 LTS、pnpm 12.3.4、uv、Python 3.14 和 Docker Desktop；移动端开发另需 Flutter SDK。
+3. 执行 `pnpm install --frozen-lockfile`。
+4. 在 `apps/ai-service` 执行 `uv sync --locked`。
+5. 本地执行 `pnpm infra:up`；Staging/Production 可使用对应 pnpm 命令，Linux 服务器也可执行 `bash scripts/compose-deploy.sh staging` 或 `bash scripts/compose-deploy.sh production`。
+6. 本地分别启动 NestJS 和 ai-service；Staging/Production 由 Compose 启动完整服务。
 
-详见 [架构说明](docs/architecture/overview.md)。
+NestJS Swagger：`http://localhost:3000/api/docs`；FastAPI 内部文档：本地为 `http://localhost:8000/docs`，Staging 默认映射到 `http://<staging-host>:18000/docs`，Production 禁用。
+
+架构说明见 [docs/architecture/overview.md](docs/architecture/overview.md)，AI 基础设施说明见 [docs/architecture/ai-service-foundation.md](docs/architecture/ai-service-foundation.md)。

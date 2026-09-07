@@ -76,14 +76,6 @@ enum DraftStatus {
   FAILED
 }
 
-enum VisibilityScope {
-  PRIVATE
-  DEPARTMENT
-  PROJECT
-  TENANT
-  CUSTOM
-}
-
 model Tenant {
   id String @id @default(uuid()) @db.Uuid
   code String @unique
@@ -415,24 +407,6 @@ model TaskActivity {
   createdBy String? @map("created_by") @db.Uuid
   @@index([tenantId, taskId])
   @@map("task_activities")
-}
-
-model WorkReport {
-  id String @id @default(uuid()) @db.Uuid
-  tenantId String @map("tenant_id") @db.Uuid
-  userId String @map("user_id") @db.Uuid
-  reportType String @map("report_type")
-  reportDate DateTime @map("report_date")
-  content Json
-  sourceDraftId String? @map("source_draft_id") @db.Uuid
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  createdBy String? @map("created_by") @db.Uuid
-  updatedBy String? @map("updated_by") @db.Uuid
-  deletedAt DateTime? @map("deleted_at")
-  version Int @default(1)
-  @@index([tenantId, userId, reportDate])
-  @@map("work_reports")
 }
 
 model FileObject {

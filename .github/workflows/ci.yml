@@ -1,0 +1,195 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+  merge_group:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  node:
+    name: Node (API + desktop)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 12.3.4
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build generated AI service client
+        run: pnpm --filter @workbench/ai-service-client build
+
+      - name: Generate Prisma client
+        run: pnpm --filter @workbench/api prisma:generate
+
+      - name: Test API
+        run: pnpm --filter @workbench/api test
+
+      - name: Build API
+        run: pnpm --filter @workbench/api build
+
+      - name: Build desktop application
+        run: pnpm --filter @workbench/desktop build
+
+  ai-service:
+    name: Python (AI service)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.7"
+          python-version: "3.14"
+          enable-cache: true
+          cache-dependency-glob: apps/ai-service/uv.lock
+
+      - name: Install dependencies
+        working-directory: apps/ai-service
+        run: uv sync --locked
+
+      - name: Lint
+        working-directory: apps/ai-service
+        run: uv run --locked ruff check app tests scripts
+
+      - name: Import application
+        working-directory: apps/ai-service
+        env:
+          NODE_ENV: test
+          AI_INTERNAL_TOKEN: change_me
+          AI_MODEL_CONFIG_PATH: config/models.toml
+        run: uv run --locked python -c "from app.main import app; assert app is not None"
+
+      - name: Run tests
+        working-directory: apps/ai-service
+        env:
+          NODE_ENV: test
+          AI_INTERNAL_TOKEN: change_me
+          AI_MODEL_CONFIG_PATH: config/models.toml
+        run: uv run --locked pytest -q
+
+  contracts:
+    name: Contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 12.3.4
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.7"
+          python-version: "3.14"
+          enable-cache: true
+          cache-dependency-glob: apps/ai-service/uv.lock
+
+      - name: Install Node dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Python dependencies
+        working-directory: apps/ai-service
+        run: uv sync --locked
+
+      - name: Validate and verify generated contracts
+        run: |
+          pnpm contracts:lint
+          pnpm contracts:check
+
+  mobile:
+    name: Flutter (mobile)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.47.2"
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        working-directory: apps/mobile
+        run: flutter pub get
+
+      - name: Analyze project
+        working-directory: apps/mobile
+        run: flutter analyze
+
+      - name: Detect Flutter tests
+        id: mobile_tests
+        working-directory: apps/mobile
+        shell: bash
+        run: |
+          test_file=""
+          if [ -d test ]; then
+            test_file="$(find test -type f -name '*_test.dart' -print -quit)"
+          fi
+          if [ -n "$test_file" ]; then
+            echo "has_tests=true" >> "$GITHUB_OUTPUT"
+            echo "Found Flutter test: $test_file"
+          else
+            echo "has_tests=false" >> "$GITHUB_OUTPUT"
+            echo "No Flutter tests found; skipping flutter test."
+          fi
+
+      - name: Run Flutter tests
+        if: steps.mobile_tests.outputs.has_tests == 'true'
+        working-directory: apps/mobile
+        run: flutter test

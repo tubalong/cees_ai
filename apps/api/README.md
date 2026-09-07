@@ -1,6 +1,6 @@
 # apps/api — NestJS 业务后端
 
-业务事实源：认证、租户、RBAC、业务写入、统计与审计。
+业务事实源：认证、租户、RBAC、业务写入、统计和审计。
 
 ## 目录说明
 
@@ -13,13 +13,12 @@ src/
 ├── document/         # 第一种受控业务资源
 ├── common/           # 异常过滤器、响应封装
 ├── audit/            # 审计
-├── ai-orchestration/ # AI 调用编排、草稿与人工确认
-├── dashboard/        # 统计聚合
+├── ai-orchestration/ # 通用 AI 服务客户端、调用审计与确认策略
 ├── database/         # Prisma 接入
 └── integration/      # 外部服务适配
 ```
 
-## 启动
+NestJS 通过生成的 `@workbench/ai-service-client` 调用内部 AI 服务。通用 invoke 不暴露给桌面端或移动端，任何未来业务 AI 功能都必须先定义正式契约和业务边界。
 
 依赖清单按需通过 `pnpm --filter @workbench/api add ...` 补充后：
 
@@ -97,3 +96,20 @@ Membership ACL、Role ACL 或 `document.manage_all` 判断资源范围；ACL 不
 `localhost`；在 Docker Compose 容器内运行时使用服务名 `postgres`。
 
 Swagger 文档地址（骨架就绪后）：`http://localhost:3000/api/docs`。
+## 启动
+
+```text
+pnpm --filter @workbench/ai-service-client build
+pnpm --filter @workbench/api prisma:generate
+pnpm --filter @workbench/api dev
+```
+
+Swagger 文档：`http://localhost:3000/api/docs`。
+
+文件上传涉及租户权限、COS、配额和审计，设计草案见 `docs/architecture/file-upload.md`。公开接口必须先落入 OpenAPI 契约，再由本应用实现。
+
+容器镜像必须从仓库根目录构建：
+
+```text
+docker build -f apps/api/Dockerfile .
+```

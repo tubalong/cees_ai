@@ -1,14 +1,27 @@
 {
-    "name": "ai-enterprise-workbench",
-    "version": "0.1.0",
-    "private": true,
-    "packageManager": "pnpm@9.15.0",
-    "scripts": {
-        "dev": "pnpm --parallel --filter @workbench/api --filter @workbench/desktop dev",
-        "build": "pnpm -r --if-present build",
-        "test": "pnpm -r --if-present test",
-        "lint": "pnpm -r --if-present lint",
-        "infra:up": "docker compose --env-file .env -f infra/docker-compose.yml up -d --build",
-        "infra:down": "docker compose --env-file .env -f infra/docker-compose.yml down"
-    }
+  "name": "ai-enterprise-workbench",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@12.3.4",
+  "engines": {
+    "node": "24.x"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --filter @workbench/api --filter @workbench/desktop dev",
+    "build": "pnpm -r --if-present build",
+    "test": "pnpm -r --if-present test",
+    "lint": "pnpm -r --if-present lint",
+    "infra:up": "docker compose --env-file .env -f infra/docker-compose.yml -f infra/docker-compose.dev.yml up -d --remove-orphans",
+    "infra:down": "docker compose --env-file .env -f infra/docker-compose.yml -f infra/docker-compose.dev.yml down --remove-orphans",
+    "infra:logs": "docker compose --env-file .env -f infra/docker-compose.yml -f infra/docker-compose.dev.yml logs -f",
+    "infra:staging:up": "docker compose --env-file .env.staging -f infra/docker-compose.yml -f infra/docker-compose.deploy.yml -f infra/docker-compose.staging.yml up -d --build --remove-orphans",
+    "infra:staging:down": "docker compose --env-file .env.staging -f infra/docker-compose.yml -f infra/docker-compose.deploy.yml -f infra/docker-compose.staging.yml down --remove-orphans",
+    "infra:staging:logs": "docker compose --env-file .env.staging -f infra/docker-compose.yml -f infra/docker-compose.deploy.yml -f infra/docker-compose.staging.yml logs -f",
+    "infra:prod:up": "docker compose --env-file .env.production -f infra/docker-compose.yml -f infra/docker-compose.deploy.yml -f infra/docker-compose.prod.yml up -d --remove-orphans",
+    "infra:prod:down": "docker compose --env-file .env.production -f infra/docker-compose.yml -f infra/docker-compose.deploy.yml -f infra/docker-compose.prod.yml down --remove-orphans",
+    "infra:prod:logs": "docker compose --env-file .env.production -f infra/docker-compose.yml -f infra/docker-compose.deploy.yml -f infra/docker-compose.prod.yml logs -f",
+    "contracts:lint": "pnpm --filter @workbench/contracts lint",
+    "contracts:gen": "pnpm --filter @workbench/contracts generate:ai-service && uv run --project apps/ai-service datamodel-codegen --input packages/contracts/openapi/ai-service.openapi.yaml --input-file-type openapi --output apps/ai-service/app/api/generated/models.py --output-model-type pydantic_v2.BaseModel --target-python-version 3.14 --use-standard-collections --use-union-operator --use-default --collapse-root-models --disable-timestamp --extra-fields forbid --formatters black isort && uv run --project apps/ai-service python apps/ai-service/scripts/generate_openapi_artifact.py",
+    "contracts:check": "pnpm contracts:gen && git diff --exit-code -- packages/ai-service-client/src/generated apps/ai-service/app/api/generated"
+  }
 }

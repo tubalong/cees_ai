@@ -1,0 +1,461 @@
+openapi: 3.1.0
+info:
+  title: CEES AI Service Internal API
+  version: 0.1.0
+  description: |
+    Internal infrastructure API used only by trusted CEES services.
+    Desktop, mobile, and third-party clients must call the NestJS public API instead.
+servers:
+  - url: /
+    description: Current deployment origin
+tags:
+  - name: system
+    description: Process liveness and configuration readiness checks.
+  - name: llm
+    description: Internal LLM invocation endpoints available only to trusted CEES services.
+paths:
+  /health:
+    get:
+      tags: [system]
+      security: []
+      operationId: getHealth
+      summary: Process liveness check
+      responses:
+        "200":
+          description: Service process is alive
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+              example:
+                status: ok
+                service: ai-service
+  /ready:
+    get:
+      tags: [system]
+      security: []
+      operationId: getReadiness
+      summary: Configuration readiness check
+      responses:
+        "200":
+          description: Service is ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadinessResponse"
+              example:
+                status: ready
+                service: ai-service
+                configured_roles: [default, structured, reasoning, rag]
+                errors: []
+        "503":
+          description: Service configuration is not ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadinessResponse"
+              example:
+                status: not_ready
+                service: ai-service
+                configured_roles: []
+                errors:
+                  - AI_INTERNAL_TOKEN is required
+  /internal/v1/llm/invoke:
+    post:
+      tags: [llm]
+      operationId: invokeLlm
+      summary: Invoke a configured LLM profile
+      security:
+        - internalToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InvokeRequest"
+            examples:
+              text:
+                summary: Text response
+                value:
+                  request_id: req-example-text-001
+                  tenant_id: tenant-example
+                  user_id: user-example
+                  messages:
+                    - role: user
+                      content: Summarize the current project status.
+                  role: default
+                  temperature: 0.3
+                  max_output_tokens: 512
+                  response_format:
+                    type: text
+              structured:
+                summary: JSON Schema response
+                value:
+                  request_id: req-example-json-001
+                  tenant_id: tenant-example
+                  user_id: user-example
+                  messages:
+                    - role: user
+                      content: Extract the project name and current status.
+                  role: structured
+                  temperature: 0
+                  max_output_tokens: 512
+                  response_format:
+                    type: json_schema
+                    name: ProjectStatus
+                    schema:
+                      type: object
+                      additionalProperties: false
+                      required: [project, status]
+                      properties:
+                        project:
+                          type: string
+                        status:
+                          type: string
+      responses:
+        "200":
+          description: Invocation completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvokeResponse"
+              examples:
+                text:
+                  summary: Text output
+                  value:
+                    request_id: req-example-text-001
+                    output:
+                      type: text
+                      text: The project is progressing normally.
+                    execution:
+                      profile: primary
+                      provider: openai_compatible
+                      model: example-model
+                      fallback_count: 0
+                      latency_ms: 420
+                      token_usage:
+                        input_tokens: 18
+                        output_tokens: 9
+                        total_tokens: 27
+                structured:
+                  summary: Structured JSON output
+                  value:
+                    request_id: req-example-json-001
+                    output:
+                      type: json
+                      value:
+                        project: CEES AI
+                        status: in_progress
+                    execution:
+                      profile: primary
+                      provider: openai_compatible
+                      model: example-model
+                      fallback_count: 0
+                      latency_ms: 510
+                      token_usage:
+                        input_tokens: 24
+                        output_tokens: 14
+                        total_tokens: 38
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "502":
+          $ref: "#/components/responses/InvalidProviderOutput"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+components:
+  securitySchemes:
+    internalToken:
+      type: apiKey
+      in: header
+      name: X-AI-Internal-Token
+      description: Internal token issued to trusted CEES services. Do not expose it to clients.
+  schemas:
+    HealthResponse:
+      type: object
+      additionalProperties: false
+      required: [status, service]
+      properties:
+        status:
+          type: string
+          const: ok
+        service:
+          type: string
+          const: ai-service
+    ReadinessResponse:
+      type: object
+      additionalProperties: false
+      required: [status, service, configured_roles, errors]
+      properties:
+        status:
+          type: string
+          enum: [ready, not_ready]
+        service:
+          type: string
+          const: ai-service
+        configured_roles:
+          type: array
+          items:
+            $ref: "#/components/schemas/ModelRole"
+        errors:
+          type: array
+          items:
+            type: string
+    ModelRole:
+      type: string
+      enum: [default, structured, reasoning, rag]
+    MessageRole:
+      type: string
+      enum: [system, user, assistant]
+    InvokeMessage:
+      type: object
+      additionalProperties: false
+      required: [role, content]
+      properties:
+        role:
+          $ref: "#/components/schemas/MessageRole"
+        content:
+          type: string
+          minLength: 1
+          maxLength: 262144
+    TextResponseFormat:
+      type: object
+      additionalProperties: false
+      required: [type]
+      properties:
+        type:
+          type: string
+          const: text
+    JsonSchemaResponseFormat:
+      type: object
+      additionalProperties: false
+      required: [type, name, schema]
+      properties:
+        type:
+          type: string
+          const: json_schema
+        name:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: "^[A-Za-z][A-Za-z0-9_-]*$"
+        schema:
+          type: object
+          additionalProperties: true
+    InvokeRequest:
+      type: object
+      additionalProperties: false
+      required: [request_id, tenant_id, user_id, messages, response_format]
+      properties:
+        request_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        tenant_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        user_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        messages:
+          type: array
+          minItems: 1
+          maxItems: 64
+          items:
+            $ref: "#/components/schemas/InvokeMessage"
+        role:
+          $ref: "#/components/schemas/ModelRole"
+        llm_profile:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 128
+        temperature:
+          type: [number, "null"]
+          minimum: 0
+          maximum: 2
+        max_output_tokens:
+          type: [integer, "null"]
+          minimum: 1
+          maximum: 32768
+        response_format:
+          oneOf:
+            - $ref: "#/components/schemas/TextResponseFormat"
+            - $ref: "#/components/schemas/JsonSchemaResponseFormat"
+          discriminator:
+            propertyName: type
+            mapping:
+              text: "#/components/schemas/TextResponseFormat"
+              json_schema: "#/components/schemas/JsonSchemaResponseFormat"
+    TextOutput:
+      type: object
+      additionalProperties: false
+      required: [type, text]
+      properties:
+        type:
+          type: string
+          const: text
+        text:
+          type: string
+    JsonOutput:
+      type: object
+      additionalProperties: false
+      required: [type, value]
+      properties:
+        type:
+          type: string
+          const: json
+        value:
+          type: object
+          additionalProperties: true
+    TokenUsage:
+      type: object
+      additionalProperties: false
+      required: [input_tokens, output_tokens, total_tokens]
+      properties:
+        input_tokens:
+          type: [integer, "null"]
+          minimum: 0
+        output_tokens:
+          type: [integer, "null"]
+          minimum: 0
+        total_tokens:
+          type: [integer, "null"]
+          minimum: 0
+    ExecutionMetadata:
+      type: object
+      additionalProperties: false
+      required: [profile, provider, model, fallback_count, latency_ms, token_usage]
+      properties:
+        profile:
+          type: string
+        provider:
+          type: string
+          enum: [mock, openai_compatible, deepseek]
+        model:
+          type: string
+        fallback_count:
+          type: integer
+          minimum: 0
+        latency_ms:
+          type: integer
+          minimum: 0
+        token_usage:
+          $ref: "#/components/schemas/TokenUsage"
+    InvokeResponse:
+      type: object
+      additionalProperties: false
+      required: [request_id, output, execution]
+      properties:
+        request_id:
+          type: string
+        output:
+          oneOf:
+            - $ref: "#/components/schemas/TextOutput"
+            - $ref: "#/components/schemas/JsonOutput"
+          discriminator:
+            propertyName: type
+            mapping:
+              text: "#/components/schemas/TextOutput"
+              json: "#/components/schemas/JsonOutput"
+        execution:
+          $ref: "#/components/schemas/ExecutionMetadata"
+    ErrorDetail:
+      type: object
+      additionalProperties: false
+      required: [code, message, request_id, retryable]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        request_id:
+          type: [string, "null"]
+        retryable:
+          type: boolean
+    ErrorResponse:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          $ref: "#/components/schemas/ErrorDetail"
+  responses:
+    BadRequest:
+      description: Invalid profile or unsupported output mode
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: INVALID_INVOCATION_REQUEST
+              message: Invalid profile or unsupported output mode
+              request_id: req-example-text-001
+              retryable: false
+    Unauthorized:
+      description: Internal authentication failed
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: INTERNAL_AUTH_FAILED
+              message: Internal authentication failed
+              request_id: null
+              retryable: false
+    ValidationError:
+      description: Request validation failed
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: INVALID_INVOCATION_REQUEST
+              message: Request validation failed
+              request_id: req-example-text-001
+              retryable: false
+    InvalidProviderOutput:
+      description: Provider output did not match the requested schema
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: INVALID_PROVIDER_OUTPUT
+              message: Provider output did not match the requested schema
+              request_id: req-example-json-001
+              retryable: true
+    InternalError:
+      description: Unexpected internal service error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: INTERNAL_ERROR
+              message: An unexpected internal error occurred
+              request_id: null
+              retryable: false
+    ServiceUnavailable:
+      description: Service or configured providers unavailable
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: AI_SERVICE_NOT_READY
+              message: AI service configuration is not ready
+              request_id: req-example-text-001
+              retryable: true

@@ -1,0 +1,15 @@
+{
+  "name": "@workbench/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "lint": "redocly lint openapi/openapi.yaml openapi/ai-service.openapi.yaml",
+    "generate:ai-service": "openapi-ts -f openapi-ts.config.ts"
+  },
+  "devDependencies": {
+    "@hey-api/openapi-ts": "0.99.0",
+    "@redocly/cli": "2.51.2",
+    "typescript": "^5.7.2"
+  }
+}

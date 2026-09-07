@@ -1,0 +1,28 @@
+[profiles.mock]
+provider = "mock"
+model = "mock-text-v1"
+enabled = true
+modes = ["text"]
+temperature = 0.0
+default_max_output_tokens = 1024
+max_output_tokens_limit = 4096
+timeout_seconds = 30.0
+max_retries = 0
+structured_output_method = "function_calling"
+
+[profiles.primary]
+provider = "openai_compatible"
+model = "test-model"
+base_url = "https://example.invalid/v1"
+api_key_env = "PRIMARY_LLM_API_KEY"
+enabled = false
+modes = ["text", "json_schema"]
+temperature = 0.0
+default_max_output_tokens = 2048
+max_output_tokens_limit = 8192
+timeout_seconds = 60.0
+max_retries = 0
+structured_output_method = "function_calling"
+
+[roles]
+default = ["mock"]
