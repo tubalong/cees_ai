@@ -149,3 +149,7 @@ pgvector 扩展二进制由数据库公共 Compose 中的 PostgreSQL 镜像提�
 - Staging 与 Production 不得共享数据库、Redis、COS 前缀、JWT Secret、内部 Token 或模型 API Key。
 - ai-service 在 Staging/Production 均不映射宿主机端口，只允许同一 Compose 项目内的 API 访问。
 - 腾讯云 COS 不在 Compose 中运行，其最小权限策略见 [tencent-cos/README.md](tencent-cos/README.md)。
+腾讯云 COS 不在 Compose 中启动，配置与最小权限策略见 [tencent-cos/README.md](tencent-cos/README.md)。
+# 基础设施
+
+PostgreSQL 使用 `pgvector/pgvector:pg16`，因为 Prisma 模型中的 `DocumentChunk.embedding` 依赖 `vector` 类型。完整基线迁移 `0001_init` 会执行 `CREATE EXTENSION IF NOT EXISTS vector`；托管 PostgreSQL 环境必须提前确认允许启用 pgvector。

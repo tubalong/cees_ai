@@ -33,6 +33,7 @@ async function bootstrap(): Promise<void> {
         .setTitle('CEES AI API')
         .setVersion('1.0')
         .addBearerAuth()
+        .addBearerAuth({ type: 'http', scheme: 'bearer', bearerFormat: 'JWT' }, 'platformBearerAuth')
         .build();
     SwaggerModule.setup('api/docs', app, SwaggerModule.createDocument(app, swaggerConfig));
     await app.listen(Number(process.env.API_PORT ?? 3000));

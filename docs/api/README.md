@@ -8,11 +8,13 @@
 ## 设计草案
 
 - [IAM、租户、RBAC、ACL 与审计 API 设计草案](iam-authorization-api.md)
+- [平台租户管理与租户账号激活](platform-tenant-administration.md)
 
 ## 已实现接口
 
 ```text
 POST /api/v1/auth/login
+POST /api/v1/auth/activate
 POST /api/v1/auth/refresh
 POST /api/v1/auth/logout
 GET  /api/v1/auth/me
@@ -45,9 +47,34 @@ DELETE /api/v1/resources/{resourceId}/acl/{aclEntryId}?version={version}
 
 GET /api/v1/audit-events
 GET /api/v1/audit-events/{auditEventId}
+
+POST /api/v1/platform/auth/login
+POST /api/v1/platform/auth/refresh
+POST /api/v1/platform/auth/logout
+GET  /api/v1/platform/auth/me
+
+GET    /api/v1/platform/tenants
+POST   /api/v1/platform/tenants
+GET    /api/v1/platform/tenants/{tenantId}
+PATCH  /api/v1/platform/tenants/{tenantId}
+POST   /api/v1/platform/tenants/{tenantId}/suspend
+POST   /api/v1/platform/tenants/{tenantId}/restore
+GET    /api/v1/platform/tenants/{tenantId}/administrators
+POST   /api/v1/platform/tenants/{tenantId}/administrators
+DELETE /api/v1/platform/tenants/{tenantId}/administrators/{membershipId}
+
+GET    /api/v1/tenants/current/invitations
+POST   /api/v1/tenants/current/invitations
+DELETE /api/v1/tenants/current/invitations/{invitationId}
+POST   /api/v1/tenants/current/account-suggestions
+PATCH  /api/v1/tenants/current/members/{membershipId}/account
+POST   /api/v1/tenants/current/members/{membershipId}/credential-reset
+
+GET /api/v1/platform/audit-events
+GET /api/v1/platform/audit-events/{auditEventId}
 ```
 
-截至 2026-09-07，第一期 Auth、Tenant/Member、RBAC、Document、ACL 和 Audit 共 28 个接口均已实现。
+截至 2026-09-07，身份、租户、RBAC、ACL、审计、平台租户管理和租户账号激活接口均已实现。
 
 - `refresh` 每次成功后都会轮换 Refresh Token，旧 Token 立即失效；
 - `logout` 撤销当前 Access Token 对应的 Session；
@@ -82,6 +109,27 @@ GET /api/v1/audit-events/{auditEventId}
 - ACL 仅支持 `MEMBERSHIP`、`ROLE` 主体和 `document.read/update/delete/share` 权限，可设置过期时间；
 - Document 修改、删除和 ACL 撤销使用 `version` 乐观锁；Document 删除为软删除，ACL 正常撤销为硬删除；
 - Document 与 Resource 共用同一个 ID，创建、修改、删除和 ACL 变更均写入审计日志。
+
+## 0.6.0 迁移说明
+
+- 新增独立 PlatformAdministrator、PlatformAuthSession 和平台 JWT，不复用租户 `tenant_admin` 身份；
+- 新增平台租户创建、查询、修改、停用、恢复和管理员管理接口；
+- 新租户会初始化 `tenant_admin` 系统角色及完整权限目录；
+- 新增 TenantInvitation 与公开接受邀请接口，新用户接受时设置密码；
+- TenantStatus 新增 `PENDING_ACTIVATION`；首位管理员接受邀请后自动激活租户；
+- 新增 PlatformAuditLog，平台操作与租户审计保持隔离；
+- 数据库迁移为 `0002_platform_tenant_administration`，契约版本提升为 `0.6.0`。
+
+## 0.7.0 迁移说明
+
+- 租户登录由 `tenantCode + email + password` 改为 `tenantCode + account + password`；
+- 账号只允许 3～32 位英文字母和数字，同一租户内按小写唯一；
+- TenantMembership 保存租户级密码、登录失败次数、锁定时间和最后登录时间；
+- PlatformAdministrator 使用独立且全局唯一的平台账号与密码；
+- TenantInvitation 从邮箱邀请改为账号激活和凭证重置令牌；
+- 新增拼音账号建议、账号修改和管理员凭证重置接口；
+- 手机和邮箱绑定、自助密码找回暂不实现；忘记密码由租户管理员签发新激活令牌；
+- 数据库迁移仍在未发布的 `0002_platform_tenant_administration` 中同步调整，契约版本提升为 `0.7.0`。
 - `packages/contracts/openapi/openapi.yaml` 是 NestJS 公开 API 的事实源。
 - `packages/contracts/openapi/ai-service.openapi.yaml` 是 NestJS 调用 ai-service 的内部契约。
 - 桌面端和移动端不得调用 ai-service 的通用 invoke 或 stream。

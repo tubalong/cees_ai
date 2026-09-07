@@ -19,9 +19,9 @@ describe('AuthService', () => {
         const jwtService = { signAsync: jest.fn().mockResolvedValue('access-token') } as unknown as JwtService;
         const passwordHash = await argon2.hash('correct-password');
         prisma.tenant.findUnique.mockResolvedValue(activeTenant());
-        prisma.tenantMembership.findFirst.mockResolvedValue({
-            ...activeMembership(),
-            user: activeUser(passwordHash),
+        prisma.tenantMembership.findUnique.mockResolvedValue({
+            ...activeMembership(passwordHash),
+            user: activeUser(),
         });
         prisma.membershipRole.findMany.mockResolvedValue([{ roleId: '20000000-0000-0000-0000-000000000001' }]);
         prisma.role.findMany.mockResolvedValue([
@@ -33,7 +33,7 @@ describe('AuthService', () => {
         const result = await service.login(
             {
                 tenantCode: 'CEES',
-                email: 'Admin@Example.com',
+                account: 'Admin',
                 password: 'correct-password',
                 deviceName: 'Test Device',
             },
@@ -44,6 +44,7 @@ describe('AuthService', () => {
         expect(result.refreshToken).toEqual(expect.any(String));
         expect(result.membership).toEqual({
             id: '50000000-0000-0000-0000-000000000001',
+            account: 'admin',
             status: 'ACTIVE',
             roles: ['tenant_admin'],
         });
@@ -65,19 +66,19 @@ describe('AuthService', () => {
         const prisma = createPrismaMock();
         const jwtService = { signAsync: jest.fn() } as unknown as JwtService;
         prisma.tenant.findUnique.mockResolvedValue(activeTenant());
-        prisma.tenantMembership.findFirst.mockResolvedValue({
-            ...activeMembership(),
-            user: activeUser(await argon2.hash('different-password')),
+        prisma.tenantMembership.findUnique.mockResolvedValue({
+            ...activeMembership(await argon2.hash('different-password')),
+            user: activeUser(),
         });
 
         const service = new AuthService(prisma as unknown as PrismaService, jwtService);
         await expect(service.login(
-            { tenantCode: 'cees', email: 'admin@example.com', password: 'wrong-password' },
+            { tenantCode: 'cees', account: 'admin', password: 'wrong-password' },
             { requestId: 'request-id' },
         )).rejects.toBeInstanceOf(UnauthorizedException);
 
-        expect(prisma.user.update).toHaveBeenCalledWith({
-            where: { id: '10000000-0000-0000-0000-000000000002' },
+        expect(prisma.tenantMembership.update).toHaveBeenCalledWith({
+            where: { id: '50000000-0000-0000-0000-000000000001' },
             data: { failedLoginCount: 1 },
         });
         expect(prisma.auditLog.create).toHaveBeenCalledWith({
@@ -89,24 +90,21 @@ describe('AuthService', () => {
         const prisma = createPrismaMock();
         const jwtService = { signAsync: jest.fn() } as unknown as JwtService;
         prisma.tenant.findUnique.mockResolvedValue(activeTenant());
-        prisma.tenantMembership.findFirst.mockResolvedValue({
-            ...activeMembership(),
-            user: {
-                ...activeUser(await argon2.hash('different-password')),
-                failedLoginCount: 4,
-            },
+        prisma.tenantMembership.findUnique.mockResolvedValue({
+            ...activeMembership(await argon2.hash('different-password')),
+            failedLoginCount: 4,
+            user: activeUser(),
         });
 
         const service = new AuthService(prisma as unknown as PrismaService, jwtService);
         await expect(service.login(
-            { tenantCode: 'cees', email: 'admin@example.com', password: 'wrong-password' },
+            { tenantCode: 'cees', account: 'admin', password: 'wrong-password' },
             { requestId: 'request-id' },
         )).rejects.toBeInstanceOf(UnauthorizedException);
 
-        expect(prisma.user.update).toHaveBeenCalledWith({
-            where: { id: '10000000-0000-0000-0000-000000000002' },
+        expect(prisma.tenantMembership.update).toHaveBeenCalledWith({
+            where: { id: '50000000-0000-0000-0000-000000000001' },
             data: {
-                status: UserStatus.LOCKED,
                 failedLoginCount: 5,
                 lockedUntil: expect.any(Date),
             },
@@ -119,7 +117,7 @@ describe('AuthService', () => {
         const currentRefreshToken = 'r'.repeat(64);
         prisma.authSession.findUnique.mockResolvedValue(activeSession(hashToken(currentRefreshToken)));
         prisma.tenant.findUnique.mockResolvedValue(activeTenant());
-        prisma.user.findUnique.mockResolvedValue(activeUser('password-hash'));
+        prisma.user.findUnique.mockResolvedValue(activeUser());
         prisma.tenantMembership.findUnique.mockResolvedValue(activeMembership());
         prisma.authSession.updateMany.mockResolvedValue({ count: 1 });
 
@@ -154,7 +152,7 @@ describe('AuthService', () => {
         const currentRefreshToken = 'r'.repeat(64);
         prisma.authSession.findUnique.mockResolvedValue(activeSession(hashToken(currentRefreshToken)));
         prisma.tenant.findUnique.mockResolvedValue(activeTenant());
-        prisma.user.findUnique.mockResolvedValue(activeUser('password-hash'));
+        prisma.user.findUnique.mockResolvedValue(activeUser());
         prisma.tenantMembership.findUnique.mockResolvedValue(activeMembership());
         prisma.authSession.updateMany.mockResolvedValue({ count: 0 });
 
@@ -170,7 +168,7 @@ describe('AuthService', () => {
         const jwtService = { signAsync: jest.fn() } as unknown as JwtService;
         prisma.authSession.findUnique.mockResolvedValue(activeSession('refresh-hash'));
         prisma.tenant.findUnique.mockResolvedValue(activeTenant());
-        prisma.user.findUnique.mockResolvedValue(activeUser('password-hash'));
+        prisma.user.findUnique.mockResolvedValue(activeUser());
         prisma.tenantMembership.findUnique.mockResolvedValue(activeMembership());
         prisma.membershipRole.findMany.mockResolvedValue([{ roleId: '20000000-0000-0000-0000-000000000001' }]);
         prisma.role.findMany.mockResolvedValue([
@@ -233,7 +231,6 @@ describe('AuthService', () => {
         expect(service.me(authenticatedPrincipal())).toEqual({
             user: {
                 id: '10000000-0000-0000-0000-000000000002',
-                email: 'admin@example.com',
                 displayName: 'Administrator',
             },
             tenant: {
@@ -243,6 +240,7 @@ describe('AuthService', () => {
             },
             membership: {
                 id: '50000000-0000-0000-0000-000000000001',
+                account: 'admin',
                 status: 'ACTIVE',
                 roles: ['tenant_admin'],
             },
@@ -255,7 +253,7 @@ function createPrismaMock(): Record<string, any> {
     const prisma: Record<string, any> = {
         tenant: { findUnique: jest.fn() },
         user: { findUnique: jest.fn(), update: jest.fn() },
-        tenantMembership: { findFirst: jest.fn(), findUnique: jest.fn() },
+        tenantMembership: { findUnique: jest.fn(), update: jest.fn() },
         membershipRole: { findMany: jest.fn() },
         role: { findMany: jest.fn() },
         rolePermission: { findMany: jest.fn() },
@@ -278,16 +276,13 @@ function activeTenant(): Record<string, unknown> {
     };
 }
 
-function activeUser(passwordHash: string): Record<string, unknown> {
+function activeUser(): Record<string, unknown> {
     return {
         id: '10000000-0000-0000-0000-000000000002',
         email: 'admin@example.com',
         normalizedEmail: 'admin@example.com',
-        passwordHash,
         displayName: 'Administrator',
         status: UserStatus.ACTIVE,
-        failedLoginCount: 0,
-        lockedUntil: null,
         deletedAt: null,
     };
 }
@@ -314,7 +309,7 @@ function authenticatedPrincipal(): AuthenticatedPrincipal {
         tenantId: '10000000-0000-0000-0000-000000000001',
         membershipId: '50000000-0000-0000-0000-000000000001',
         sessionId: '30000000-0000-0000-0000-000000000001',
-        email: 'admin@example.com',
+        account: 'admin',
         displayName: 'Administrator',
         tenantCode: 'cees',
         tenantName: 'CEES',
@@ -323,13 +318,19 @@ function authenticatedPrincipal(): AuthenticatedPrincipal {
     };
 }
 
-function activeMembership(): Record<string, unknown> {
+function activeMembership(passwordHash = 'password-hash'): Record<string, unknown> {
     return {
         id: '50000000-0000-0000-0000-000000000001',
         tenantId: '10000000-0000-0000-0000-000000000001',
         userId: '10000000-0000-0000-0000-000000000002',
         departmentId: null,
         displayName: 'Tenant Administrator',
+        account: 'admin',
+        normalizedAccount: 'admin',
+        passwordHash,
+        failedLoginCount: 0,
+        lockedUntil: null,
+        lastLoginAt: null,
         status: MembershipStatus.ACTIVE,
         joinedAt: new Date('2026-09-04T00:00:00.000Z'),
         deletedAt: null,

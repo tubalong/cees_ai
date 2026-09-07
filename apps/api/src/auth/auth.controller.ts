@@ -17,7 +17,7 @@ export class AuthController {
     @Post('login')
     @HttpCode(HttpStatus.OK)
     @ApiOkResponse({ description: '登录成功' })
-    @ApiUnauthorizedResponse({ description: '邮箱或密码错误' })
+    @ApiUnauthorizedResponse({ description: '账号或密码错误' })
     async login(@Body() input: LoginDto, @Req() request: Request): Promise<LoginResult> {
         return this.authService.login(input, getRequestMetadata(request));
     }

@@ -7,12 +7,30 @@ export function requireAccessTokenSecret(): string {
     return secret;
 }
 
+export function requirePlatformAccessTokenSecret(): string {
+    const secret = process.env.JWT_PLATFORM_ACCESS_SECRET
+        ?? (process.env.NODE_ENV === 'production' ? undefined : process.env.JWT_ACCESS_SECRET);
+    if (!secret) throw new Error('JWT_PLATFORM_ACCESS_SECRET is required');
+    if (process.env.NODE_ENV === 'production' && secret.startsWith('change_me')) {
+        throw new Error('JWT_PLATFORM_ACCESS_SECRET must be replaced in production');
+    }
+    return secret;
+}
+
 export function jwtIssuer(): string {
     return process.env.JWT_ISSUER ?? 'cees-api';
 }
 
 export function jwtAudience(): string {
     return process.env.JWT_AUDIENCE ?? 'cees-client';
+}
+
+export function platformJwtIssuer(): string {
+    return process.env.JWT_PLATFORM_ISSUER ?? 'cees-platform-api';
+}
+
+export function platformJwtAudience(): string {
+    return process.env.JWT_PLATFORM_AUDIENCE ?? 'cees-platform-client';
 }
 
 export function parseDurationSeconds(value: string | undefined, fallback: number): number {

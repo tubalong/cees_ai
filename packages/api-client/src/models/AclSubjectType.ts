@@ -2,4 +2,7 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
-export type AclSubjectType = 'MEMBERSHIP' | 'ROLE';
+export enum AclSubjectType {
+    MEMBERSHIP = 'MEMBERSHIP',
+    ROLE = 'ROLE',
+}

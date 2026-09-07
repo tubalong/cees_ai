@@ -1,16 +1,17 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { AuditOutcome, MembershipStatus, Prisma } from '@prisma/client';
+import { normalizeAccount } from '../auth/account';
 import { PrismaService } from '../database/prisma.service';
+import { TENANT_ADMIN_ROLE_CODE } from '../rbac/permission-catalog';
 import {
     ListTenantMembersQueryDto,
     ReplaceTenantMemberRolesDto,
     UpdateTenantDto,
     UpdateTenantMemberDto,
+    UpdateTenantMemberAccountDto,
 } from './dto';
 import { TenantContext } from './tenant-context';
 import { TenantMemberListResult, TenantMemberResult, TenantResult } from './tenant.types';
-
-const TENANT_ADMIN_ROLE_CODE = 'tenant_admin';
 
 const memberInclude = {
     user: true,
@@ -94,7 +95,7 @@ export class TenantService {
                 OR: keyword
                     ? [
                         { displayName: { contains: keyword, mode: 'insensitive' } },
-                        { user: { email: { contains: keyword, mode: 'insensitive' } } },
+                        { account: { contains: keyword, mode: 'insensitive' } },
                         { user: { displayName: { contains: keyword, mode: 'insensitive' } } },
                     ]
                     : undefined,
@@ -124,6 +125,12 @@ export class TenantService {
             throw new BadRequestException({ code: 'MEMBER_UPDATE_EMPTY', message: '至少提供一个需要修改的字段' });
         }
         const member = await this.requireMember(context.tenantId, membershipId);
+        if (input.status === MembershipStatus.PENDING_ACTIVATION) {
+            throw new BadRequestException({
+                code: 'TENANT_MEMBER_STATUS_INVALID',
+                message: '待激活状态只能通过凭证重置流程设置',
+            });
+        }
         if (input.status === MembershipStatus.DISABLED && membershipId === context.membershipId) {
             throw this.selfOperationConflict();
         }
@@ -176,6 +183,64 @@ export class TenantService {
                             status: input.status ?? null,
                         },
                     },
+                },
+            });
+        });
+        return this.getMember(membershipId);
+    }
+
+    async updateMemberAccount(
+        membershipId: string,
+        input: UpdateTenantMemberAccountDto,
+    ): Promise<TenantMemberResult> {
+        const context = this.tenantContext.require();
+        const member = await this.requireMember(context.tenantId, membershipId);
+        const account = normalizeAccount(input.account);
+        if (member.normalizedAccount === account) return toMemberResult(member);
+
+        const conflict = await this.prisma.tenantMembership.findUnique({
+            where: { tenantId_normalizedAccount: { tenantId: context.tenantId, normalizedAccount: account } },
+            select: { id: true },
+        });
+        if (conflict) {
+            throw new ConflictException({
+                code: 'TENANT_ACCOUNT_ALREADY_EXISTS',
+                message: `账号 ${account} 已被当前租户使用`,
+            });
+        }
+
+        const now = new Date();
+        await this.prisma.$transaction(async (transaction) => {
+            const updated = await transaction.tenantMembership.updateMany({
+                where: {
+                    id: membershipId,
+                    tenantId: context.tenantId,
+                    version: input.version,
+                    deletedAt: null,
+                },
+                data: {
+                    account,
+                    normalizedAccount: account,
+                    updatedBy: context.userId,
+                    version: { increment: 1 },
+                },
+            });
+            if (updated.count !== 1) throw this.versionConflict();
+            await transaction.authSession.updateMany({
+                where: { tenantId: context.tenantId, membershipId, revokedAt: null },
+                data: { revokedAt: now },
+            });
+            await transaction.auditLog.create({
+                data: {
+                    tenantId: context.tenantId,
+                    actorUserId: context.userId,
+                    actorMembershipId: context.membershipId,
+                    action: 'TENANT_MEMBER_ACCOUNT_CHANGED',
+                    outcome: AuditOutcome.SUCCESS,
+                    resourceType: 'TENANT_MEMBERSHIP',
+                    resourceId: membershipId,
+                    requestId: context.requestId,
+                    metadata: { before: { account: member.account }, after: { account } },
                 },
             });
         });
@@ -366,9 +431,9 @@ function toTenantResult(tenant: {
 function toMemberResult(member: MemberWithRoles): TenantMemberResult {
     return {
         id: member.id,
+        account: member.account,
         user: {
             id: member.user.id,
-            email: member.user.email,
             displayName: member.displayName ?? member.user.displayName,
         },
         departmentId: member.departmentId,
@@ -392,6 +457,7 @@ function isTenantAdmin(member: MemberWithRoles): boolean {
 function memberSnapshot(member: MemberWithRoles): Prisma.InputJsonObject {
     return {
         membershipId: member.id,
+        account: member.account,
         displayName: member.displayName,
         departmentId: member.departmentId,
         status: member.status,

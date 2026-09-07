@@ -19,8 +19,23 @@ jobs:
     name: Node (API + desktop)
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: cees_ai_test
+          POSTGRES_USER: cees_test
+          POSTGRES_PASSWORD: change_me
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U cees_test -d cees_ai_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     env:
       ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      DATABASE_URL: postgresql://cees_test:change_me@localhost:5432/cees_ai_test?schema=public
 
     steps:
       - name: Checkout repository
@@ -49,6 +64,9 @@ jobs:
 
       - name: Generate Prisma client
         run: pnpm --filter @cees/api prisma:generate
+
+      - name: Validate Prisma migrations
+        run: pnpm --filter @cees/api exec prisma migrate deploy
 
       - name: Test API
         run: pnpm --filter @cees/api test

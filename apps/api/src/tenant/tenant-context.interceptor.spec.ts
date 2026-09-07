@@ -37,7 +37,7 @@ function authenticatedPrincipal(): AuthenticatedPrincipal {
         tenantId: '10000000-0000-0000-0000-000000000001',
         membershipId: '50000000-0000-0000-0000-000000000001',
         sessionId: '30000000-0000-0000-0000-000000000001',
-        email: 'admin@example.com',
+        account: 'admin',
         displayName: 'Administrator',
         tenantCode: 'cees',
         tenantName: 'CEES',

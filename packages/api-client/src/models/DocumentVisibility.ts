@@ -2,4 +2,7 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
-export type DocumentVisibility = 'PRIVATE' | 'TENANT';
+export enum DocumentVisibility {
+    PRIVATE = 'PRIVATE',
+    TENANT = 'TENANT',
+}

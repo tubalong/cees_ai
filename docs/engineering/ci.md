@@ -6,7 +6,7 @@
 
 | GitHub 检查名称 | 验证内容 |
 | --- | --- |
-| `CI / Node (API + desktop)` | 锁定安装、生成 AI 客户端构建、Prisma Client、NestJS Jest/build、桌面端 build |
+| `CI / Node (API + desktop)` | 锁定安装、生成 AI 客户端、Prisma Client、在临时 pgvector PostgreSQL 执行全部 migration、NestJS Jest/build、桌面端 build |
 | `CI / Python (AI service)` | Python 3.14、uv 锁定安装、Ruff、应用导入、pytest |
 | `CI / Contracts` | OpenAPI lint、TypeScript/Pydantic 生成物漂移检查 |
 | `CI / Flutter (mobile)` | Flutter 依赖、静态分析和存在测试时的 flutter test |

@@ -12,9 +12,9 @@ export interface TenantResult {
 
 export interface TenantMemberResult {
     id: string;
+    account: string;
     user: {
         id: string;
-        email: string;
         displayName: string;
     };
     departmentId: string | null;

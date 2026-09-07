@@ -8,8 +8,25 @@ datasource db {
 }
 
 enum TenantStatus {
+  PENDING_ACTIVATION
   ACTIVE
   SUSPENDED
+}
+
+enum PlatformRole {
+  SUPER_ADMIN
+}
+
+enum PlatformAdministratorStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum TenantInvitationStatus {
+  PENDING
+  ACCEPTED
+  REVOKED
+  EXPIRED
 }
 
 enum UserStatus {
@@ -19,6 +36,7 @@ enum UserStatus {
 }
 
 enum MembershipStatus {
+  PENDING_ACTIVATION
   ACTIVE
   DISABLED
 }
@@ -98,6 +116,7 @@ model Tenant {
   resources Resource[]
   managedDocuments ManagedDocument[]
   resourceAcls ResourceAcl[]
+  invitations TenantInvitation[]
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
   deletedAt DateTime? @map("deleted_at")
@@ -107,9 +126,9 @@ model Tenant {
 
 model User {
   id String @id @default(uuid()) @db.Uuid
-  email String
-  normalizedEmail String @unique @map("normalized_email")
-  passwordHash String @map("password_hash")
+  email String?
+  normalizedEmail String? @unique @map("normalized_email")
+  passwordHash String? @map("password_hash")
   displayName String @map("display_name")
   status UserStatus @default(ACTIVE)
   failedLoginCount Int @default(0) @map("failed_login_count")
@@ -117,6 +136,9 @@ model User {
   lastLoginAt DateTime? @map("last_login_at")
   memberships TenantMembership[]
   authSessions AuthSession[]
+  platformAdministrator PlatformAdministrator?
+  platformAuthSessions PlatformAuthSession[]
+  acceptedTenantInvitations TenantInvitation[] @relation("AcceptedTenantInvitations")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
   createdBy String? @map("created_by") @db.Uuid
@@ -135,7 +157,13 @@ model TenantMembership {
   departmentId String? @map("department_id") @db.Uuid
   department Department? @relation(fields: [departmentId], references: [id])
   displayName String? @map("display_name")
+  account String
+  normalizedAccount String @map("normalized_account")
+  passwordHash String? @map("password_hash")
   status MembershipStatus @default(ACTIVE)
+  failedLoginCount Int @default(0) @map("failed_login_count")
+  lockedUntil DateTime? @map("locked_until")
+  lastLoginAt DateTime? @map("last_login_at")
   joinedAt DateTime @default(now()) @map("joined_at")
   authSessions AuthSession[]
   membershipRoles MembershipRole[]
@@ -147,6 +175,7 @@ model TenantMembership {
   deletedAt DateTime? @map("deleted_at")
   version Int @default(1)
   @@unique([tenantId, userId])
+  @@unique([tenantId, normalizedAccount])
   @@index([tenantId, departmentId])
   @@index([tenantId, status])
   @@map("tenant_memberships")
@@ -173,6 +202,50 @@ model AuthSession {
   @@index([tenantId, membershipId])
   @@index([expiresAt])
   @@map("auth_sessions")
+}
+
+model PlatformAdministrator {
+  id String @id @default(uuid()) @db.Uuid
+  userId String @unique @map("user_id") @db.Uuid
+  user User @relation(fields: [userId], references: [id])
+  account String
+  normalizedAccount String @unique @map("normalized_account")
+  passwordHash String @map("password_hash")
+  role PlatformRole @default(SUPER_ADMIN)
+  status PlatformAdministratorStatus @default(ACTIVE)
+  failedLoginCount Int @default(0) @map("failed_login_count")
+  lockedUntil DateTime? @map("locked_until")
+  lastLoginAt DateTime? @map("last_login_at")
+  sessions PlatformAuthSession[]
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  createdBy String? @map("created_by") @db.Uuid
+  updatedBy String? @map("updated_by") @db.Uuid
+  deletedAt DateTime? @map("deleted_at")
+  version Int @default(1)
+  @@index([status, deletedAt])
+  @@map("platform_administrators")
+}
+
+model PlatformAuthSession {
+  id String @id @default(uuid()) @db.Uuid
+  platformAdministratorId String @map("platform_administrator_id") @db.Uuid
+  platformAdministrator PlatformAdministrator @relation(fields: [platformAdministratorId], references: [id])
+  userId String @map("user_id") @db.Uuid
+  user User @relation(fields: [userId], references: [id])
+  refreshTokenHash String @unique @map("refresh_token_hash")
+  deviceName String? @map("device_name")
+  ipAddress String? @map("ip_address")
+  userAgent String? @map("user_agent")
+  expiresAt DateTime @map("expires_at")
+  lastUsedAt DateTime? @map("last_used_at")
+  revokedAt DateTime? @map("revoked_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  @@index([platformAdministratorId, revokedAt])
+  @@index([userId, revokedAt])
+  @@index([expiresAt])
+  @@map("platform_auth_sessions")
 }
 
 model Department {
@@ -203,6 +276,7 @@ model Role {
   dataScope DataScope @default(SELF) @map("data_scope")
   membershipRoles MembershipRole[]
   rolePermissions RolePermission[]
+  invitationRoles TenantInvitationRole[]
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
   createdBy String? @map("created_by") @db.Uuid
@@ -212,6 +286,44 @@ model Role {
   @@unique([tenantId, code])
   @@index([tenantId, deletedAt])
   @@map("roles")
+}
+
+model TenantInvitation {
+  id String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  account String
+  normalizedAccount String @map("normalized_account")
+  displayName String @map("display_name")
+  targetMembershipId String? @map("target_membership_id") @db.Uuid
+  tokenHash String @unique @map("token_hash")
+  status TenantInvitationStatus @default(PENDING)
+  isInitialAdministrator Boolean @default(false) @map("is_initial_administrator")
+  expiresAt DateTime @map("expires_at")
+  acceptedAt DateTime? @map("accepted_at")
+  acceptedByUserId String? @map("accepted_by_user_id") @db.Uuid
+  acceptedByUser User? @relation("AcceptedTenantInvitations", fields: [acceptedByUserId], references: [id])
+  invitedByUserId String @map("invited_by_user_id") @db.Uuid
+  revokedAt DateTime? @map("revoked_at")
+  roles TenantInvitationRole[]
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  @@index([tenantId, status, createdAt])
+  @@index([tenantId, normalizedAccount, status])
+  @@index([expiresAt])
+  @@map("tenant_invitations")
+}
+
+model TenantInvitationRole {
+  id String @id @default(uuid()) @db.Uuid
+  invitationId String @map("invitation_id") @db.Uuid
+  invitation TenantInvitation @relation(fields: [invitationId], references: [id], onDelete: Cascade)
+  roleId String @map("role_id") @db.Uuid
+  role Role @relation(fields: [roleId], references: [id])
+  createdAt DateTime @default(now()) @map("created_at")
+  @@unique([invitationId, roleId])
+  @@index([roleId])
+  @@map("tenant_invitation_roles")
 }
 
 model Permission {
@@ -658,4 +770,26 @@ model AuditLog {
   @@index([tenantId, requestId])
   @@index([tenantId, resourceType, resourceId])
   @@map("audit_logs")
+}
+
+model PlatformAuditLog {
+  id String @id @default(uuid()) @db.Uuid
+  actorUserId String? @map("actor_user_id") @db.Uuid
+  actorPlatformAdministratorId String? @map("actor_platform_administrator_id") @db.Uuid
+  action String
+  outcome AuditOutcome @default(SUCCESS)
+  resourceType String @map("resource_type")
+  resourceId String? @map("resource_id") @db.Uuid
+  requestId String @map("request_id")
+  ipAddress String? @map("ip_address")
+  userAgent String? @map("user_agent")
+  metadata Json?
+  createdAt DateTime @default(now()) @map("created_at")
+  @@index([createdAt, id])
+  @@index([action, createdAt])
+  @@index([outcome, createdAt])
+  @@index([actorPlatformAdministratorId, createdAt], map: "platform_audit_actor_admin_created_idx")
+  @@index([requestId])
+  @@index([resourceType, resourceId])
+  @@map("platform_audit_logs")
 }

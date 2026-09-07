@@ -4,6 +4,7 @@ import { AuditOutcome, MembershipStatus, TenantStatus, UserStatus } from '@prism
 import * as argon2 from 'argon2';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { PrismaService } from '../database/prisma.service';
+import { normalizeAccount } from './account';
 import { jwtAudience, jwtIssuer, parseDurationSeconds, requireAccessTokenSecret } from './auth.config';
 import {
     AccessTokenPayload,
@@ -42,7 +43,7 @@ export class AuthService {
 
     async login(input: LoginDto, metadata: LoginRequestMetadata): Promise<LoginResult> {
         const tenantCode = input.tenantCode.trim().toLowerCase();
-        const email = input.email.trim().toLowerCase();
+        const account = normalizeAccount(input.account);
         const tenant = await this.prisma.tenant.findUnique({ where: { code: tenantCode } });
 
         if (!tenant || tenant.deletedAt || tenant.status !== TenantStatus.ACTIVE) {
@@ -50,54 +51,48 @@ export class AuthService {
             throw this.invalidCredentials();
         }
 
-        const membership = await this.prisma.tenantMembership.findFirst({
-            where: {
-                tenantId: tenant.id,
-                deletedAt: null,
-                user: {
-                    normalizedEmail: email,
-                    deletedAt: null,
-                },
-            },
+        let membership = await this.prisma.tenantMembership.findUnique({
+            where: { tenantId_normalizedAccount: { tenantId: tenant.id, normalizedAccount: account } },
             include: { user: true },
         });
 
-        if (!membership) {
+        if (!membership || membership.deletedAt || membership.user.deletedAt) {
             await this.verifyDummyPassword(input.password);
             await this.writeLoginFailure(tenant.id, undefined, undefined, metadata, 'INVALID_CREDENTIALS');
             throw this.invalidCredentials();
         }
 
-        let user = membership.user;
+        const user = membership.user;
         if (membership.status !== MembershipStatus.ACTIVE) {
-            await this.verifyPassword(user.passwordHash, input.password);
+            await this.verifyPassword(membership.passwordHash, input.password);
             await this.writeLoginFailure(tenant.id, user.id, membership.id, metadata, 'MEMBERSHIP_UNAVAILABLE');
             throw this.invalidCredentials();
         }
 
         const now = new Date();
-        if (user.status === UserStatus.DISABLED) {
-            await this.verifyPassword(user.passwordHash, input.password);
+        if (user.status !== UserStatus.ACTIVE) {
+            await this.verifyPassword(membership.passwordHash, input.password);
             await this.writeLoginFailure(tenant.id, user.id, membership.id, metadata, 'ACCOUNT_UNAVAILABLE');
             throw this.invalidCredentials();
         }
 
-        if (user.status === UserStatus.LOCKED && (!user.lockedUntil || user.lockedUntil > now)) {
-            await this.verifyPassword(user.passwordHash, input.password);
+        if (membership.lockedUntil && membership.lockedUntil > now) {
+            await this.verifyPassword(membership.passwordHash, input.password);
             await this.writeLoginFailure(tenant.id, user.id, membership.id, metadata, 'ACCOUNT_LOCKED');
             throw this.invalidCredentials();
         }
 
-        if (user.status === UserStatus.LOCKED) {
-            user = await this.prisma.user.update({
-                where: { id: user.id },
-                data: { status: UserStatus.ACTIVE, failedLoginCount: 0, lockedUntil: null },
+        if (membership.lockedUntil) {
+            membership = await this.prisma.tenantMembership.update({
+                where: { id: membership.id },
+                data: { failedLoginCount: 0, lockedUntil: null },
+                include: { user: true },
             });
         }
 
-        const passwordValid = await this.verifyPassword(user.passwordHash, input.password);
+        const passwordValid = await this.verifyPassword(membership.passwordHash, input.password);
         if (!passwordValid) {
-            await this.recordPasswordFailure(user.id, user.failedLoginCount, now);
+            await this.recordPasswordFailure(membership.id, membership.failedLoginCount, now);
             await this.writeLoginFailure(tenant.id, user.id, membership.id, metadata, 'INVALID_CREDENTIALS');
             throw this.invalidCredentials();
         }
@@ -107,10 +102,9 @@ export class AuthService {
         const tokens = await this.issueTokenPair(user.id, tenant.id, membership.id, sessionId, now);
 
         await this.prisma.$transaction(async (transaction) => {
-            await transaction.user.update({
-                where: { id: user.id },
+            await transaction.tenantMembership.update({
+                where: { id: membership.id },
                 data: {
-                    status: UserStatus.ACTIVE,
                     failedLoginCount: 0,
                     lockedUntil: null,
                     lastLoginAt: now,
@@ -150,11 +144,10 @@ export class AuthService {
             ...toPublicTokenPair(tokens),
             user: {
                 id: user.id,
-                email: user.email,
                 displayName: membership.displayName ?? user.displayName,
             },
             tenant: { id: tenant.id, code: tenant.code, name: tenant.name },
-            membership: { id: membership.id, status: 'ACTIVE', roles },
+            membership: { id: membership.id, account: membership.account, status: 'ACTIVE', roles },
         };
     }
 
@@ -259,7 +252,7 @@ export class AuthService {
             tenantId: tenant.id,
             membershipId: membership.id,
             sessionId: session.id,
-            email: user.email,
+            account: membership.account,
             displayName: membership.displayName ?? user.displayName,
             tenantCode: tenant.code,
             tenantName: tenant.name,
@@ -304,7 +297,6 @@ export class AuthService {
         return {
             user: {
                 id: principal.id,
-                email: principal.email,
                 displayName: principal.displayName,
             },
             tenant: {
@@ -314,6 +306,7 @@ export class AuthService {
             },
             membership: {
                 id: principal.membershipId,
+                account: principal.account,
                 status: 'ACTIVE',
                 roles: principal.roles,
             },
@@ -384,14 +377,13 @@ export class AuthService {
         };
     }
 
-    private async recordPasswordFailure(userId: string, currentFailures: number, now: Date): Promise<void> {
+    private async recordPasswordFailure(membershipId: string, currentFailures: number, now: Date): Promise<void> {
         const nextFailures = currentFailures + 1;
         const shouldLock = nextFailures >= MAX_LOGIN_FAILURES;
-        await this.prisma.user.update({
-            where: { id: userId },
+        await this.prisma.tenantMembership.update({
+            where: { id: membershipId },
             data: shouldLock
                 ? {
-                    status: UserStatus.LOCKED,
                     failedLoginCount: nextFailures,
                     lockedUntil: new Date(now.getTime() + LOGIN_LOCK_SECONDS * 1000),
                 }
@@ -430,14 +422,15 @@ export class AuthService {
         await argon2.verify(await this.dummyPasswordHash, password).catch(() => false);
     }
 
-    private async verifyPassword(passwordHash: string, password: string): Promise<boolean> {
+    private async verifyPassword(passwordHash: string | null, password: string): Promise<boolean> {
+        if (!passwordHash) return false;
         return argon2.verify(passwordHash, password).catch(() => false);
     }
 
     private invalidCredentials(): UnauthorizedException {
         return new UnauthorizedException({
             code: 'AUTH_INVALID_CREDENTIALS',
-            message: '邮箱或密码错误',
+            message: '账号或密码错误',
         });
     }
 
