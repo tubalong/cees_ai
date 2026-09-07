@@ -19,6 +19,8 @@ SCHEMAS_TO_COMPARE = {
     "ReadinessResponse",
     "InvokeRequest",
     "InvokeResponse",
+    "ExecutionMetadata",
+    "StreamRequest",
     "ErrorResponse",
 }
 

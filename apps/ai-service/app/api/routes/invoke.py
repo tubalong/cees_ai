@@ -13,6 +13,7 @@ from app.api.generated.models import (
     TextOutput,
     TokenUsage,
 )
+from app.api.request_validation import validate_message_content_size
 from app.core.config import ModelRole, OutputMode
 from app.core.errors import AIServiceError
 from app.core.runtime import AppRuntime
@@ -70,14 +71,7 @@ async def invoke_llm(payload: InvokeRequest, request: Request) -> InvokeResponse
             request_id=payload.request_id,
         )
 
-    total_message_bytes = sum(len(message.content.encode("utf-8")) for message in payload.messages)
-    if total_message_bytes > 256 * 1024:
-        raise AIServiceError(
-            "INVALID_INVOCATION_REQUEST",
-            "Message content exceeds 256 KiB",
-            status_code=422,
-            request_id=payload.request_id,
-        )
+    validate_message_content_size(payload.messages, payload.request_id)
 
     is_structured = isinstance(payload.response_format, JsonSchemaResponseFormat)
     output_mode = OutputMode.json_schema if is_structured else OutputMode.text
@@ -118,6 +112,7 @@ async def invoke_llm(payload: InvokeRequest, request: Request) -> InvokeResponse
             model=result.profile.model,
             fallback_count=result.fallback_count,
             latency_ms=result.latency_ms,
+            finish_reason=result.provider_result.finish_reason,
             token_usage=TokenUsage(
                 input_tokens=usage.input_tokens,
                 output_tokens=usage.output_tokens,
