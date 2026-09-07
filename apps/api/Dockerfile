@@ -4,10 +4,10 @@ WORKDIR /workspace
 ENV ELECTRON_SKIP_BINARY_DOWNLOAD=1
 
 COPY . .
-RUN pnpm install --frozen-lockfile --filter @workbench/api...
-RUN pnpm --filter @workbench/ai-service-client build \
-    && DATABASE_URL=postgresql://cees:change_me@localhost:5432/cees_ai pnpm --filter @workbench/api prisma:generate \
-    && pnpm --filter @workbench/api build
+RUN pnpm install --frozen-lockfile --filter @cees/api...
+RUN pnpm --filter @cees/ai-service-client build \
+    && DATABASE_URL=postgresql://cees:change_me@localhost:5432/cees_ai pnpm --filter @cees/api prisma:generate \
+    && pnpm --filter @cees/api build
 
 FROM node:24-alpine
 WORKDIR /workspace

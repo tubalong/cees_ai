@@ -30,7 +30,7 @@ async function bootstrap(): Promise<void> {
     app.useGlobalInterceptors(new ApiResponseInterceptor());
 
     const swaggerConfig = new DocumentBuilder()
-        .setTitle('AI Enterprise Workbench API')
+        .setTitle('CEES AI API')
         .setVersion('1.0')
         .addBearerAuth()
         .build();

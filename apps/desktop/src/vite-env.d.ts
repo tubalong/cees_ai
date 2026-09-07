@@ -1,5 +1,5 @@
 /// <reference types="vite/client" />
 
 interface Window {
-    workbench?: { platform: string; version: string };
+    cees?: { platform: string; version: string };
 }

@@ -9,11 +9,18 @@ electron/  # 主进程、preload、桌面能力（文件、通知、深链、自
 src/       # React 渲染层
 ```
 
-## 待初始化
+## 开发与构建
 
-骨架阶段尚未生成：`index.html`、`vite.config.ts`、`electron/main.ts`、`electron/preload.ts` 与 tsconfig。
-依赖按需通过 `pnpm --filter @cees/desktop add ...` 补充后启动：
+Electron 主进程、preload、Vite 渲染入口与 TypeScript 配置已经落地。preload 仅通过 `window.cees` 暴露平台和 Electron 版本信息；业务数据继续通过版本化 API 获取。
+
+开发启动：
 
 ```text
 pnpm --filter @cees/desktop dev
+```
+
+类型检查与生产构建：
+
+```text
+pnpm --filter @cees/desktop build
 ```

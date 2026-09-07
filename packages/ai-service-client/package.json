@@ -1,5 +1,5 @@
 {
-  "name": "@workbench/ai-service-client",
+  "name": "@cees/ai-service-client",
   "version": "0.1.0",
   "private": true,
   "type": "module",

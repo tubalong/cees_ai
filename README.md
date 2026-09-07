@@ -1,4 +1,4 @@
-# AI Enterprise Workbench
+# CEES AI
 
 企业协同应用仓库。NestJS 负责业务事实与审计，FastAPI ai-service 只提供与具体业务无关的 AI 运行时基础设施。
 

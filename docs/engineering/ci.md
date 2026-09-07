@@ -19,11 +19,11 @@
 pnpm install --frozen-lockfile
 pnpm contracts:lint
 pnpm contracts:check
-pnpm --filter @workbench/ai-service-client build
-pnpm --filter @workbench/api prisma:generate
-pnpm --filter @workbench/api test
-pnpm --filter @workbench/api build
-pnpm --filter @workbench/desktop build
+pnpm --filter @cees/ai-service-client build
+pnpm --filter @cees/api prisma:generate
+pnpm --filter @cees/api test
+pnpm --filter @cees/api build
+pnpm --filter @cees/desktop build
 ```
 
 AI 服务：
@@ -44,7 +44,7 @@ flutter analyze
 flutter test
 ```
 
-Prisma 基线可在空测试数据库上通过 `pnpm --filter @workbench/api prisma:migrate reset --force` 验证。数据库 URL 和所有 Secret 只从测试环境变量或平台 Secrets 注入。
+Prisma 基线可在空测试数据库上通过 `pnpm --filter @cees/api prisma:migrate reset --force` 验证。数据库 URL 和所有 Secret 只从测试环境变量或平台 Secrets 注入。
 
 ## 权限与安全
 
