@@ -75,6 +75,7 @@ class Settings(BaseSettings):
 
     node_env: Literal["development", "test", "production"] = "development"
     ai_internal_token: str | None = None
+    ai_docs_enabled: bool | None = None
     ai_model_config_path: Path = SERVICE_ROOT / "config/models.toml"
     log_level: str = "INFO"
 

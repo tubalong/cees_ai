@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Request
 
 from app.api.generated.models import (
+    ErrorResponse,
     ExecutionMetadata,
     InvokeRequest,
     InvokeResponse,
@@ -20,11 +21,44 @@ from app.llm.types import ChatMessage
 
 router = APIRouter(
     prefix="/internal/v1/llm",
+    tags=["llm"],
     dependencies=[Depends(require_internal_token)],
 )
 
 
-@router.post("/invoke", response_model=InvokeResponse)
+@router.post(
+    "/invoke",
+    response_model=InvokeResponse,
+    operation_id="invokeLlm",
+    summary="Invoke a configured LLM profile",
+    response_description="Invocation completed",
+    responses={
+        400: {
+            "model": ErrorResponse,
+            "description": "Invalid profile or unsupported output mode",
+        },
+        401: {
+            "model": ErrorResponse,
+            "description": "Internal authentication failed",
+        },
+        422: {
+            "model": ErrorResponse,
+            "description": "Request validation failed",
+        },
+        500: {
+            "model": ErrorResponse,
+            "description": "Unexpected internal service error",
+        },
+        502: {
+            "model": ErrorResponse,
+            "description": "Provider output did not match the requested schema",
+        },
+        503: {
+            "model": ErrorResponse,
+            "description": "Service or configured providers unavailable",
+        },
+    },
+)
 async def invoke_llm(payload: InvokeRequest, request: Request) -> InvokeResponse:
     runtime: AppRuntime = request.app.state.runtime
     if not runtime.ready or runtime.router is None:

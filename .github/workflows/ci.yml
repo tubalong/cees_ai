@@ -84,7 +84,7 @@ jobs:
 
       - name: Lint
         working-directory: apps/ai-service
-        run: uv run --locked ruff check app tests
+        run: uv run --locked ruff check app tests scripts
 
       - name: Import application
         working-directory: apps/ai-service

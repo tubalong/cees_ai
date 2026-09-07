@@ -43,6 +43,18 @@ ai-service 只提供：
 - 日志不记录消息正文、Schema、密钥或 base URL；
 - NestJS 根据响应 execution 元数据写入 `AIInvocationLog`。
 
-## 5. 后续扩展规则
+## 5. OpenAPI 与内部文档
+
+`packages/contracts/openapi/ai-service.openapi.yaml` 是 ai-service HTTP 行为的唯一事实源。契约生成 Pydantic 模型、NestJS TypeScript 客户端和随 ai-service 发布的 OpenAPI JSON；FastAPI `/docs`、`/redoc` 与 `/openapi.json` 直接展示该生成契约。测试会另外根据实际 Python 路由生成 OpenAPI，并检查路径、方法、operationId、标签、认证、响应状态与主要 Schema 字段是否漂移。
+
+内部认证继续使用 `X-AI-Internal-Token`，并在 OpenAPI 中声明为 Header `apiKey` 安全方案。该名称属于现有 NestJS 与 ai-service 内部契约，本次不做破坏性重命名。
+
+- Development：文档开启，可查看、可调用；
+- Staging：通过 `AI_DOCS_ENABLED=true` 开启，并使用 `AI_SERVICE_PORT` 映射 ai-service 端口，可查看、可调用，仅面向内部开发和运维人员；
+- Production：通过 `AI_DOCS_ENABLED=false` 关闭；即使未显式配置，`NODE_ENV=production` 也默认关闭文档；
+- 文档开关不影响 `/health`、`/ready` 和受认证的 invoke 本身，生产环境中的 NestJS 仍可正常调用内部接口；
+- 桌面端、移动端和第三方客户端不得通过该 Swagger 绕过 NestJS 的认证、权限、租户、配额和审计边界。
+
+## 6. 后续扩展规则
 
 真实业务出现后，应新增专用契约、领域 Schema、权限输入和测试，再由业务模块调用通用底座。不得直接把通用 invoke 暴露给桌面端或移动端，也不得在 ai-service 中创建正式业务资源。

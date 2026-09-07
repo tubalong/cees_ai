@@ -6,15 +6,33 @@ from fastapi.responses import JSONResponse
 from app.api.generated.models import HealthResponse, ModelRole, ReadinessResponse, Status
 from app.core.runtime import AppRuntime
 
-router = APIRouter()
+router = APIRouter(tags=["system"])
 
 
-@router.get("/health", response_model=HealthResponse)
+@router.get(
+    "/health",
+    response_model=HealthResponse,
+    operation_id="getHealth",
+    summary="Process liveness check",
+    response_description="Service process is alive",
+)
 async def health() -> HealthResponse:
     return HealthResponse(status="ok", service="ai-service")
 
 
-@router.get("/ready", response_model=ReadinessResponse)
+@router.get(
+    "/ready",
+    response_model=ReadinessResponse,
+    operation_id="getReadiness",
+    summary="Configuration readiness check",
+    response_description="Service is ready",
+    responses={
+        503: {
+            "model": ReadinessResponse,
+            "description": "Service configuration is not ready",
+        }
+    },
+)
 async def ready(request: Request) -> ReadinessResponse | JSONResponse:
     runtime: AppRuntime = request.app.state.runtime
     response = ReadinessResponse(

@@ -15,7 +15,19 @@ FastAPI 内部服务，负责受控 LLM 调用与未来 AI 工作流的运行时
 - `GET /ready`：配置与密钥就绪检查
 - `POST /internal/v1/llm/invoke`：需要 `X-AI-Internal-Token` 的内部非流式调用
 
-正式契约位于 `packages/contracts/openapi/ai-service.openapi.yaml`。业务客户端不得直接调用通用 invoke，必须由 NestJS 统一认证、审计和编排。
+正式契约位于 `packages/contracts/openapi/ai-service.openapi.yaml`。业务客户端不得直接调用通用 invoke，必须由 NestJS 统一认证、审计和编排。`X-AI-Internal-Token` 是 OpenAPI 中的 `apiKey` 安全方案，并通过 Swagger 的 Authorize 操作设置。
+
+## OpenAPI 与交互文档
+
+FastAPI 的 `/docs`、`/redoc` 和 `/openapi.json` 直接展示由正式 YAML 契约生成的 `app/api/generated/openapi.json`，标题、版本、服务器、标签、安全方案、示例和错误响应不在应用代码中重复维护。修改契约后必须运行根目录的 `pnpm contracts:gen`。
+
+文档开关由 `AI_DOCS_ENABLED` 控制：
+
+- Development：示例配置为 `true`，文档可查看、可调用；
+- Staging：示例配置为 `true`，并通过 `AI_SERVICE_PORT` 映射服务端口，文档可查看、可调用，但仍只应开放给内部开发和运维人员；
+- Production：示例配置为 `false`，禁用 `/docs`、`/redoc` 和 `/openapi.json`；未显式配置时，`NODE_ENV=production` 也默认禁用文档。
+
+Swagger 中执行 invoke 会直接调用模型，应只使用非生产内部 Token 和测试数据。桌面端、移动端和第三方客户端必须调用 NestJS 公开 API，不得使用此内部文档作为客户端 API 入口。
 
 ## 环境与依赖
 
@@ -35,6 +47,7 @@ uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```text
 NODE_ENV=development
 AI_INTERNAL_TOKEN=change_me
+AI_DOCS_ENABLED=true
 AI_MODEL_CONFIG_PATH=config/models.toml
 PRIMARY_LLM_API_KEY=change_me
 BACKUP_LLM_API_KEY=change_me
@@ -45,11 +58,18 @@ BACKUP_LLM_API_KEY=change_me
 ## 验证
 
 ```powershell
-uv run ruff check app tests
+uv run ruff check app tests scripts
 uv run pytest -q
 ```
 
-FastAPI 文档：`http://localhost:8000/docs`。
+契约验证与生成物漂移检查：
+
+```powershell
+pnpm contracts:lint
+pnpm contracts:check
+```
+
+本地 FastAPI 文档：`http://localhost:8000/docs`。Staging 默认映射为 `http://<staging-host>:18000/docs`，可通过 `AI_SERVICE_PORT` 调整端口；部署网络应使用防火墙或 VPN 限制访问。
 
 容器构建使用 ai-service 目录作为上下文：
 

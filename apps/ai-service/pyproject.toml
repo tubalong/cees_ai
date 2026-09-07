@@ -21,6 +21,7 @@ dev = [
     "datamodel-code-generator",
     "pytest",
     "pytest-asyncio",
+    "pyyaml>=6.0.3",
     "ruff",
 ]
 
