@@ -16,14 +16,14 @@ src/
 └── integration/      # 外部服务适配
 ```
 
-NestJS 通过生成的 `@workbench/ai-service-client` 调用内部 AI 服务。通用 invoke 不暴露给桌面端或移动端，任何未来业务 AI 功能都必须先定义正式契约和业务边界。
+NestJS 通过生成的 `@cees/ai-service-client` 调用内部 AI 服务。通用 invoke 不暴露给桌面端或移动端，任何未来业务 AI 功能都必须先定义正式契约和业务边界。
 
 ## 启动
 
 ```text
-pnpm --filter @workbench/ai-service-client build
-pnpm --filter @workbench/api prisma:generate
-pnpm --filter @workbench/api dev
+pnpm --filter @cees/ai-service-client build
+pnpm --filter @cees/api prisma:generate
+pnpm --filter @cees/api dev
 ```
 
 Swagger 文档：`http://localhost:3000/api/docs`。

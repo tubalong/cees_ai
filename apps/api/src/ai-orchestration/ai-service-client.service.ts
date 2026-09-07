@@ -6,7 +6,7 @@ import {
   type ErrorResponse,
   type InvokeRequest,
   type InvokeResponse,
-} from '@workbench/ai-service-client';
+} from '@cees/ai-service-client';
 import { PrismaService } from '../database/prisma.service';
 
 export class AiServiceInvocationError extends Error {

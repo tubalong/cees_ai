@@ -45,19 +45,19 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build generated AI service client
-        run: pnpm --filter @workbench/ai-service-client build
+        run: pnpm --filter @cees/ai-service-client build
 
       - name: Generate Prisma client
-        run: pnpm --filter @workbench/api prisma:generate
+        run: pnpm --filter @cees/api prisma:generate
 
       - name: Test API
-        run: pnpm --filter @workbench/api test
+        run: pnpm --filter @cees/api test
 
       - name: Build API
-        run: pnpm --filter @workbench/api build
+        run: pnpm --filter @cees/api build
 
       - name: Build desktop application
-        run: pnpm --filter @workbench/desktop build
+        run: pnpm --filter @cees/desktop build
 
   ai-service:
     name: Python (AI service)

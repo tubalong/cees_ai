@@ -1,4 +1,4 @@
-import type { InvokeResponse } from '@workbench/ai-service-client';
+import type { InvokeResponse } from '@cees/ai-service-client';
 import type { PrismaService } from '../database/prisma.service';
 import { AiServiceClientService, AiServiceInvocationError } from './ai-service-client.service';
 
