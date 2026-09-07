@@ -201,6 +201,7 @@ dev = [
     { name = "datamodel-code-generator" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
+    { name = "pyyaml" },
     { name = "ruff" },
 ]
 
@@ -224,6 +225,7 @@ dev = [
     { name = "datamodel-code-generator" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "ruff" },
 ]
 

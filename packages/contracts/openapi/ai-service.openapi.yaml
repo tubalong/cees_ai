@@ -2,12 +2,21 @@ openapi: 3.1.0
 info:
   title: CEES AI Service Internal API
   version: 0.1.0
-  description: Internal infrastructure API used only by trusted CEES services.
+  description: |
+    Internal infrastructure API used only by trusted CEES services.
+    Desktop, mobile, and third-party clients must call the NestJS public API instead.
 servers:
-  - url: http://localhost:8000
+  - url: /
+    description: Current deployment origin
+tags:
+  - name: system
+    description: Process liveness and configuration readiness checks.
+  - name: llm
+    description: Internal LLM invocation endpoints available only to trusted CEES services.
 paths:
   /health:
     get:
+      tags: [system]
       security: []
       operationId: getHealth
       summary: Process liveness check
@@ -18,8 +27,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthResponse"
+              example:
+                status: ok
+                service: ai-service
   /ready:
     get:
+      tags: [system]
       security: []
       operationId: getReadiness
       summary: Configuration readiness check
@@ -30,14 +43,26 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ReadinessResponse"
+              example:
+                status: ready
+                service: ai-service
+                configured_roles: [default, structured, reasoning, rag]
+                errors: []
         "503":
           description: Service configuration is not ready
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ReadinessResponse"
+              example:
+                status: not_ready
+                service: ai-service
+                configured_roles: []
+                errors:
+                  - AI_INTERNAL_TOKEN is required
   /internal/v1/llm/invoke:
     post:
+      tags: [llm]
       operationId: invokeLlm
       summary: Invoke a configured LLM profile
       security:
@@ -48,6 +73,45 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/InvokeRequest"
+            examples:
+              text:
+                summary: Text response
+                value:
+                  request_id: req-example-text-001
+                  tenant_id: tenant-example
+                  user_id: user-example
+                  messages:
+                    - role: user
+                      content: Summarize the current project status.
+                  role: default
+                  temperature: 0.3
+                  max_output_tokens: 512
+                  response_format:
+                    type: text
+              structured:
+                summary: JSON Schema response
+                value:
+                  request_id: req-example-json-001
+                  tenant_id: tenant-example
+                  user_id: user-example
+                  messages:
+                    - role: user
+                      content: Extract the project name and current status.
+                  role: structured
+                  temperature: 0
+                  max_output_tokens: 512
+                  response_format:
+                    type: json_schema
+                    name: ProjectStatus
+                    schema:
+                      type: object
+                      additionalProperties: false
+                      required: [project, status]
+                      properties:
+                        project:
+                          type: string
+                        status:
+                          type: string
       responses:
         "200":
           description: Invocation completed
@@ -55,24 +119,62 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/InvokeResponse"
+              examples:
+                text:
+                  summary: Text output
+                  value:
+                    request_id: req-example-text-001
+                    output:
+                      type: text
+                      text: The project is progressing normally.
+                    execution:
+                      profile: primary
+                      provider: openai_compatible
+                      model: example-model
+                      fallback_count: 0
+                      latency_ms: 420
+                      token_usage:
+                        input_tokens: 18
+                        output_tokens: 9
+                        total_tokens: 27
+                structured:
+                  summary: Structured JSON output
+                  value:
+                    request_id: req-example-json-001
+                    output:
+                      type: json
+                      value:
+                        project: CEES AI
+                        status: in_progress
+                    execution:
+                      profile: primary
+                      provider: openai_compatible
+                      model: example-model
+                      fallback_count: 0
+                      latency_ms: 510
+                      token_usage:
+                        input_tokens: 24
+                        output_tokens: 14
+                        total_tokens: 38
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "422":
           $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
         "502":
           $ref: "#/components/responses/InvalidProviderOutput"
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
-        "500":
-          $ref: "#/components/responses/InternalError"
 components:
   securitySchemes:
     internalToken:
       type: apiKey
       in: header
       name: X-AI-Internal-Token
+      description: Internal token issued to trusted CEES services. Do not expose it to clients.
   schemas:
     HealthResponse:
       type: object
@@ -291,33 +393,69 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: INVALID_INVOCATION_REQUEST
+              message: Invalid profile or unsupported output mode
+              request_id: req-example-text-001
+              retryable: false
     Unauthorized:
       description: Internal authentication failed
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: INTERNAL_AUTH_FAILED
+              message: Internal authentication failed
+              request_id: null
+              retryable: false
     ValidationError:
       description: Request validation failed
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: INVALID_INVOCATION_REQUEST
+              message: Request validation failed
+              request_id: req-example-text-001
+              retryable: false
     InvalidProviderOutput:
       description: Provider output did not match the requested schema
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: INVALID_PROVIDER_OUTPUT
+              message: Provider output did not match the requested schema
+              request_id: req-example-json-001
+              retryable: true
     InternalError:
       description: Unexpected internal service error
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: INTERNAL_ERROR
+              message: An unexpected internal error occurred
+              request_id: null
+              retryable: false
     ServiceUnavailable:
       description: Service or configured providers unavailable
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: AI_SERVICE_NOT_READY
+              message: AI service configuration is not ready
+              request_id: req-example-text-001
+              retryable: true

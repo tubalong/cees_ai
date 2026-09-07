@@ -42,6 +42,6 @@
 5. 本地执行 `pnpm infra:up`；Staging/Production 可使用对应 pnpm 命令，Linux 服务器也可执行 `bash scripts/compose-deploy.sh staging` 或 `bash scripts/compose-deploy.sh production`。
 6. 本地分别启动 NestJS 和 ai-service；Staging/Production 由 Compose 启动完整服务。
 
-NestJS Swagger：`http://localhost:3000/api/docs`；FastAPI 文档：`http://localhost:8000/docs`。
+NestJS Swagger：`http://localhost:3000/api/docs`；FastAPI 内部文档：本地为 `http://localhost:8000/docs`，Staging 默认映射到 `http://<staging-host>:18000/docs`，Production 禁用。
 
 架构说明见 [docs/architecture/overview.md](docs/architecture/overview.md)，AI 基础设施说明见 [docs/architecture/ai-service-foundation.md](docs/architecture/ai-service-foundation.md)。

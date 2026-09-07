@@ -26,6 +26,7 @@ services:
     environment:
       NODE_ENV: ${NODE_ENV}
       AI_INTERNAL_TOKEN: ${AI_INTERNAL_TOKEN}
+      AI_DOCS_ENABLED: ${AI_DOCS_ENABLED:-false}
       AI_MODEL_CONFIG_PATH: /run/config/ai-models.toml
       PRIMARY_LLM_API_KEY: ${PRIMARY_LLM_API_KEY}
       BACKUP_LLM_API_KEY: ${BACKUP_LLM_API_KEY}

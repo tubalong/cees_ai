@@ -63,9 +63,10 @@ def ready_runtime(
     model_catalog: ModelCatalog,
     *,
     token: str = "secret",
+    settings: Settings | None = None,
 ) -> AppRuntime:
     return AppRuntime(
-        settings=Settings(node_env="test", ai_internal_token=token),
+        settings=settings or Settings(node_env="test", ai_internal_token=token),
         catalog=model_catalog,
         router=router,
         readiness_errors=[],

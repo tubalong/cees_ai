@@ -9,7 +9,11 @@ from app.main import create_app
 from tests.helpers import StubProvider, catalog, profile, ready_runtime, result
 
 
-def build_client(*, structured: bool = False) -> tuple[TestClient, StubProvider]:
+def build_client(
+    *,
+    structured: bool = False,
+    settings: Settings | None = None,
+) -> tuple[TestClient, StubProvider]:
     modes = {OutputMode.text, OutputMode.json_schema} if structured else {OutputMode.text}
     model_profile = profile(modes=modes)
     outcome = result({"answer": 42}) if structured else result("hello")
@@ -17,7 +21,7 @@ def build_client(*, structured: bool = False) -> tuple[TestClient, StubProvider]
     role = ModelRole.structured if structured else ModelRole.default
     model_catalog = catalog({"primary": model_profile}, {role: ["primary"]})
     router = LLMRouter(model_catalog, lambda _name, _profile: provider)
-    app = create_app(runtime=ready_runtime(router, model_catalog))
+    app = create_app(runtime=ready_runtime(router, model_catalog, settings=settings))
     return TestClient(app), provider
 
 
@@ -138,3 +142,55 @@ def test_not_ready_runtime_rejects_invocation() -> None:
     assert readiness.status_code == 503
     assert response.status_code == 503
     assert response.json()["error"]["code"] == "AI_SERVICE_NOT_READY"
+
+
+def test_docs_are_enabled_for_staging_configuration() -> None:
+    settings = Settings(
+        node_env="production",
+        ai_internal_token="secret",
+        ai_docs_enabled=True,
+    )
+    client, _ = build_client(settings=settings)
+
+    with client:
+        docs = client.get("/docs")
+        redoc = client.get("/redoc")
+        openapi = client.get("/openapi.json")
+        invocation = client.post(
+            "/internal/v1/llm/invoke",
+            headers={"X-AI-Internal-Token": "secret"},
+            json=text_payload(),
+        )
+
+    assert docs.status_code == 200
+    assert redoc.status_code == 200
+    assert openapi.status_code == 200
+    assert openapi.json()["servers"] == [
+        {"url": "/", "description": "Current deployment origin"}
+    ]
+    assert invocation.status_code == 200
+
+
+def test_docs_are_disabled_by_default_in_production() -> None:
+    settings = Settings(
+        node_env="production",
+        ai_internal_token="secret",
+    )
+    client, _ = build_client(settings=settings)
+
+    with client:
+        docs = client.get("/docs")
+        redoc = client.get("/redoc")
+        openapi = client.get("/openapi.json")
+        health = client.get("/health")
+        invocation = client.post(
+            "/internal/v1/llm/invoke",
+            headers={"X-AI-Internal-Token": "secret"},
+            json=text_payload(),
+        )
+
+    assert docs.status_code == 404
+    assert redoc.status_code == 404
+    assert openapi.status_code == 404
+    assert health.status_code == 200
+    assert invocation.status_code == 200
