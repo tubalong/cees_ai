@@ -9,8 +9,12 @@ import { AiOrchestrationModule } from './ai-orchestration/ai-orchestration.modul
 @Module({}) export class UserModule { }
 @Module({}) export class ProjectModule { }
 @Module({}) export class TaskModule { }
+@Module({}) export class WorkReportModule { }
 @Module({}) export class FileModule { }
+@Module({}) export class KnowledgeModule { }
+@Module({}) export class MeetingModule { }
 @Module({}) export class NotificationModule { }
+@Module({}) export class DashboardModule { }
 @Module({}) export class IntegrationModule { }
 @Module({}) export class CommonModule { }
 @Module({}) export class JobsModule { }
