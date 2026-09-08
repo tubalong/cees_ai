@@ -1,5 +1,7 @@
 # 安全模型
 
+- [密码修改与凭证安全](password-management.md)：租户成员和平台超级管理员修改自己的密码、会话撤销与审计规则。
+
 - API 入口由 JWT 建立用户身份，再由租户守卫建立租户上下文。
 - 平台超级管理员使用独立 Platform JWT、PlatformAuthSession 和权限 Guard，不能通过租户 `tenant_admin` 角色获得平台权限。
 - Production 必须为平台 JWT 配置独立的 `JWT_PLATFORM_ACCESS_SECRET`，不得与租户 Access Token 共用 Secret。

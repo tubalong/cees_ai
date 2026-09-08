@@ -2,8 +2,7 @@
 
 > 状态：按当前实现整理  
 > 最后同步：2026-09-08  
-> 公开契约版本：`0.9.0`
-> 公开契约版本：`0.9.0`  
+> 公开契约版本：`0.10.0`
 > 事实源：`packages/contracts/openapi/openapi.yaml`、`apps/api/prisma/schema.prisma`
 
 ## 1. 文档用途
@@ -11,7 +10,7 @@
 本文面向本地开发、接口联调、产品验收和数据库排查，统一说明：
 
 - 平台超级管理员、租户管理员和普通成员的区别；
-- 当前已经实现的 60 个 HTTP 操作；
+- 当前已经实现的 64 个 HTTP 操作；
 - 路径参数、查询参数和 JSON 请求体字段的含义；
 - PostgreSQL 中 40 张业务表、449 个业务字段及 Prisma 迁移表的用途；
 - 租户创建、成员激活、登录、授权、资源访问、审计、停用和恢复的整体流转；
@@ -24,6 +23,7 @@
 | 领域 | 当前状态 | 说明 |
 | --- | --- | --- |
 | 平台管理员认证 | 已实现 | 独立账号、JWT、Refresh Token 和 Session |
+| 本人密码修改 | 已实现 | 租户成员与平台管理员校验当前密码后修改，并撤销其他会话 |
 | 平台租户管理 | 已实现 | 创建、查询、修改、停用、恢复和租户管理员维护 |
 | 租户成员认证 | 已实现 | `tenantCode + account + password` 登录、刷新、退出和身份查询 |
 | 用户个人资料 | 已实现 | 查询当前租户资料并由成员自行修改展示名 |
@@ -183,6 +183,7 @@ pnpm --filter @cees/api dev
 | `POST /auth/activate` | 使用邀请令牌设置密码并激活成员 | `AcceptTenantInvitationRequest` | 租户和成员信息 | 公开 |
 | `POST /auth/logout` | 撤销当前租户 Session | 无 | `204` | 租户 Bearer |
 | `GET /auth/me` | 查询当前用户、租户、角色和实时权限 | 无 | `MeResponse` | 租户 Bearer |
+| `POST /auth/change-password` | 修改当前租户成员密码并撤销其他会话 | `ChangePasswordRequest` | `204` | 租户 Bearer |
 | `GET /users/me/profile` | 查询当前租户内的个人资料 | 无 | `UserProfile` | 租户 Bearer |
 | `PATCH /users/me/profile` | 修改当前租户内的展示名 | `UpdateUserProfileRequest` | 修改后的 `UserProfile` | 租户 Bearer |
 
@@ -280,6 +281,7 @@ pnpm --filter @cees/api dev
 | `POST /platform/auth/refresh` | 轮换平台 Token | `RefreshTokenRequest` | 新 Token 对 | 公开 |
 | `POST /platform/auth/logout` | 撤销当前平台 Session | 无 | `204` | 平台 Bearer |
 | `GET /platform/auth/me` | 查询平台管理员和平台权限 | 无 | 平台管理员身份 | 平台 Bearer |
+| `POST /platform/auth/change-password` | 修改当前平台管理员密码并撤销其他会话 | `ChangePasswordRequest` | `204` | 平台 Bearer |
 
 ### 6.9 平台租户管理与平台审计
 
@@ -340,6 +342,15 @@ pnpm --filter @cees/api dev
 | 字段 | 必填 | 含义与约束 |
 | --- | --- | --- |
 | `refreshToken` | 是 | 登录或上次刷新返回的 Refresh Token，32～512 位；成功使用后立即失效 |
+
+#### `ChangePasswordRequest`
+
+| 字段 | 必填 | 含义与约束 |
+| --- | --- | --- |
+| `currentPassword` | 是 | 当前密码，8～128 位；服务端使用 Argon2 Hash 校验 |
+| `newPassword` | 是 | 新密码，8～128 位，不能与当前密码相同 |
+
+修改成功后保留当前 Session，撤销同一租户成员身份或同一平台管理员身份的其他 Session。租户密码和平台密码相互独立。
 
 #### `AcceptTenantInvitationRequest`
 
@@ -1694,3 +1705,11 @@ API 只有在 COS HEAD 返回的大小和 Content-Type 与会话一致时才创�
 - 数据库迁移为 `0004_redis_cos_upload_foundation`，新增结构均包含 PostgreSQL 中文注释；
 - 公开契约版本由 `0.8.0` 提升为 `0.9.0`；
 - 当前尚未启用 `file.*` 细粒度权限、租户额度、分片、安全扫描和 AI 入库。
+
+## 23. `0.10.0` 迁移说明
+
+- 新增 `POST /auth/change-password` 和 `POST /platform/auth/change-password`；
+- 两个接口都要求有效 Access Token，并校验当前密码；
+- 新密码不能与当前密码相同，成功后保留当前 Session 并撤销其他 Session；
+- 租户与平台分别写入独立的成功或失败审计事件，审计中不保存密码或密码 Hash；
+- 复用现有密码和 Session 字段，不需要新增 Prisma migration。

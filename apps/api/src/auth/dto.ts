@@ -38,3 +38,17 @@ export class RefreshTokenDto {
     @MaxLength(512)
     refreshToken!: string;
 }
+
+export class ChangePasswordDto {
+    @ApiProperty({ format: 'password', minLength: 8, maxLength: 128 })
+    @IsString()
+    @MinLength(8)
+    @MaxLength(128)
+    currentPassword!: string;
+
+    @ApiProperty({ format: 'password', minLength: 8, maxLength: 128 })
+    @IsString()
+    @MinLength(8)
+    @MaxLength(128)
+    newPassword!: string;
+}

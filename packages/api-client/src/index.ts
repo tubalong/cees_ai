@@ -23,6 +23,7 @@ export { AuditOutcome } from './models/AuditOutcome';
 export { AuthMembership } from './models/AuthMembership';
 export type { AuthTenant } from './models/AuthTenant';
 export type { AuthUser } from './models/AuthUser';
+export type { ChangePasswordRequest } from './models/ChangePasswordRequest';
 export type { CreateDepartmentRequest } from './models/CreateDepartmentRequest';
 export type { CreateDocumentRequest } from './models/CreateDocumentRequest';
 export type { CreatePlatformTenantRequest } from './models/CreatePlatformTenantRequest';
@@ -118,14 +119,14 @@ export type { UpdateTenantMemberAccountRequest } from './models/UpdateTenantMemb
 export { UpdateTenantMemberRequest } from './models/UpdateTenantMemberRequest';
 export type { UpdateTenantRequest } from './models/UpdateTenantRequest';
 export type { UpdateUserProfileRequest } from './models/UpdateUserProfileRequest';
-export type { UserProfile } from './models/UserProfile';
-export type { UserProfileDepartment } from './models/UserProfileDepartment';
-export type { UserProfileResponseEnvelope } from './models/UserProfileResponseEnvelope';
 export type { UploadInstruction } from './models/UploadInstruction';
 export { UploadMode } from './models/UploadMode';
 export type { UploadSession } from './models/UploadSession';
 export type { UploadSessionResponseEnvelope } from './models/UploadSessionResponseEnvelope';
 export { UploadSessionStatus } from './models/UploadSessionStatus';
+export type { UserProfile } from './models/UserProfile';
+export type { UserProfileDepartment } from './models/UserProfileDepartment';
+export type { UserProfileResponseEnvelope } from './models/UserProfileResponseEnvelope';
 export type { VersionRequest } from './models/VersionRequest';
 
 export { AclService } from './services/AclService';

@@ -11,6 +11,7 @@
 - [平台租户管理与租户账号激活](platform-tenant-administration.md)
 - [组织部门管理](../product/organization-department-management.md)
 - [用户个人资料管理](../product/user-profile-management.md)
+- [密码修改与凭证安全](../security/password-management.md)
 - [平台使用、接口与数据库字典](../product/platform-usage-guide.md)：按当前 OpenAPI 汇总全部接口、请求参数和验证顺序。
 
 ## 已实现接口
@@ -21,6 +22,7 @@ POST /api/v1/auth/activate
 POST /api/v1/auth/refresh
 POST /api/v1/auth/logout
 GET  /api/v1/auth/me
+POST /api/v1/auth/change-password
 
 GET   /api/v1/users/me/profile
 PATCH /api/v1/users/me/profile
@@ -68,6 +70,7 @@ POST /api/v1/platform/auth/login
 POST /api/v1/platform/auth/refresh
 POST /api/v1/platform/auth/logout
 GET  /api/v1/platform/auth/me
+POST /api/v1/platform/auth/change-password
 
 GET    /api/v1/platform/tenants
 POST   /api/v1/platform/tenants
@@ -90,14 +93,14 @@ GET /api/v1/platform/audit-events
 GET /api/v1/platform/audit-events/{auditEventId}
 ```
 
-截至 2026-09-08，身份、用户个人资料、租户、组织部门、RBAC、ACL、审计、平台租户管理和租户账号激活接口均已实现。
-截至 2026-09-08，身份、租户、组织部门、RBAC、ACL、审计、平台租户管理、租户账号激活和 COS 基础上传接口均已实现。
+截至 2026-09-08，身份、本人密码修改、用户个人资料、租户、组织部门、RBAC、ACL、审计、平台租户管理、租户账号激活和 COS 基础上传接口均已实现。
 
 - `refresh` 每次成功后都会轮换 Refresh Token，旧 Token 立即失效；
 - `logout` 撤销当前 Access Token 对应的 Session；
 - `me` 返回当前用户、租户、角色和实时计算的权限；
 - 个人资料接口允许有效成员查询并修改自己在当前租户内的展示名，不要求额外 RBAC 权限；
-- `logout`、`me` 和个人资料接口必须携带 `Authorization: Bearer <access-token>`。
+- 改密接口校验当前密码，成功后保留当前 Session 并撤销其他 Session；
+- `logout`、`me`、个人资料和改密接口必须携带对应身份域的 Bearer Token。
 
 ## 身份与会话
 
@@ -159,6 +162,13 @@ GET /api/v1/platform/audit-events/{auditEventId}
 - 当前尚未启用 `file.*` 细粒度权限和租户额度，调用者必须至少是当前租户的有效登录成员；
 - 新增 Prisma 迁移 `0004_redis_cos_upload_foundation`；
 - 公开 TypeScript 客户端生成已接入 `pnpm contracts:gen`，生成物禁止手改。
+
+## 0.10.0 迁移说明
+
+- 公开契约版本由 `0.9.0` 提升为 `0.10.0`；
+- 新增租户成员和平台管理员本人修改密码接口；
+- 成功改密会撤销除当前 Session 之外的其他 Session；
+- 接口复用现有数据模型，不需要数据库迁移。
 
 ## 契约事实源
 

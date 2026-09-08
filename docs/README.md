@@ -5,6 +5,7 @@
 | [product](product/README.md) | 产品范围、版本目标与验收口径 |
 | [平台使用、接口与数据库字典](product/platform-usage-guide.md) | 本地使用、管理员模型、全部公开接口、参数、业务流转和数据表字段 |
 | [用户个人资料管理](product/user-profile-management.md) | 当前租户成员查询和修改自己的展示资料 |
+| [密码修改与凭证安全](security/password-management.md) | 租户成员和平台管理员修改自己的密码及会话安全规则 |
 | [architecture](architecture/overview.md) | 总体架构、目录树、边界与数据流 |
 | [ai-service-foundation](architecture/ai-service-foundation.md) | 通用 LLM、多模型路由、LangGraph 与 LlamaIndex 基础设施 |
 | [document-generation](architecture/document-generation.md) | 领域无关的文档组合、DocumentSpec 与 DOCX 渲染 |

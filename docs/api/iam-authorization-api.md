@@ -386,13 +386,14 @@ DELETE /auth/sessions/{sessionId}
 DELETE /auth/sessions/others
 GET    /auth/tenants
 POST   /auth/switch-tenant
-POST   /auth/change-password
 
 PATCH  /resources/{resourceId}/access-policy
 GET    /resources/{resourceId}/effective-permissions
 POST   /resources/{resourceId}/transfer-ownership
 POST   /audit-events/export
 ```
+
+本人密码修改能力已于 2026-09-08 实现：租户成员使用 `POST /auth/change-password`，平台管理员使用 `POST /platform/auth/change-password`。详细安全规则见 [密码修改与凭证安全](../security/password-management.md)。
 
 平台级租户接口已经与租户业务 API 分离，并使用独立 Platform Admin 身份、Session 和权限体系。
 

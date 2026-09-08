@@ -223,6 +223,80 @@ describe('AuthService', () => {
         });
     });
 
+    it('changes the current tenant password and revokes other sessions', async () => {
+        const prisma = createPrismaMock();
+        const jwtService = { signAsync: jest.fn() } as unknown as JwtService;
+        const passwordHash = await argon2.hash('current-password');
+        prisma.tenantMembership.findUnique.mockResolvedValue(activeMembership(passwordHash));
+        prisma.tenantMembership.updateMany.mockResolvedValue({ count: 1 });
+        prisma.authSession.updateMany.mockResolvedValue({ count: 2 });
+        const service = new AuthService(prisma as unknown as PrismaService, jwtService);
+
+        await service.changePassword(
+            authenticatedPrincipal(),
+            { currentPassword: 'current-password', newPassword: 'new-password' },
+            { requestId: 'password-request', ipAddress: '127.0.0.1', userAgent: 'jest' },
+        );
+
+        const update = prisma.tenantMembership.updateMany.mock.calls[0][0];
+        expect(await argon2.verify(update.data.passwordHash, 'new-password')).toBe(true);
+        expect(update.where).toEqual(expect.objectContaining({
+            id: '50000000-0000-0000-0000-000000000001',
+            passwordHash,
+        }));
+        expect(prisma.authSession.updateMany).toHaveBeenCalledWith({
+            where: {
+                tenantId: '10000000-0000-0000-0000-000000000001',
+                userId: '10000000-0000-0000-0000-000000000002',
+                membershipId: '50000000-0000-0000-0000-000000000001',
+                id: { not: '30000000-0000-0000-0000-000000000001' },
+                revokedAt: null,
+            },
+            data: { revokedAt: expect.any(Date), lastUsedAt: expect.any(Date) },
+        });
+        expect(prisma.auditLog.create).toHaveBeenCalledWith({
+            data: expect.objectContaining({
+                action: 'AUTH_PASSWORD_CHANGED',
+                metadata: expect.objectContaining({ revokedOtherSessionCount: 2 }),
+            }),
+        });
+    });
+
+    it('rejects an invalid current tenant password and writes failure audit', async () => {
+        const prisma = createPrismaMock();
+        const jwtService = { signAsync: jest.fn() } as unknown as JwtService;
+        prisma.tenantMembership.findUnique.mockResolvedValue(activeMembership(await argon2.hash('current-password')));
+        const service = new AuthService(prisma as unknown as PrismaService, jwtService);
+
+        await expect(service.changePassword(
+            authenticatedPrincipal(),
+            { currentPassword: 'wrong-password', newPassword: 'new-password' },
+            { requestId: 'password-request' },
+        )).rejects.toMatchObject({ response: { code: 'AUTH_CURRENT_PASSWORD_INVALID' } });
+        expect(prisma.tenantMembership.updateMany).not.toHaveBeenCalled();
+        expect(prisma.auditLog.create).toHaveBeenCalledWith({
+            data: expect.objectContaining({
+                action: 'AUTH_PASSWORD_CHANGE_FAILED',
+                outcome: 'FAILURE',
+            }),
+        });
+    });
+
+    it('rejects reusing the current tenant password', async () => {
+        const prisma = createPrismaMock();
+        const jwtService = { signAsync: jest.fn() } as unknown as JwtService;
+        prisma.tenantMembership.findUnique.mockResolvedValue(activeMembership(await argon2.hash('same-password')));
+        const service = new AuthService(prisma as unknown as PrismaService, jwtService);
+
+        await expect(service.changePassword(
+            authenticatedPrincipal(),
+            { currentPassword: 'same-password', newPassword: 'same-password' },
+            { requestId: 'password-request' },
+        )).rejects.toMatchObject({ response: { code: 'AUTH_NEW_PASSWORD_SAME_AS_CURRENT' } });
+        expect(prisma.tenantMembership.updateMany).not.toHaveBeenCalled();
+        expect(prisma.authSession.updateMany).not.toHaveBeenCalled();
+    });
+
     it('returns the authenticated user context for me', () => {
         const prisma = createPrismaMock();
         const jwtService = { signAsync: jest.fn() } as unknown as JwtService;
@@ -253,7 +327,7 @@ function createPrismaMock(): Record<string, any> {
     const prisma: Record<string, any> = {
         tenant: { findUnique: jest.fn() },
         user: { findUnique: jest.fn(), update: jest.fn() },
-        tenantMembership: { findUnique: jest.fn(), update: jest.fn() },
+        tenantMembership: { findUnique: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
         membershipRole: { findMany: jest.fn() },
         role: { findMany: jest.fn() },
         rolePermission: { findMany: jest.fn() },
