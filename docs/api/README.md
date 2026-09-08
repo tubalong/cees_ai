@@ -10,6 +10,7 @@
 - [IAM、租户、RBAC、ACL 与审计 API 设计草案](iam-authorization-api.md)
 - [平台租户管理与租户账号激活](platform-tenant-administration.md)
 - [组织部门管理](../product/organization-department-management.md)
+- [用户个人资料管理](../product/user-profile-management.md)
 - [平台使用、接口与数据库字典](../product/platform-usage-guide.md)：按当前 OpenAPI 汇总全部接口、请求参数和验证顺序。
 
 ## 已实现接口
@@ -20,6 +21,9 @@ POST /api/v1/auth/activate
 POST /api/v1/auth/refresh
 POST /api/v1/auth/logout
 GET  /api/v1/auth/me
+
+GET   /api/v1/users/me/profile
+PATCH /api/v1/users/me/profile
 
 GET    /api/v1/tenants/current
 PATCH  /api/v1/tenants/current
@@ -86,12 +90,14 @@ GET /api/v1/platform/audit-events
 GET /api/v1/platform/audit-events/{auditEventId}
 ```
 
+截至 2026-09-08，身份、用户个人资料、租户、组织部门、RBAC、ACL、审计、平台租户管理和租户账号激活接口均已实现。
 截至 2026-09-08，身份、租户、组织部门、RBAC、ACL、审计、平台租户管理、租户账号激活和 COS 基础上传接口均已实现。
 
 - `refresh` 每次成功后都会轮换 Refresh Token，旧 Token 立即失效；
 - `logout` 撤销当前 Access Token 对应的 Session；
 - `me` 返回当前用户、租户、角色和实时计算的权限；
-- `logout` 和 `me` 必须携带 `Authorization: Bearer <access-token>`。
+- 个人资料接口允许有效成员查询并修改自己在当前租户内的展示名，不要求额外 RBAC 权限；
+- `logout`、`me` 和个人资料接口必须携带 `Authorization: Bearer <access-token>`。
 
 ## 身份与会话
 

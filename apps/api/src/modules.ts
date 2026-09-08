@@ -5,9 +5,9 @@ import { RbacModule } from './rbac/rbac.module';
 import { ResourceModule } from './resource/resource.module';
 import { AiOrchestrationModule } from './ai-orchestration/ai-orchestration.module';
 import { OrganizationModule } from './organization/organization.module';
+import { UserModule } from './user/user.module';
 import { FileModule } from './file/file.module';
 
-@Module({}) export class UserModule { }
 @Module({}) export class ProjectModule { }
 @Module({}) export class TaskModule { }
 @Module({}) export class WorkReportModule { }

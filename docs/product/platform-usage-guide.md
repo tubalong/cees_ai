@@ -2,6 +2,7 @@
 
 > 状态：按当前实现整理  
 > 最后同步：2026-09-08  
+> 公开契约版本：`0.9.0`
 > 公开契约版本：`0.9.0`  
 > 事实源：`packages/contracts/openapi/openapi.yaml`、`apps/api/prisma/schema.prisma`
 
@@ -25,6 +26,7 @@
 | 平台管理员认证 | 已实现 | 独立账号、JWT、Refresh Token 和 Session |
 | 平台租户管理 | 已实现 | 创建、查询、修改、停用、恢复和租户管理员维护 |
 | 租户成员认证 | 已实现 | `tenantCode + account + password` 登录、刷新、退出和身份查询 |
+| 用户个人资料 | 已实现 | 查询当前租户资料并由成员自行修改展示名 |
 | 成员邀请与激活 | 已实现 | 一次性激活令牌、账号建议、账号修改和凭证重置 |
 | 租户与成员管理 | 已实现 | 当前租户、成员查询、状态修改、移除和角色分配 |
 | RBAC | 已实现 | 权限目录、角色管理、权限替换和数据范围 |
@@ -171,7 +173,7 @@ pnpm --filter @cees/api dev
 
 以下路径均相对于 `/api/v1`。
 
-### 6.1 系统与租户认证
+### 6.1 系统、租户认证与个人资料
 
 | 方法与路径 | 用途 | 参数/请求体 | 返回 | 鉴权 |
 | --- | --- | --- | --- | --- |
@@ -181,6 +183,10 @@ pnpm --filter @cees/api dev
 | `POST /auth/activate` | 使用邀请令牌设置密码并激活成员 | `AcceptTenantInvitationRequest` | 租户和成员信息 | 公开 |
 | `POST /auth/logout` | 撤销当前租户 Session | 无 | `204` | 租户 Bearer |
 | `GET /auth/me` | 查询当前用户、租户、角色和实时权限 | 无 | `MeResponse` | 租户 Bearer |
+| `GET /users/me/profile` | 查询当前租户内的个人资料 | 无 | `UserProfile` | 租户 Bearer |
+| `PATCH /users/me/profile` | 修改当前租户内的展示名 | `UpdateUserProfileRequest` | 修改后的 `UserProfile` | 租户 Bearer |
+
+个人资料修改不需要额外 RBAC 权限，但只能修改当前 Access Token 对应的成员资料。账号、部门、成员状态和角色仍由租户管理员接口管理。
 
 ### 6.2 当前租户与成员
 
@@ -345,6 +351,13 @@ pnpm --filter @cees/api dev
 | `password` | 是 | 成员要设置的新密码，8～128 位 |
 
 ### 7.3 租户和成员请求
+
+#### `UpdateUserProfileRequest`
+
+| 字段 | 必填 | 含义 |
+| --- | --- | --- |
+| `displayName` | 是 | 当前租户内的展示名称，去除首尾空白后长度为 1～120 位 |
+| `version` | 是 | 当前 `tenant_memberships.version`；版本不一致返回 `409` |
 
 #### `UpdateTenantRequest`
 
@@ -1670,6 +1683,11 @@ API 只有在 COS HEAD 返回的大小和 Content-Type 与会话一致时才创�
 
 ## 22. `0.9.0` 迁移说明
 
+- 新增 `GET /users/me/profile` 和 `PATCH /users/me/profile`；
+- 个人资料属于当前租户成员身份，仅允许本人修改当前租户展示名；
+- 账号保持只读，邮箱、手机、头像和密码修改暂缓；
+- 修改使用 `tenant_memberships.version` 乐观锁并写入 `USER_PROFILE_UPDATED` 审计事件；
+- 复用现有成员字段，不需要新增 Prisma migration。
 - 新增创建和完成单文件 COS 直传会话的 2 个公开接口；
 - 对象键固定为 `cees/{environment}/tenants/{tenantId}/files/{yyyy}/{mm}/{fileId}/source`；
 - 新增 `UploadSession`，并扩展 `FileObject` 的原始文件名、用途、存储提供商、Bucket、Region 和 ETag；
