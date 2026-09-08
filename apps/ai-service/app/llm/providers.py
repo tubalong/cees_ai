@@ -77,8 +77,9 @@ class OpenAICompatibleProvider:
                 schema,
                 method=self.profile.structured_output_method,
                 include_raw=True,
+                **invocation_kwargs,
             )
-            structured = await structured_model.ainvoke(langchain_messages, **invocation_kwargs)
+            structured = await structured_model.ainvoke(langchain_messages)
             if not isinstance(structured, dict):
                 raise ProviderOutputError("structured provider response has an invalid shape")
             parsing_error = structured.get("parsing_error")
@@ -163,7 +164,10 @@ def _invocation_kwargs(
 ) -> dict[str, Any]:
     kwargs: dict[str, Any] = {"temperature": options.temperature}
     if profile.provider == "deepseek":
-        kwargs["extra_body"] = {"max_tokens": options.max_output_tokens}
+        extra_body: dict[str, Any] = {"max_tokens": options.max_output_tokens}
+        if options.output_mode == OutputMode.json_schema:
+            extra_body["thinking"] = {"type": "disabled"}
+        kwargs["extra_body"] = extra_body
     else:
         kwargs["max_completion_tokens"] = options.max_output_tokens
     return kwargs
