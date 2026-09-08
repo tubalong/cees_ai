@@ -2,8 +2,9 @@
 
 完整表级字段说明和 Navicat 只读查询见 [平台使用、接口与数据库字典](../product/platform-usage-guide.md)。
 部门树模型、约束和成员归属见 [组织部门管理](../product/organization-department-management.md)。
+项目、项目成员和状态历史见 [项目与项目成员管理](../product/project-management.md)。
 
-> 新环境使用 `prisma migrate deploy` 按 `0001_init`、`0002_platform_tenant_administration`、`0003_organization_departments_and_database_comments`、`0004_redis_cos_upload_foundation` 顺序执行迁移；全部迁移完成后与当前 `schema.prisma` 保持一致。
+> 新环境使用 `prisma migrate deploy` 按 `0001_init` 到 `0005_project_management` 的目录顺序执行迁移；全部迁移完成后与当前 `schema.prisma` 保持一致。
 
 - `apps/api/prisma/schema.prisma` 是数据模型唯一事实源，迁移提交 `prisma/migrations`。
 - 新建表和字段必须在同一迁移中使用 `COMMENT ON TABLE`、`COMMENT ON COLUMN` 添加 PostgreSQL 注释；`0003_organization_departments_and_database_comments` 已补齐此前全部业务表和字段注释。
@@ -86,6 +87,21 @@ UploadSession --COS HEAD 校验通过--> FileObject
 - COS 对象键唯一约束为 `bucket + objectKey`，规范格式是 `cees/{environment}/tenants/{tenantId}/files/{yyyy}/{mm}/{fileId}/source`；
 - `0004_redis_cos_upload_foundation` 新增上传会话、文件存储元数据和相关枚举；本期不创建额度预占、租户用量或通用文件绑定表；
 - 文件大小使用 PostgreSQL `BIGINT`，API 返回前转换为 JavaScript 安全整数；当前硬上限 500 MiB。
+
+## 项目模型
+
+```text
+Project
+  ├── ownerMembership -> TenantMembership
+  ├── members -> ProjectMember[] -> TenantMembership
+  └── statusHistory -> ProjectStatusHistory[]
+```
+
+- 项目成员外键指向 `TenantMembership`，不直接使用全局 User；
+- 项目编码使用 `tenantId + normalizedCode` 唯一约束；
+- `ownerMembershipId` 保存唯一当前负责人，项目成员角色同步为 `OWNER`；
+- `project_status_history` 保存每次状态变化及操作者 Membership；
+- `0005_project_management` 迁移旧成员关系、项目状态和编码，并为新增结构添加 PostgreSQL 中文注释。
 
 - `apps/api/prisma/schema.prisma` 是数据模型唯一事实源，迁移提交到 `apps/api/prisma/migrations`。
 - `0001_init` 包含 pgvector 扩展和当前 `schema.prisma` 的完整空库结构；共享环境首次执行后，后续结构变化必须新增前向迁移，不再重写该基线。

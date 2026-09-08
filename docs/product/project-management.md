@@ -1,0 +1,97 @@
+# 项目与项目成员管理
+
+## 1. 落地状态
+
+截至 2026-09-08，本功能已经落地项目 CRUD、项目成员、负责人转移、项目状态机、完成后只读、归档恢复、乐观锁和租户审计。任务本身的创建、评论、附件和动态接口仍属于后续工作项。
+
+公开契约以 `packages/contracts/openapi/openapi.yaml` 的 `0.11.0` 为准，NestJS 实现在 `apps/api/src/project`，数据库迁移为 `apps/api/prisma/migrations/0005_project_management`。
+
+## 2. 租户与可见性边界
+
+项目属于单一租户，但“同租户”不代表自动获得项目访问权限。访问项目必须同时满足：
+
+```text
+有效租户成员身份
+AND 对应 project.* RBAC 权限
+AND（当前项目成员 OR 拥有 project.manage_all）
+```
+
+- 普通成员默认只能看到自己参与的项目；
+- 部门只用于业务归属、筛选和统计，不自动授权整个部门访问；
+- 无权访问项目时统一返回 `404 PROJECT_NOT_FOUND`，避免泄露项目是否存在；
+- 平台超级管理员身份不直接绕过租户业务权限，必须使用有效租户成员身份进入项目；
+- 第一版项目不接入通用 `ResourceAcl`，项目范围由项目成员关系负责。
+
+## 3. 项目角色
+
+| 角色 | 能力 |
+| --- | --- |
+| `OWNER` | 唯一当前负责人；可管理项目、成员，完成、重开、归档和转移负责人 |
+| `MANAGER` | 可修改未完成项目、管理普通项目成员、执行常规状态流转 |
+| `MEMBER` | 在具有对应 RBAC 权限时读取项目和成员信息 |
+
+`Project.ownerMembershipId` 是唯一负责人事实源，并与一个有效的 `ProjectMember.role = OWNER` 保持一致。普通成员修改接口不能设置或移除 `OWNER`；负责人变更必须调用专用转移接口，原负责人自动降为 `MANAGER`。
+
+项目成员使用 `TenantMembership.id`，不使用全局 `User.id`。这样同一自然人在不同租户中的账号、角色和项目身份不会混淆。
+
+## 4. 状态机
+
+```text
+PLANNING ─start──> ACTIVE ─pause──> PAUSED
+                      ^              │
+                      └──resume──────┘
+
+ACTIVE ─complete──> COMPLETED ─archive──> ARCHIVED
+   ^                    │                    │
+   └──────reopen────────┘                    └──restore──> COMPLETED
+
+PLANNING / ACTIVE / PAUSED ─cancel──> CANCELLED
+```
+
+- 状态只能通过命令接口变更，普通 `PATCH /projects/{projectId}` 不能直接修改状态；
+- 完成项目仅允许负责人或 `project.manage_all` 执行，并要求 `project.complete`；
+- 存在 `TODO`、`IN_PROGRESS` 或 `BLOCKED` 任务时返回 `409 PROJECT_HAS_UNFINISHED_TASKS`；
+- `COMPLETED`、`CANCELLED` 和 `ARCHIVED` 项目禁止修改核心资料及成员关系；
+- 已完成项目继续工作前必须先 `reopen`；归档项目先 `restore` 为 `COMPLETED`，需要工作时再 `reopen`；
+- 每次状态变化写入 `project_status_history`，同时写入租户 `audit_logs`。
+
+## 5. 删除与历史保留
+
+项目删除只用于录入错误且还没有任务等业务数据的项目。删除采用软删除，并同步软删除项目成员关系。
+
+- 项目存在任何任务时返回 `409 PROJECT_HAS_BUSINESS_DATA`；
+- 正式业务项目应使用完成或归档，不使用物理删除；
+- 完成和归档不会删除成员、任务、评论、附件或动态历史；
+- 项目成员访问范围不会因为项目完成而扩大。
+
+## 6. 并发与审计
+
+修改项目、删除项目、修改或移除成员、转移负责人和状态命令均使用 `version` 乐观锁。版本不一致返回 `409 PROJECT_VERSION_CONFLICT`。
+
+主要审计动作包括项目创建、修改、删除，成员增删与角色变化，负责人转移，以及全部项目状态命令。审计事件记录租户、操作者 User、操作者 Membership、请求 ID、项目资源 ID、动作和变化元数据。
+
+## 7. 数据模型
+
+- `projects`：项目编码、名称、部门、唯一负责人、状态、时间范围、完成信息和版本；
+- `project_members`：项目与租户成员关系及 `OWNER/MANAGER/MEMBER` 角色；
+- `project_status_history`：不可变的项目状态变化记录；
+- `tasks.project_id`：用于完成校验和删除保护，任务接口将在后续功能中实现。
+
+项目编码只允许英文、数字、下划线和连字符，同租户按规范化小写编码唯一。迁移 `0005_project_management` 会为旧项目生成 `legacy-<uuid片段>` 编码，并把旧 `user_id` 项目成员关系映射到同租户 Membership；无法映射时迁移主动失败，避免静默归错租户。
+
+## 8. 权限目录
+
+```text
+project.create
+project.read
+project.update
+project.delete
+project.member.read
+project.member.manage
+project.complete
+project.reopen
+project.archive
+project.manage_all
+```
+
+系统 `tenant_admin` 通过 seed 自动获得上述权限。自定义角色需要显式授权，项目内角色不会替代 RBAC 权限。
