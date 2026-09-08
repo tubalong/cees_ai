@@ -30,6 +30,8 @@ FastAPI 内部服务，负责受控 LLM 调用与未来 AI 工作流的运行时
 
 DeepSeek V4 的 thinking 模式与 `function_calling` 强制 `tool_choice` 不兼容。DeepSeek structured 调用会在 LangChain wrapper 创建阶段绑定 `thinking.type=disabled`、`temperature` 和 `max_tokens`；文本 invoke 与 stream 保持模型 profile 的原有行为。
 
+文档 `generation_mode=fast` 保持单次 structured 调用。`generation_mode=quality` 先通过 thinking Planner 生成可审阅 `DocumentPlan`，再由非 thinking structured formatter 生成 `DocumentSpec`；默认规划强度为 `low`，规划 token 预算与最终文档预算独立。
+
 ## OpenAPI 与交互文档
 
 FastAPI 的 `/docs`、`/redoc` 和 `/openapi.json` 直接展示由正式 YAML 契约生成的 `app/api/generated/openapi.json`，标题、版本、服务器、标签、安全方案、示例和错误响应不在应用代码中重复维护。修改契约后必须运行根目录的 `pnpm contracts:gen`。

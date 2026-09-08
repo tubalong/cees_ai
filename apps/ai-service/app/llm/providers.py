@@ -167,6 +167,9 @@ def _invocation_kwargs(
         extra_body: dict[str, Any] = {"max_tokens": options.max_output_tokens}
         if options.output_mode == OutputMode.json_schema:
             extra_body["thinking"] = {"type": "disabled"}
+        elif options.reasoning_effort is not None:
+            extra_body["thinking"] = {"type": "enabled"}
+            kwargs["reasoning_effort"] = options.reasoning_effort
         kwargs["extra_body"] = extra_body
     else:
         kwargs["max_completion_tokens"] = options.max_output_tokens

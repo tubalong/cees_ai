@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from app.api.generated.models import ComposeDocumentRequest
@@ -46,6 +48,24 @@ def document_data(*, source_refs: list[str] | None = None) -> dict[str, object]:
     }
 
 
+def plan_data() -> dict[str, object]:
+    return {
+        "schema_version": "1.0",
+        "title": "Implementation plan",
+        "audience": "Project team",
+        "objective": "Define the MVP delivery approach",
+        "sections": [
+            {
+                "heading": "Scope",
+                "level": 1,
+                "purpose": "Define the first release",
+                "key_points": ["Ship the first release"],
+                "source_refs": ["requirements"],
+            }
+        ],
+    }
+
+
 def build_composer(output: dict[str, object], *, finish_reason: str = "stop") -> tuple[
     DocumentComposer, StubProvider
 ]:
@@ -69,6 +89,48 @@ async def test_composes_valid_document_spec() -> None:
     assert provider.calls[0][1].output_mode == OutputMode.json_schema
     assert provider.calls[0][1].schema_name == "DocumentSpec"
     assert provider.calls[0][1].max_output_tokens == 2048
+    assert composition.plan is None
+    assert len(provider.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_quality_mode_plans_before_composing_document() -> None:
+    model_profile = profile(modes={OutputMode.text, OutputMode.json_schema})
+    provider = StubProvider(
+        model_profile,
+        [result(json.dumps(plan_data())), result(document_data())],
+    )
+    router = LLMRouter(
+        catalog(
+            {"primary": model_profile},
+            {
+                ModelRole.reasoning: ["primary"],
+                ModelRole.structured: ["primary"],
+            },
+        ),
+        lambda _name, _profile: provider,
+    )
+    payload = request_data()
+    payload["document_options"] = {
+        **payload["document_options"],
+        "generation_mode": "quality",
+        "planning_max_output_tokens": 1024,
+    }
+
+    composition = await DocumentComposer(router).compose(
+        ComposeDocumentRequest.model_validate(payload)
+    )
+
+    assert composition.plan is not None
+    assert composition.plan.objective == "Define the MVP delivery approach"
+    assert composition.planning_routing is not None
+    assert [call[1].output_mode for call in provider.calls] == [
+        OutputMode.text,
+        OutputMode.json_schema,
+    ]
+    assert provider.calls[0][1].max_output_tokens == 1024
+    compose_prompt = json.loads(provider.calls[1][0][1].content)
+    assert compose_prompt["document_plan"]["sections"][0]["heading"] == "Scope"
 
 
 @pytest.mark.asyncio

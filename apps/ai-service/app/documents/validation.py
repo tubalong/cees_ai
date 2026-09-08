@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.api.generated.models import DocumentSpec, TableBlock
+from app.api.generated.models import DocumentPlan, DocumentSpec, TableBlock
 from app.core.errors import AIServiceError
 
 
@@ -34,6 +34,35 @@ def validate_document_spec(
                     request_id,
                     status_code,
                 )
+
+
+def validate_document_plan(
+    plan: DocumentPlan,
+    *,
+    request_id: str,
+    allowed_source_refs: set[str],
+) -> None:
+    for section in plan.sections:
+        source_refs = list(section.source_refs)
+        if len(source_refs) != len(set(source_refs)):
+            _raise_plan_invalid(
+                "Document plan source references must be unique",
+                request_id,
+            )
+        if set(source_refs) - allowed_source_refs:
+            _raise_plan_invalid(
+                "Document plan references source material that was not provided",
+                request_id,
+            )
+
+
+def _raise_plan_invalid(message: str, request_id: str) -> None:
+    raise AIServiceError(
+        "DOCUMENT_PLAN_INVALID",
+        message,
+        status_code=502,
+        request_id=request_id,
+    )
 
 
 def _raise_invalid(message: str, request_id: str, status_code: int) -> None:

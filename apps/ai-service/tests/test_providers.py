@@ -132,6 +132,31 @@ async def test_deepseek_provider_uses_max_tokens_for_invoke_and_stream() -> None
 
 
 @pytest.mark.asyncio
+async def test_deepseek_reasoning_invocation_enables_thinking_with_effort() -> None:
+    chat_model = FakeStreamingChatModel()
+    provider = object.__new__(OpenAICompatibleProvider)
+    provider.profile = profile(provider="deepseek")
+    provider.chat_model = chat_model
+    options = InvocationOptions(
+        temperature=0.4,
+        max_output_tokens=1024,
+        output_mode=OutputMode.text,
+        reasoning_effort="low",
+    )
+
+    await provider.invoke([ChatMessage(role="user", content="plan")], options)
+
+    assert chat_model.invoke_calls[0][1] == {
+        "temperature": 0.4,
+        "reasoning_effort": "low",
+        "extra_body": {
+            "max_tokens": 1024,
+            "thinking": {"type": "enabled"},
+        },
+    }
+
+
+@pytest.mark.asyncio
 async def test_deepseek_structured_output_disables_thinking_before_binding_tools() -> None:
     chat_model = FakeStructuredChatModel()
     provider = object.__new__(OpenAICompatibleProvider)
