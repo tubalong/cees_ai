@@ -1,6 +1,6 @@
 # 文件上传与 COS 设计
 
-> 状态：基础单文件直传已于 2026-09-08 落地；权限、额度、分片、扫描、业务绑定和 AI 入库仍为后续设计。正式公开行为以 `packages/contracts/openapi/openapi.yaml` 0.9.0 为准。
+> 状态：基础单文件直传已于 2026-09-08 落地；权限、额度、分片、扫描、业务绑定和 AI 入库仍为后续设计。正式公开行为以当前 `packages/contracts/openapi/openapi.yaml` 为准。
 
 ## 1. 当前结论
 
