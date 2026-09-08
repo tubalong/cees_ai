@@ -5,11 +5,13 @@
   "type": "module",
   "scripts": {
     "lint": "redocly lint openapi/openapi.yaml openapi/ai-service.openapi.yaml",
+    "generate:public": "node node_modules/openapi-typescript-codegen/bin/index.js --input openapi/openapi.yaml --output ../api-client/src --client fetch --useOptions --exportSchemas false",
     "generate:ai-service": "openapi-ts -f openapi-ts.config.ts"
   },
   "devDependencies": {
     "@hey-api/openapi-ts": "0.99.0",
     "@redocly/cli": "2.51.2",
+    "openapi-typescript-codegen": "0.31.0",
     "typescript": "^5.7.2"
   }
 }

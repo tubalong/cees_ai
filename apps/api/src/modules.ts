@@ -4,8 +4,8 @@ import { DocumentModule } from './document/document.module';
 import { RbacModule } from './rbac/rbac.module';
 import { ResourceModule } from './resource/resource.module';
 import { AiOrchestrationModule } from './ai-orchestration/ai-orchestration.module';
+import { OrganizationModule } from './organization/organization.module';
 
-@Module({}) export class OrganizationModule { }
 @Module({}) export class UserModule { }
 @Module({}) export class ProjectModule { }
 @Module({}) export class TaskModule { }

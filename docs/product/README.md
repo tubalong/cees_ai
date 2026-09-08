@@ -1,5 +1,10 @@
 # 产品范围
 
+## 使用与验收
+
+- [平台使用、接口与数据库字典](platform-usage-guide.md)：管理员账号、58 个 HTTP 操作、参数含义、平台流转、39 张业务表和 Navicat 查询。
+- [组织部门管理](organization-department-management.md)：租户内部门树、权限、成员归属、审计和数据库约束。
+
 待补充。建议按以下维度维护：
 
 - 目标用户与核心工作流；
