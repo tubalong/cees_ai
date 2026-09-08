@@ -10,6 +10,8 @@
 - [IAM、租户、RBAC、ACL 与审计 API 设计草案](iam-authorization-api.md)
 - [平台租户管理与租户账号激活](platform-tenant-administration.md)
 - [组织部门管理](../product/organization-department-management.md)
+- [项目管理 API](project-management-api.md)
+- [项目与项目成员管理](../product/project-management.md)
 - [用户个人资料管理](../product/user-profile-management.md)
 - [密码修改与凭证安全](../security/password-management.md)
 - [平台使用、接口与数据库字典](../product/platform-usage-guide.md)：按当前 OpenAPI 汇总全部接口、请求参数和验证顺序。
@@ -91,9 +93,28 @@ POST   /api/v1/tenants/current/members/{membershipId}/credential-reset
 
 GET /api/v1/platform/audit-events
 GET /api/v1/platform/audit-events/{auditEventId}
+
+GET    /api/v1/projects
+POST   /api/v1/projects
+GET    /api/v1/projects/{projectId}
+PATCH  /api/v1/projects/{projectId}
+DELETE /api/v1/projects/{projectId}?version={version}
+GET    /api/v1/projects/{projectId}/members
+POST   /api/v1/projects/{projectId}/members
+PATCH  /api/v1/projects/{projectId}/members/{membershipId}
+DELETE /api/v1/projects/{projectId}/members/{membershipId}?version={version}
+PUT    /api/v1/projects/{projectId}/owner
+POST   /api/v1/projects/{projectId}/start
+POST   /api/v1/projects/{projectId}/pause
+POST   /api/v1/projects/{projectId}/resume
+POST   /api/v1/projects/{projectId}/complete
+POST   /api/v1/projects/{projectId}/reopen
+POST   /api/v1/projects/{projectId}/cancel
+POST   /api/v1/projects/{projectId}/archive
+POST   /api/v1/projects/{projectId}/restore
 ```
 
-截至 2026-09-08，身份、本人密码修改、用户个人资料、租户、组织部门、RBAC、ACL、审计、平台租户管理、租户账号激活和 COS 基础上传接口均已实现。
+截至 2026-09-08，身份、本人密码修改、用户个人资料、租户、组织部门、项目与项目成员、RBAC、ACL、审计、平台租户管理、租户账号激活和 COS 基础上传接口均已实现。
 
 - `refresh` 每次成功后都会轮换 Refresh Token，旧 Token 立即失效；
 - `logout` 撤销当前 Access Token 对应的 Session；
@@ -169,6 +190,14 @@ GET /api/v1/platform/audit-events/{auditEventId}
 - 新增租户成员和平台管理员本人修改密码接口；
 - 成功改密会撤销除当前 Session 之外的其他 Session；
 - 接口复用现有数据模型，不需要数据库迁移。
+
+## 0.11.0 迁移说明
+
+- 公开契约版本由 `0.10.0` 提升为 `0.11.0`；
+- 新增项目 CRUD、项目成员、负责人转移和项目状态命令；
+- 同租户成员默认不能访问未参与项目，跨项目管理需要 `project.manage_all`；
+- 完成、取消和归档项目禁止修改资料与成员，完成前必须清理未完成任务；
+- 新增 Prisma 迁移 `0005_project_management`，客户端需要重新生成。
 
 ## 契约事实源
 

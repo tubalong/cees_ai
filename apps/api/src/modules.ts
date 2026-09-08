@@ -7,8 +7,8 @@ import { AiOrchestrationModule } from './ai-orchestration/ai-orchestration.modul
 import { OrganizationModule } from './organization/organization.module';
 import { UserModule } from './user/user.module';
 import { FileModule } from './file/file.module';
+import { ProjectModule } from './project/project.module';
 
-@Module({}) export class ProjectModule { }
 @Module({}) export class TaskModule { }
 @Module({}) export class WorkReportModule { }
 @Module({}) export class KnowledgeModule { }

@@ -2,7 +2,7 @@
 
 > 状态：按当前实现整理  
 > 最后同步：2026-09-08  
-> 公开契约版本：`0.10.0`
+> 公开契约版本：`0.11.0`
 > 事实源：`packages/contracts/openapi/openapi.yaml`、`apps/api/prisma/schema.prisma`
 
 ## 1. 文档用途
@@ -10,9 +10,9 @@
 本文面向本地开发、接口联调、产品验收和数据库排查，统一说明：
 
 - 平台超级管理员、租户管理员和普通成员的区别；
-- 当前已经实现的 64 个 HTTP 操作；
+- 当前已经实现的 82 个 HTTP 操作；
 - 路径参数、查询参数和 JSON 请求体字段的含义；
-- PostgreSQL 中 40 张业务表、449 个业务字段及 Prisma 迁移表的用途；
+- PostgreSQL 中 41 张业务表、470 个业务字段及 Prisma 迁移表的用途；
 - 租户创建、成员激活、登录、授权、资源访问、审计、停用和恢复的整体流转；
 - 哪些能力已经有公开 API，哪些目前只有数据库结构或模块占位。
 
@@ -35,7 +35,8 @@
 | 租户与平台审计 | 已实现 | 分域记录和查询操作审计 |
 | 组织部门管理 | 已实现 | 部门树、增删改、启停、成员列表和成员调部门 |
 | 文件上传 | 基础接口已实现 | 通过短时预签名 PUT URL 直传私有 COS，HEAD 校验通过后登记正式文件 |
-| 项目、任务 | 仅数据库结构/模块占位 | 当前没有对应公开 API |
+| 项目与项目成员 | 已实现 | 项目 CRUD、成员角色、负责人转移、状态机、完成后只读和归档 |
+| 任务、评论、附件和动态 | 仅数据库结构/模块占位 | 项目完成校验已读取任务状态，任务公开 API 尚未实现 |
 | 知识库、会议、通知 | 仅数据库结构/设计基础 | 当前没有对应公开 API |
 | AI 草稿和调用日志 | 数据结构与内部编排基础 | AI 不能绕过 NestJS 写正式业务数据 |
 
@@ -220,7 +221,32 @@ pnpm --filter @cees/api dev
 
 部门最大 10 级，同级名称唯一，禁止父子循环；部门有子部门或成员时不能删除，只能向启用部门分配成员。
 
-### 6.4 成员邀请
+### 6.4 项目与项目成员
+
+| 方法与路径 | 用途 | 参数/请求体 | 返回 | 权限与范围 |
+| --- | --- | --- | --- | --- |
+| `GET /projects` | 查询当前成员可见项目 | `keyword/status/departmentId/ownerMembershipId/includeArchived/limit/cursor` | 项目列表 | `project.read` + 项目成员或 `project.manage_all` |
+| `POST /projects` | 创建项目并设置负责人 | `CreateProjectRequest` | 新项目 | `project.create` |
+| `GET /projects/{projectId}` | 查询项目详情 | `projectId` | 项目详情 | `project.read` + 项目范围 |
+| `PATCH /projects/{projectId}` | 修改非只读项目资料 | 路径 ID + `UpdateProjectRequest` | 修改后的项目 | `project.update` + OWNER/MANAGER |
+| `DELETE /projects/{projectId}` | 软删除无任务项目 | 路径 ID + 查询参数 `version` | `204` | `project.delete` + OWNER |
+| `GET /projects/{projectId}/members` | 查询项目成员 | `projectId` | 成员列表 | `project.member.read` + 项目范围 |
+| `POST /projects/{projectId}/members` | 添加项目成员 | `AddProjectMemberRequest` | 项目成员 | `project.member.manage` + OWNER/MANAGER |
+| `PATCH /projects/{projectId}/members/{membershipId}` | 修改 MANAGER/MEMBER 角色 | 路径 ID + `UpdateProjectMemberRequest` | 项目成员 | `project.member.manage` + OWNER/MANAGER |
+| `DELETE /projects/{projectId}/members/{membershipId}` | 移除非负责人 | 路径 ID + 查询参数 `version` | `204` | `project.member.manage` + OWNER/MANAGER |
+| `PUT /projects/{projectId}/owner` | 转移唯一负责人 | `TransferProjectOwnerRequest` | 项目详情 | `project.member.manage` + OWNER |
+| `POST /projects/{projectId}/start` | `PLANNING → ACTIVE` | `ProjectVersionRequest` | 项目详情 | `project.update` + OWNER/MANAGER |
+| `POST /projects/{projectId}/pause` | `ACTIVE → PAUSED` | `ProjectVersionRequest` | 项目详情 | `project.update` + OWNER/MANAGER |
+| `POST /projects/{projectId}/resume` | `PAUSED → ACTIVE` | `ProjectVersionRequest` | 项目详情 | `project.update` + OWNER/MANAGER |
+| `POST /projects/{projectId}/complete` | 完成项目并进入只读 | `CompleteProjectRequest` | 项目详情 | `project.complete` + OWNER |
+| `POST /projects/{projectId}/reopen` | `COMPLETED → ACTIVE` | `ProjectReasonRequest` | 项目详情 | `project.reopen` + OWNER |
+| `POST /projects/{projectId}/cancel` | 取消未完成项目 | `ProjectReasonRequest` | 项目详情 | `project.update` + OWNER/MANAGER |
+| `POST /projects/{projectId}/archive` | `COMPLETED → ARCHIVED` | `ProjectVersionRequest` | 项目详情 | `project.archive` + OWNER |
+| `POST /projects/{projectId}/restore` | `ARCHIVED → COMPLETED` | `ProjectVersionRequest` | 项目详情 | `project.archive` + OWNER |
+
+同租户不自动获得项目访问权。部门只用于归属和筛选；完成、取消和归档项目禁止修改资料与成员。详细规则见 [项目与项目成员管理](project-management.md)。
+
+### 6.5 成员邀请
 
 | 方法与路径 | 用途 | 参数/请求体 | 返回 | 权限 |
 | --- | --- | --- | --- | --- |
@@ -230,7 +256,7 @@ pnpm --filter @cees/api dev
 
 邀请令牌只在创建或凭证重置响应中返回一次，数据库仅保存令牌 Hash。调用方必须通过受控渠道交付 `tenantCode + account + invitationToken`。
 
-### 6.5 RBAC
+### 6.6 RBAC
 
 | 方法与路径 | 用途 | 参数/请求体 | 返回 | 权限 |
 | --- | --- | --- | --- | --- |
@@ -244,7 +270,7 @@ pnpm --filter @cees/api dev
 
 `tenant_admin` 是系统角色，不能通过公开接口修改、替换权限或删除。
 
-### 6.6 Managed Document 与资源 ACL
+### 6.7 Managed Document 与资源 ACL
 
 | 方法与路径 | 用途 | 参数/请求体 | 返回 | 权限 |
 | --- | --- | --- | --- | --- |
@@ -264,7 +290,7 @@ pnpm --filter @cees/api dev
 
 `TENANT` 可见性只扩展读取范围，不自动赋予修改、删除或分享权限。
 
-### 6.7 租户审计
+### 6.8 租户审计
 
 | 方法与路径 | 用途 | 参数 | 返回 | 权限 |
 | --- | --- | --- | --- | --- |
@@ -273,7 +299,7 @@ pnpm --filter @cees/api dev
 
 审计查询始终附带当前 `tenantId`，不能跨租户查询。
 
-### 6.8 平台管理员认证
+### 6.9 平台管理员认证
 
 | 方法与路径 | 用途 | 参数/请求体 | 返回 | 鉴权 |
 | --- | --- | --- | --- | --- |
@@ -283,7 +309,7 @@ pnpm --filter @cees/api dev
 | `GET /platform/auth/me` | 查询平台管理员和平台权限 | 无 | 平台管理员身份 | 平台 Bearer |
 | `POST /platform/auth/change-password` | 修改当前平台管理员密码并撤销其他会话 | `ChangePasswordRequest` | `204` | 平台 Bearer |
 
-### 6.9 平台租户管理与平台审计
+### 6.10 平台租户管理与平台审计
 
 | 方法与路径 | 用途 | 参数/请求体 | 返回 | 平台权限 |
 | --- | --- | --- | --- | --- |
@@ -307,6 +333,7 @@ pnpm --filter @cees/api dev
 | --- | --- |
 | `tenantId` | 平台管理场景中的租户 UUID |
 | `membershipId` | 用户在某一租户内的成员关系 UUID，不等于 `userId` |
+| `projectId` | 当前租户项目 UUID；无项目范围时接口按不存在处理 |
 | `roleId` | 当前租户角色 UUID；在成员列表查询中表示只返回拥有该角色的成员 |
 | `documentId` | Managed Document UUID，同时也是其 Resource UUID |
 | `resourceId` | 统一授权资源 UUID；当前公开资源类型只有文档 |
@@ -325,6 +352,7 @@ pnpm --filter @cees/api dev
 | `from/to` | ISO 8601 时间范围起止值 |
 | `limit` | 返回条数，范围 `1..100` |
 | `cursor` | 上一页响应的 `nextCursor` |
+| `includeArchived` | 项目列表是否包含归档项目，默认 `false` |
 
 ### 7.2 租户登录和激活请求
 
@@ -350,7 +378,20 @@ pnpm --filter @cees/api dev
 | `currentPassword` | 是 | 当前密码，8～128 位；服务端使用 Argon2 Hash 校验 |
 | `newPassword` | 是 | 新密码，8～128 位，不能与当前密码相同 |
 
-修改成功后保留当前 Session，撤销同一租户成员身份或同一平台管理员身份的其他 Session。租户密码和平台密码相互独立。
+同一个请求模型用于以下两个接口：
+
+```text
+POST /auth/change-password
+POST /platform/auth/change-password
+```
+
+- 两个接口都必须携带各自认证域的有效 Access Token；
+- 租户成员密码保存在 `tenant_memberships.password_hash`，平台管理员密码保存在 `platform_administrators.password_hash`；
+- 修改成功后保留发起请求的当前 Session，撤销同一租户成员身份或同一平台管理员身份的其他未撤销 Session；
+- 成功修改会清零登录失败次数和锁定时间，并递增对应身份的 `version`；
+- 当前密码错误返回 `401 AUTH_CURRENT_PASSWORD_INVALID`；
+- 新密码与当前密码相同返回 `400 AUTH_NEW_PASSWORD_SAME_AS_CURRENT`；
+- 租户密码和平台密码相互独立，修改其中一个不会修改另一个认证域的密码。
 
 #### `AcceptTenantInvitationRequest`
 
@@ -443,7 +484,20 @@ pnpm --filter @cees/api dev
 | `departmentId` | 是 | 目标部门 UUID；`null` 表示取消部门归属 |
 | `version` | 是 | 当前成员版本 |
 
-### 7.5 角色请求
+### 7.5 项目请求
+
+| 请求 | 关键字段 | 说明 |
+| --- | --- | --- |
+| `CreateProjectRequest` | `code/name`，可选 `description/departmentId/ownerMembershipId/startsAt/endsAt` | 编码 2～32 位，只允许英文、数字、`_`、`-` |
+| `UpdateProjectRequest` | 可修改创建字段中的项目资料，必填 `version` | 不允许直接修改状态和负责人 |
+| `AddProjectMemberRequest` | `membershipId`，可选 `role` | role 仅 `MANAGER/MEMBER`，默认 `MEMBER` |
+| `UpdateProjectMemberRequest` | `role/version` | 负责人不能通过该接口修改 |
+| `TransferProjectOwnerRequest` | `membershipId/version` | 目标必须是当前项目的有效成员 |
+| `ProjectVersionRequest` | `version` | 启动、暂停、恢复、归档和恢复归档使用 |
+| `ProjectReasonRequest` | `reason/version` | 重开或取消项目使用 |
+| `CompleteProjectRequest` | `version`，可选 `completionSummary` | 存在未完成任务时拒绝完成 |
+
+### 7.6 角色请求
 
 #### `CreateRoleRequest`
 
@@ -470,7 +524,7 @@ pnpm --filter @cees/api dev
 | `permissionIds` | 是 | 完整的新权限 UUID 集合，最多 100 个 |
 | `version` | 是 | 当前角色版本 |
 
-### 7.6 文档与 ACL 请求
+### 7.7 文档与 ACL 请求
 
 #### `CreateDocumentRequest`
 
@@ -498,7 +552,7 @@ pnpm --filter @cees/api dev
 | `permissionCodes` | 是 | 1～20 个权限，仅允许 `document.read/update/delete/share` |
 | `expiresAt` | 否 | ISO 8601 过期时间；`null` 表示长期有效 |
 
-### 7.7 平台请求
+### 7.8 平台请求
 
 #### `PlatformLoginRequest`
 
@@ -541,6 +595,8 @@ pnpm --filter @cees/api dev
 | `DepartmentSummary` | 部门 UUID、父部门、名称、说明、排序、状态、成员数、子部门数和版本 |
 | `DepartmentTreeNode` | `DepartmentSummary` 的全部字段以及递归 `children` 子部门数组 |
 | `DepartmentTree` | 当前租户部门树的根节点数组 `items` |
+| `ProjectSummary` | 项目编码、状态、负责人、当前成员角色、成员/任务数量、时间和版本 |
+| `ProjectMemberSummary` | ProjectMember UUID、Membership UUID、账号、展示名、部门、项目角色和版本 |
 | `Role` | 角色编码、名称、描述、数据范围、系统标记、权限、成员数和版本 |
 | `DocumentSummary/Detail` | 文档和资源 ID、标题、正文、可见性、所有者、当前有效权限和版本 |
 | `ResourceAclEntry` | 授权主体、权限编码、过期时间和版本 |
@@ -567,6 +623,16 @@ pnpm --filter @cees/api dev
 | `department.update` | 修改、移动和启停部门 |
 | `department.delete` | 删除空部门 |
 | `department.member.assign` | 调整成员所属部门 |
+| `project.create` | 创建项目 |
+| `project.read` | 查看参与的项目 |
+| `project.update` | 修改参与的非只读项目并执行常规状态流转 |
+| `project.delete` | 删除没有业务数据的项目 |
+| `project.member.read` | 查看项目成员 |
+| `project.member.manage` | 添加、修改、移除项目成员及转移负责人 |
+| `project.complete` | 完成项目 |
+| `project.reopen` | 重新开启已完成项目 |
+| `project.archive` | 归档和恢复项目 |
+| `project.manage_all` | 管理当前租户全部项目并绕过项目成员范围 |
 | `role.read` | 查看权限和角色 |
 | `role.create` | 创建角色 |
 | `role.update` | 修改角色及其权限 |
@@ -607,6 +673,8 @@ platform.audit.read
 | `UserStatus` | `ACTIVE` 正常；`LOCKED` 锁定；`DISABLED` 禁用 |
 | `MembershipStatus` | `PENDING_ACTIVATION` 待设置密码；`ACTIVE` 正常；`DISABLED` 禁用 |
 | `DepartmentStatus` | `ACTIVE` 启用；`DISABLED` 停用 |
+| `ProjectStatus` | `PLANNING` 规划；`ACTIVE` 进行中；`PAUSED` 暂停；`COMPLETED` 完成；`CANCELLED` 取消；`ARCHIVED` 归档 |
+| `ProjectMemberRole` | `OWNER` 唯一负责人；`MANAGER` 项目经理；`MEMBER` 普通项目成员 |
 | `AuditOutcome` | `SUCCESS` 成功；`FAILURE` 失败 |
 | `ResourceType` | 当前只有 `DOCUMENT` |
 | `AclSubjectType` | `MEMBERSHIP` 成员；`ROLE` 角色 |
@@ -655,7 +723,26 @@ flowchart LR
   Disable --> Revoke[撤销成员全部 Session]
 ```
 
-### 10.3 部门与成员归属
+### 10.3 本人修改密码
+
+```mermaid
+flowchart LR
+  User[已登录成员或平台管理员] --> Token[校验当前认证域 Access Token 与 Session]
+  Token --> Identity[加载 ACTIVE 身份和当前密码 Hash]
+  Identity --> Current{当前密码正确?}
+  Current -- 否 --> Failure[记录失败审计并返回 401]
+  Current -- 是 --> Same{新密码与当前密码相同?}
+  Same -- 是 --> Reject[返回 400]
+  Same -- 否 --> Hash[Argon2 生成新密码 Hash]
+  Hash --> Update[更新密码并清除失败次数和锁定]
+  Update --> Revoke[撤销当前 Session 之外的其他 Session]
+  Revoke --> Audit[记录成功审计]
+  Audit --> Keep[当前 Session 保持有效]
+```
+
+租户成员成功时写入 `AUTH_PASSWORD_CHANGED`，当前密码错误时写入 `AUTH_PASSWORD_CHANGE_FAILED`；平台管理员对应写入 `PLATFORM_PASSWORD_CHANGED` 和 `PLATFORM_PASSWORD_CHANGE_FAILED`。审计元数据不保存明文密码或密码 Hash，成功事件只记录当前 Session 和被撤销的其他 Session 数量。
+
+### 10.4 部门与成员归属
 
 ```mermaid
 flowchart LR
@@ -671,7 +758,7 @@ flowchart LR
 
 所有部门查询和写入都使用 JWT 中的当前 `tenantId`；平台管理员不能跨过租户权限直接维护部门。部门创建、修改、移动、删除和成员调部门分别写入 `DEPARTMENT_CREATED`、`DEPARTMENT_UPDATED`、`DEPARTMENT_MOVED`、`DEPARTMENT_DELETED`、`MEMBER_DEPARTMENT_CHANGED` 审计动作。
 
-### 10.4 请求授权链路
+### 10.5 请求授权链路
 
 ```mermaid
 flowchart LR
@@ -689,7 +776,7 @@ flowchart LR
   Execute --> Audit[写入审计]
 ```
 
-### 10.5 租户停用与恢复
+### 10.6 租户停用与恢复
 
 ```text
 PENDING_ACTIVATION --首位管理员激活--> ACTIVE
@@ -735,13 +822,15 @@ Prisma 自动维护的迁移历史表，记录迁移名称、校验值、开始/
 0002_platform_tenant_administration
 0003_organization_departments_and_database_comments
 0004_redis_cos_upload_foundation
+0005_project_management
 ```
 
 - 使用 `pnpm --filter @cees/api exec prisma migrate deploy` 执行已提交迁移；
 - `0003` 新增部门层级字段、部门权限、同级名称唯一索引和父部门外键；
 - `0003` 已为当前 39 张业务表和 422 个业务字段补齐 PostgreSQL 注释；
 - `0004` 新增上传会话表和正式文件的 COS 定位字段，并为新增表、枚举和字段写入中文注释；
-- 当前共 40 张业务表和 449 个业务字段；
+- `0005` 将项目成员改为关联 TenantMembership，新增项目状态历史、负责人、编码和完成信息；
+- 当前共 41 张业务表和 470 个业务字段；
 - 后续新建表或字段时，必须在同一迁移中添加 `COMMENT ON TABLE` 和 `COMMENT ON COLUMN`；
 - Prisma Schema、迁移 SQL 和本数据字典必须保持一致。
 
@@ -1030,7 +1119,7 @@ Prisma 自动维护的迁移历史表，记录迁移名称、校验值、开始/
 
 ## 15. 项目、任务与文件表
 
-本节表结构已经存在，但当前没有对应公开 API。字段中的业务状态字符串仍可能在未来契约落地时调整，不能仅凭表存在认定功能已经可用。
+项目和项目成员已经提供公开 API；任务、评论、附件和动态当前仍只有数据库结构。项目完成校验会读取任务状态。
 
 ### 15.1 `projects`
 
@@ -1040,10 +1129,17 @@ Prisma 自动维护的迁移历史表，记录迁移名称、校验值、开始/
 | --- | --- |
 | `id` | 项目 UUID |
 | `tenant_id` | 所属租户 |
+| `code` | 租户内项目业务编码 |
+| `normalized_code` | 小写规范化编码，与租户组成唯一约束 |
 | `department_id` | 所属部门 UUID，可空 |
+| `owner_membership_id` | 唯一当前负责人 Membership UUID；旧数据兼容时可空 |
 | `name` | 项目名称 |
 | `description` | 项目说明 |
-| `status` | 项目状态字符串，当前默认 `ACTIVE`，尚未形成公开枚举契约 |
+| `status` | `PLANNING/ACTIVE/PAUSED/COMPLETED/CANCELLED/ARCHIVED`，默认 `PLANNING` |
+| `starts_at/ends_at` | 项目开始和计划结束时间 |
+| `completed_at` | 最近一次完成时间 |
+| `completed_by_membership_id` | 最近一次完成人 Membership UUID |
+| `completion_summary` | 最近一次完成总结 |
 | `created_at/updated_at` | 创建和更新时间 |
 | `created_by/updated_by` | 创建和修改者 |
 | `deleted_at` | 软删除时间 |
@@ -1051,18 +1147,36 @@ Prisma 自动维护的迁移历史表，记录迁移名称、校验值、开始/
 
 ### 15.2 `project_members`
 
-项目和用户的成员关系。
+项目和租户成员的关系。项目角色不会替代租户 RBAC 权限。
 
 | 字段 | 含义 |
 | --- | --- |
 | `id` | 关系 UUID |
 | `tenant_id` | 所属租户 |
 | `project_id` | 项目 UUID |
-| `user_id` | 成员 User UUID |
-| `role` | 项目内角色字符串，默认 `MEMBER` |
-| `created_at` | 加入项目时间 |
+| `membership_id` | 当前租户 Membership UUID，不使用全局 User UUID |
+| `role` | `OWNER/MANAGER/MEMBER`，默认 `MEMBER` |
+| `joined_at` | 最近一次加入项目时间 |
+| `created_at/updated_at` | 关系创建和更新时间 |
+| `created_by/updated_by` | 创建和修改者 User UUID |
+| `deleted_at` | 移出项目时间；重新加入会恢复原记录 |
+| `version` | 成员关系乐观锁版本 |
 
-### 15.3 `tasks`
+### 15.3 `project_status_history`
+
+项目状态变化历史，不随项目完成或归档删除。
+
+| 字段 | 含义 |
+| --- | --- |
+| `id` | 状态历史 UUID |
+| `tenant_id` | 所属租户 |
+| `project_id` | 项目 UUID |
+| `from_status/to_status` | 变更前后项目状态 |
+| `reason` | 重开、取消原因或完成总结 |
+| `changed_by_membership_id` | 执行状态变化的 Membership UUID |
+| `created_at` | 状态变化时间 |
+
+### 15.4 `tasks`
 
 任务主表，支持项目任务、父子任务、优先级、截止时间和通用业务关联。
 
@@ -1084,7 +1198,7 @@ Prisma 自动维护的迁移历史表，记录迁移名称、校验值、开始/
 | `deleted_at` | 软删除时间 |
 | `version` | 任务版本 |
 
-### 15.4 `task_assignees`
+### 15.5 `task_assignees`
 
 任务和执行人的多对多关系。
 
@@ -1097,7 +1211,7 @@ Prisma 自动维护的迁移历史表，记录迁移名称、校验值、开始/
 | `assignee_type` | 执行人类型字符串，默认 `OWNER` |
 | `created_at` | 分配时间 |
 
-### 15.5 `task_comments`
+### 15.6 `task_comments`
 
 任务评论表。
 
@@ -1112,7 +1226,7 @@ Prisma 自动维护的迁移历史表，记录迁移名称、校验值、开始/
 | `deleted_at` | 软删除时间 |
 | `version` | 评论版本 |
 
-### 15.6 `task_attachments`
+### 15.7 `task_attachments`
 
 任务和文件对象的关联表。
 
@@ -1127,7 +1241,7 @@ Prisma 自动维护的迁移历史表，记录迁移名称、校验值、开始/
 | `deleted_at` | 软删除时间 |
 | `version` | 附件关系版本 |
 
-### 15.7 `task_activities`
+### 15.8 `task_activities`
 
 任务领域活动流水，与全局安全审计的 `audit_logs` 用途不同。
 
@@ -1141,7 +1255,7 @@ Prisma 自动维护的迁移历史表，记录迁移名称、校验值、开始/
 | `created_at` | 发生时间 |
 | `created_by` | 操作者 User UUID |
 
-### 15.8 `file_objects`
+### 15.9 `file_objects`
 
 正式文件元数据表。二进制内容不进入 PostgreSQL，存放于私有 COS；只有上传会话通过 COS HEAD 校验后才创建记录。
 
@@ -1164,7 +1278,7 @@ Prisma 自动维护的迁移历史表，记录迁移名称、校验值、开始/
 | `deleted_at` | 软删除时间 |
 | `version` | 文件元数据版本 |
 
-### 15.9 `upload_sessions`
+### 15.10 `upload_sessions`
 
 客户端直传 COS 前由 API 创建的短期上传会话。客户端不能指定租户、Bucket 或对象键。
 
@@ -1588,7 +1702,42 @@ GET /api/v1/tenants/current/departments
 GET /api/v1/audit-events
 ```
 
-### 20.3 组织部门管理
+### 20.3 修改当前账号密码
+
+租户成员先使用租户 Access Token 调用：
+
+```http
+POST /api/v1/auth/change-password
+Authorization: Bearer <tenant-access-token>
+```
+
+平台超级管理员使用平台 Access Token 调用：
+
+```http
+POST /api/v1/platform/auth/change-password
+Authorization: Bearer <platform-access-token>
+```
+
+两个接口请求体相同：
+
+```json
+{
+  "currentPassword": "change_me",
+  "newPassword": "change_me_new"
+}
+```
+
+成功返回 `204 No Content`。验证时建议同时确认：
+
+1. 当前 Access Token 仍可调用对应的 `/auth/me` 或 `/platform/auth/me`；
+2. 该身份在其他设备或浏览器中的旧 Session 已被撤销；
+3. 退出当前 Session 后，旧密码不能登录，新密码可以登录；
+4. 租户域查看 `audit_logs`，平台域查看 `platform_audit_logs`；
+5. 当前密码错误返回 `401 AUTH_CURRENT_PASSWORD_INVALID`，新旧密码相同返回 `400 AUTH_NEW_PASSWORD_SAME_AS_CURRENT`。
+
+生产或共享环境不要继续使用示例密码 `change_me`，示例中的新密码也应替换为符合环境安全策略的值。
+
+### 20.4 组织部门管理
 
 先创建根部门：
 
@@ -1633,7 +1782,45 @@ DELETE /api/v1/tenants/current/departments/{departmentId}?version={version}
 
 删除测试应先删除没有成员和子部门的叶子部门；删除仍有成员或子部门的部门会返回 `409 DEPARTMENT_NOT_EMPTY`。
 
-### 20.4 创建并查询受控文档
+### 20.5 项目与项目成员
+
+先创建项目：
+
+```json
+{
+  "code": "PRJ-2026-001",
+  "name": "AI 工作台",
+  "description": "企业内部 AI 协作平台",
+  "departmentId": null,
+  "startsAt": "2026-09-08T00:00:00.000Z",
+  "endsAt": "2026-12-31T00:00:00.000Z"
+}
+```
+
+不传 `ownerMembershipId` 时当前成员自动成为 `OWNER`。建议按以下顺序验证：
+
+```text
+POST /api/v1/projects
+GET  /api/v1/projects
+POST /api/v1/projects/{projectId}/members
+PUT  /api/v1/projects/{projectId}/owner
+POST /api/v1/projects/{projectId}/start
+POST /api/v1/projects/{projectId}/complete
+POST /api/v1/projects/{projectId}/archive
+```
+
+完成请求示例：
+
+```json
+{
+  "completionSummary": "项目已验收",
+  "version": 3
+}
+```
+
+如果项目存在 `TODO/IN_PROGRESS/BLOCKED` 任务，完成接口返回 `409 PROJECT_HAS_UNFINISHED_TASKS`。完成后修改资料和成员会返回 `409 PROJECT_READ_ONLY`，继续工作必须先调用 `reopen`。
+
+### 20.6 创建并查询受控文档
 
 调用 `POST /api/v1/documents`：
 
@@ -1656,7 +1843,7 @@ GET /api/v1/audit-events
 
 文档创建成功后，`documents` 知识库表不会变化；应查看 `managed_documents`、`resources` 和 `audit_logs`。
 
-### 20.5 验证 COS 基础直传
+### 20.7 验证 COS 基础直传
 
 使用租户 Access Token 和客户端生成的 `Idempotency-Key` 创建上传会话：
 
@@ -1696,7 +1883,7 @@ API 只有在 COS HEAD 返回的大小和 Content-Type 与会话一致时才创�
 
 - 新增 `GET /users/me/profile` 和 `PATCH /users/me/profile`；
 - 个人资料属于当前租户成员身份，仅允许本人修改当前租户展示名；
-- 账号保持只读，邮箱、手机、头像和密码修改暂缓；
+- 账号保持只读，邮箱、手机和头像修改暂缓；本人密码修改已在 `0.10.0` 落地；
 - 修改使用 `tenant_memberships.version` 乐观锁并写入 `USER_PROFILE_UPDATED` 审计事件；
 - 复用现有成员字段，不需要新增 Prisma migration。
 - 新增创建和完成单文件 COS 直传会话的 2 个公开接口；
@@ -1713,3 +1900,15 @@ API 只有在 COS HEAD 返回的大小和 Content-Type 与会话一致时才创�
 - 新密码不能与当前密码相同，成功后保留当前 Session 并撤销其他 Session；
 - 租户与平台分别写入独立的成功或失败审计事件，审计中不保存密码或密码 Hash；
 - 复用现有密码和 Session 字段，不需要新增 Prisma migration。
+
+## 24. `0.11.0` 迁移说明
+
+- 新增项目 CRUD、项目成员、负责人转移和 8 个项目状态命令，共 18 个公开 HTTP 操作；
+- 项目默认只有项目成员可见，`project.manage_all` 才能跨项目管理当前租户项目；
+- 新增 10 个 `project.*` 权限，系统 `tenant_admin` 通过 seed 自动获得；
+- 项目成员从全局 `user_id` 改为租户 `membership_id`，避免跨租户身份混淆；
+- 项目增加租户内唯一编码、唯一负责人、开始结束时间和完成信息；
+- 新增 `project_status_history`，所有状态命令同时写入状态历史和租户审计；
+- `COMPLETED/CANCELLED/ARCHIVED` 项目只读，完成项目要求不存在未完成任务；
+- 数据库迁移为 `0005_project_management`，新表、枚举和字段包含 PostgreSQL 中文注释；
+- 公开契约版本由 `0.10.0` 提升为 `0.11.0`。
