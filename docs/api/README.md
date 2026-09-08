@@ -9,6 +9,8 @@
 
 - [IAM、租户、RBAC、ACL 与审计 API 设计草案](iam-authorization-api.md)
 - [平台租户管理与租户账号激活](platform-tenant-administration.md)
+- [组织部门管理](../product/organization-department-management.md)
+- [平台使用、接口与数据库字典](../product/platform-usage-guide.md)：按当前 OpenAPI 汇总全部接口、请求参数和验证顺序。
 
 ## 已实现接口
 
@@ -21,11 +23,18 @@ GET  /api/v1/auth/me
 
 GET    /api/v1/tenants/current
 PATCH  /api/v1/tenants/current
+GET    /api/v1/tenants/current/departments
+POST   /api/v1/tenants/current/departments
+GET    /api/v1/tenants/current/departments/{departmentId}
+PATCH  /api/v1/tenants/current/departments/{departmentId}
+DELETE /api/v1/tenants/current/departments/{departmentId}?version={version}
+GET    /api/v1/tenants/current/departments/{departmentId}/members
 GET    /api/v1/tenants/current/members
 GET    /api/v1/tenants/current/members/{membershipId}
 PATCH  /api/v1/tenants/current/members/{membershipId}
 DELETE /api/v1/tenants/current/members/{membershipId}
 PUT    /api/v1/tenants/current/members/{membershipId}/roles
+PUT    /api/v1/tenants/current/members/{membershipId}/department
 
 GET    /api/v1/permissions
 GET    /api/v1/roles
@@ -74,7 +83,7 @@ GET /api/v1/platform/audit-events
 GET /api/v1/platform/audit-events/{auditEventId}
 ```
 
-截至 2026-09-07，身份、租户、RBAC、ACL、审计、平台租户管理和租户账号激活接口均已实现。
+截至 2026-09-08，身份、租户、组织部门、RBAC、ACL、审计、平台租户管理和租户账号激活接口均已实现。
 
 - `refresh` 每次成功后都会轮换 Refresh Token，旧 Token 立即失效；
 - `logout` 撤销当前 Access Token 对应的 Session；

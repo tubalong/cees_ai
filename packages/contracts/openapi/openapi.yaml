@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CEES AI API
-  version: 0.7.0
+  version: 0.8.0
   description: 以本文件为唯一事实源的公开 API 契约。资源与操作按 docs/api 约定补充。
 
 servers:
@@ -103,13 +103,13 @@ paths:
             schema:
               $ref: "#/components/schemas/AcceptTenantInvitationRequest"
       responses:
-        200:
+        '200':
           description: 租户账号激活成功
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/TenantInvitationAcceptanceResponseEnvelope"
-        401:
+        '401':
           description: 激活令牌无效、过期或已使用
           content:
             application/json:
@@ -227,6 +227,355 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /tenants/current/departments:
+    get:
+      summary: 查询当前租户部门树
+      operationId: departmentListTree
+      tags:
+        - Organization
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/DepartmentStatus'
+      responses:
+        '200':
+          description: 当前租户部门树
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DepartmentTreeResponseEnvelope'
+        '401':
+          description: 登录状态无效或已过期
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '403':
+          description: 缺少 department.read 权限
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+    post:
+      summary: 创建当前租户部门
+      operationId: departmentCreate
+      tags:
+        - Organization
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDepartmentRequest'
+      responses:
+        '201':
+          description: 已创建部门
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DepartmentResponseEnvelope'
+        '400':
+          description: 请求字段或部门层级无效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '401':
+          description: 登录状态无效或已过期
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '403':
+          description: 缺少 department.create 权限
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '404':
+          description: 父部门不存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '409':
+          description: 同级部门名称冲突
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+  /tenants/current/departments/{departmentId}:
+    parameters:
+      - name: departmentId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      summary: 获取当前租户部门详情
+      operationId: departmentGet
+      tags:
+        - Organization
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 部门详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DepartmentResponseEnvelope'
+        '401':
+          description: 登录状态无效或已过期
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '403':
+          description: 缺少 department.read 权限
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '404':
+          description: 当前租户内部门不存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+    patch:
+      summary: 修改当前租户部门
+      operationId: departmentUpdate
+      tags:
+        - Organization
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateDepartmentRequest'
+      responses:
+        '200':
+          description: 修改后的部门
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DepartmentResponseEnvelope'
+        '400':
+          description: 请求字段、父子关系或部门层级无效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '401':
+          description: 登录状态无效或已过期
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '403':
+          description: 缺少 department.update 权限
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '404':
+          description: 当前部门或父部门不存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '409':
+          description: 版本或同级部门名称冲突
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+    delete:
+      summary: 删除当前租户部门
+      operationId: departmentDelete
+      tags:
+        - Organization
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: version
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        '204':
+          description: 部门已删除
+        '400':
+          description: 版本参数无效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '401':
+          description: 登录状态无效或已过期
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '403':
+          description: 缺少 department.delete 权限
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '404':
+          description: 当前租户内部门不存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '409':
+          description: 版本冲突或部门仍有子部门、成员
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+  /tenants/current/departments/{departmentId}/members:
+    parameters:
+      - name: departmentId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      summary: 查询当前租户部门成员
+      operationId: departmentListMembers
+      tags:
+        - Organization
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: keyword
+          in: query
+          schema:
+            type: string
+            maxLength: 100
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/MemberStatus'
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: cursor
+          in: query
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: 当前部门成员列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantMemberListResponseEnvelope'
+        '400':
+          description: 查询参数校验失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '401':
+          description: 登录状态无效或已过期
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '403':
+          description: 缺少 department.read 或 member.read 权限
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '404':
+          description: 当前租户内部门不存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+  /tenants/current/members/{membershipId}/department:
+    parameters:
+      - name: membershipId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    put:
+      summary: 调整当前租户成员部门
+      operationId: departmentAssignMember
+      tags:
+        - Organization
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssignTenantMemberDepartmentRequest'
+      responses:
+        '200':
+          description: 调整部门后的成员
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantMemberResponseEnvelope'
+        '400':
+          description: 请求字段校验失败或目标部门已停用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '401':
+          description: 登录状态无效或已过期
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '403':
+          description: 缺少 department.member.assign 权限
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '404':
+          description: 当前租户内成员或部门不存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '409':
+          description: 成员版本冲突
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
 
   /tenants/current/members:
     get:
@@ -362,7 +711,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponseEnvelope"
         "403":
-          description: 缺少 member.update 权限
+          description: 缺少 member.update 或 department.member.assign 权限
           content:
             application/json:
               schema:
@@ -487,7 +836,7 @@ paths:
             schema:
               $ref: "#/components/schemas/AccountSuggestionRequest"
       responses:
-        200:
+        '200':
           description: 账号建议
           content:
             application/json:
@@ -515,13 +864,13 @@ paths:
             schema:
               $ref: "#/components/schemas/UpdateTenantMemberAccountRequest"
       responses:
-        200:
+        '200':
           description: 修改账号后的成员
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/TenantMemberResponseEnvelope"
-        409:
+        '409':
           description: 账号已存在或版本冲突
           content:
             application/json:
@@ -543,13 +892,13 @@ paths:
             type: string
             format: uuid
       responses:
-        201:
+        '201':
           description: 凭证重置成功；激活令牌只在本次响应返回
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/TenantInvitationCreatedResponseEnvelope"
-        409:
+        '409':
           description: 不能重置自己或最后一名有效管理员
           content:
             application/json:
@@ -2577,6 +2926,155 @@ components:
           type: integer
           minimum: 1
 
+    DepartmentStatus:
+      type: string
+      enum: [ACTIVE, DISABLED]
+
+    DepartmentSummary:
+      type: object
+      required:
+        - id
+        - parentId
+        - name
+        - description
+        - sortOrder
+        - status
+        - memberCount
+        - childCount
+        - version
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        parentId:
+          type:
+            - string
+            - 'null'
+          format: uuid
+        name:
+          type: string
+        description:
+          type:
+            - string
+            - 'null'
+        sortOrder:
+          type: integer
+        status:
+          $ref: '#/components/schemas/DepartmentStatus'
+        memberCount:
+          type: integer
+          minimum: 0
+        childCount:
+          type: integer
+          minimum: 0
+        version:
+          type: integer
+          minimum: 1
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    DepartmentTreeNode:
+      allOf:
+        - $ref: '#/components/schemas/DepartmentSummary'
+        - type: object
+          required:
+            - children
+          properties:
+            children:
+              type: array
+              items:
+                $ref: '#/components/schemas/DepartmentTreeNode'
+
+    DepartmentTree:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/DepartmentTreeNode'
+
+    CreateDepartmentRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        parentId:
+          type:
+            - string
+            - 'null'
+          format: uuid
+          default: null
+        description:
+          type:
+            - string
+            - 'null'
+          maxLength: 500
+          default: null
+        sortOrder:
+          type: integer
+          minimum: 0
+          maximum: 2147483647
+          default: 0
+
+    UpdateDepartmentRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - version
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        parentId:
+          type:
+            - string
+            - 'null'
+          format: uuid
+        description:
+          type:
+            - string
+            - 'null'
+          maxLength: 500
+        sortOrder:
+          type: integer
+          minimum: 0
+          maximum: 2147483647
+        status:
+          $ref: '#/components/schemas/DepartmentStatus'
+        version:
+          type: integer
+          minimum: 1
+
+    AssignTenantMemberDepartmentRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - departmentId
+        - version
+      properties:
+        departmentId:
+          type:
+            - string
+            - 'null'
+          format: uuid
+        version:
+          type: integer
+          minimum: 1
+
     AccountSuggestionRequest:
       type: object
       additionalProperties: false
@@ -3166,6 +3664,38 @@ components:
           type:
             - string
             - "null"
+
+    DepartmentResponseEnvelope:
+      type: object
+      required:
+        - success
+        - data
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: '#/components/schemas/DepartmentSummary'
+        requestId:
+          type:
+            - string
+            - 'null'
+
+    DepartmentTreeResponseEnvelope:
+      type: object
+      required:
+        - success
+        - data
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: '#/components/schemas/DepartmentTree'
+        requestId:
+          type:
+            - string
+            - 'null'
 
     PermissionListResponseEnvelope:
       type: object

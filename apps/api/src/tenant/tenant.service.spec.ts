@@ -1,5 +1,5 @@
 import { ConflictException } from '@nestjs/common';
-import { MembershipStatus, TenantStatus } from '@prisma/client';
+import { DepartmentStatus, MembershipStatus, TenantStatus } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
 import { TenantContext } from './tenant-context';
 import { TenantService } from './tenant.service';
@@ -142,6 +142,35 @@ describe('TenantService', () => {
             data: expect.objectContaining({ action: 'TENANT_MEMBER_ACCOUNT_CHANGED' }),
         });
     });
+
+    it('changes a member department only with the department assignment permission', async () => {
+        const prisma = createPrismaMock();
+        prisma.tenantMembership.findFirst
+            .mockResolvedValueOnce(memberRecord())
+            .mockResolvedValueOnce(memberRecord({ departmentId: DEPARTMENT_ID, version: 2 }));
+        prisma.department.findFirst.mockResolvedValue({ id: DEPARTMENT_ID, status: DepartmentStatus.ACTIVE });
+        prisma.tenantMembership.updateMany.mockResolvedValue({ count: 1 });
+        const service = createService(prisma);
+
+        const result = await service.updateMember(MEMBER_ID, { departmentId: DEPARTMENT_ID, version: 1 });
+
+        expect(result.departmentId).toBe(DEPARTMENT_ID);
+        expect(prisma.auditLog.create).toHaveBeenCalledWith({
+            data: expect.objectContaining({ action: 'MEMBER_DEPARTMENT_CHANGED' }),
+        });
+    });
+
+    it('rejects department changes without the department assignment permission', async () => {
+        const prisma = createPrismaMock();
+        prisma.tenantMembership.findFirst.mockResolvedValue(memberRecord());
+        const service = createService(prisma, ['member.update']);
+
+        await expect(service.updateMember(MEMBER_ID, {
+            departmentId: DEPARTMENT_ID,
+            version: 1,
+        })).rejects.toMatchObject({ response: { code: 'AUTH_PERMISSION_DENIED' } });
+        expect(prisma.department.findFirst).not.toHaveBeenCalled();
+    });
 });
 
 const TENANT_ID = '10000000-0000-0000-0000-000000000001';
@@ -150,8 +179,9 @@ const CURRENT_MEMBERSHIP_ID = '50000000-0000-0000-0000-000000000001';
 const MEMBER_ID = '50000000-0000-0000-0000-000000000002';
 const SECOND_MEMBER_ID = '50000000-0000-0000-0000-000000000003';
 const ADMIN_ROLE_ID = '20000000-0000-0000-0000-000000000001';
+const DEPARTMENT_ID = '60000000-0000-0000-0000-000000000001';
 
-function createService(prisma: Record<string, any>): TenantService {
+function createService(prisma: Record<string, any>, permissions?: string[]): TenantService {
     const tenantContext = {
         require: jest.fn().mockReturnValue({
             tenantId: TENANT_ID,
@@ -159,7 +189,15 @@ function createService(prisma: Record<string, any>): TenantService {
             membershipId: CURRENT_MEMBERSHIP_ID,
             requestId: 'request-id',
             roles: ['tenant_admin'],
-            permissions: ['tenant.read', 'tenant.update', 'member.read', 'member.update', 'member.remove', 'role.assign'],
+            permissions: permissions ?? [
+                'tenant.read',
+                'tenant.update',
+                'member.read',
+                'member.update',
+                'member.remove',
+                'role.assign',
+                'department.member.assign',
+            ],
         }),
     } as unknown as TenantContext;
     return new TenantService(prisma as unknown as PrismaService, tenantContext);

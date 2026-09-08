@@ -41,6 +41,11 @@ enum MembershipStatus {
   DISABLED
 }
 
+enum DepartmentStatus {
+  ACTIVE
+  DISABLED
+}
+
 enum AuditOutcome {
   SUCCESS
   FAILURE
@@ -253,7 +258,13 @@ model Department {
   tenantId String @map("tenant_id") @db.Uuid
   tenant Tenant @relation(fields: [tenantId], references: [id])
   parentId String? @map("parent_id") @db.Uuid
+  parent Department? @relation("DepartmentHierarchy", fields: [parentId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  children Department[] @relation("DepartmentHierarchy")
   name String
+  normalizedName String @map("normalized_name")
+  description String?
+  sortOrder Int @default(0) @map("sort_order")
+  status DepartmentStatus @default(ACTIVE)
   memberships TenantMembership[]
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -262,6 +273,7 @@ model Department {
   deletedAt DateTime? @map("deleted_at")
   version Int @default(1)
   @@index([tenantId, parentId])
+  @@index([tenantId, status, sortOrder])
   @@map("departments")
 }
 

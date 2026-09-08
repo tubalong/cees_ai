@@ -1,8 +1,12 @@
 # 数据库约定
 
-> 当前数据库迁移以 `0001_init` 作为完整空库基线，与现有 `schema.prisma` 保持一致；新环境直接执行该迁移，不需要历史数据回填。
+完整表级字段说明和 Navicat 只读查询见 [平台使用、接口与数据库字典](../product/platform-usage-guide.md)。
+部门树模型、约束和成员归属见 [组织部门管理](../product/organization-department-management.md)。
+
+> 新环境使用 `prisma migrate deploy` 按 `0001_init`、`0002_platform_tenant_administration`、`0003_organization_departments_and_database_comments` 顺序执行迁移；全部迁移完成后与当前 `schema.prisma` 保持一致。
 
 - `apps/api/prisma/schema.prisma` 是数据模型唯一事实源，迁移提交 `prisma/migrations`。
+- 新建表和字段必须在同一迁移中使用 `COMMENT ON TABLE`、`COMMENT ON COLUMN` 添加 PostgreSQL 注释；`0003_organization_departments_and_database_comments` 已补齐此前全部业务表和字段注释。
 - PostgreSQL/pgvector 与 Redis 的精确镜像标签只在 `infra/database/docker-compose.yml` 维护。
 - 向量检索使用 pgvector；扩展由 `0001_init` 在创建向量字段前启用，不使用环境专属初始化 SQL。
 - AI 服务对业务库只读；正式写入统一经 NestJS。
