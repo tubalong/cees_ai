@@ -22,6 +22,8 @@ for await (const event of result.stream) {
 
 调用方应使用 `AbortSignal` 取消不再需要的流，并根据业务超时设置 `sseMaxRetryAttempts`；流开始后的 `error` 是正常 SSE 事件，不是非 2xx HTTP 响应。
 
+Chat 接口由同一契约生成：invokeChat 返回完整 Assistant 消息，streamChat 返回 ChatStreamEvent，compactChat 返回调用方需要保存并在后续请求中重放的摘要。调用方必须传入完整可用历史或 conversation_summary + recent messages，并处理 started/status/content_delta/usage/completed/error。
+
 文档接口由同一契约生成：`composeDocument` 返回可审阅的 `DocumentSpec`，`renderDocumentDocx` 和 `generateDocumentDocx` 返回 `Blob | File`。NestJS 应在调用前完成租户、权限和材料过滤，并负责将返回字节登记为正式文件；该 SDK 不负责业务写入。
 
 `generation_mode: 'quality'` 会让 `composeDocument` 额外返回 `plan` 与 `planning_execution`，调用方应分别统计规划和最终组合的模型消耗；`fast` 模式保持单次调用，两字段为空。

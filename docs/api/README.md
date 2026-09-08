@@ -133,10 +133,22 @@ GET /api/v1/platform/audit-events/{auditEventId}
 - `packages/contracts/openapi/openapi.yaml` 是 NestJS 公开 API 的事实源。
 - `packages/contracts/openapi/ai-service.openapi.yaml` 是 NestJS 调用 ai-service 的内部契约。
 - 桌面端和移动端不得调用 ai-service 的通用 invoke 或 stream。
-- ai-service 文档接口同样只供 NestJS 内部调用；客户端不得绕过业务权限直接 compose 或 render。
+- ai-service Chat 与文档接口同样只供 NestJS 内部调用；客户端不得绕过业务权限直接 chat、compact、compose 或 render。
+- Chat 调用方必须保存正式会话状态，并在每轮传入历史摘要与近期消息；ai-service 不持久化 Conversation 或 Message。
 - ai-service 使用 `X-AI-Internal-Token` 请求头作为 OpenAPI `apiKey` 安全方案；该 Token 只授予可信内部服务。
 - ai-service 的 FastAPI 文档由正式契约生成：Development 和 Staging 可查看、可调用，Production 禁用。
 - TypeScript/Python/OpenAPI 生成物禁止手改，契约变更后必须运行 `contracts:lint`、`contracts:gen` 和 `contracts:check`。
 - 新增或改变外部行为时先改契约，再实现服务端和调用端；兼容新增字段必须保持可选并声明默认行为。
+
+## ai-service 上下文对话适配说明（2026-09-08）
+
+- 内部契约新增 `invokeChat`、`streamChat` 和 `compactChat`；原有 LLM 与文档接口路径和请求结构不变；
+- `ChatRequest.mode` 支持 `standard`、`ultra`，省略时默认为 `standard`；
+- 调用方必须传 `conversation_id`，并在每轮传入完整可用历史或 `conversation_summary + recent messages`；
+- `streamChat` 新增独立的 `ChatStreamEvent` 联合，事件为 `started/status/content_delta/usage/completed/error`，不能按原 `StreamEvent` 类型解析；
+- `compactChat` 返回的 `summary` 和 `summarized_through_message_id` 必须由调用方持久化；
+- `/ready` 响应新增必填 `configured_chat_modes`；
+- 部署拥有的 `AI_MODEL_CONFIG_PATH` 文件必须增加 `[chat]`、`[chat.modes.standard]` 和 `[chat.modes.ultra]`，否则服务 readiness 返回 503；
+- Chat API 不接受 `llm_profile`、Provider、模型名、temperature 或 reasoning effort 覆盖，这些参数由 ai-service 模式配置控制。
 
 文件上传的跨领域设计草案见 [文件上传设计](../architecture/file-upload.md)。其中路径和 Schema 只有写入公开 OpenAPI 并通过评审后，才构成正式 API。

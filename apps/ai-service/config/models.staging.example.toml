@@ -12,6 +12,26 @@ timeout_seconds = 60.0
 max_retries = 2
 structured_output_method = "function_calling"
 
+[chat]
+compaction_role = "default"
+compaction_max_output_tokens = 2048
+compaction_context_budget_tokens = 65536
+
+[chat.modes.standard]
+role = "default"
+default_max_output_tokens = 2048
+max_output_tokens_limit = 8192
+context_budget_tokens = 65536
+emit_reasoning_status = false
+
+[chat.modes.ultra]
+role = "reasoning"
+reasoning_effort = "high"
+default_max_output_tokens = 8192
+max_output_tokens_limit = 8192
+context_budget_tokens = 131072
+emit_reasoning_status = true
+
 [roles]
 default = ["primary"]
 structured = ["primary"]

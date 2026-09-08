@@ -7,9 +7,12 @@
 ai-service 只提供：
 
 - `/health`：进程存活；
-- `/ready`：模型目录、角色映射、密钥和生产安全策略校验；
+- `/ready`：模型目录、角色映射、Chat 模式、密钥和生产安全策略校验；
 - `/internal/v1/llm/invoke`：供 NestJS 使用的内部非流式模型调用；
 - `/internal/v1/llm/stream`：供 NestJS 使用的内部文本 SSE 模型调用；
+- `/internal/v1/chat/invoke`：无状态多轮上下文对话；
+- `/internal/v1/chat/stream`：带阶段状态的上下文对话 SSE；
+- `/internal/v1/chat/compact`：将历史消息压缩为调用方可持久化的摘要；
 - `/internal/v1/documents/*`：领域无关的 `DocumentSpec` 组合与 DOCX 渲染。
 
 工作记录、会议解析、会议总结、知识问答、管理简报和文档向量化不属于当前范围。通用文档生成不查询这些业务数据，也不创建正式文件记录。桌面端、移动端仍保留的相关页面只是 UI 原型。
@@ -25,7 +28,7 @@ ai-service 只提供：
 
 ## 3. 多模型配置
 
-`apps/ai-service/config/models.toml` 定义 `mock`、`openai_compatible`、`deepseek` 命名 profile 和 `default`、`structured`、`reasoning`、`rag` 角色。Secret 不进入 TOML，`api_key_env` 只保存环境变量名称。
+`apps/ai-service/config/models.toml` 定义 `mock`、`openai_compatible`、`deepseek` 命名 profile、`default`/`structured`/`reasoning`/`rag` 角色，以及 `standard`/`ultra` Chat 模式策略。Secret 不进入 TOML，`api_key_env` 只保存环境变量名称。
 
 - 未指定 profile：按角色候选顺序执行；
 - 连接、超时、限流和 provider 5xx：允许切换下一候选；
@@ -52,7 +55,13 @@ DeepSeek V4 默认启用 thinking，但其 thinking 模式不接受 LangChain `f
 
 `invoke` 的 execution 元数据和 `stream` 的 completed 事件均保留可选的 Provider `finish_reason`。其中 `length` 表示达到输出 token 上限，结果可能不完整；未知或未返回的结束原因使用 `null`，不跨 Provider 强制封闭枚举。
 
-## 5. OpenAPI 与内部文档
+## 5. 上下文对话
+
+Chat 接口以无状态方式接收可信指令、可选历史摘要和近期消息。ai-service 不保存正式 Conversation 或 Message；调用方必须在每轮重放完整可用历史，或者传入 `conversation_summary + recent messages`。最后一条消息必须为 `user`。
+
+`standard` 使用 default 角色；`ultra` 使用 reasoning 角色和配置的 reasoning effort。Chat API 不接受 `llm_profile`、Provider、模型名或 reasoning effort 覆盖。流式事件在模型首个 token 前发送 `started`，随后发送可选 reasoning 状态、携带执行元数据的 answering 状态、正文增量、用量和完成事件。详细设计见 [上下文对话](contextual-chat.md)。
+
+## 6. OpenAPI 与内部文档
 
 `packages/contracts/openapi/ai-service.openapi.yaml` 是 ai-service HTTP 行为的唯一事实源。契约生成 Pydantic 模型、NestJS TypeScript 客户端和随 ai-service 发布的 OpenAPI JSON；FastAPI `/docs`、`/redoc` 与 `/openapi.json` 直接展示该生成契约。测试会另外根据实际 Python 路由生成 OpenAPI，并检查路径、方法、operationId、标签、认证、响应状态与主要 Schema 字段是否漂移。
 
@@ -64,6 +73,6 @@ DeepSeek V4 默认启用 thinking，但其 thinking 模式不接受 LangChain `f
 - 文档开关不影响 `/health`、`/ready` 和受认证的 invoke、stream 本身，生产环境中的 NestJS 仍可正常调用内部接口；
 - 桌面端、移动端和第三方客户端不得通过该 Swagger 绕过 NestJS 的认证、权限、租户、配额和审计边界。
 
-## 6. 后续扩展规则
+## 7. 后续扩展规则
 
 真实业务出现后，应新增专用契约、领域 Schema、权限输入和测试，再由业务模块调用通用底座。不得直接把通用 invoke 或 stream 暴露给桌面端或移动端，也不得在 ai-service 中创建正式业务资源。

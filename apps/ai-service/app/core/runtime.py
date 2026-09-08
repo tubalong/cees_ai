@@ -21,6 +21,12 @@ class AppRuntime:
     def configured_roles(self) -> list[str]:
         return sorted(role.value for role in self.catalog.roles) if self.catalog else []
 
+    @property
+    def configured_chat_modes(self) -> list[str]:
+        if self.catalog is None or self.catalog.chat is None:
+            return []
+        return sorted(mode.value for mode in self.catalog.chat.modes)
+
 
 def build_runtime(
     settings: Settings | None = None,

@@ -13,6 +13,7 @@ export type ReadinessResponse = {
     status: 'ready' | 'not_ready';
     service: 'ai-service';
     configured_roles: Array<ModelRole>;
+    configured_chat_modes: Array<ChatMode>;
     errors: Array<string>;
 };
 
@@ -110,6 +111,114 @@ export type StreamEvent = ({
 } & UsageEvent) | ({
     type: 'completed';
 } & StreamCompletedEvent) | ({
+    type: 'error';
+} & StreamErrorEvent);
+
+export type ChatMode = 'standard' | 'ultra';
+
+export type ChatMessageRole = 'user' | 'assistant';
+
+export type ChatMessage = {
+    id?: string | null;
+    role: ChatMessageRole;
+    content: string;
+};
+
+export type ChatContextStrategy = 'full' | 'summary_plus_recent' | 'recent_only';
+
+export type ChatContextUsage = {
+    strategy: ChatContextStrategy;
+    received_message_count: number;
+    included_message_count: number;
+    history_truncated: boolean;
+    estimated_input_tokens: number;
+};
+
+export type ChatRequest = {
+    request_id: string;
+    tenant_id: string;
+    user_id: string;
+    conversation_id: string;
+    mode?: ChatMode;
+    /**
+     * Trusted system instructions supplied by the internal caller.
+     */
+    instructions?: string | null;
+    /**
+     * Summary of history preceding the supplied recent messages.
+     */
+    conversation_summary?: string | null;
+    messages: Array<ChatMessage>;
+    max_output_tokens?: number | null;
+};
+
+export type ChatAssistantMessage = {
+    role: 'assistant';
+    content: string;
+};
+
+export type ChatInvokeResponse = {
+    request_id: string;
+    conversation_id: string;
+    mode: ChatMode;
+    message: ChatAssistantMessage;
+    context_usage: ChatContextUsage;
+    execution: ExecutionMetadata;
+};
+
+export type CompactChatRequest = {
+    request_id: string;
+    tenant_id: string;
+    user_id: string;
+    conversation_id: string;
+    previous_summary?: string | null;
+    messages: Array<ChatMessage>;
+};
+
+export type CompactChatResponse = {
+    request_id: string;
+    conversation_id: string;
+    summary: string;
+    summarized_through_message_id?: string | null;
+    execution: ExecutionMetadata;
+};
+
+export type ChatStreamStartedEvent = {
+    type: 'started';
+    request_id: string;
+    conversation_id: string;
+    mode: ChatMode;
+    context_usage: ChatContextUsage;
+};
+
+export type ChatStreamPhase = 'reasoning' | 'answering';
+
+export type ChatStreamStatusEvent = {
+    type: 'status';
+    phase: ChatStreamPhase;
+    execution?: StreamExecutionMetadata;
+};
+
+export type ChatStreamCompletedEvent = {
+    type: 'completed';
+    latency_ms: number;
+    /**
+     * Provider completion reason. `length` indicates the output token limit was reached.
+     */
+    finish_reason?: string | null;
+};
+
+export type ChatStreamEvent = ({
+    type: 'started';
+} & ChatStreamStartedEvent) | ({
+    type: 'status';
+} & ChatStreamStatusEvent) | ({
+    type: 'content_delta';
+} & ContentDeltaEvent) | ({
+    type: 'usage';
+} & UsageEvent) | ({
+    type: 'completed';
+} & ChatStreamCompletedEvent) | ({
     type: 'error';
 } & StreamErrorEvent);
 
@@ -420,6 +529,141 @@ export type StreamLlmResponses = {
 };
 
 export type StreamLlmResponse = StreamLlmResponses[keyof StreamLlmResponses];
+
+export type InvokeChatData = {
+    body: ChatRequest;
+    path?: never;
+    query?: never;
+    url: '/internal/v1/chat/invoke';
+};
+
+export type InvokeChatErrors = {
+    /**
+     * Invalid profile or unsupported output mode
+     */
+    400: ErrorResponse;
+    /**
+     * Internal authentication failed
+     */
+    401: ErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ErrorResponse;
+    /**
+     * Unexpected internal service error
+     */
+    500: ErrorResponse;
+    /**
+     * Provider output did not match the requested schema
+     */
+    502: ErrorResponse;
+    /**
+     * Service or configured providers unavailable
+     */
+    503: ErrorResponse;
+};
+
+export type InvokeChatError = InvokeChatErrors[keyof InvokeChatErrors];
+
+export type InvokeChatResponses = {
+    /**
+     * Chat response generated
+     */
+    200: ChatInvokeResponse;
+};
+
+export type InvokeChatResponse = InvokeChatResponses[keyof InvokeChatResponses];
+
+export type StreamChatData = {
+    body: ChatRequest;
+    path?: never;
+    query?: never;
+    url: '/internal/v1/chat/stream';
+};
+
+export type StreamChatErrors = {
+    /**
+     * Invalid profile or unsupported output mode
+     */
+    400: ErrorResponse;
+    /**
+     * Internal authentication failed
+     */
+    401: ErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ErrorResponse;
+    /**
+     * Unexpected internal service error
+     */
+    500: ErrorResponse;
+    /**
+     * Provider output did not match the requested schema
+     */
+    502: ErrorResponse;
+    /**
+     * Service or configured providers unavailable
+     */
+    503: ErrorResponse;
+};
+
+export type StreamChatError = StreamChatErrors[keyof StreamChatErrors];
+
+export type StreamChatResponses = {
+    /**
+     * Chat response events are streamed
+     */
+    200: ChatStreamEvent;
+};
+
+export type StreamChatResponse = StreamChatResponses[keyof StreamChatResponses];
+
+export type CompactChatData = {
+    body: CompactChatRequest;
+    path?: never;
+    query?: never;
+    url: '/internal/v1/chat/compact';
+};
+
+export type CompactChatErrors = {
+    /**
+     * Invalid profile or unsupported output mode
+     */
+    400: ErrorResponse;
+    /**
+     * Internal authentication failed
+     */
+    401: ErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ErrorResponse;
+    /**
+     * Unexpected internal service error
+     */
+    500: ErrorResponse;
+    /**
+     * Provider output did not match the requested schema
+     */
+    502: ErrorResponse;
+    /**
+     * Service or configured providers unavailable
+     */
+    503: ErrorResponse;
+};
+
+export type CompactChatError = CompactChatErrors[keyof CompactChatErrors];
+
+export type CompactChatResponses = {
+    /**
+     * Conversation history compacted
+     */
+    200: CompactChatResponse;
+};
+
+export type CompactChatResponse2 = CompactChatResponses[keyof CompactChatResponses];
 
 export type ComposeDocumentData = {
     body: ComposeDocumentRequest;
