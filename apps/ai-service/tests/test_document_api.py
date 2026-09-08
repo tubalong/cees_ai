@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from io import BytesIO
 
 from docx import Document as WordDocument
@@ -53,6 +54,17 @@ def compose_payload() -> dict[str, object]:
     }
 
 
+def quality_compose_payload() -> dict[str, object]:
+    payload = compose_payload()
+    payload["document_options"] = {
+        **payload["document_options"],
+        "generation_mode": "quality",
+        "planning_max_output_tokens": 1024,
+        "planning_reasoning_effort": "low",
+    }
+    return payload
+
+
 def render_payload() -> dict[str, object]:
     return {
         "request_id": "req-document-render-1",
@@ -67,12 +79,39 @@ def render_payload() -> dict[str, object]:
     }
 
 
-def build_client() -> tuple[TestClient, StubProvider]:
-    model_profile = profile(modes={OutputMode.json_schema})
-    provider = StubProvider(model_profile, [result(document_data())] * 2)
+def plan_data() -> dict[str, object]:
+    return {
+        "schema_version": "1.0",
+        "title": "Implementation plan",
+        "audience": "Project team",
+        "objective": "Define the MVP delivery approach",
+        "sections": [
+            {
+                "heading": "Scope",
+                "level": 1,
+                "purpose": "Define the first release",
+                "key_points": ["Compose", "Render"],
+                "source_refs": ["requirements"],
+            }
+        ],
+    }
+
+
+def build_client(*, quality: bool = False) -> tuple[TestClient, StubProvider]:
+    modes = {OutputMode.text, OutputMode.json_schema} if quality else {OutputMode.json_schema}
+    model_profile = profile(modes=modes)
+    outcomes = (
+        [result(json.dumps(plan_data())), result(document_data())]
+        if quality
+        else [result(document_data())] * 2
+    )
+    provider = StubProvider(model_profile, outcomes)
+    roles = {ModelRole.structured: ["structured"]}
+    if quality:
+        roles[ModelRole.reasoning] = ["structured"]
     model_catalog = catalog(
         {"structured": model_profile},
-        {ModelRole.structured: ["structured"]},
+        roles,
     )
     router = LLMRouter(model_catalog, lambda _name, _profile: provider)
     app = create_app(runtime=ready_runtime(router, model_catalog))
@@ -108,7 +147,48 @@ def test_compose_returns_document_and_execution_metadata() -> None:
     assert body["document"]["title"] == "Implementation plan"
     assert body["execution"]["profile"] == "structured"
     assert body["execution"]["finish_reason"] == "stop"
+    assert body["plan"] is None
+    assert body["planning_execution"] is None
     assert len(provider.calls) == 1
+
+
+def test_quality_compose_returns_plan_and_both_execution_metadata() -> None:
+    client, provider = build_client(quality=True)
+
+    with client:
+        response = client.post(
+            "/internal/v1/documents/compose",
+            headers={"X-AI-Internal-Token": "secret"},
+            json=quality_compose_payload(),
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["plan"]["objective"] == "Define the MVP delivery approach"
+    assert body["planning_execution"]["profile"] == "structured"
+    assert body["execution"]["profile"] == "structured"
+    assert [call[1].output_mode for call in provider.calls] == [
+        OutputMode.text,
+        OutputMode.json_schema,
+    ]
+
+
+def test_quality_generate_returns_docx_after_planning_and_composition() -> None:
+    client, provider = build_client(quality=True)
+
+    with client:
+        response = client.post(
+            "/internal/v1/documents/generate-docx",
+            headers={"X-AI-Internal-Token": "secret"},
+            json=quality_compose_payload(),
+        )
+
+    assert response.status_code == 200
+    assert response.content.startswith(b"PK")
+    assert [call[1].output_mode for call in provider.calls] == [
+        OutputMode.text,
+        OutputMode.json_schema,
+    ]
 
 
 def test_render_returns_docx_without_invoking_model() -> None:

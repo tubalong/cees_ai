@@ -146,6 +146,17 @@ class TemplateId(StrEnum):
     business_standard = 'business-standard'
 
 
+class GenerationMode(StrEnum):
+    fast = 'fast'
+    quality = 'quality'
+
+
+class PlanningReasoningEffort(StrEnum):
+    low = 'low'
+    high = 'high'
+    max = 'max'
+
+
 class DocumentOptions(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
@@ -154,6 +165,15 @@ class DocumentOptions(BaseModel):
     locale: constr(min_length=2, max_length=32) | None = 'zh-CN'
     template_id: TemplateId | None = 'business-standard'
     include_toc: bool | None = False
+    generation_mode: GenerationMode | None = Field(
+        'fast',
+        description='Fast composes directly; quality creates a reasoning plan before composition.',
+    )
+    planning_max_output_tokens: conint(ge=256, le=8192) | None = 2048
+    planning_reasoning_effort: PlanningReasoningEffort | None = Field(
+        'low',
+        description='DeepSeek reasoning effort used by the quality-mode planning stage.',
+    )
 
 
 class ParagraphBlock(BaseModel):
@@ -228,6 +248,30 @@ class DocumentSection(BaseModel):
             Field(discriminator='type'),
         ]
     ] = Field(..., max_length=100, min_length=1)
+
+
+class DocumentPlanSection(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    heading: constr(min_length=1, max_length=256)
+    level: conint(ge=1, le=3)
+    purpose: constr(min_length=1, max_length=2000)
+    key_points: list[constr(min_length=1, max_length=2000)] = Field(
+        ..., max_length=20, min_length=1
+    )
+    source_refs: list[constr(min_length=1, max_length=128)] = Field(..., max_length=32)
+
+
+class DocumentPlan(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    schema_version: Literal['1.0']
+    title: constr(min_length=1, max_length=256)
+    audience: constr(min_length=1, max_length=256) | None = None
+    objective: constr(min_length=1, max_length=2000)
+    sections: list[DocumentPlanSection] = Field(..., max_length=50, min_length=1)
 
 
 class DocumentSpec(BaseModel):
@@ -384,4 +428,6 @@ class ComposeDocumentResponse(BaseModel):
     )
     request_id: str
     document: DocumentSpec
+    plan: DocumentPlan | None = None
+    planning_execution: ExecutionMetadata | None = None
     execution: ExecutionMetadata

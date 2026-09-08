@@ -33,6 +33,8 @@ ai-service 只提供：
 - 显式 profile：必须属于角色白名单，并精确执行、不回退；
 - 生产环境角色不得绑定 Mock。
 
+DeepSeek V4 默认启用 thinking，但其 thinking 模式不接受 LangChain `function_calling` 结构化输出所需的强制 `tool_choice`。因此 DeepSeek 的 JSON Schema 调用在创建 structured wrapper 时显式绑定 `thinking.type=disabled`；普通文本 invoke、stream 和 reasoning 角色不受影响。文档 quality Planner 通过 reasoning 角色显式启用 thinking，并使用独立的 reasoning effort 与 token 预算。`temperature` 与 token 上限也必须在 wrapper 创建阶段绑定，不能作为 wrapper `ainvoke` 的参数传入，否则 LangChain 不会把它们发送给 Provider。
+
 配置在进程启动时读取，修改后需要重启。Readiness 不主动访问模型供应商。
 
 ## 4. invoke 与 stream 安全边界

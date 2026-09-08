@@ -25,6 +25,7 @@ from app.llm.types import (
     LLMProvider,
     ProviderResult,
     ProviderStreamChunk,
+    ReasoningEffort,
 )
 
 logger = logging.getLogger(__name__)
@@ -71,6 +72,7 @@ class LLMRouter:
         profile_override: str | None,
         temperature: float | None,
         max_output_tokens: int | None,
+        reasoning_effort: ReasoningEffort | None = None,
         schema_name: str | None = None,
         json_schema: dict[str, Any] | None = None,
     ) -> RoutingResult:
@@ -90,6 +92,7 @@ class LLMRouter:
                 temperature=temperature,
                 max_output_tokens=max_output_tokens,
                 request_id=request_id,
+                reasoning_effort=reasoning_effort,
                 schema_name=schema_name,
                 json_schema=json_schema,
             )
@@ -321,6 +324,7 @@ class LLMRouter:
         temperature: float | None,
         max_output_tokens: int | None,
         request_id: str,
+        reasoning_effort: ReasoningEffort | None = None,
         schema_name: str | None = None,
         json_schema: dict[str, Any] | None = None,
     ) -> InvocationOptions:
@@ -338,6 +342,7 @@ class LLMRouter:
             output_mode=output_mode,
             schema_name=schema_name,
             json_schema=json_schema,
+            reasoning_effort=reasoning_effort,
         )
 
     @staticmethod

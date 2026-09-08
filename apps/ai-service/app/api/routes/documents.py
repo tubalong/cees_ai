@@ -98,6 +98,12 @@ async def compose_document(
     return ComposeDocumentResponse(
         request_id=payload.request_id,
         document=composition.document,
+        plan=composition.plan,
+        planning_execution=(
+            _execution_metadata(composition.planning_routing)
+            if composition.planning_routing is not None
+            else None
+        ),
         execution=_execution_metadata(composition.routing),
     )
 

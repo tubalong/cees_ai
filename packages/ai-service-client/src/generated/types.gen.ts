@@ -124,6 +124,15 @@ export type DocumentOptions = {
     locale?: string;
     template_id?: 'business-standard';
     include_toc?: boolean;
+    /**
+     * Fast composes directly; quality creates a reasoning plan before composition.
+     */
+    generation_mode?: 'fast' | 'quality';
+    planning_max_output_tokens?: number;
+    /**
+     * DeepSeek reasoning effort used by the quality-mode planning stage.
+     */
+    planning_reasoning_effort?: 'low' | 'high' | 'max';
 };
 
 export type ParagraphBlock = {
@@ -177,6 +186,22 @@ export type DocumentSection = {
     blocks: Array<DocumentBlock>;
 };
 
+export type DocumentPlanSection = {
+    heading: string;
+    level: number;
+    purpose: string;
+    key_points: Array<string>;
+    source_refs: Array<string>;
+};
+
+export type DocumentPlan = {
+    schema_version: '1.0';
+    title: string;
+    audience?: string | null;
+    objective: string;
+    sections: Array<DocumentPlanSection>;
+};
+
 export type DocumentSpec = {
     schema_version: '1.0';
     title: string;
@@ -200,6 +225,8 @@ export type ComposeDocumentRequest = {
 export type ComposeDocumentResponse = {
     request_id: string;
     document: DocumentSpec;
+    plan?: DocumentPlan;
+    planning_execution?: ExecutionMetadata;
     execution: ExecutionMetadata;
 };
 

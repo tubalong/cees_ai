@@ -14,8 +14,12 @@ ai-service 接收可信内部服务提供的生成指令和纯文本材料，生
 
 ```mermaid
 flowchart LR
-  API[NestJS API] --> C[DocumentComposer]
-  C --> R[LLMRouter structured role]
+  API[NestJS API] --> M{generation mode}
+  M -->|fast| C[DocumentComposer]
+  M -->|quality| P[Thinking DocumentPlanner]
+  P --> DP[DocumentPlan]
+  DP --> C
+  C --> R[Structured formatter]
   R --> S[DocumentSpec]
   S --> V[Schema and semantic validation]
   V --> D[DocxRenderer]
@@ -23,7 +27,11 @@ flowchart LR
   B --> API
 ```
 
-`DocumentComposer` 在进程内直接复用 `LLMRouter`，不通过 HTTP 回调本服务的 `/invoke`。模型只生成语义结构，`DocxRenderer` 不调用模型。同一个 `DocumentSpec` 和 `template_id` 必须得到语义一致的 DOCX。
+`DocumentPlanner` 与 `DocumentComposer` 在进程内直接复用 `LLMRouter`，不通过 HTTP 回调本服务的 `/invoke`。模型只生成语义结构，`DocxRenderer` 不调用模型。同一个 `DocumentSpec` 和 `template_id` 必须得到语义一致的 DOCX。
+
+`generation_mode=fast` 直接生成 `DocumentSpec`，保持单次模型调用和既有延迟、成本。`generation_mode=quality` 先通过 reasoning 角色生成并校验 `DocumentPlan`，再关闭 structured formatter 的 thinking，将计划扩写为严格 `DocumentSpec`。compose 响应在 quality 模式下返回 `plan` 和 `planning_execution`；fast 模式下两者为 `null`。
+
+quality Planner 只保留最终 JSON 计划，不保存或返回 Provider 的 chain-of-thought。DeepSeek 默认使用 `planning_reasoning_effort=low` 和独立的 `planning_max_output_tokens=2048`，调用方可选择 high 或 max，但必须为更长推理预留足够预算。
 
 ## 3. DocumentSpec
 
@@ -48,9 +56,13 @@ Schema 禁止额外字段并限制章节、块、表格与文本长度。表格�
 
 `compose` 和 `generate-docx` 固定使用 `structured` 模型角色。调用方可选择该角色白名单中的 profile，但不能覆盖 Provider、模型地址、密钥或重试策略。
 
+当 structured profile 使用 DeepSeek V4 与 `function_calling` 时，ai-service 会关闭该次调用的 thinking 模式，因为 DeepSeek thinking 与强制 `tool_choice` 不兼容。该行为只影响结构化调用，不改变通用文本或流式调用的 thinking 行为。
+
 ## 5. 失败语义
 
 - 输入材料与指令总 UTF-8 大小超过 256 KiB：`INVALID_DOCUMENT_REQUEST`，HTTP 422；
+- Planner 未返回合法 `DocumentPlan`：`DOCUMENT_PLAN_INVALID`，HTTP 502；
+- Planner 达到 token 上限：`DOCUMENT_PLANNING_TRUNCATED`，HTTP 502，不进入 structured formatter；
 - `DocumentSpec` 不满足 Schema 或语义约束：`DOCUMENT_SPEC_INVALID`，HTTP 502（模型生成）或 422（调用方提交）；
 - Provider `finish_reason=length`：`DOCUMENT_GENERATION_TRUNCATED`，HTTP 502，不渲染部分结果；
 - 模板不在契约白名单：请求校验失败，HTTP 422；
@@ -65,6 +77,8 @@ Schema 禁止额外字段并限制章节、块、表格与文本长度。表格�
 ## 7. 验收口径
 
 - compose 输出通过正式 OpenAPI `DocumentSpec` 校验；
+- quality compose 先产生合法 `DocumentPlan`，并返回独立规划执行元数据；
+- fast compose 保持单次模型调用；
 - `finish_reason=length` 不产生 DOCX；
 - render-docx 不调用 LLM；
 - 生成文件可由 `python-docx` 重新打开，标题、章节、列表和表格内容正确；

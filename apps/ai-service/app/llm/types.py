@@ -6,6 +6,8 @@ from typing import Any, Literal, Protocol
 
 from app.core.config import ModelProfile, OutputMode
 
+ReasoningEffort = Literal["low", "high", "max"]
+
 
 @dataclass(frozen=True)
 class ChatMessage:
@@ -20,6 +22,7 @@ class InvocationOptions:
     output_mode: OutputMode
     schema_name: str | None = None
     json_schema: dict[str, Any] | None = None
+    reasoning_effort: ReasoningEffort | None = None
 
 
 @dataclass(frozen=True)

@@ -23,6 +23,7 @@ SCHEMAS_TO_COMPARE = {
     "StreamRequest",
     "ComposeDocumentRequest",
     "ComposeDocumentResponse",
+    "DocumentPlan",
     "RenderDocxRequest",
     "DocumentSpec",
     "ErrorResponse",
