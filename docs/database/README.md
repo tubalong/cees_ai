@@ -3,7 +3,7 @@
 完整表级字段说明和 Navicat 只读查询见 [平台使用、接口与数据库字典](../product/platform-usage-guide.md)。
 部门树模型、约束和成员归属见 [组织部门管理](../product/organization-department-management.md)。
 
-> 新环境使用 `prisma migrate deploy` 按 `0001_init`、`0002_platform_tenant_administration`、`0003_organization_departments_and_database_comments` 顺序执行迁移；全部迁移完成后与当前 `schema.prisma` 保持一致。
+> 新环境使用 `prisma migrate deploy` 按 `0001_init`、`0002_platform_tenant_administration`、`0003_organization_departments_and_database_comments`、`0004_redis_cos_upload_foundation` 顺序执行迁移；全部迁移完成后与当前 `schema.prisma` 保持一致。
 
 - `apps/api/prisma/schema.prisma` 是数据模型唯一事实源，迁移提交 `prisma/migrations`。
 - 新建表和字段必须在同一迁移中使用 `COMMENT ON TABLE`、`COMMENT ON COLUMN` 添加 PostgreSQL 注释；`0003_organization_departments_and_database_comments` 已补齐此前全部业务表和字段注释。
@@ -74,6 +74,19 @@ Resource
 - `TENANT` 可见性只扩展读取范围，不能授予修改、删除或分享能力；
 - Document 删除会软删除 ManagedDocument、Resource 和 ACL，正常 ACL 撤销采用硬删除以允许后续重新授权；
 - 原知识库文档 Prisma 模型已更名为 KnowledgeDocument，仍映射原 `documents` 表，与 ManagedDocument 分离。
+
+## 基础文件上传模型
+
+```text
+UploadSession --COS HEAD 校验通过--> FileObject
+```
+
+- `UploadSession` 保存租户、创建成员、幂等键、预期大小与 Content-Type、COS Bucket/Region/对象键、过期时间和完成状态；
+- `FileObject` 只在 COS 对象校验通过后创建，保存原文件名、用途、存储提供商、Bucket、Region、对象键、大小、Content-Type 和 ETag；
+- COS 对象键唯一约束为 `bucket + objectKey`，规范格式是 `cees/{environment}/tenants/{tenantId}/files/{yyyy}/{mm}/{fileId}/source`；
+- `0004_redis_cos_upload_foundation` 新增上传会话、文件存储元数据和相关枚举；本期不创建额度预占、租户用量或通用文件绑定表；
+- 文件大小使用 PostgreSQL `BIGINT`，API 返回前转换为 JavaScript 安全整数；当前硬上限 500 MiB。
+
 - `apps/api/prisma/schema.prisma` 是数据模型唯一事实源，迁移提交到 `apps/api/prisma/migrations`。
 - `0001_init` 包含 pgvector 扩展和当前 `schema.prisma` 的完整空库结构；共享环境首次执行后，后续结构变化必须新增前向迁移，不再重写该基线。
 - 本地 PostgreSQL 与 Redis 由 `infra/database/docker-compose.yml` 和本地开发覆盖启动；共享环境数据库由独立数据库服务器运行，Redis 必须启用密码。
