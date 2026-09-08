@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CEES AI API
-  version: 0.8.0
+  version: 0.9.0
   description: 以本文件为唯一事实源的公开 API 契约。资源与操作按 docs/api 约定补充。
 
 servers:
@@ -151,6 +151,66 @@ paths:
                 $ref: "#/components/schemas/MeResponseEnvelope"
         "401":
           description: Access Token 无效或 Session 已失效
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /users/me/profile:
+    get:
+      summary: 获取当前租户内的个人资料
+      operationId: userProfileGetCurrent
+      tags:
+        - User
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 当前用户在当前租户内的个人资料
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfileResponseEnvelope"
+        "401":
+          description: 登录状态无效或已过期
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+    patch:
+      summary: 修改当前租户内的个人资料
+      operationId: userProfileUpdateCurrent
+      tags:
+        - User
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateUserProfileRequest"
+      responses:
+        "200":
+          description: 修改后的个人资料
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfileResponseEnvelope"
+        "400":
+          description: 请求字段校验失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "401":
+          description: 登录状态无效或已过期
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "409":
+          description: 个人资料版本冲突
           content:
             application/json:
               schema:
@@ -2785,6 +2845,72 @@ components:
           items:
             type: string
 
+    UserProfileDepartment:
+      type: object
+      required:
+        - id
+        - name
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+
+    UserProfile:
+      type: object
+      required:
+        - userId
+        - membershipId
+        - tenantId
+        - account
+        - displayName
+        - department
+        - version
+        - updatedAt
+      properties:
+        userId:
+          type: string
+          format: uuid
+        membershipId:
+          type: string
+          format: uuid
+        tenantId:
+          type: string
+          format: uuid
+        account:
+          type: string
+          description: 当前租户登录账号，只读
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 120
+        department:
+          oneOf:
+            - $ref: "#/components/schemas/UserProfileDepartment"
+            - type: "null"
+        version:
+          type: integer
+          minimum: 1
+        updatedAt:
+          type: string
+          format: date-time
+
+    UpdateUserProfileRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - displayName
+        - version
+      properties:
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 120
+        version:
+          type: integer
+          minimum: 1
+
     MemberStatus:
       type: string
       enum:
@@ -3612,6 +3738,22 @@ components:
           const: true
         data:
           $ref: "#/components/schemas/MeResponse"
+        requestId:
+          type:
+            - string
+            - "null"
+
+    UserProfileResponseEnvelope:
+      type: object
+      required:
+        - success
+        - data
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: "#/components/schemas/UserProfile"
         requestId:
           type:
             - string

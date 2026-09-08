@@ -2,8 +2,9 @@
 
 ## 使用与验收
 
-- [平台使用、接口与数据库字典](platform-usage-guide.md)：管理员账号、58 个 HTTP 操作、参数含义、平台流转、39 张业务表和 Navicat 查询。
+- [平台使用、接口与数据库字典](platform-usage-guide.md)：管理员账号、60 个 HTTP 操作、参数含义、平台流转、39 张业务表和 Navicat 查询。
 - [组织部门管理](organization-department-management.md)：租户内部门树、权限、成员归属、审计和数据库约束。
+- [用户个人资料管理](user-profile-management.md)：成员查询并修改自己在当前租户内的展示资料。
 
 待补充。建议按以下维度维护：
 

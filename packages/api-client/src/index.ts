@@ -113,6 +113,10 @@ export type { UpdateRoleRequest } from './models/UpdateRoleRequest';
 export type { UpdateTenantMemberAccountRequest } from './models/UpdateTenantMemberAccountRequest';
 export { UpdateTenantMemberRequest } from './models/UpdateTenantMemberRequest';
 export type { UpdateTenantRequest } from './models/UpdateTenantRequest';
+export type { UpdateUserProfileRequest } from './models/UpdateUserProfileRequest';
+export type { UserProfile } from './models/UserProfile';
+export type { UserProfileDepartment } from './models/UserProfileDepartment';
+export type { UserProfileResponseEnvelope } from './models/UserProfileResponseEnvelope';
 export type { VersionRequest } from './models/VersionRequest';
 
 export { AclService } from './services/AclService';
@@ -126,3 +130,4 @@ export { PlatformAuthService } from './services/PlatformAuthService';
 export { PlatformTenantService } from './services/PlatformTenantService';
 export { RbacService } from './services/RbacService';
 export { TenantService } from './services/TenantService';
+export { UserService } from './services/UserService';
