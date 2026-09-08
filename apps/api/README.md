@@ -11,9 +11,13 @@ src/
 ├── platform-tenant/  # 平台租户生命周期、管理员和平台审计
 ├── tenant/           # 租户上下文与守卫
 ├── tenant-invitation/# 租户账号邀请、激活与凭证重置
+├── organization/     # 租户组织部门树与成员归属
 ├── rbac/             # 权限与数据范围
 ├── resource/         # 资源级授权计算与 ACL
 ├── document/         # 第一种受控业务资源
+├── file/             # COS 基础上传会话与正式文件登记
+├── storage/          # StorageProvider、腾讯 COS 适配器与对象键规则
+├── redis/            # 带环境命名空间的 Redis 基础 CRUD
 ├── common/           # 异常过滤器、响应封装
 ├── audit/            # 审计
 ├── ai-orchestration/ # 通用 AI 服务客户端、调用审计与确认策略
@@ -82,6 +86,9 @@ DELETE /api/v1/resources/{resourceId}/acl/{aclEntryId}?version={version}
 GET /api/v1/audit-events
 GET /api/v1/audit-events/{auditEventId}
 
+POST /api/v1/upload-sessions
+POST /api/v1/upload-sessions/{uploadSessionId}/complete
+
 POST /api/v1/platform/auth/login
 POST /api/v1/platform/auth/refresh
 POST /api/v1/platform/auth/logout
@@ -106,7 +113,7 @@ GET /api/v1/platform/audit-events
 GET /api/v1/platform/audit-events/{auditEventId}
 ```
 
-截至 2026-09-07，身份、租户、权限、审计、平台租户管理和租户账号激活接口均已实现。
+截至 2026-09-08，身份、租户、组织部门、权限、审计、平台租户管理、租户账号激活和 COS 基础直传接口均已实现。
 
 > 数据库使用 `prisma/migrations/0001_init` 作为当前完整的空库基线，其中会先启用 pgvector，再创建与 `schema.prisma` 一致的全部业务表。
 
@@ -148,7 +155,15 @@ pnpm --filter @cees/api dev
 
 Swagger 文档：`http://localhost:3000/api/docs`。
 
-文件上传涉及租户权限、COS、配额和审计，设计草案见 `docs/architecture/file-upload.md`。公开接口必须先落入 OpenAPI 契约，再由本应用实现。
+Redis 基础能力由全局 `RedisModule` 提供。业务模块注入 `RedisService` 后使用逻辑键调用字符串、JSON、TTL、删除、计数和 `SET NX` 方法；服务会自动附加 `REDIS_KEY_PREFIX`。Redis 不保存正式业务事实，完整约定见 `docs/architecture/redis-foundation.md`。
+
+COS 基础上传采用客户端直传：API 创建短时 PUT URL，客户端上传后再调用完成接口，API 使用 COS HEAD 校验大小和 Content-Type 后创建 `FileObject`。对象键固定为：
+
+```text
+cees/{environment}/tenants/{tenantId}/files/{yyyy}/{mm}/{fileId}/source
+```
+
+当前接口保留 JWT、TenantContext、幂等和审计，但细粒度 `file.*` 权限、租户额度、分片、扫描及 AI 入库尚未实现，详见 `docs/architecture/file-upload.md`。
 
 容器镜像必须从仓库根目录构建：
 

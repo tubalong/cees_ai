@@ -1,0 +1,4 @@
+export const STORAGE_CONFIG = Symbol('STORAGE_CONFIG');
+export const STORAGE_SETTINGS = Symbol('STORAGE_SETTINGS');
+export const STORAGE_PROVIDER = Symbol('STORAGE_PROVIDER');
+export const TENCENT_COS_CLIENT = Symbol('TENCENT_COS_CLIENT');

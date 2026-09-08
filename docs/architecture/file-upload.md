@@ -1,12 +1,13 @@
-# 文件上传设计草案
+# 文件上传与 COS 设计
 
-> 状态：设计草案，尚未写入 OpenAPI 契约，也尚未实现公开上传接口。本文用于确定边界和实施顺序，不是已经生效的 API 定义。
+> 状态：基础单文件直传已于 2026-09-08 落地；权限、额度、分片、扫描、业务绑定和 AI 入库仍为后续设计。正式公开行为以 `packages/contracts/openapi/openapi.yaml` 0.9.0 为准。
 
 ## 1. 当前结论
 
-- 公开上传 API 必须先修改 `packages/contracts/openapi/openapi.yaml`，完成契约评审后再由 `apps/api` 实现。
-- 不需要等待完整 RBAC 管理能力全部完成，但实现公开接口前必须具备最小的认证、租户上下文、上传权限、额度预占和审计能力。
-- 当前可以先实现不对外暴露的 COS 适配层、对象键生成规则和文件策略；不得先提供无租户和无额度控制的通用上传接口。
+- 已实现 `POST /api/v1/upload-sessions` 和 `POST /api/v1/upload-sessions/{uploadSessionId}/complete`，客户端通过短时预签名 PUT URL 直传 COS。
+- 基础接口必须经过 JWT 认证并使用服务端建立的 TenantContext；客户端不能提交 `tenantId`、Bucket 或对象键。
+- 当前暂不执行 `file.upload` 等细粒度权限和租户商业额度，因此有效租户内的登录成员均可使用基础上传接口；该限制必须在扩大生产使用范围前补齐。
+- 基础接口仅支持普通附件、单文件上传和 100 MiB 默认技术上限，环境可以下调，上限硬限制为 500 MiB。
 - 文件二进制存储在腾讯云 COS；正式文件元数据、租户归属、业务关联、额度和审计记录由 NestJS/PostgreSQL 管理。
 - 客户端直接上传到 COS，NestJS 负责授权和签发短时上传凭证；AI 服务只使用限时下载 URL 或受控内容，不持有长期 COS 密钥。
 
@@ -37,18 +38,14 @@ cees/{environment}/tenants/{tenantId}/files/{yyyy}/{mm}/{fileId}/source
 例如：
 
 ```text
-cees/local/tenants/tenant_123/files/2026/09/file_456/source
-cees/staging/tenants/tenant_123/files/2026/09/file_789/source
-cees/prod/tenants/tenant_123/files/2026/09/file_999/source
+cees/local/tenants/11111111-1111-4111-8111-111111111111/files/2026/09/22222222-2222-4222-8222-222222222222/source
+cees/staging/tenants/33333333-3333-4333-8333-333333333333/files/2026/09/44444444-4444-4444-8444-444444444444/source
+cees/prod/tenants/55555555-5555-4555-8555-555555555555/files/2026/09/66666666-6666-4666-8666-666666666666/source
 ```
 
-自动化测试应继续增加运行标识，避免清理测试数据时影响开发文件：
+`tenantId` 和 `fileId` 必须为 UUID。当前基础上传接口只签发上述 `source` 路径；自动化测试也必须使用独立测试租户和文件 UUID，不能自行插入额外路径层级。
 
-```text
-cees/staging/runs/{testRunId}/tenants/{tenantId}/files/{fileId}/source
-```
-
-原始文件名只保存在数据库中，不直接作为 COS 对象键。派生文件放在同一 `fileId` 下：
+原始文件名只保存在数据库中，不直接作为 COS 对象键。后续派生文件可放在同一 `fileId` 下：
 
 ```text
 {fileId}/source
@@ -77,14 +74,16 @@ COS 中的“文件夹”本质上是对象键前缀，因此仅依赖代码拼�
 
 | 组件 | 职责 |
 | --- | --- |
-| NestJS API | 认证、租户、权限、上传会话、额度预占、COS 签名、文件元数据、业务关联和审计 |
+| NestJS API | 当前负责认证、租户、上传会话、COS 签名、文件元数据和审计；后续增加细粒度权限、额度及业务关联 |
 | 腾讯云 COS | 保存原始文件与派生二进制对象，不作为业务事实源 |
-| PostgreSQL | 保存 FileAsset、UploadSession、额度、关联和状态 |
-| Redis | 上传限流、短期状态、任务队列和幂等辅助，不作为额度事实源 |
+| PostgreSQL | 当前保存 FileObject、UploadSession 和审计；后续增加额度、关联及扩展状态 |
+| Redis | 当前提供通用缓存、幂等、计数和短期协调基础；后续可承载上传限流及任务队列，不作为额度事实源 |
 | AI Service | 使用限时 URL 读取已授权文件，返回提取、OCR、分类或切块结果，不直接创建正式文件记录 |
 | Desktop/Mobile | 创建上传会话、直传 COS、上报完成状态，不决定租户、对象键或 ACL |
 
-## 5. 推荐上传流程
+## 5. 完整体系目标流程
+
+以下流程包含尚未落地的权限、额度、异步任务和 AI 处理，用于说明后续目标，不代表当前基础接口已经具备这些能力。当前已实现流程以第 6 节为准。
 
 ```mermaid
 sequenceDiagram
@@ -117,9 +116,9 @@ sequenceDiagram
 - 大文件使用限定前缀、操作和有效期的 STS 临时凭证或分片签名；
 - 契约从第一版保留 `uploadMode`，以便兼容 `single` 与 `multipart`。
 
-## 6. 上传 API 草案
+## 6. 已实现的基础上传 API
 
-以下路径仅用于设计讨论，正式实现前必须先写入 OpenAPI。
+以下路径已经写入 OpenAPI 0.9.0。响应由全局拦截器包装为 `{ success, data, requestId }`。
 
 ### 6.1 创建上传会话
 
@@ -135,21 +134,22 @@ Idempotency-Key: <client-generated-key>
   "purpose": "attachment",
   "fileName": "项目方案.pptx",
   "contentType": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-  "sizeBytes": 28377120,
-  "sha256": "optional"
+  "sizeBytes": 28377120
 }
 ```
 
 客户端不得提交 `tenantId`、Bucket、对象前缀、完整对象键或 ACL。
 
-响应草案：
+响应数据示例：
 
 ```json
 {
-  "uploadSessionId": "upl_xxx",
-  "fileId": "file_xxx",
+  "uploadSessionId": "11111111-1111-4111-8111-111111111111",
+  "fileId": "22222222-2222-4222-8222-222222222222",
+  "purpose": "attachment",
   "uploadMode": "single",
-  "expiresAt": "2026-09-04T12:00:00Z",
+  "status": "PENDING",
+  "expiresAt": "2026-09-08T12:00:00Z",
   "upload": {
     "method": "PUT",
     "url": "temporary-signed-url",
@@ -163,12 +163,13 @@ Idempotency-Key: <client-generated-key>
 创建会话时必须完成：
 
 1. 从服务端认证上下文取得用户和租户；
-2. 校验上传用途和资源权限；
-3. 根据用途、套餐和技术上限校验文件类型与声明大小；
-4. 在 PostgreSQL 事务内预占额度；
-5. 生成服务端控制的 `fileId` 和 COS 对象键；
-6. 签发短时、最小范围的上传权限；
-7. 记录上传会话创建审计事件。
+2. 校验基础附件类型和当前环境的技术大小上限；
+3. 生成服务端控制的 UUID `fileId` 和规范 COS 对象键；
+4. 签发只允许 PUT 单一对象键并绑定规范 Content-Type 的短时 URL；
+5. 在 PostgreSQL 保存带幂等键、对象定位和过期时间的 UploadSession；
+6. 记录上传会话创建审计事件。
+
+同一成员使用同一 `Idempotency-Key` 和相同请求重试时复用原会话；同一幂等键用于不同文件元数据时返回 `409`。
 
 ### 6.2 完成上传
 
@@ -180,12 +181,12 @@ POST /api/v1/upload-sessions/{uploadSessionId}/complete
 
 - 对象确实存在；
 - 对象键与会话一致；
-- 实际大小未超过批准值和套餐上限；
-- ETag、CRC 或可用校验值一致；
+- 实际大小与会话声明值完全一致；
+- COS 返回的 Content-Type 与会话声明一致；
 - 会话尚未过期且未被完成过；
-- 声明 MIME 与实际文件类型没有危险冲突。
+- 会话绑定的 Bucket、Region 和环境前缀仍与当前运行配置一致。
 
-验证成功后，预占额度转为正式使用量，文件进入安全检查或解析流程。
+验证成功后才创建正式 `FileObject`；不匹配对象会被拒绝并尝试从 COS 删除。基础版本尚不执行内容嗅探、病毒扫描、额度结算或 AI 解析。
 
 ### 6.3 文件访问
 
@@ -203,6 +204,8 @@ DELETE /api/v1/files/{fileId}
 
 文件是否“允许存储”和是否“允许 AI 解析”必须分别判断。
 
+当前基础版本只接受 `purpose=attachment`，支持 PDF、DOCX、XLSX、PPTX、JPEG、PNG、WebP、TXT、Markdown、CSV 和 JSON。下表中的其他用途及处理流程尚未开放。
+
 | 用途 | v1 建议格式 | 处理方式 |
 | --- | --- | --- |
 | `avatar` | JPEG、PNG、WebP | 校验尺寸并生成缩略图 |
@@ -210,7 +213,7 @@ DELETE /api/v1/files/{fileId}
 | `attachment` | PDF、现代 Office、图片、纯文本 | 可以只保存，不强制进入 AI |
 | `data_import` | CSV、XLSX、JSON | 独立的数据导入校验流程，不按普通附件处理 |
 
-第一版建议明确支持 `.pptx`，旧式 `.ppt`、`.doc`、`.xls` 可以先作为普通附件保存，但在受隔离的格式转换能力完成前不承诺 AI 解析。
+当前明确支持 `.pptx`、`.docx` 和 `.xlsx`；旧式 `.ppt`、`.doc`、`.xls` 暂不开放。后续若允许旧格式作为普通附件保存，也不能在受隔离的格式转换能力完成前承诺 AI 解析。
 
 第一版不建议开放：
 
@@ -235,13 +238,24 @@ DELETE /api/v1/files/{fileId}
 
 这些数值属于技术安全默认值，商业套餐可以进一步降低或在经过容量验证后提高。
 
-## 8. 数据与状态模型草案
+## 8. 数据与状态模型
 
-建议至少拆分以下概念：
+当前已实现：
 
 ```text
-FileAsset             正式文件元数据
-UploadSession         上传会话、过期时间和预期大小
+UploadSession         上传会话、幂等键、预期元数据、COS 定位和过期时间
+FileObject            通过 COS HEAD 校验后的正式文件元数据
+```
+
+`UploadSession.status` 当前为：
+
+```text
+PENDING / COMPLETED / EXPIRED / FAILED
+```
+
+正式 `FileObject` 只在完成校验后创建，因此基础版本无需再维护一个“待验证文件”状态。以下概念随完整上传体系继续实现：
+
+```text
 StorageReservation    并发上传的额度预占
 TenantStorageUsage    租户已用和已预占字节数
 FileBinding           文件与业务资源的关联
@@ -251,9 +265,6 @@ TenantEntitlement     套餐最终计算出的有效权益
 状态不要全部塞进单一字段：
 
 ```text
-UploadSession.status:
-PENDING / UPLOADING / COMPLETED / EXPIRED / FAILED
-
 FileAsset.status:
 VERIFYING / ACTIVE / REJECTED / DELETING / DELETED
 
@@ -297,7 +308,7 @@ usedBytes + reservedBytes + requestedBytes <= effectiveLimitBytes
 
 ## 10. 权限与审计前置条件
 
-公开上传接口不必等待完整 RBAC 产品完成，但至少需要以下服务端能力：
+基础接口已经具备 JWT、TenantContext、对象键租户隔离和审计，但暂未引入下列细粒度权限：
 
 ```text
 file.upload
@@ -306,13 +317,14 @@ file.delete
 file.manage
 ```
 
-必须满足：
+当前必须满足：
 
 - 用户身份已经认证；
 - TenantContext 由服务端建立，不接受客户端 tenantId 作为授权依据；
-- 上传到具体业务资源时，校验该资源的数据范围；
-- 创建、完成、拒绝、下载签名、删除和额度不足均记录审计事件；
+- 创建、完成、元数据拒绝和会话过期均记录审计事件；
 - 日志不得记录 SecretId、SecretKey 或完整签名 URL。
+
+在文件绑定具体业务资源或面向正式生产用户开放前，还必须增加 `file.upload/read/delete/manage` 权限、资源数据范围和租户额度控制。
 
 ## 11. 实施顺序
 
@@ -320,20 +332,24 @@ file.manage
 
 1. 补充 COS 的 `cees/local`、`cees/staging`、`cees/prod` 前缀约定；
 2. 为三套环境创建独立、按前缀收窄的 CAM 策略模板；
+3. 在 OpenAPI 0.9.0 定义创建和完成上传会话；
+4. 实现 `StorageProvider`、腾讯云 COS 适配器和规范对象键生成器；
+5. 实现 UploadSession、FileObject 元数据与 `0004_redis_cos_upload_foundation` 迁移；
+6. 实现 JWT/TenantContext 保护、幂等创建、COS HEAD 校验和基础审计；
+7. 为对象键、签名参数、元数据校验和异常路径增加单元测试。
 
 ### 下一步实施
 
-1. 定稿文件用途、支持类型和额度计量口径；
-2. 在 `packages/contracts` 编写上传会话和文件元数据契约；
-3. 设计 Prisma 模型和迁移；
-4. 在 `apps/api` 实现内部 `StorageProvider` 接口、腾讯 COS 适配器和对象键生成器；
-5. 为对象键隔离、额度预占和签名参数编写测试。
+1. 增加 `file.upload/read/delete/manage` 权限和资源范围；
+2. 定稿套餐额度并实现 PostgreSQL 原子预占与释放；
+3. 增加文件详情、下载签名、删除和业务绑定接口；
+4. 增加孤儿对象清理、内容嗅探、安全扫描和对账；
+5. 根据客户端需求实现分片上传和断点续传。
 
-### 达到以下条件后开放 API
+### 扩大生产使用范围前的条件
 
-- OpenAPI 契约已完成并评审；
-- 已有可信用户与 TenantContext；
-- 权限检查接口可用；
+- OpenAPI 契约和客户端生成物持续一致；
+- `file.*` 权限检查接口可用；
 - 额度能够事务性预占和释放；
 - 审计服务可用；
 - COS 凭据已按 local/staging/prod 前缀隔离。

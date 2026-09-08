@@ -6,6 +6,7 @@ import { DatabaseModule } from './database/database.module';
 import { TenantModule } from './tenant/tenant.module';
 import { AuthModule } from './auth/auth.module';
 import { PlatformTenantModule } from './platform-tenant/platform-tenant.module';
+import { RedisModule } from './redis/redis.module';
 import { BusinessModules } from './modules';
 
 @Module({
@@ -15,6 +16,7 @@ import { BusinessModules } from './modules';
             envFilePath: [resolve(process.cwd(), '.env'), resolve(process.cwd(), '../../.env')],
         }),
         DatabaseModule,
+        RedisModule,
         TenantModule,
         AuthModule,
         PlatformTenantModule,

@@ -1500,6 +1500,138 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponseEnvelope"
 
+  /upload-sessions:
+    post:
+      summary: 创建单文件 COS 直传会话
+      description: >-
+        为当前登录成员生成仅绑定单一 COS 对象键的短时 PUT URL。对象键由服务端按照
+        cees/{environment}/tenants/{tenantId}/files/{yyyy}/{mm}/{fileId}/source 生成，
+        客户端不得指定租户、Bucket 或对象键。
+      operationId: fileCreateUploadSession
+      tags: [File]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: 同一成员重试同一请求时复用的幂等键
+          schema:
+            type: string
+            minLength: 8
+            maxLength: 128
+            pattern: ^[A-Za-z0-9._:-]+$
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateUploadSessionRequest"
+      responses:
+        "201":
+          description: 已创建上传会话并签发短时 PUT URL
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadSessionResponseEnvelope"
+        "400":
+          description: 请求字段、文件类型或幂等键无效
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "401":
+          description: 登录状态无效或已过期
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "409":
+          description: 幂等键已用于不同请求或对应会话已不可继续上传
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "410":
+          description: 幂等键对应的待上传会话已经过期
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "413":
+          description: 文件超过当前技术上限
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "502":
+          description: COS 上传地址签发失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /upload-sessions/{uploadSessionId}/complete:
+    post:
+      summary: 校验并完成 COS 直传会话
+      description: >-
+        向 COS 发起 HEAD 请求校验对象存在、大小和 Content-Type，校验通过后创建正式文件记录。
+        客户端调用本接口不代表服务端会信任客户端声明的上传结果。
+      operationId: fileCompleteUploadSession
+      tags: [File]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: uploadSessionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 上传对象校验通过并已登记为正式文件
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileMetadataResponseEnvelope"
+        "400":
+          description: 上传会话 ID 不是有效 UUID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "401":
+          description: 登录状态无效或已过期
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "404":
+          description: 当前成员的上传会话不存在
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "409":
+          description: COS 对象不存在、元数据不匹配或会话状态冲突
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "410":
+          description: 上传会话已过期
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "502":
+          description: COS 暂时不可用或返回无效响应
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
   /resources/{resourceId}/acl:
     parameters:
       - name: resourceId
@@ -3498,6 +3630,103 @@ components:
           type: integer
           minimum: 1
 
+    FileUploadPurpose:
+      type: string
+      description: 第一版仅开放普通附件；后续用途以兼容枚举值扩展
+      enum: [attachment]
+
+    UploadMode:
+      type: string
+      enum: [single]
+
+    UploadSessionStatus:
+      type: string
+      enum: [PENDING, COMPLETED, EXPIRED, FAILED]
+
+    CreateUploadSessionRequest:
+      type: object
+      additionalProperties: false
+      required: [purpose, fileName, contentType, sizeBytes]
+      properties:
+        purpose:
+          $ref: "#/components/schemas/FileUploadPurpose"
+        fileName:
+          type: string
+          minLength: 1
+          maxLength: 255
+          description: 仅作为元数据保存，不参与 COS 对象键生成
+        contentType:
+          type: string
+          minLength: 3
+          maxLength: 255
+        sizeBytes:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 524288000
+          description: 系统硬上限为 500 MiB，环境配置可以设置更低的实际上限
+
+    UploadInstruction:
+      type: object
+      required: [method, url, headers]
+      properties:
+        method:
+          type: string
+          const: PUT
+        url:
+          type: string
+          format: uri
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+          description: 客户端上传时必须原样携带的请求头
+
+    UploadSession:
+      type: object
+      required: [uploadSessionId, fileId, purpose, uploadMode, status, expiresAt, upload]
+      properties:
+        uploadSessionId:
+          type: string
+          format: uuid
+        fileId:
+          type: string
+          format: uuid
+        purpose:
+          $ref: "#/components/schemas/FileUploadPurpose"
+        uploadMode:
+          $ref: "#/components/schemas/UploadMode"
+        status:
+          $ref: "#/components/schemas/UploadSessionStatus"
+        expiresAt:
+          type: string
+          format: date-time
+        upload:
+          $ref: "#/components/schemas/UploadInstruction"
+
+    FileMetadata:
+      type: object
+      required: [id, purpose, fileName, contentType, sizeBytes, etag, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        purpose:
+          $ref: "#/components/schemas/FileUploadPurpose"
+        fileName:
+          type: string
+        contentType:
+          type: string
+        sizeBytes:
+          type: integer
+          format: int64
+          minimum: 1
+        etag:
+          type: [string, "null"]
+        createdAt:
+          type: string
+          format: date-time
+
     AclSubjectType:
       type: string
       enum: [MEMBERSHIP, ROLE]
@@ -3896,6 +4125,30 @@ components:
           const: true
         data:
           $ref: "#/components/schemas/DocumentList"
+        requestId:
+          type: [string, "null"]
+
+    UploadSessionResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: "#/components/schemas/UploadSession"
+        requestId:
+          type: [string, "null"]
+
+    FileMetadataResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: "#/components/schemas/FileMetadata"
         requestId:
           type: [string, "null"]
 

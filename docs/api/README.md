@@ -61,6 +61,9 @@ DELETE /api/v1/resources/{resourceId}/acl/{aclEntryId}?version={version}
 GET /api/v1/audit-events
 GET /api/v1/audit-events/{auditEventId}
 
+POST /api/v1/upload-sessions
+POST /api/v1/upload-sessions/{uploadSessionId}/complete
+
 POST /api/v1/platform/auth/login
 POST /api/v1/platform/auth/refresh
 POST /api/v1/platform/auth/logout
@@ -88,6 +91,7 @@ GET /api/v1/platform/audit-events/{auditEventId}
 ```
 
 截至 2026-09-08，身份、用户个人资料、租户、组织部门、RBAC、ACL、审计、平台租户管理和租户账号激活接口均已实现。
+截至 2026-09-08，身份、租户、组织部门、RBAC、ACL、审计、平台租户管理、租户账号激活和 COS 基础上传接口均已实现。
 
 - `refresh` 每次成功后都会轮换 Refresh Token，旧 Token 立即失效；
 - `logout` 撤销当前 Access Token 对应的 Session；
@@ -144,6 +148,20 @@ GET /api/v1/platform/audit-events/{auditEventId}
 - 新增拼音账号建议、账号修改和管理员凭证重置接口；
 - 手机和邮箱绑定、自助密码找回暂不实现；忘记密码由租户管理员签发新激活令牌；
 - 数据库迁移仍在未发布的 `0002_platform_tenant_administration` 中同步调整，契约版本提升为 `0.7.0`。
+
+## 0.9.0 迁移说明
+
+- 公开契约版本由 `0.8.0` 提升为 `0.9.0`；
+- 新增 `POST /upload-sessions`，要求 JWT、有效 TenantContext 和 `Idempotency-Key`，返回单对象预签名 PUT URL；
+- 新增 `POST /upload-sessions/{uploadSessionId}/complete`，服务端通过 COS HEAD 校验对象后创建正式文件记录；
+- 第一版只支持 `purpose=attachment` 和 `uploadMode=single`；默认技术上限为 100 MiB，系统硬上限为 500 MiB；
+- COS 对象键由服务端按 `cees/{environment}/tenants/{tenantId}/files/{yyyy}/{mm}/{fileId}/source` 生成；
+- 当前尚未启用 `file.*` 细粒度权限和租户额度，调用者必须至少是当前租户的有效登录成员；
+- 新增 Prisma 迁移 `0004_redis_cos_upload_foundation`；
+- 公开 TypeScript 客户端生成已接入 `pnpm contracts:gen`，生成物禁止手改。
+
+## 契约事实源
+
 - `packages/contracts/openapi/openapi.yaml` 是 NestJS 公开 API 的事实源。
 - `packages/contracts/openapi/ai-service.openapi.yaml` 是 NestJS 调用 ai-service 的内部契约。
 - 桌面端和移动端不得调用 ai-service 的通用 invoke 或 stream。
@@ -153,4 +171,4 @@ GET /api/v1/platform/audit-events/{auditEventId}
 - TypeScript/Python/OpenAPI 生成物禁止手改，契约变更后必须运行 `contracts:lint`、`contracts:gen` 和 `contracts:check`。
 - 新增或改变外部行为时先改契约，再实现服务端和调用端；兼容新增字段必须保持可选并声明默认行为。
 
-文件上传的跨领域设计草案见 [文件上传设计](../architecture/file-upload.md)。其中路径和 Schema 只有写入公开 OpenAPI 并通过评审后，才构成正式 API。
+文件上传的已实现范围和后续设计见 [文件上传与 COS 设计](../architecture/file-upload.md)。正式路径和 Schema 以公开 OpenAPI 为准。

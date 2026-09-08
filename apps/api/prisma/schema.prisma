@@ -107,6 +107,17 @@ enum DraftStatus {
   FAILED
 }
 
+enum FilePurpose {
+  ATTACHMENT
+}
+
+enum UploadSessionStatus {
+  PENDING
+  COMPLETED
+  EXPIRED
+  FAILED
+}
+
 model Tenant {
   id String @id @default(uuid()) @db.Uuid
   code String @unique
@@ -544,18 +555,53 @@ model TaskActivity {
 model FileObject {
   id String @id @default(uuid()) @db.Uuid
   tenantId String @map("tenant_id") @db.Uuid
+  originalName String @map("original_name")
+  purpose FilePurpose @default(ATTACHMENT)
+  storageProvider String @default("TENCENT_COS") @map("storage_provider")
+  bucket String
+  region String
   objectKey String @map("object_key")
   mimeType String @map("mime_type")
   sizeBytes BigInt @map("size_bytes")
   checksum String?
+  etag String?
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
   createdBy String? @map("created_by") @db.Uuid
   updatedBy String? @map("updated_by") @db.Uuid
   deletedAt DateTime? @map("deleted_at")
   version Int @default(1)
+  @@unique([bucket, objectKey])
   @@index([tenantId])
   @@map("file_objects")
+}
+
+model UploadSession {
+  id String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+  fileId String @unique @map("file_id") @db.Uuid
+  createdBy String @map("created_by") @db.Uuid
+  createdByMembershipId String @map("created_by_membership_id") @db.Uuid
+  idempotencyKey String @map("idempotency_key")
+  requestFingerprint String @map("request_fingerprint")
+  purpose FilePurpose @default(ATTACHMENT)
+  originalName String @map("original_name")
+  mimeType String @map("mime_type")
+  expectedSizeBytes BigInt @map("expected_size_bytes")
+  storageProvider String @default("TENCENT_COS") @map("storage_provider")
+  bucket String
+  region String
+  objectKey String @map("object_key")
+  status UploadSessionStatus @default(PENDING)
+  expiresAt DateTime @map("expires_at")
+  completedAt DateTime? @map("completed_at")
+  failureCode String? @map("failure_code")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  @@unique([tenantId, createdByMembershipId, idempotencyKey], map: "upload_sessions_idempotency_key")
+  @@unique([bucket, objectKey])
+  @@index([tenantId, status, expiresAt])
+  @@map("upload_sessions")
 }
 
 model KnowledgeBase {
