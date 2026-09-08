@@ -1,6 +1,6 @@
 # 数据库服务器部署单元
 
-本目录是可独立复制到数据库服务器 `45.40.251.151`（内网 `172.27.0.3`）的完整部署单元，不包含 API、ai-service 或客户端源码。
+本目录是可独立复制到数据库服务器的完整部署单元，不包含 API、ai-service 或客户端源码。
 
 精确 PostgreSQL/pgvector 与 Redis 镜像标签只在 [docker-compose.yml](docker-compose.yml) 中维护。本目录中的同一份 Compose 定义通过不同环境文件和 Compose 项目名称创建两套独立实例。
 
@@ -11,25 +11,23 @@
 ├── docker-compose.yml
 ├── docker-compose.server.yml
 ├── manage.sh
-├── staging/
-│   └── .env
-└── production/
-    └── .env
+├── .env.staging
+└── .env.production
 ```
 
 示例文件映射：
 
 ```text
-.env.staging.example    -> /opt/cees-db/staging/.env
-.env.production.example -> /opt/cees-db/production/.env
+.env.staging.example    -> /opt/cees-db/.env.staging
+.env.production.example -> /opt/cees-db/.env.production
 ```
 
 ## 环境隔离
 
 | 环境 | Compose 项目 | PostgreSQL 端口 | Redis 端口 | 应用来源 |
 | --- | --- | ---: | ---: | --- |
-| Staging | `cees-ai-db-staging` | `172.27.0.3:15432` | `172.27.0.3:16379` | `172.27.0.2` |
-| Production | `cees-ai-db-production` | `172.27.0.3:25432` | `172.27.0.3:26379` | `172.27.0.2` |
+| Staging | `cees-ai-db-staging` | `<数据库私网 IP>:15432` | `<数据库私网 IP>:16379` | 应用服务器私网地址 |
+| Production | `cees-ai-db-production` | `<数据库私网 IP>:25432` | `<数据库私网 IP>:26379` | 应用服务器私网地址 |
 
 Compose 项目名称会隔离容器、默认网络和数据卷。两个环境即使使用同一份 `docker-compose.yml`，也会创建四个容器和四个独立数据卷。
 
@@ -38,11 +36,11 @@ Compose 项目名称会隔离容器、默认网络和数据卷。两个环境即
 ```bash
 cd /opt/cees-db
 
-bash manage.sh staging validate
-bash manage.sh staging
-bash manage.sh staging ps
-bash manage.sh staging logs
-bash manage.sh staging down
+bash manage-db.sh staging validate
+bash manage-db.sh staging
+bash manage-db.sh staging ps
+bash manage-db.sh staging logs
+bash manage-db.sh staging down
 ```
 
 Production 将命令中的 `staging` 替换为 `production`。`down` 只停止并删除容器和网络，不删除数据卷；禁止把 `down -v` 作为日常运维命令。
@@ -60,4 +58,4 @@ Production 将命令中的 `staging` 替换为 `production`。`down` 只停止�
 
 ## 网络安全
 
-数据库端口绑定在数据库服务器内网 IP。腾讯云安全组必须只允许应用服务器内网 IP `172.27.0.2` 访问四个数据库端口，并拒绝公网来源。由于腾讯云公网 IP 通过 NAT 映射到内网网卡，绑定内网 IP 不能替代安全组限制。
+数据库端口绑定在 `DB_BIND_IP` 指定的地址。设置为 `0.0.0.0` 或 `::` 时，`manage-db.sh validate` 会输出警告但不会阻止启动；此时必须通过防火墙或安全组限制数据库端口来源并拒绝公网访问。

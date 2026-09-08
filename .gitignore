@@ -2,6 +2,7 @@ node_modules/
 .pnpm-store/
 .uv-cache/
 .vscode/
+.idea/
 dist/
 coverage/
 .env

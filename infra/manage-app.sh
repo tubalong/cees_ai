@@ -5,14 +5,14 @@ set -Eeuo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  ./scripts/compose-deploy.sh <staging|production> [up|down|logs|ps|validate] [service...]
+  ./infra/manage-app.sh <staging|production> [up|down|logs|ps|validate] [service...]
 
 Examples:
-  ./scripts/compose-deploy.sh staging
-  ./scripts/compose-deploy.sh production
-  ./scripts/compose-deploy.sh production logs api
-  ./scripts/compose-deploy.sh production ps
-  ./scripts/compose-deploy.sh production down
+  ./infra/manage-app.sh staging
+  ./infra/manage-app.sh production
+  ./infra/manage-app.sh production logs api
+  ./infra/manage-app.sh production ps
+  ./infra/manage-app.sh production down
 
 The default action is "up". The script never pulls source code or removes volumes.
 EOF
@@ -85,13 +85,13 @@ validate_deployment_inputs() {
     exit 1
   fi
 
-  if [[ "$database_url" != *"@$EXPECTED_DATABASE_ENDPOINT/"* ]]; then
-    echo "Error: DATABASE_URL must use the $ENVIRONMENT database endpoint $EXPECTED_DATABASE_ENDPOINT." >&2
+  if [[ "$database_url" != postgresql://* && "$database_url" != postgres://* ]]; then
+    echo "Error: DATABASE_URL must be a PostgreSQL connection URL." >&2
     exit 1
   fi
 
-  if [[ "$redis_url" != *"@$EXPECTED_REDIS_ENDPOINT/"* ]]; then
-    echo "Error: REDIS_URL must use the $ENVIRONMENT Redis endpoint $EXPECTED_REDIS_ENDPOINT." >&2
+  if [[ "$redis_url" != redis://* && "$redis_url" != rediss://* ]]; then
+    echo "Error: REDIS_URL must be a Redis connection URL." >&2
     exit 1
   fi
 }
@@ -106,15 +106,11 @@ case "$ENVIRONMENT" in
   staging)
     ENV_FILE=".env.staging"
     ENV_COMPOSE_FILE="infra/docker-compose.staging.yml"
-    EXPECTED_DATABASE_ENDPOINT="172.27.0.3:15432"
-    EXPECTED_REDIS_ENDPOINT="172.27.0.3:16379"
     ;;
   production | prod)
     ENVIRONMENT="production"
     ENV_FILE=".env.production"
     ENV_COMPOSE_FILE="infra/docker-compose.prod.yml"
-    EXPECTED_DATABASE_ENDPOINT="172.27.0.3:25432"
-    EXPECTED_REDIS_ENDPOINT="172.27.0.3:26379"
     ;;
   -h | --help | help)
     usage

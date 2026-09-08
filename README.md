@@ -26,12 +26,12 @@
 1. 从 [Node.js 下载页](https://nodejs.org/en/download) 下载 Node.js 24 LTS 的 `Windows Installer (.msi)`（通常选择 x64）并完成安装。
 2. 重新打开 PowerShell；若 Node.js 安装在 `Program Files` 且 `corepack enable pnpm` 报权限错误，请以管理员身份运行 PowerShell。执行：
 
-	```powershell
-	corepack enable pnpm
-	pnpm -v
-	```
+   ```powershell
+   corepack enable pnpm
+   pnpm -v
+   ```
 
-	项目根目录的 `packageManager` 字段会将 pnpm 固定为 `12.3.4`。
+   项目根目录的 `packageManager` 字段会将 pnpm 固定为 `12.3.4`。
 
 ## 快速启动
 
@@ -39,8 +39,9 @@
 2. 安装 Node.js 24 LTS、pnpm 12.3.4、uv、Python 3.14 和 Docker Desktop；移动端开发另需 Flutter SDK。
 3. 执行 `pnpm install --frozen-lockfile`。
 4. 在 `apps/ai-service` 执行 `uv sync --locked`。
-5. 本地执行 `pnpm infra:up`；数据库服务器通过 `infra/database/manage.sh` 管理 PostgreSQL/Redis。
-6. 应用服务器通过 `scripts/compose-deploy.sh` 管理 API、ai-service 和 Prisma migration。数据库与应用必须先后部署，完整说明见 [infra/README.md](infra/README.md)。
+5. 本地执行 `pnpm infra:up`。
+6. 数据库服务器通过 `infra/database/manage-db.sh` 管理 PostgreSQL/Redis。
+7. 应用服务器通过 `infra/manage-app.sh` 管理 API、ai-service 和 Prisma migration。数据库与应用必须先后部署，完整说明见 [infra/README.md](infra/README.md)。
 
 NestJS Swagger：`http://localhost:3000/api/docs`；FastAPI 内部文档本地为 `http://localhost:8000/docs`，Staging/Production 不映射 ai-service 宿主机端口。
 
