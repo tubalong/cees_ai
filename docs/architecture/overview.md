@@ -26,6 +26,8 @@ cees_ai/
 - ai-service 不直接连接业务数据库，不创建或修改正式业务数据。
 - 未来业务 AI 功能必须由 NestJS 建立可信租户/用户上下文，并在契约中定义专用输入输出，不能让客户端直接调用通用 invoke。
 - COS 长期凭据只由 NestJS 持有；客户端和 ai-service 不持有长期 COS 密钥。
+- 客户端上传文件时只获取绑定单一规范对象键的短时 COS URL；正式文件记录由 NestJS 在 HEAD 校验后写入 PostgreSQL。
+- Redis 仅承载缓存、幂等、计数和短期协调数据，所有调用键自动加环境前缀，不能替代 PostgreSQL 业务事实。
 - 桌面端和移动端中的部分菜单仍是 UI 原型，占位入口不构成后端需求或可用能力。
 - 本地开发在开发电脑运行 PostgreSQL/Redis；共享环境将应用与数据库部署到同一 VPC 内的两台独立服务器。
 - Staging 与 Production 在每台物理服务器内通过独立目录、Compose 项目、容器、网络、端口、数据卷和 Secret 隔离。
@@ -75,4 +77,5 @@ flowchart LR
 
 - [AI Service 通用基础设施](ai-service-foundation.md)
 - [通用文档生成](document-generation.md)
-- [文件上传设计草案](file-upload.md)
+- [文件上传与 COS 设计](file-upload.md)
+- [Redis 基础能力](redis-foundation.md)

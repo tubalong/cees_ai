@@ -2,7 +2,7 @@
 
 > 状态：按当前实现整理  
 > 最后同步：2026-09-08  
-> 公开契约版本：`0.8.0`  
+> 公开契约版本：`0.9.0`  
 > 事实源：`packages/contracts/openapi/openapi.yaml`、`apps/api/prisma/schema.prisma`
 
 ## 1. 文档用途
@@ -10,9 +10,9 @@
 本文面向本地开发、接口联调、产品验收和数据库排查，统一说明：
 
 - 平台超级管理员、租户管理员和普通成员的区别；
-- 当前已经实现的 58 个 HTTP 操作；
+- 当前已经实现的 60 个 HTTP 操作；
 - 路径参数、查询参数和 JSON 请求体字段的含义；
-- PostgreSQL 中 39 张业务表、422 个业务字段及 Prisma 迁移表的用途；
+- PostgreSQL 中 40 张业务表、449 个业务字段及 Prisma 迁移表的用途；
 - 租户创建、成员激活、登录、授权、资源访问、审计、停用和恢复的整体流转；
 - 哪些能力已经有公开 API，哪些目前只有数据库结构或模块占位。
 
@@ -32,8 +32,9 @@
 | Resource ACL | 已实现 | 按成员或角色授予文档级权限 |
 | 租户与平台审计 | 已实现 | 分域记录和查询操作审计 |
 | 组织部门管理 | 已实现 | 部门树、增删改、启停、成员列表和成员调部门 |
+| 文件上传 | 基础接口已实现 | 通过短时预签名 PUT URL 直传私有 COS，HEAD 校验通过后登记正式文件 |
 | 项目、任务 | 仅数据库结构/模块占位 | 当前没有对应公开 API |
-| 文件、知识库、会议、通知 | 仅数据库结构/设计基础 | 当前没有对应公开 API |
+| 知识库、会议、通知 | 仅数据库结构/设计基础 | 当前没有对应公开 API |
 | AI 草稿和调用日志 | 数据结构与内部编排基础 | AI 不能绕过 NestJS 写正式业务数据 |
 
 ## 3. 管理员账号到底存在哪里
@@ -709,11 +710,14 @@ Prisma 自动维护的迁移历史表，记录迁移名称、校验值、开始/
 0001_init
 0002_platform_tenant_administration
 0003_organization_departments_and_database_comments
+0004_redis_cos_upload_foundation
 ```
 
 - 使用 `pnpm --filter @cees/api exec prisma migrate deploy` 执行已提交迁移；
 - `0003` 新增部门层级字段、部门权限、同级名称唯一索引和父部门外键；
 - `0003` 已为当前 39 张业务表和 422 个业务字段补齐 PostgreSQL 注释；
+- `0004` 新增上传会话表和正式文件的 COS 定位字段，并为新增表、枚举和字段写入中文注释；
+- 当前共 40 张业务表和 449 个业务字段；
 - 后续新建表或字段时，必须在同一迁移中添加 `COMMENT ON TABLE` 和 `COMMENT ON COLUMN`；
 - Prisma Schema、迁移 SQL 和本数据字典必须保持一致。
 
@@ -1115,20 +1119,53 @@ Prisma 自动维护的迁移历史表，记录迁移名称、校验值、开始/
 
 ### 15.8 `file_objects`
 
-文件元数据表。二进制内容不进入 PostgreSQL，正式设计中存放于私有 COS。
+正式文件元数据表。二进制内容不进入 PostgreSQL，存放于私有 COS；只有上传会话通过 COS HEAD 校验后才创建记录。
 
 | 字段 | 含义 |
 | --- | --- |
 | `id` | 文件对象 UUID |
 | `tenant_id` | 所属租户 |
+| `original_name` | 上传时的原始文件名，仅作为元数据保存 |
+| `purpose` | 文件用途，当前仅支持 `ATTACHMENT` |
+| `storage_provider` | 对象存储提供商，当前为 `TENCENT_COS` |
+| `bucket` | 对象所在的 COS Bucket |
+| `region` | 对象所在的 COS 地域 |
 | `object_key` | COS 对象键，不是公开下载 URL |
 | `mime_type` | MIME 类型 |
 | `size_bytes` | 文件字节数 |
 | `checksum` | 文件校验值，可空 |
+| `etag` | COS 返回的对象 ETag，可空 |
 | `created_at/updated_at` | 创建和更新时间 |
 | `created_by/updated_by` | 创建和修改者 |
 | `deleted_at` | 软删除时间 |
 | `version` | 文件元数据版本 |
+
+### 15.9 `upload_sessions`
+
+客户端直传 COS 前由 API 创建的短期上传会话。客户端不能指定租户、Bucket 或对象键。
+
+| 字段 | 含义 |
+| --- | --- |
+| `id` | 上传会话 UUID |
+| `tenant_id` | 上传会话所属租户 |
+| `file_id` | 预先生成的正式文件 UUID |
+| `created_by` | 创建会话的 User UUID |
+| `created_by_membership_id` | 创建会话的租户成员身份 UUID |
+| `idempotency_key` | 同一成员重试创建请求时复用的幂等键 |
+| `request_fingerprint` | 规范化上传请求的 SHA-256 指纹 |
+| `purpose` | 文件用途，当前仅支持 `ATTACHMENT` |
+| `original_name` | 客户端提供的原始文件名 |
+| `mime_type` | 声明并在完成时校验的 Content-Type |
+| `expected_size_bytes` | 声明并在完成时校验的预期字节数 |
+| `storage_provider` | 对象存储提供商标识 |
+| `bucket` | 本次上传使用的 COS Bucket |
+| `region` | 本次上传使用的 COS 地域 |
+| `object_key` | 服务端生成的 COS 对象键 |
+| `status` | `PENDING`、`COMPLETED`、`EXPIRED` 或 `FAILED` |
+| `expires_at` | 上传会话失效时间 |
+| `completed_at` | 对象校验通过并登记正式文件的时间，可空 |
+| `failure_code` | 失败或过期时的稳定错误代码，可空 |
+| `created_at/updated_at` | 创建和更新时间 |
 
 ## 16. 知识库与检索表
 
@@ -1595,6 +1632,32 @@ GET /api/v1/audit-events
 
 文档创建成功后，`documents` 知识库表不会变化；应查看 `managed_documents`、`resources` 和 `audit_logs`。
 
+### 20.5 验证 COS 基础直传
+
+使用租户 Access Token 和客户端生成的 `Idempotency-Key` 创建上传会话：
+
+```http
+POST /api/v1/upload-sessions
+Idempotency-Key: desktop-upload-0001
+```
+
+```json
+{
+  "purpose": "attachment",
+  "fileName": "项目方案.pdf",
+  "contentType": "application/pdf",
+  "sizeBytes": 1024
+}
+```
+
+客户端按照响应中的 PUT URL 和请求头直传 COS 后，再调用：
+
+```http
+POST /api/v1/upload-sessions/{uploadSessionId}/complete
+```
+
+API 只有在 COS HEAD 返回的大小和 Content-Type 与会话一致时才创建 `file_objects`。当前基础范围、支持格式、对象键和暂缓能力统一见 [文件上传与 COS 设计](../architecture/file-upload.md)。
+
 ## 21. `0.8.0` 迁移说明
 
 - 新增租户组织部门树的 7 个公开接口和 5 个部门权限；
@@ -1604,3 +1667,12 @@ GET /api/v1/audit-events
 - 原成员修改接口修改 `departmentId` 时也必须拥有 `department.member.assign`；
 - 数据库迁移 `0003_organization_departments_and_database_comments` 同时补齐 39 张业务表和 422 个业务字段的 PostgreSQL 注释；
 - 公开契约版本由 `0.7.0` 提升为 `0.8.0`，并新增可重复生成 `packages/api-client` 的脚本。
+
+## 22. `0.9.0` 迁移说明
+
+- 新增创建和完成单文件 COS 直传会话的 2 个公开接口；
+- 对象键固定为 `cees/{environment}/tenants/{tenantId}/files/{yyyy}/{mm}/{fileId}/source`；
+- 新增 `UploadSession`，并扩展 `FileObject` 的原始文件名、用途、存储提供商、Bucket、Region 和 ETag；
+- 数据库迁移为 `0004_redis_cos_upload_foundation`，新增结构均包含 PostgreSQL 中文注释；
+- 公开契约版本由 `0.8.0` 提升为 `0.9.0`；
+- 当前尚未启用 `file.*` 细粒度权限、租户额度、分片、安全扫描和 AI 入库。

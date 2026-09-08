@@ -29,6 +29,7 @@ export type { CreatePlatformTenantRequest } from './models/CreatePlatformTenantR
 export type { CreateResourceAclRequest } from './models/CreateResourceAclRequest';
 export type { CreateRoleRequest } from './models/CreateRoleRequest';
 export type { CreateTenantInvitationRequest } from './models/CreateTenantInvitationRequest';
+export type { CreateUploadSessionRequest } from './models/CreateUploadSessionRequest';
 export { DataScope } from './models/DataScope';
 export type { DepartmentResponseEnvelope } from './models/DepartmentResponseEnvelope';
 export { DepartmentStatus } from './models/DepartmentStatus';
@@ -43,6 +44,9 @@ export type { DocumentResponseEnvelope } from './models/DocumentResponseEnvelope
 export type { DocumentSummary } from './models/DocumentSummary';
 export { DocumentVisibility } from './models/DocumentVisibility';
 export type { ErrorResponseEnvelope } from './models/ErrorResponseEnvelope';
+export type { FileMetadata } from './models/FileMetadata';
+export type { FileMetadataResponseEnvelope } from './models/FileMetadataResponseEnvelope';
+export { FileUploadPurpose } from './models/FileUploadPurpose';
 export type { InitialTenantAdministratorRequest } from './models/InitialTenantAdministratorRequest';
 export type { LoginRequest } from './models/LoginRequest';
 export type { LoginResponse } from './models/LoginResponse';
@@ -113,6 +117,11 @@ export type { UpdateRoleRequest } from './models/UpdateRoleRequest';
 export type { UpdateTenantMemberAccountRequest } from './models/UpdateTenantMemberAccountRequest';
 export { UpdateTenantMemberRequest } from './models/UpdateTenantMemberRequest';
 export type { UpdateTenantRequest } from './models/UpdateTenantRequest';
+export type { UploadInstruction } from './models/UploadInstruction';
+export { UploadMode } from './models/UploadMode';
+export type { UploadSession } from './models/UploadSession';
+export type { UploadSessionResponseEnvelope } from './models/UploadSessionResponseEnvelope';
+export { UploadSessionStatus } from './models/UploadSessionStatus';
 export type { VersionRequest } from './models/VersionRequest';
 
 export { AclService } from './services/AclService';
@@ -120,6 +129,7 @@ export { AuditService } from './services/AuditService';
 export { AuthService } from './services/AuthService';
 export { DefaultService } from './services/DefaultService';
 export { DocumentService } from './services/DocumentService';
+export { FileService } from './services/FileService';
 export { OrganizationService } from './services/OrganizationService';
 export { PlatformAuditService } from './services/PlatformAuditService';
 export { PlatformAuthService } from './services/PlatformAuthService';

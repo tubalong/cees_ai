@@ -4,5 +4,7 @@
 
 - 本目录为生成物，**禁止手改**；
 - 契约变更后重新生成并提交；
-- 根目录执行 `pnpm contracts:generate` 重新生成。
-当前公开契约仍只有健康检查，完整公开客户端生成配置尚未接入；在接入生成器前不得继续手写扩展业务方法。ai-service 内部契约和客户端已由 `packages/ai-service-client` 独立管理。
+- 根目录执行 `pnpm contracts:gen` 重新生成；
+- `pnpm contracts:check` 会校验本目录与正式 OpenAPI 契约没有漂移。
+
+生成器配置由 `packages/contracts` 维护。桌面端或其他 TypeScript 调用方应依赖本包，不得手写平行接口类型；ai-service 内部契约和客户端由 `packages/ai-service-client` 独立管理。

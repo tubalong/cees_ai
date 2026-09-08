@@ -20,14 +20,14 @@ openapi/
 
 生成物包括：
 
-- 公开 TypeScript：`packages/api-client/src`；
+- 公开 TypeScript API 客户端：`packages/api-client/src`；
 - TypeScript：`packages/ai-service-client/src/generated`；
 - Python：`apps/ai-service/app/api/generated/models.py`；
 - ai-service Swagger 契约：`apps/ai-service/app/api/generated/openapi.json`。
 
 FastAPI `/docs` 直接展示生成的 OpenAPI JSON；测试会另外根据 Python 路由生成运行时 OpenAPI，并对路径、方法、operationId、标签、认证、响应状态和主要 Schema 字段执行契约漂移检查。
 
-全部契约客户端生成命令：
+全部客户端与契约产物生成命令：
 
 ```text
 pnpm contracts:gen
