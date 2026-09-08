@@ -12,7 +12,7 @@
 - 平台超级管理员、租户管理员和普通成员的区别；
 - 当前已经实现的 58 个 HTTP 操作；
 - 路径参数、查询参数和 JSON 请求体字段的含义；
-- PostgreSQL 中 39 张业务表及 Prisma 迁移表的用途；
+- PostgreSQL 中 39 张业务表、422 个业务字段及 Prisma 迁移表的用途；
 - 租户创建、成员激活、登录、授权、资源访问、审计、停用和恢复的整体流转；
 - 哪些能力已经有公开 API，哪些目前只有数据库结构或模块占位。
 
@@ -513,6 +513,9 @@ pnpm --filter @cees/api dev
 | `MeResponse` | 当前用户、租户、成员及实时权限编码数组 |
 | `TenantDetail` | 租户 UUID、编码、名称、状态、版本和时间 |
 | `TenantMember` | Membership UUID、账号、User、部门、状态、角色、加入时间和版本 |
+| `DepartmentSummary` | 部门 UUID、父部门、名称、说明、排序、状态、成员数、子部门数和版本 |
+| `DepartmentTreeNode` | `DepartmentSummary` 的全部字段以及递归 `children` 子部门数组 |
+| `DepartmentTree` | 当前租户部门树的根节点数组 `items` |
 | `Role` | 角色编码、名称、描述、数据范围、系统标记、权限、成员数和版本 |
 | `DocumentSummary/Detail` | 文档和资源 ID、标题、正文、可见性、所有者、当前有效权限和版本 |
 | `ResourceAclEntry` | 授权主体、权限编码、过期时间和版本 |
@@ -641,7 +644,7 @@ flowchart LR
   Check -- 否 --> Reject[409 拒绝删除]
 ```
 
-所有部门查询和写入都使用 JWT 中的当前 `tenantId`；平台管理员不能跨过租户权限直接维护部门。
+所有部门查询和写入都使用 JWT 中的当前 `tenantId`；平台管理员不能跨过租户权限直接维护部门。部门创建、修改、移动、删除和成员调部门分别写入 `DEPARTMENT_CREATED`、`DEPARTMENT_UPDATED`、`DEPARTMENT_MOVED`、`DEPARTMENT_DELETED`、`MEMBER_DEPARTMENT_CHANGED` 审计动作。
 
 ### 10.4 请求授权链路
 
@@ -699,6 +702,20 @@ SUSPENDED ---------存在有效管理员---> ACTIVE
 #### `_prisma_migrations`
 
 Prisma 自动维护的迁移历史表，记录迁移名称、校验值、开始/完成时间和失败信息。不要通过 Navicat 手工修改。业务表结构只能通过 `apps/api/prisma/migrations` 演进。
+
+当前空库按以下顺序执行：
+
+```text
+0001_init
+0002_platform_tenant_administration
+0003_organization_departments_and_database_comments
+```
+
+- 使用 `pnpm --filter @cees/api exec prisma migrate deploy` 执行已提交迁移；
+- `0003` 新增部门层级字段、部门权限、同级名称唯一索引和父部门外键；
+- `0003` 已为当前 39 张业务表和 422 个业务字段补齐 PostgreSQL 注释；
+- 后续新建表或字段时，必须在同一迁移中添加 `COMMENT ON TABLE` 和 `COMMENT ON COLUMN`；
+- Prisma Schema、迁移 SQL 和本数据字典必须保持一致。
 
 ## 12. 身份、租户和认证表
 
@@ -834,6 +851,15 @@ Prisma 自动维护的迁移历史表，记录迁移名称、校验值、开始/
 | `created_by/updated_by` | 创建和修改者 |
 | `deleted_at` | 软删除时间 |
 | `version` | 部门版本 |
+
+部门数据约束：
+
+- 最大层级为 10 级，创建和移动时禁止形成父子循环；
+- 未删除根部门名称在租户内唯一；未删除子部门名称在同一父部门下唯一；
+- `deleted_at` 非空后不再参与名称唯一约束，原名称可以重新使用；
+- 存在未删除子部门或成员时不能删除部门；
+- `status = DISABLED` 的部门不能接收新的成员分配；
+- 修改、移动和删除时必须提交当前 `version`。
 
 ## 13. 邀请和 RBAC 表
 
@@ -1501,7 +1527,30 @@ GET /api/v1/tenants/current/departments
 GET /api/v1/audit-events
 ```
 
-组织部门验证建议按以下顺序执行：
+### 20.3 组织部门管理
+
+先创建根部门：
+
+```json
+{
+  "name": "总部",
+  "description": "企业组织根部门",
+  "sortOrder": 0
+}
+```
+
+再创建子部门：
+
+```json
+{
+  "name": "研发部",
+  "parentId": "根部门 UUID",
+  "description": "产品研发部门",
+  "sortOrder": 10
+}
+```
+
+建议按以下顺序验证：
 
 ```text
 POST   /api/v1/tenants/current/departments
@@ -1512,7 +1561,18 @@ GET    /api/v1/tenants/current/departments/{departmentId}/members
 DELETE /api/v1/tenants/current/departments/{departmentId}?version={version}
 ```
 
-### 20.3 创建并查询受控文档
+成员调部门需要先通过 `GET /api/v1/tenants/current/members/{membershipId}` 获取最新成员 `version`：
+
+```json
+{
+  "departmentId": "目标部门 UUID",
+  "version": 1
+}
+```
+
+删除测试应先删除没有成员和子部门的叶子部门；删除仍有成员或子部门的部门会返回 `409 DEPARTMENT_NOT_EMPTY`。
+
+### 20.4 创建并查询受控文档
 
 调用 `POST /api/v1/documents`：
 
@@ -1542,5 +1602,5 @@ GET /api/v1/audit-events
 - `departments` 新增规范化名称、说明、排序、状态和父子自关联约束；
 - 根部门在租户内同名唯一，子部门在同一父部门下同名唯一，软删除后名称可复用；
 - 原成员修改接口修改 `departmentId` 时也必须拥有 `department.member.assign`；
-- 数据库迁移 `0003_organization_departments_and_database_comments` 同时补齐 39 张业务表及全部业务字段的 PostgreSQL 注释；
+- 数据库迁移 `0003_organization_departments_and_database_comments` 同时补齐 39 张业务表和 422 个业务字段的 PostgreSQL 注释；
 - 公开契约版本由 `0.7.0` 提升为 `0.8.0`，并新增可重复生成 `packages/api-client` 的脚本。
