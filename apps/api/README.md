@@ -44,6 +44,11 @@ pnpm --filter @cees/api prisma:seed
 `SEED_ADMIN_ACCOUNT` 和 `SEED_ADMIN_PASSWORD`，部署前必须替换 `change_me`。
 平台超级管理员使用独立账号，可通过 `SEED_PLATFORM_ADMIN_ACCOUNT`、
 `SEED_PLATFORM_ADMIN_PASSWORD` 和 `SEED_PLATFORM_ADMIN_DISPLAY_NAME` 单独配置。
+Staging/Production 部署会在 Prisma migration 成功后自动运行仅创建平台管理员的
+`prisma:seed:platform-admin`，不会创建 `SEED_TENANT_*` 或 `SEED_ADMIN_*` 对应的数据。
+如果同名平台账号已经存在则直接跳过，不覆盖密码、显示名称、状态或角色。
+完整的 `prisma:seed` 仅用于本地开发，负责默认租户、租户管理员和权限数据；它现在复用
+同一套平台管理员 create-only 逻辑，并会在 `NODE_ENV=production` 时直接拒绝执行。
 
 认证接口：
 

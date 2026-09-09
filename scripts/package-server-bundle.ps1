@@ -162,6 +162,20 @@ function Test-ContainsPlaceholder {
     return [System.IO.File]::ReadAllText($Path).Contains('change_me')
 }
 
+function Assert-EnvironmentKeys {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string[]]$Keys
+    )
+
+    $content = [System.IO.File]::ReadAllText($Path).Replace("`r`n", "`n").Replace("`r", "`n")
+    foreach ($key in $Keys) {
+        if ($content -notmatch "(?m)^$([regex]::Escape($key))=.+$") {
+            throw "Required environment variable is missing or empty in $Path`: $key"
+        }
+    }
+}
+
 function Get-ManifestSourceLabel {
     param(
         [Parameter(Mandatory)][string]$Path,
@@ -319,6 +333,11 @@ else {
 $includesRuntimeConfiguration = $environmentSource -ne 'example' -or $modelConfigSource -ne 'example'
 $resolvedEnvironmentFile = Resolve-InputFile -Path $EnvironmentFile -RepositoryRoot $repositoryRoot -Description 'Environment file'
 $resolvedModelConfigFile = Resolve-InputFile -Path $ModelConfigFile -RepositoryRoot $repositoryRoot -Description 'Model configuration file'
+Assert-EnvironmentKeys -Path $resolvedEnvironmentFile -Keys @(
+    'SEED_PLATFORM_ADMIN_ACCOUNT',
+    'SEED_PLATFORM_ADMIN_PASSWORD',
+    'SEED_PLATFORM_ADMIN_DISPLAY_NAME'
+)
 $environmentSourceLabel = Get-ManifestSourceLabel -Path $resolvedEnvironmentFile -RepositoryRoot $repositoryRoot
 $modelConfigSourceLabel = Get-ManifestSourceLabel -Path $resolvedModelConfigFile -RepositoryRoot $repositoryRoot
 
@@ -407,9 +426,10 @@ Git Commit：$gitCommit
 
 ### 1. 检查运行配置
 
-检查并填写 $environmentFileName 与 config/$modelFileName，确保不再包含 change_me：
+检查并填写 $environmentFileName 与 config/$modelFileName，确保不再包含 change_me；其中必须提供平台超级管理员的三个 `SEED_PLATFORM_ADMIN_*` 初始值：
 
     grep -R "change_me" $environmentFileName config/$modelFileName
+    grep -E "^SEED_PLATFORM_ADMIN_(ACCOUNT|PASSWORD|DISPLAY_NAME)=" $environmentFileName
 
 ### 2. 安装 COSCLI（Linux AMD64）
 
@@ -427,6 +447,8 @@ Bucket Name 填 cees-ai-1403013862，Endpoint 填 cos.ap-chengdu.myqcloud.com，
 ### 4. 部署
 
     bash infra/deploy-cos-release.sh $deployArgument latest
+
+部署时先执行 Prisma migration，再创建缺失的平台超级管理员；同名账号已存在时不会覆盖密码或状态，也不会创建默认租户或租户管理员。
 
 $docsAccess
 

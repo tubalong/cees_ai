@@ -85,6 +85,19 @@ validate_deployment_inputs() {
     exit 1
   fi
 
+  local seed_key
+  local seed_value
+  for seed_key in \
+    SEED_PLATFORM_ADMIN_ACCOUNT \
+    SEED_PLATFORM_ADMIN_PASSWORD \
+    SEED_PLATFORM_ADMIN_DISPLAY_NAME; do
+    seed_value="$(read_env_value "$seed_key")"
+    if [[ -z "$seed_value" ]]; then
+      echo "Error: $seed_key is required in $ENV_FILE." >&2
+      exit 1
+    fi
+  done
+
   if [[ "$database_url" != postgresql://* && "$database_url" != postgres://* ]]; then
     echo "Error: DATABASE_URL must be a PostgreSQL connection URL." >&2
     exit 1

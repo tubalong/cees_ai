@@ -187,9 +187,12 @@ TENANT_MEMBER_CREDENTIAL_ACTIVATED
 - PlatformAdministrator 新增独立平台账号、密码和锁定字段；
 - TenantInvitation 改为保存账号、姓名和可选目标成员；
 - `TENANT_INVITATION_TTL` 默认 `1d`；
-- `SEED_ADMIN_ACCOUNT` 默认 `admin`；
-- `SEED_PLATFORM_ADMIN_ACCOUNT` 默认 `superadmin`；
-- Production 必须提供独立且非 `change_me` 的 `JWT_PLATFORM_ACCESS_SECRET`。
+- `SEED_ADMIN_ACCOUNT` 默认 `admin`，仅供完整开发 seed 创建本地租户管理员；
+- `SEED_PLATFORM_ADMIN_ACCOUNT` 默认 `superadmin`，并与 `SEED_PLATFORM_ADMIN_PASSWORD`、`SEED_PLATFORM_ADMIN_DISPLAY_NAME` 一起出现在 Staging/Production 环境示例中；
+- 应用部署在 Prisma migration 成功后运行独立的 `seed-platform-admin` 一次性服务，只创建缺失的平台超级管理员，不创建默认租户或租户管理员；
+- 自动初始化采用 create-only 语义：同名平台账号已存在时不覆盖密码、显示名称、角色和状态，后续密码变更必须通过平台密码修改接口完成；
+- 完整开发 seed 与部署初始化复用同一个平台管理员创建函数，不再维护第二套更新逻辑；完整 seed 在 `NODE_ENV=production` 时拒绝执行，避免误创建默认租户或覆盖租户管理员数据；
+- Production 必须提供独立且非 `change_me` 的平台管理员初始密码和 `JWT_PLATFORM_ACCESS_SECRET`。
 
 ## 10. 暂缓项
 
