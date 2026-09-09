@@ -149,7 +149,7 @@ Staging 与 Production 位于不同服务器，均使用 PostgreSQL `5432` 和 R
 
 数据库容器提供 pgvector 扩展文件，`apps/api/prisma/migrations/0001_init` 会在创建向量字段前执行 `CREATE EXTENSION`。正式业务表和扩展状态统一由 Prisma migration 演进，数据库服务器不执行环境专属建表脚本，也不需要 Prisma 源码。
 
-应用部署包中的一次性 `migrate` 服务使用 API 镜像执行 `prisma migrate deploy`。部署顺序必须是：先通过本部署包启动数据库，再部署应用。
+应用部署包中的一次性 `migrate` 服务使用 API 镜像执行 `prisma migrate deploy`，随后 `seed-platform-admin` 服务根据应用服务器环境文件创建缺失的平台超级管理员。该初始化不读取 `SEED_TENANT_*` 或 `SEED_ADMIN_*`，同名平台账号已存在时不会覆盖密码或状态。部署顺序必须是：先通过本部署包启动数据库，再部署应用。
 
 ## 8. 网络安全
 

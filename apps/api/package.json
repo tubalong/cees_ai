@@ -11,7 +11,8 @@
         "test": "jest --runInBand",
         "prisma:generate": "prisma generate",
         "prisma:migrate": "prisma migrate dev",
-        "prisma:seed": "ts-node prisma/seed.ts"
+        "prisma:seed": "ts-node prisma/seed.ts",
+        "prisma:seed:platform-admin": "ts-node src/cli/seed-platform-administrator.ts"
     },
     "dependencies": {
         "@nestjs/common": "^10.4.15",

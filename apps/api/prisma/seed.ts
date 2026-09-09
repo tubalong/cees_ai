@@ -1,19 +1,20 @@
 import {
     DataScope,
     MembershipStatus,
-    PlatformAdministratorStatus,
-    PlatformRole,
     PrismaClient,
     TenantStatus,
     UserStatus,
 } from '@prisma/client';
 import * as argon2 from 'argon2';
 import { normalizeAccount } from '../src/auth/account';
+import { ensurePlatformAdministrator } from '../src/platform-auth/platform-administrator.seed';
 import { TENANT_ADMIN_ROLE_CODE, TENANT_PERMISSION_DEFINITIONS } from '../src/rbac/permission-catalog';
 
 const prisma = new PrismaClient();
 
 async function main(): Promise<void> {
+    assertFullSeedIsNotRunningInProduction();
+
     const tenantCode = process.env.SEED_TENANT_CODE?.trim().toLowerCase() || 'cees';
     const tenantName = process.env.SEED_TENANT_NAME?.trim() || 'CEES';
     const adminAccount = normalizeAccount(process.env.SEED_ADMIN_ACCOUNT || 'admin');
@@ -114,45 +115,19 @@ async function main(): Promise<void> {
         create: { tenantId: tenant.id, roleId: role.id, permissionId: permission.id },
     })));
 
-    const platformPasswordHash = await argon2.hash(platformAdminPassword);
-    const existingPlatformAdministrator = await prisma.platformAdministrator.findUnique({
-        where: { normalizedAccount: platformAdminAccount },
-        include: { user: true },
+    await ensurePlatformAdministrator(prisma, {
+        account: platformAdminAccount,
+        password: platformAdminPassword,
+        displayName: platformAdminDisplayName,
     });
-    if (existingPlatformAdministrator) {
-        await prisma.$transaction([
-            prisma.user.update({
-                where: { id: existingPlatformAdministrator.userId },
-                data: { displayName: platformAdminDisplayName, status: UserStatus.ACTIVE, deletedAt: null },
-            }),
-            prisma.platformAdministrator.update({
-                where: { id: existingPlatformAdministrator.id },
-                data: {
-                    account: platformAdminAccount,
-                    normalizedAccount: platformAdminAccount,
-                    passwordHash: platformPasswordHash,
-                    role: PlatformRole.SUPER_ADMIN,
-                    status: PlatformAdministratorStatus.ACTIVE,
-                    failedLoginCount: 0,
-                    lockedUntil: null,
-                    deletedAt: null,
-                },
-            }),
-        ]);
-    } else {
-        const platformUser = await prisma.user.create({
-            data: { displayName: platformAdminDisplayName, status: UserStatus.ACTIVE },
-        });
-        await prisma.platformAdministrator.create({
-            data: {
-                userId: platformUser.id,
-                account: platformAdminAccount,
-                normalizedAccount: platformAdminAccount,
-                passwordHash: platformPasswordHash,
-                role: PlatformRole.SUPER_ADMIN,
-                status: PlatformAdministratorStatus.ACTIVE,
-            },
-        });
+}
+
+function assertFullSeedIsNotRunningInProduction(): void {
+    if (process.env.NODE_ENV?.trim().toLowerCase() === 'production') {
+        throw new Error(
+            'The full Prisma seed is development-only and must not run with NODE_ENV=production. '
+            + 'Use prisma:seed:platform-admin for deployment bootstrap.',
+        );
     }
 }
 

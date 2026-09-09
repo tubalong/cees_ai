@@ -76,7 +76,7 @@ users
 - `roles` 中 `code = tenant_admin`、`is_system = true` 表示租户系统管理员角色；
 - `membership_roles` 表示某个成员拥有某个角色；
 - `role_permissions` 表示角色拥有的权限；
-- 本地 seed 默认租户编码为 `cees`，租户管理员账号为 `admin`，默认密码为 `change_me`。
+- 本地完整 seed 默认租户编码为 `cees`，租户管理员账号为 `admin`，默认密码为 `change_me`；它仅允许在非 Production 环境执行，并与部署初始化复用同一个平台管理员 create-only 创建函数。
 
 ## 4. 本地使用入口
 
@@ -892,8 +892,8 @@ platform.audit.read
 
 ```mermaid
 flowchart TD
-  Seed[执行 Prisma seed] --> PA[创建平台超级管理员 superadmin]
-  Seed --> LT[创建本地租户 cees 与管理员 admin]
+  Seed[执行本地完整 Prisma seed] --> PA[缺失时创建平台超级管理员 superadmin]
+  Seed --> LT[创建或更新本地租户 cees 与管理员 admin]
   PA --> PL[平台管理员登录]
   PL --> CT[创建正式租户]
   CT --> TPA[租户状态 PENDING_ACTIVATION]

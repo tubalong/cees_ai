@@ -86,7 +86,7 @@ chmod 600 .env.staging       # Production 使用 .env.production
 bash deploy-db.sh staging    # Production 使用 production
 ```
 
-部署前必须清除环境文件中的 `change_me`。`deploy-db.sh` 会优先加载包内离线镜像；没有离线镜像时拉取 PostgreSQL/pgvector 和 Redis 镜像，然后启动服务。
+部署前必须清除环境文件中的 `change_me`。`deploy-db.sh` 会优先加载包内离线镜像；没有离线镜像时拉取 PostgreSQL/pgvector 和 Redis 镜像，然后启动服务。数据库服务器只负责基础设施；业务表迁移和平台超级管理员初始化由随后部署的 API 镜像执行。
 
 ```bash
 bash manage-db.sh staging ps       # 查看状态
@@ -158,7 +158,7 @@ bash infra/deploy-cos-release.sh <environment> <release-reference>
 | Staging | `staging` | `latest` 或明确的 `release-id` |
 | Production | `production` | 已在 Staging 验证的明确 `release-id`，不要使用 `latest` |
 
-部署前必须清除环境文件和模型配置中的 `change_me`。`deploy-cos-release.sh` 会从 COS 下载并校验镜像包、导入镜像、更新镜像标签、执行 Prisma migration，然后启动 ai-service 和 API。
+部署前必须清除环境文件和模型配置中的 `change_me`，并填写 `SEED_PLATFORM_ADMIN_ACCOUNT`、`SEED_PLATFORM_ADMIN_PASSWORD`、`SEED_PLATFORM_ADMIN_DISPLAY_NAME`。`deploy-cos-release.sh` 会从 COS 下载并校验镜像包、导入镜像和更新镜像标签；Compose 随后执行 Prisma migration、创建缺失的平台超级管理员，再启动 ai-service 和 API。平台初始化不会创建默认租户或租户管理员，同名平台账号已存在时也不会覆盖现有凭证或状态。
 
 服务器目录结构不变时，日常发布无需重新打目录包，只需发布新镜像并再次执行 `deploy-cos-release.sh`。
 
