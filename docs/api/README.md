@@ -13,6 +13,8 @@
 - [组织架构与成员批量导入](../product/organization-member-import.md)
 - [项目管理 API](project-management-api.md)
 - [项目与项目成员管理](../product/project-management.md)
+- [任务管理 API](task-management-api.md)
+- [项目任务管理](../product/task-management.md)
 - [用户个人资料管理](../product/user-profile-management.md)
 - [密码修改与凭证安全](../security/password-management.md)
 - [平台使用、接口与数据库字典](../product/platform-usage-guide.md)：按当前 OpenAPI 汇总全部接口、请求参数和验证顺序。
@@ -115,6 +117,22 @@ POST   /api/v1/projects/{projectId}/reopen
 POST   /api/v1/projects/{projectId}/cancel
 POST   /api/v1/projects/{projectId}/archive
 POST   /api/v1/projects/{projectId}/restore
+
+GET    /api/v1/projects/{projectId}/tasks
+POST   /api/v1/projects/{projectId}/tasks
+GET    /api/v1/projects/{projectId}/tasks/{taskId}
+PATCH  /api/v1/projects/{projectId}/tasks/{taskId}
+DELETE /api/v1/projects/{projectId}/tasks/{taskId}?version={version}
+POST   /api/v1/projects/{projectId}/tasks/{taskId}/transitions
+PUT    /api/v1/projects/{projectId}/tasks/{taskId}/assignees
+GET    /api/v1/projects/{projectId}/tasks/{taskId}/comments
+POST   /api/v1/projects/{projectId}/tasks/{taskId}/comments
+PATCH  /api/v1/projects/{projectId}/tasks/{taskId}/comments/{commentId}
+DELETE /api/v1/projects/{projectId}/tasks/{taskId}/comments/{commentId}?version={version}
+GET    /api/v1/projects/{projectId}/tasks/{taskId}/attachments
+POST   /api/v1/projects/{projectId}/tasks/{taskId}/attachments
+DELETE /api/v1/projects/{projectId}/tasks/{taskId}/attachments/{attachmentId}?version={version}
+GET    /api/v1/projects/{projectId}/tasks/{taskId}/activities
 ```
 
 截至 2026-09-08，身份、本人密码修改、用户个人资料、租户、组织部门、项目与项目成员、RBAC、ACL、审计、平台租户管理、租户账号激活和 COS 基础上传接口均已实现。
@@ -210,6 +228,15 @@ POST   /api/v1/projects/{projectId}/restore
 - 确认导入事务创建待激活成员、角色关系和独立激活凭证；
 - 已有启用部门按路径复用，第一版只创建新成员并禁止批量分配 `tenant_admin`；
 - 复用现有 Prisma 数据模型，不需要新增数据库迁移，TypeScript 客户端需要重新生成。
+
+## 0.13.0 迁移说明
+
+- 公开契约版本由 `0.12.0` 提升为 `0.13.0`；
+- 新增任务 CRUD、执行人整体替换、状态流转、评论、附件和动态共 15 个接口；
+- 任务访问必须是实际项目成员，`project.manage_all` 不绕过任务项目成员边界；
+- 新增 `task.*` 权限、任务唯一负责人约束和成员身份外键；
+- 项目完成、取消、归档后任务域只读，承担未完成任务的成员不能直接移出项目；
+- 新增 Prisma 迁移 `0006_task_management` 和 `0007_task_database_comments`，TypeScript 客户端已经重新生成。
 
 ## 契约事实源
 

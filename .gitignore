@@ -5,6 +5,7 @@ node_modules/
 .idea/
 dist/
 coverage/
+*.tsbuildinfo
 .env
 .env.*
 !.env.example

@@ -2,7 +2,7 @@
 
 > 状态：按当前实现整理  
 > 最后同步：2026-09-09
-> 公开契约版本：`0.12.0`
+> 公开契约版本：`0.13.0`
 > 事实源：`packages/contracts/openapi/openapi.yaml`、`apps/api/prisma/schema.prisma`
 
 ## 1. 文档用途
@@ -10,9 +10,9 @@
 本文面向本地开发、接口联调、产品验收和数据库排查，统一说明：
 
 - 平台超级管理员、租户管理员和普通成员的区别；
-- 当前已经实现的 84 个 HTTP 操作；
+- 当前已经实现的 99 个 HTTP 操作；
 - 路径参数、查询参数和 JSON 请求体字段的含义；
-- PostgreSQL 中 41 张业务表、470 个业务字段及 Prisma 迁移表的用途；
+- PostgreSQL 中 41 张业务表、474 个业务字段及 Prisma 迁移表的用途；
 - 租户创建、成员激活、登录、授权、资源访问、审计、停用和恢复的整体流转；
 - 哪些能力已经有公开 API，哪些目前只有数据库结构或模块占位。
 
@@ -37,7 +37,7 @@
 | 组织人员批量导入 | 已实现 | 前端解析 Excel，后端校验并事务创建部门、待激活成员、角色和一次性激活凭证 |
 | 文件上传 | 基础接口已实现 | 通过短时预签名 PUT URL 直传私有 COS，HEAD 校验通过后登记正式文件 |
 | 项目与项目成员 | 已实现 | 项目 CRUD、成员角色、负责人转移、状态机、完成后只读和归档 |
-| 任务、评论、附件和动态 | 仅数据库结构/模块占位 | 项目完成校验已读取任务状态，任务公开 API 尚未实现 |
+| 任务、评论、附件和动态 | 已实现 | 任务 CRUD、父子任务、执行人、状态机、评论、COS 附件、动态和审计 |
 | 知识库、会议、通知 | 仅数据库结构/设计基础 | 当前没有对应公开 API |
 | AI 草稿和调用日志 | 数据结构与内部编排基础 | AI 不能绕过 NestJS 写正式业务数据 |
 
@@ -251,6 +251,28 @@ pnpm --filter @cees/api dev
 
 同租户不自动获得项目访问权。部门只用于归属和筛选；完成、取消和归档项目禁止修改资料与成员。详细规则见 [项目与项目成员管理](project-management.md)。
 
+#### 6.4.1 项目任务、评论、附件和动态
+
+| 方法与路径 | 用途 | 参数/请求体 | 返回 | 权限与范围 |
+| --- | --- | --- | --- | --- |
+| `GET /projects/{projectId}/tasks` | 查询项目任务 | 过滤条件及游标分页 | 任务列表 | `task.read` + 必须是项目成员 |
+| `POST /projects/{projectId}/tasks` | 创建任务 | `CreateTaskRequest` | 新任务 | `task.create` + 项目成员 |
+| `GET /projects/{projectId}/tasks/{taskId}` | 查询任务详情 | 项目和任务 ID | 任务详情 | `task.read` + 项目成员 |
+| `PATCH /projects/{projectId}/tasks/{taskId}` | 修改资料或父任务 | `UpdateTaskRequest` | 修改后的任务 | `task.update` + 项目 OWNER/MANAGER 或任务 OWNER |
+| `DELETE /projects/{projectId}/tasks/{taskId}` | 删除无子任务的任务 | 查询参数 `version` | `204` | `task.delete` + 任务管理者 |
+| `POST /projects/{projectId}/tasks/{taskId}/transitions` | 变更任务状态 | `TaskTransitionRequest` | 修改后的任务 | `task.status.update` + 执行人或项目管理者 |
+| `PUT /projects/{projectId}/tasks/{taskId}/assignees` | 整体替换负责人和协作人 | `ReplaceTaskAssigneesRequest` | 修改后的任务 | `task.assignee.manage` + 任务管理者 |
+| `GET /projects/{projectId}/tasks/{taskId}/comments` | 查询评论 | `limit/cursor` | 评论列表 | `task.read` + 项目成员 |
+| `POST /projects/{projectId}/tasks/{taskId}/comments` | 新增评论 | `CreateTaskCommentRequest` | 评论 | `task.comment.create` + 项目成员 |
+| `PATCH /projects/{projectId}/tasks/{taskId}/comments/{commentId}` | 修改评论 | `UpdateTaskCommentRequest` | 评论 | `task.comment.update` + 作者或任务管理者 |
+| `DELETE /projects/{projectId}/tasks/{taskId}/comments/{commentId}` | 删除评论 | 查询参数 `version` | `204` | `task.comment.delete` + 作者或任务管理者 |
+| `GET /projects/{projectId}/tasks/{taskId}/attachments` | 查询附件 | 项目和任务 ID | 附件列表 | `task.read` + 项目成员 |
+| `POST /projects/{projectId}/tasks/{taskId}/attachments` | 关联已上传 COS 文件 | `AddTaskAttachmentRequest` | 附件关系 | `task.attachment.manage` + 项目成员 |
+| `DELETE /projects/{projectId}/tasks/{taskId}/attachments/{attachmentId}` | 移除附件关系 | 查询参数 `version` | `204` | `task.attachment.manage` + 添加者或任务管理者 |
+| `GET /projects/{projectId}/tasks/{taskId}/activities` | 查询任务动态 | `limit/cursor` | 动态列表 | `task.read` + 项目成员 |
+
+任务接口不会被 `project.manage_all` 绕过：即使租户管理员拥有跨项目管理权限，也必须先加入项目才能访问任务。项目 `COMPLETED/CANCELLED/ARCHIVED` 后任务域只读。完整状态机和示例见 [项目任务管理](task-management.md) 与 [任务管理 API](../api/task-management-api.md)。
+
 ### 6.5 成员邀请
 
 | 方法与路径 | 用途 | 参数/请求体 | 返回 | 权限 |
@@ -339,6 +361,9 @@ pnpm --filter @cees/api dev
 | `tenantId` | 平台管理场景中的租户 UUID |
 | `membershipId` | 用户在某一租户内的成员关系 UUID，不等于 `userId` |
 | `projectId` | 当前租户项目 UUID；无项目范围时接口按不存在处理 |
+| `taskId` | 当前项目内的任务 UUID；必须同时匹配当前租户和 `projectId` |
+| `commentId` | 当前任务评论 UUID |
+| `attachmentId` | 当前任务附件关系 UUID，不是 COS 文件对象 UUID |
 | `roleId` | 当前租户角色 UUID；在成员列表查询中表示只返回拥有该角色的成员 |
 | `documentId` | Managed Document UUID，同时也是其 Resource UUID |
 | `resourceId` | 统一授权资源 UUID；当前公开资源类型只有文档 |
@@ -358,6 +383,10 @@ pnpm --filter @cees/api dev
 | `limit` | 返回条数，范围 `1..100` |
 | `cursor` | 上一页响应的 `nextCursor` |
 | `includeArchived` | 项目列表是否包含归档项目，默认 `false` |
+| `priority` | 任务优先级过滤：`LOW/MEDIUM/HIGH/URGENT` |
+| `assigneeMembershipId` | 查询指定成员作为负责人或协作人的任务 |
+| `parentId` | 查询某个父任务的直接子任务；请求体中表示设置父任务 |
+| `rootOnly` | 任务列表只返回根任务，默认 `false`；不能和查询参数 `parentId` 同时使用 |
 
 ### 7.2 租户登录和激活请求
 
@@ -502,6 +531,86 @@ POST /platform/auth/change-password
 | `ProjectReasonRequest` | `reason/version` | 重开或取消项目使用 |
 | `CompleteProjectRequest` | `version`，可选 `completionSummary` | 存在未完成任务时拒绝完成 |
 
+#### 7.5.1 `CreateTaskRequest`
+
+| 字段 | 必填 | 类型/限制 | 含义 |
+| --- | --- | --- | --- |
+| `title` | 是 | 字符串，去除首尾空白后 1～200 字符 | 任务标题 |
+| `description` | 否 | 字符串或 `null`，最多 10000 字符，默认 `null` | 任务详细说明；空字符串按 `null` 保存 |
+| `parentId` | 否 | UUID 或 `null`，默认 `null` | 同项目父任务；为空表示根任务 |
+| `priority` | 否 | `LOW/MEDIUM/HIGH/URGENT`，默认 `MEDIUM` | 任务优先级 |
+| `dueDate` | 否 | ISO 8601 日期时间或 `null`，默认 `null` | 计划截止时间 |
+| `ownerMembershipId` | 是 | UUID | 唯一任务负责人，必须是当前项目有效成员 |
+| `collaboratorMembershipIds` | 否 | UUID 数组，最多 100 个且不能重复，默认 `[]` | 完整协作人集合；不能包含负责人 |
+
+创建示例：
+
+```json
+{
+  title: 完成任务管理页面,
+  description: 实现列表、详情和状态操作,
+  parentId: null,
+  priority: HIGH,
+  dueDate: 2026-09-15T10:00:00.000Z,
+  ownerMembershipId: 20000000-0000-0000-0000-000000000001,
+  collaboratorMembershipIds: [
+    20000000-0000-0000-0000-000000000002
+  ]
+}
+```
+
+#### 7.5.2 `UpdateTaskRequest`
+
+| 字段 | 必填 | 类型/限制 | 含义 |
+| --- | --- | --- | --- |
+| `title` | 否 | 字符串，1～200 字符 | 新任务标题 |
+| `description` | 否 | 字符串或 `null`，最多 10000 字符 | 新说明；`null` 或空字符串表示清空 |
+| `parentId` | 否 | UUID 或 `null` | 新父任务；`null` 表示改成根任务 |
+| `priority` | 否 | `LOW/MEDIUM/HIGH/URGENT` | 新优先级 |
+| `dueDate` | 否 | ISO 8601 日期时间或 `null` | 新截止时间；`null` 表示清空 |
+| `version` | 是 | 大于等于 1 的整数 | 当前任务乐观锁版本 |
+
+该接口不修改状态和执行人。`DONE/CANCELLED` 任务不可修改；修改父任务时会校验同项目、无循环且完整子树不超过 10 层。
+
+#### 7.5.3 `TaskTransitionRequest`
+
+| 字段 | 必填 | 类型/限制 | 含义 |
+| --- | --- | --- | --- |
+| `status` | 是 | `IN_PROGRESS/BLOCKED/DONE/CANCELLED` | 目标任务状态 |
+| `reason` | 条件必填 | 字符串或 `null`，最多 500 字符 | 流转到 `BLOCKED/CANCELLED` 时必须填写 |
+| `version` | 是 | 大于等于 1 的整数 | 当前任务乐观锁版本 |
+
+```json
+{
+  status: BLOCKED,
+  reason: 等待第三方接口提供测试环境,
+  version: 3
+}
+```
+
+允许流转：`TODO → IN_PROGRESS/CANCELLED`、`IN_PROGRESS → BLOCKED/DONE/CANCELLED`、`BLOCKED → IN_PROGRESS/DONE/CANCELLED`。终态不能继续流转。
+
+#### 7.5.4 `ReplaceTaskAssigneesRequest`
+
+| 字段 | 必填 | 类型/限制 | 含义 |
+| --- | --- | --- | --- |
+| `ownerMembershipId` | 是 | UUID | 新的唯一任务负责人 |
+| `collaboratorMembershipIds` | 是 | UUID 数组，最多 100 个且不能重复 | 新的完整协作人集合，不是增量列表 |
+| `version` | 是 | 大于等于 1 的整数 | 当前任务版本 |
+
+负责人和协作人必须仍是当前项目有效成员，负责人不能同时出现在协作人数组。接口成功后原执行人集合会被整体替换。
+
+#### 7.5.5 评论与附件请求
+
+| 请求 | 字段 | 必填 | 类型/限制 | 含义 |
+| --- | --- | --- | --- | --- |
+| `CreateTaskCommentRequest` | `content` | 是 | 字符串，去除首尾空白后 1～5000 字符 | 新评论正文 |
+| `UpdateTaskCommentRequest` | `content` | 是 | 字符串，1～5000 字符 | 修改后的完整评论正文 |
+| `UpdateTaskCommentRequest` | `version` | 是 | 大于等于 1 的整数 | 当前评论版本 |
+| `AddTaskAttachmentRequest` | `fileObjectId` | 是 | UUID | 已完成 COS 上传并登记到 `file_objects` 的文件 UUID |
+
+任务删除、评论删除和附件移除的 `version` 位于查询参数中。附件移除只删除任务关系，不删除 COS 对象和 `file_objects`。
+
 ### 7.6 角色请求
 
 #### `CreateRoleRequest`
@@ -602,12 +711,88 @@ POST /platform/auth/change-password
 | `DepartmentTree` | 当前租户部门树的根节点数组 `items` |
 | `ProjectSummary` | 项目编码、状态、负责人、当前成员角色、成员/任务数量、时间和版本 |
 | `ProjectMemberSummary` | ProjectMember UUID、Membership UUID、账号、展示名、部门、项目角色和版本 |
+| `TaskSummary` | 任务层级、状态、优先级、负责人、协作人、子任务/评论/附件数量和版本 |
+| `TaskComment` | 评论正文、作者 Membership、时间和版本 |
+| `TaskAttachment` | 文件对象、文件名、Content-Type、大小、添加者和版本 |
+| `TaskActivity` | 动作编码、操作者 Membership、扩展元数据和发生时间 |
 | `Role` | 角色编码、名称、描述、数据范围、系统标记、权限、成员数和版本 |
 | `DocumentSummary/Detail` | 文档和资源 ID、标题、正文、可见性、所有者、当前有效权限和版本 |
 | `ResourceAclEntry` | 授权主体、权限编码、过期时间和版本 |
 | `AuditEvent` | 动作、结果、操作者、资源、请求 ID、客户端信息、元数据和时间 |
 | `PlatformTenantDetail` | 租户状态、有效管理员数、待处理邀请数、版本和时间 |
 | `TenantInvitationCreated` | 邀请详情及只返回一次的 `invitationToken` |
+
+### 8.1 `TaskSummary` 字段
+
+任务列表和任务详情都返回同一结构：
+
+| 字段 | 类型 | 含义 |
+| --- | --- | --- |
+| `id` | UUID | 任务 UUID |
+| `projectId` | UUID | 所属项目 UUID |
+| `parentId` | UUID 或 `null` | 直接父任务；为空表示根任务 |
+| `title` | 字符串 | 任务标题 |
+| `description` | 字符串或 `null` | 任务详细说明 |
+| `status` | `TaskStatus` | 当前任务状态 |
+| `priority` | `TaskPriority` | 当前任务优先级 |
+| `dueDate` | ISO 8601 时间或 `null` | 截止时间 |
+| `owner` | `TaskAssignee` 或 `null` | 唯一负责人；迁移旧数据未补齐负责人时可能暂时为空 |
+| `collaborators` | `TaskAssignee[]` | 协作人列表 |
+| `subtaskCount` | 整数 | 未删除直接子任务数量 |
+| `commentCount` | 整数 | 未删除评论数量 |
+| `attachmentCount` | 整数 | 未删除附件关系数量 |
+| `createdAt/updatedAt` | ISO 8601 时间 | 创建和最后更新时间 |
+| `version` | 整数 | 任务乐观锁版本 |
+
+### 8.2 `TaskMemberIdentity` 与 `TaskAssignee`
+
+| 字段 | 类型 | 含义 |
+| --- | --- | --- |
+| `membershipId` | UUID | 当前租户成员 UUID，不是全局 User UUID |
+| `account` | 字符串 | 当前租户登录账号 |
+| `displayName` | 字符串 | 当前租户展示名；为空时回退全局 User 展示名 |
+| `departmentId` | UUID 或 `null` | 当前所属部门 |
+| `type` | `OWNER/COLLABORATOR` | 仅 `TaskAssignee` 拥有，表示负责人或协作人 |
+
+评论作者和动态操作者使用 `TaskMemberIdentity`，不会错误携带任务执行人 `type`。
+
+### 8.3 `TaskComment` 字段
+
+| 字段 | 类型 | 含义 |
+| --- | --- | --- |
+| `id` | UUID | 评论 UUID |
+| `taskId` | UUID | 所属任务 UUID |
+| `content` | 字符串 | 评论正文 |
+| `author` | `TaskMemberIdentity` | 评论作者的租户成员信息 |
+| `createdAt/updatedAt` | ISO 8601 时间 | 创建和最后修改时间 |
+| `version` | 整数 | 评论乐观锁版本 |
+
+### 8.4 `TaskAttachment` 字段
+
+| 字段 | 类型 | 含义 |
+| --- | --- | --- |
+| `id` | UUID | 任务附件关系 UUID |
+| `taskId` | UUID | 所属任务 UUID |
+| `fileObjectId` | UUID | `file_objects.id`，对应已完成上传的 COS 文件 |
+| `fileName` | 字符串 | 上传时原始文件名 |
+| `contentType` | 字符串 | 文件 MIME 类型 |
+| `sizeBytes` | int64 | 文件字节数；当前上传硬上限 500 MiB |
+| `createdByMembershipId` | UUID | 添加附件的租户成员 UUID |
+| `createdAt` | ISO 8601 时间 | 添加时间 |
+| `version` | 整数 | 附件关系乐观锁版本 |
+
+### 8.5 `TaskActivity` 字段
+
+| 字段 | 类型 | 含义 |
+| --- | --- | --- |
+| `id` | UUID | 动态 UUID |
+| `taskId` | UUID | 所属任务 UUID |
+| `action` | 字符串 | `TASK_CREATED`、`TASK_UPDATED`、`TASK_STATUS_CHANGED` 等动作编码 |
+| `actor` | `TaskMemberIdentity` 或 `null` | 操作者；系统动作可以为空 |
+| `metadata` | JSON 对象或 `null` | 状态前后值、评论 ID、附件 ID、执行人集合等动作数据 |
+| `createdAt` | ISO 8601 时间 | 动作发生时间 |
+
+列表响应统一使用 `items`；任务、评论和动态列表同时返回 `nextCursor`，没有下一页时为 `null`。附件列表当前不分页。
 
 ## 9. 权限与状态枚举
 
@@ -638,6 +823,16 @@ POST /platform/auth/change-password
 | `project.reopen` | 重新开启已完成项目 |
 | `project.archive` | 归档和恢复项目 |
 | `project.manage_all` | 管理当前租户全部项目并绕过项目成员范围 |
+| `task.create` | 在已加入的项目中创建任务 |
+| `task.read` | 查看已加入项目的任务、评论、附件和动态 |
+| `task.update` | 修改有权管理的非终态任务 |
+| `task.delete` | 删除有权管理且没有子任务的任务 |
+| `task.status.update` | 由执行人或项目管理者变更任务状态 |
+| `task.assignee.manage` | 整体替换任务负责人和协作人 |
+| `task.comment.create` | 新增任务评论 |
+| `task.comment.update` | 修改本人评论或由任务管理者修改 |
+| `task.comment.delete` | 删除本人评论或由任务管理者删除 |
+| `task.attachment.manage` | 添加或移除任务附件关系 |
 | `role.read` | 查看权限和角色 |
 | `role.create` | 创建角色 |
 | `role.update` | 修改角色及其权限 |
@@ -688,6 +883,7 @@ platform.audit.read
 | `DataScope` | `SELF`、`DEPARTMENT`、`DEPARTMENT_TREE`、`PROJECT`、`CUSTOM`、`TENANT` |
 | `TaskStatus` | `TODO`、`IN_PROGRESS`、`BLOCKED`、`DONE`、`CANCELLED` |
 | `TaskPriority` | `LOW`、`MEDIUM`、`HIGH`、`URGENT` |
+| `TaskAssigneeType` | `OWNER` 唯一任务负责人；`COLLABORATOR` 协作人 |
 | `DraftStatus` | `DRAFT`、`PENDING_CONFIRMATION`、`CONFIRMED`、`REJECTED`、`EXPIRED`、`EXECUTED`、`FAILED` |
 
 ## 10. 平台整体流转
@@ -835,7 +1031,7 @@ Prisma 自动维护的迁移历史表，记录迁移名称、校验值、开始/
 - `0003` 已为当前 39 张业务表和 422 个业务字段补齐 PostgreSQL 注释；
 - `0004` 新增上传会话表和正式文件的 COS 定位字段，并为新增表、枚举和字段写入中文注释；
 - `0005` 将项目成员改为关联 TenantMembership，新增项目状态历史、负责人、编码和完成信息；
-- 当前共 41 张业务表和 470 个业务字段；
+- 当前共 41 张业务表和 474 个业务字段；
 - 后续新建表或字段时，必须在同一迁移中添加 `COMMENT ON TABLE` 和 `COMMENT ON COLUMN`；
 - Prisma Schema、迁移 SQL 和本数据字典必须保持一致。
 
@@ -1124,7 +1320,7 @@ Prisma 自动维护的迁移历史表，记录迁移名称、校验值、开始/
 
 ## 15. 项目、任务与文件表
 
-项目和项目成员已经提供公开 API；任务、评论、附件和动态当前仍只有数据库结构。项目完成校验会读取任务状态。
+项目、项目成员、任务、评论、附件和动态均已提供公开 API。项目完成校验会读取有效任务状态，任务附件复用 COS 文件上传基础能力。
 
 ### 15.1 `projects`
 
@@ -1185,80 +1381,100 @@ Prisma 自动维护的迁移历史表，记录迁移名称、校验值、开始/
 
 任务主表，支持项目任务、父子任务、优先级、截止时间和通用业务关联。
 
-| 字段 | 含义 |
-| --- | --- |
-| `id` | 任务 UUID |
-| `tenant_id` | 所属租户 |
-| `project_id` | 所属项目 UUID，可空 |
-| `parent_id` | 父任务 UUID，可空 |
-| `title` | 任务标题 |
-| `description` | 任务说明 |
-| `status` | `TODO/IN_PROGRESS/BLOCKED/DONE/CANCELLED` |
-| `priority` | `LOW/MEDIUM/HIGH/URGENT` |
-| `due_date` | 截止时间 |
-| `relation_type` | 外部业务关联类型 |
-| `relation_id` | 外部业务关联资源 UUID |
-| `created_at/updated_at` | 创建和更新时间 |
-| `created_by/updated_by` | 创建和修改者 |
-| `deleted_at` | 软删除时间 |
-| `version` | 任务版本 |
+| 字段 | PostgreSQL/Prisma 类型 | 空值与默认值 | 含义 |
+| --- | --- | --- | --- |
+| `id` | `UUID/String` | 非空，默认 UUID | 任务主键 |
+| `tenant_id` | `UUID/String` | 非空 | 所属租户；所有查询必须参与过滤 |
+| `project_id` | `UUID/String?` | 数据库可空 | 所属项目；当前项目任务接口创建时必填 |
+| `parent_id` | `UUID/String?` | 默认 `null` | 同项目父任务；为空表示根任务 |
+| `title` | `TEXT/String` | 非空 | 任务标题，API 限制 1～200 字符 |
+| `description` | `TEXT/String?` | 默认 `null` | 任务说明，API 最多 10000 字符 |
+| `status` | `TaskStatus` | 非空，默认 `TODO` | `TODO/IN_PROGRESS/BLOCKED/DONE/CANCELLED` |
+| `priority` | `TaskPriority` | 非空，默认 `MEDIUM` | `LOW/MEDIUM/HIGH/URGENT` |
+| `due_date` | `TIMESTAMP(3)/DateTime?` | 默认 `null` | 截止时间，API 使用 ISO 8601 |
+| `relation_type` | `TEXT/String?` | 默认 `null` | 预留的外部业务关联类型 |
+| `relation_id` | `UUID/String?` | 默认 `null` | 预留的外部业务资源 UUID |
+| `created_by_membership_id` | `UUID/String?` | 默认 `null` | 创建任务的租户 Membership UUID；系统或旧数据可空 |
+| `created_at` | `TIMESTAMP(3)/DateTime` | 非空，默认当前时间 | 创建时间 |
+| `updated_at` | `TIMESTAMP(3)/DateTime` | 非空，Prisma 自动更新 | 最后更新时间 |
+| `created_by` | `UUID/String?` | 默认 `null` | 创建者全局 User UUID |
+| `updated_by` | `UUID/String?` | 默认 `null` | 最后修改者全局 User UUID |
+| `deleted_at` | `TIMESTAMP(3)/DateTime?` | 默认 `null` | 软删除时间；非空后不再通过公开接口返回 |
+| `version` | `INTEGER/Int` | 非空，默认 `1` | 乐观锁版本，每次任务写操作递增 |
+
+关键约束：`parent_id` 自关联 `tasks.id`；父子任务同项目、无循环和最多 10 层由业务事务校验；常用索引覆盖 `tenant_id + project_id + parent_id`、状态和截止时间。
 
 ### 15.5 `task_assignees`
 
-任务和执行人的多对多关系。
+任务执行人关系。每个任务必须有且只有一个 `OWNER`，可以有多个 `COLLABORATOR`。
 
-| 字段 | 含义 |
-| --- | --- |
-| `id` | 分配 UUID |
-| `tenant_id` | 所属租户 |
-| `task_id` | 任务 UUID |
-| `user_id` | 执行人 User UUID |
-| `assignee_type` | 执行人类型字符串，默认 `OWNER` |
-| `created_at` | 分配时间 |
+| 字段 | PostgreSQL/Prisma 类型 | 空值与默认值 | 含义 |
+| --- | --- | --- | --- |
+| `id` | `UUID/String` | 非空，默认 UUID | 分配关系主键 |
+| `tenant_id` | `UUID/String` | 非空 | 所属租户 |
+| `task_id` | `UUID/String` | 非空 | 任务 UUID |
+| `membership_id` | `UUID/String` | 非空 | 执行人对应的租户 Membership UUID |
+| `assignee_type` | `TaskAssigneeType` | 非空，默认 `OWNER` | `OWNER` 唯一负责人；`COLLABORATOR` 协作人 |
+| `created_at` | `TIMESTAMP(3)/DateTime` | 非空，默认当前时间 | 分配时间 |
+
+关键约束：`tenant_id + task_id + membership_id` 唯一；部分唯一索引保证每个任务最多一个 `OWNER`。删除任务时执行人关系被硬删除，任务本身仍采用软删除。
 
 ### 15.6 `task_comments`
 
 任务评论表。
 
-| 字段 | 含义 |
-| --- | --- |
-| `id` | 评论 UUID |
-| `tenant_id` | 所属租户 |
-| `task_id` | 任务 UUID |
-| `content` | 评论内容 |
-| `created_at/updated_at` | 创建和更新时间 |
-| `created_by/updated_by` | 创建和修改者 |
-| `deleted_at` | 软删除时间 |
-| `version` | 评论版本 |
+| 字段 | PostgreSQL/Prisma 类型 | 空值与默认值 | 含义 |
+| --- | --- | --- | --- |
+| `id` | `UUID/String` | 非空，默认 UUID | 评论主键 |
+| `tenant_id` | `UUID/String` | 非空 | 所属租户 |
+| `task_id` | `UUID/String` | 非空 | 所属任务 UUID |
+| `content` | `TEXT/String` | 非空 | 评论正文，API 限制 1～5000 字符 |
+| `author_membership_id` | `UUID/String` | 非空 | 评论作者对应的租户 Membership UUID |
+| `created_at` | `TIMESTAMP(3)/DateTime` | 非空，默认当前时间 | 创建时间 |
+| `updated_at` | `TIMESTAMP(3)/DateTime` | 非空，Prisma 自动更新 | 最后修改时间 |
+| `created_by` | `UUID/String?` | 默认 `null` | 创建者全局 User UUID |
+| `updated_by` | `UUID/String?` | 默认 `null` | 最后修改者全局 User UUID |
+| `deleted_at` | `TIMESTAMP(3)/DateTime?` | 默认 `null` | 软删除时间 |
+| `version` | `INTEGER/Int` | 非空，默认 `1` | 评论乐观锁版本 |
+
+评论按 `tenant_id + task_id + created_at` 建索引。修改或删除必须同时匹配评论 `version`，并写入任务动态和租户审计。
 
 ### 15.7 `task_attachments`
 
 任务和文件对象的关联表。
 
-| 字段 | 含义 |
-| --- | --- |
-| `id` | 附件关系 UUID |
-| `tenant_id` | 所属租户 |
-| `task_id` | 任务 UUID |
-| `file_object_id` | 文件对象 UUID |
-| `created_at/updated_at` | 创建和更新时间 |
-| `created_by/updated_by` | 创建和修改者 |
-| `deleted_at` | 软删除时间 |
-| `version` | 附件关系版本 |
+| 字段 | PostgreSQL/Prisma 类型 | 空值与默认值 | 含义 |
+| --- | --- | --- | --- |
+| `id` | `UUID/String` | 非空，默认 UUID | 附件关系主键 |
+| `tenant_id` | `UUID/String` | 非空 | 所属租户 |
+| `task_id` | `UUID/String` | 非空 | 所属任务 UUID |
+| `file_object_id` | `UUID/String` | 非空 | 已完成上传的 `file_objects.id` |
+| `created_by_membership_id` | `UUID/String` | 非空 | 添加附件的租户 Membership UUID |
+| `created_at` | `TIMESTAMP(3)/DateTime` | 非空，默认当前时间 | 添加时间 |
+| `updated_at` | `TIMESTAMP(3)/DateTime` | 非空，Prisma 自动更新 | 最后更新时间 |
+| `created_by` | `UUID/String?` | 默认 `null` | 创建者全局 User UUID |
+| `updated_by` | `UUID/String?` | 默认 `null` | 最后修改者全局 User UUID |
+| `deleted_at` | `TIMESTAMP(3)/DateTime?` | 默认 `null` | 关系软删除时间，不删除文件本身 |
+| `version` | `INTEGER/Int` | 非空，默认 `1` | 附件关系乐观锁版本 |
+
+关键约束：只允许关联当前租户、用途为 `ATTACHMENT` 的正式文件对象；`tenant_id + task_id + file_object_id` 在 `deleted_at IS NULL` 时唯一，软删除后允许重新关联。
 
 ### 15.8 `task_activities`
 
 任务领域活动流水，与全局安全审计的 `audit_logs` 用途不同。
 
-| 字段 | 含义 |
-| --- | --- |
-| `id` | 活动 UUID |
-| `tenant_id` | 所属租户 |
-| `task_id` | 任务 UUID |
-| `action` | 任务动作编码 |
-| `metadata` | 动作扩展 JSON |
-| `created_at` | 发生时间 |
-| `created_by` | 操作者 User UUID |
+| 字段 | PostgreSQL/Prisma 类型 | 空值与默认值 | 含义 |
+| --- | --- | --- | --- |
+| `id` | `UUID/String` | 非空，默认 UUID | 动态主键 |
+| `tenant_id` | `UUID/String` | 非空 | 所属租户 |
+| `task_id` | `UUID/String` | 非空 | 所属任务 UUID |
+| `action` | `TEXT/String` | 非空 | `TASK_CREATED`、`TASK_UPDATED`、`TASK_STATUS_CHANGED`、`TASK_ASSIGNEES_CHANGED`、评论和附件动作编码 |
+| `metadata` | `JSONB/Json?` | 默认 `null` | 状态前后值、原因、评论 ID、附件 ID 或执行人集合 |
+| `actor_membership_id` | `UUID/String?` | 默认 `null` | 操作者租户 Membership UUID；系统动作可以为空 |
+| `created_at` | `TIMESTAMP(3)/DateTime` | 非空，默认当前时间 | 动作发生时间 |
+| `created_by` | `UUID/String?` | 默认 `null` | 操作者全局 User UUID |
+
+任务动态不可通过公开接口修改或删除，按 `tenant_id + task_id + created_at` 查询。它面向项目成员展示业务时间线；`audit_logs` 则记录请求 ID、结果和资源等安全审计信息。
 
 ### 15.9 `file_objects`
 
@@ -2314,3 +2530,15 @@ API 只有在 COS HEAD 返回的大小和 Content-Type 与会话一致时才创�
 - 批量导入禁止分配 `tenant_admin`，确认接口要求 `department.create`、`member.invite` 和 `role.assign`；
 - 新增 `ORGANIZATION_MEMBERS_IMPORTED` 汇总审计，明文激活令牌不会进入日志或审计；
 - 复用现有数据模型，不需要新增 Prisma migration；公开契约版本由 `0.11.0` 提升为 `0.12.0`。
+
+## 26. `0.13.0` 迁移说明
+
+- 新增任务 CRUD、状态流转、执行人、评论、附件和动态共 15 个公开 HTTP 操作；
+- 任务访问必须是实际项目成员，`project.manage_all` 不绕过任务边界；
+- 新增 10 个 `task.*` 权限，已有 `tenant_admin` 角色通过迁移自动获得；
+- 任务执行人、评论作者、附件添加者和动态操作者统一使用租户 `membership_id`；
+- 每个任务通过部分唯一索引约束一个 `OWNER`，附件关系通过部分唯一索引避免重复关联；
+- `DONE/CANCELLED` 为任务终态，`BLOCKED/CANCELLED` 状态流转要求原因；
+- `COMPLETED/CANCELLED/ARCHIVED` 项目任务域只读，成员承担未完成任务时不能移出项目；
+- 数据库迁移为 `0006_task_management` 和 `0007_task_database_comments`；
+- 修改契约后已经重新生成 `packages/api-client`，公开契约版本由 `0.12.0` 提升为 `0.13.0`。

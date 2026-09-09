@@ -116,6 +116,26 @@ describe('ProjectService', () => {
             .rejects.toMatchObject({ response: expect.objectContaining({ code: 'PROJECT_OWNER_MUTATION_DENIED' }) });
     });
 
+    it('does not remove members assigned to unfinished tasks', async () => {
+        const prisma = createPrismaMock();
+        prisma.project.findFirst.mockResolvedValue(projectRecord({
+            members: [
+                projectMemberRecord(),
+                projectMemberRecord({
+                    id: OTHER_PROJECT_MEMBER_ID,
+                    membershipId: OTHER_MEMBERSHIP_ID,
+                    role: ProjectMemberRole.MEMBER,
+                }),
+            ],
+        }));
+        prisma.taskAssignee.findFirst.mockResolvedValue({ taskId: '50000000-0000-0000-0000-000000000001' });
+        const service = createService(prisma);
+
+        await expect(service.removeMember(PROJECT_ID, OTHER_MEMBERSHIP_ID, 1))
+            .rejects.toMatchObject({ response: expect.objectContaining({ code: 'PROJECT_MEMBER_HAS_ACTIVE_TASKS' }) });
+        expect(prisma.projectMember.updateMany).not.toHaveBeenCalled();
+    });
+
     it('transfers ownership and demotes the previous owner to manager', async () => {
         const prisma = createPrismaMock();
         prisma.project.findFirst
@@ -241,6 +261,7 @@ function createPrismaMock(): Record<string, any> {
         tenantMembership: { findFirst: jest.fn() },
         department: { findFirst: jest.fn() },
         task: { count: jest.fn(), groupBy: jest.fn() },
+        taskAssignee: { findFirst: jest.fn() },
         auditLog: { create: jest.fn() },
         $transaction: jest.fn(),
     };

@@ -2,9 +2,9 @@
 
 ## 1. 落地状态
 
-截至 2026-09-08，本功能已经落地项目 CRUD、项目成员、负责人转移、项目状态机、完成后只读、归档恢复、乐观锁和租户审计。任务本身的创建、评论、附件和动态接口仍属于后续工作项。
+截至 2026-09-09，本功能已经落地项目 CRUD、项目成员、负责人转移、项目状态机、完成后只读、归档恢复、乐观锁和租户审计。项目任务、评论、附件和动态接口已经落地，详细规则见 [项目任务管理](task-management.md)。
 
-公开契约以 `packages/contracts/openapi/openapi.yaml` 的 `0.11.0` 为准，NestJS 实现在 `apps/api/src/project`，数据库迁移为 `apps/api/prisma/migrations/0005_project_management`。
+公开契约以 `packages/contracts/openapi/openapi.yaml` 的 `0.13.0` 为准，项目 NestJS 实现在 `apps/api/src/project`，任务实现在 `apps/api/src/task`；数据库迁移包括 `0005_project_management`、`0006_task_management` 和 `0007_task_database_comments`。
 
 ## 2. 租户与可见性边界
 
@@ -60,6 +60,7 @@ PLANNING / ACTIVE / PAUSED ─cancel──> CANCELLED
 项目删除只用于录入错误且还没有任务等业务数据的项目。删除采用软删除，并同步软删除项目成员关系。
 
 - 项目存在任何任务时返回 `409 PROJECT_HAS_BUSINESS_DATA`；
+- 项目成员仍负责或协作未完成任务时返回 `409 PROJECT_MEMBER_HAS_ACTIVE_TASKS`，必须先调整任务执行人；
 - 正式业务项目应使用完成或归档，不使用物理删除；
 - 完成和归档不会删除成员、任务、评论、附件或动态历史；
 - 项目成员访问范围不会因为项目完成而扩大。
@@ -75,7 +76,7 @@ PLANNING / ACTIVE / PAUSED ─cancel──> CANCELLED
 - `projects`：项目编码、名称、部门、唯一负责人、状态、时间范围、完成信息和版本；
 - `project_members`：项目与租户成员关系及 `OWNER/MANAGER/MEMBER` 角色；
 - `project_status_history`：不可变的项目状态变化记录；
-- `tasks.project_id`：用于完成校验和删除保护，任务接口将在后续功能中实现。
+- `tasks.project_id`：用于任务访问隔离、完成校验和删除保护；任务接口已经实现。
 
 项目编码只允许英文、数字、下划线和连字符，同租户按规范化小写编码唯一。迁移 `0005_project_management` 会为旧项目生成 `legacy-<uuid片段>` 编码，并把旧 `user_id` 项目成员关系映射到同租户 Membership；无法映射时迁移主动失败，避免静默归错租户。
 
