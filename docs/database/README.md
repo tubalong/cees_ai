@@ -105,8 +105,8 @@ Project
 
 - `apps/api/prisma/schema.prisma` 是数据模型唯一事实源，迁移提交到 `apps/api/prisma/migrations`。
 - `0001_init` 包含 pgvector 扩展和当前 `schema.prisma` 的完整空库结构；共享环境首次执行后，后续结构变化必须新增前向迁移，不再重写该基线。
-- 本地 PostgreSQL 与 Redis 由 `infra/database/docker-compose.yml` 和本地开发覆盖启动；共享环境数据库由独立数据库服务器运行，Redis 必须启用密码。
-- Staging API 使用数据库服务器内网端口 `15432`/`16379`，Production 使用 `25432`/`26379`；两个环境使用独立容器和数据卷。
+- 本地 PostgreSQL 与 Redis 由 `infra/database/docker-compose.yml` 和本地开发覆盖启动；Staging 与 Production 数据库部署在各自独立服务器或服务器组，Redis 必须启用密码。
+- Staging 与 Production 均使用 PostgreSQL `5432` 和 Redis `6379`；两个环境位于不同服务器并使用独立容器、账号、密码和数据卷。
 - 二进制文件不进入数据库，存放于私有腾讯云 COS；数据库只保存对象键、校验值、大小、内容类型和审计元数据。
 - ai-service 当前不直接连接业务数据库；正式数据读取、写入和 AI 调用审计统一由 NestJS 处理。
 - 未确认的业务实体不得提前加入 Prisma schema。

@@ -9,12 +9,13 @@ Usage:
 
 Examples:
   ./manage-db.sh staging validate
-  ./manage-db.sh staging
   ./manage-db.sh staging logs postgres
-  ./manage-db.sh production
+  ./manage-db.sh staging ps
   ./manage-db.sh production down
 
-The default action is "up". The script never removes data volumes.
+Use deploy-db.sh for deployment. The default action remains "up" for operational
+compatibility, but it only uses images already prepared locally and never pulls.
+The script never removes data volumes.
 EOF
 }
 
@@ -154,11 +155,8 @@ case "$ACTION" in
     echo "Validating $ENVIRONMENT database configuration..."
     "${COMPOSE[@]}" config --quiet
 
-    echo "Pulling database images..."
-    "${COMPOSE[@]}" pull
-
-    echo "Starting $ENVIRONMENT PostgreSQL and Redis..."
-    "${COMPOSE[@]}" up -d --wait --wait-timeout 120 --remove-orphans
+    echo "Starting $ENVIRONMENT PostgreSQL and Redis from prepared local images..."
+    "${COMPOSE[@]}" up -d --pull never --wait --wait-timeout 120 --remove-orphans
     "${COMPOSE[@]}" ps
     ;;
   down)

@@ -6,6 +6,13 @@ import { STORAGE_CONFIG, STORAGE_PROVIDER, STORAGE_SETTINGS, TENCENT_COS_CLIENT 
 import type { StorageConfig, StorageSettings } from './storage.types';
 import { TencentCosStorageProvider } from './tencent-cos-storage.provider';
 
+export function createTencentCosClient(config: StorageConfig): COS {
+    return new COS({
+        SecretId: config.secretId,
+        SecretKey: config.secretKey,
+    });
+}
+
 @Module({
     providers: [
         {
@@ -15,10 +22,7 @@ import { TencentCosStorageProvider } from './tencent-cos-storage.provider';
         {
             provide: TENCENT_COS_CLIENT,
             inject: [STORAGE_CONFIG],
-            useFactory: (config: StorageConfig): COS => new COS({
-                SecretId: config.secretId,
-                SecretKey: config.secretKey,
-            }),
+            useFactory: createTencentCosClient,
         },
         {
             provide: STORAGE_SETTINGS,

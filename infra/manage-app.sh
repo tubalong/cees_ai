@@ -14,7 +14,7 @@ Examples:
   ./infra/manage-app.sh production ps
   ./infra/manage-app.sh production down
 
-The default action is "up". The script never pulls source code or removes volumes.
+The default action is "up". It only uses preloaded images and never builds, pulls source code, or removes volumes.
 EOF
 }
 
@@ -96,6 +96,34 @@ validate_deployment_inputs() {
   fi
 }
 
+validate_local_images() {
+  local api_image
+  local ai_service_image
+  local image_tag
+
+  api_image="$(read_env_value API_IMAGE)"
+  ai_service_image="$(read_env_value AI_SERVICE_IMAGE)"
+  image_tag="$(read_env_value IMAGE_TAG)"
+
+  api_image="${api_image:-cees-api}"
+  ai_service_image="${ai_service_image:-cees-ai-service}"
+
+  if [[ -z "$image_tag" ]]; then
+    echo "Error: IMAGE_TAG is required in $ENV_FILE." >&2
+    exit 1
+  fi
+
+  if ! docker image inspect "${api_image}:${image_tag}" >/dev/null 2>&1; then
+    echo "Error: preloaded API image is unavailable: ${api_image}:${image_tag}" >&2
+    exit 1
+  fi
+
+  if ! docker image inspect "${ai_service_image}:${image_tag}" >/dev/null 2>&1; then
+    echo "Error: preloaded AI service image is unavailable: ${ai_service_image}:${image_tag}" >&2
+    exit 1
+  fi
+}
+
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
@@ -160,8 +188,9 @@ case "$ACTION" in
     echo "Validating $ENVIRONMENT Compose configuration..."
     "${COMPOSE[@]}" config --quiet
 
-    echo "Building and starting $ENVIRONMENT services..."
-    "${COMPOSE[@]}" up -d --build --remove-orphans
+    validate_local_images
+    echo "Starting $ENVIRONMENT services from preloaded images..."
+    "${COMPOSE[@]}" up -d --no-build --pull never --remove-orphans
 
     echo
     "${COMPOSE[@]}" ps

@@ -40,9 +40,20 @@
 3. 执行 `pnpm install --frozen-lockfile`。
 4. 在 `apps/ai-service` 执行 `uv sync --locked`。
 5. 本地执行 `pnpm infra:up`。
-6. 数据库服务器通过 `infra/database/manage-db.sh` 管理 PostgreSQL/Redis。
-7. 应用服务器通过 `infra/manage-app.sh` 管理 API、ai-service 和 Prisma migration。数据库与应用必须先后部署，完整说明见 [infra/README.md](infra/README.md)。
+6. 数据库服务器通过 `scripts/package-database-bundle.ps1` 生成部署包，服务器解压后执行 `infra/database/deploy-db.sh`；不需要 clone 仓库。
+7. Staging/Production 使用“本地构建镜像并上传 COS、服务器下载并导入镜像”的部署方式；应用服务器不需要 clone 完整仓库，也不执行依赖安装或镜像构建。
 
-NestJS Swagger：`http://localhost:3000/api/docs`；FastAPI 内部文档本地为 `http://localhost:8000/docs`，Staging/Production 不映射 ai-service 宿主机端口。
+## 部署入口
+
+按顺序执行的完整部署手册见 [infra/README.md](infra/README.md)：
+
+1. 本地通过 `scripts/package-database-bundle.ps1` 生成数据库服务器部署包，上传解压后执行 `infra/database/deploy-db.sh`。
+2. 本地通过 `scripts/publish-cos-release.ps1` 构建应用镜像并上传 COS。
+3. 通过 `scripts/package-server-bundle.ps1` 生成应用服务器最小目录压缩包。
+4. 应用服务器解压后通过 `infra/deploy-cos-release.sh` 下载、校验、导入并启动发布。
+
+COS 权限和 COSCLI 参考见 [infra/tencent-cos/README.md](infra/tencent-cos/README.md)，数据库服务器部署见 [infra/database/README.md](infra/database/README.md)。
+
+NestJS Swagger：`http://localhost:3000/api/docs`；FastAPI 文档本地为 `http://localhost:8000/docs`。Staging 在 `AI_SERVICE_PORT`（默认 `8000`）对外提供 `/docs`，Production 不映射 ai-service 宿主机端口。
 
 架构说明见 [docs/architecture/overview.md](docs/architecture/overview.md)，AI 基础设施说明见 [docs/architecture/ai-service-foundation.md](docs/architecture/ai-service-foundation.md)。
