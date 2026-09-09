@@ -31,6 +31,25 @@ describe('TaskService', () => {
         expect(prisma.task.create).not.toHaveBeenCalled();
     });
 
+    it('rechecks project state only after acquiring the project row lock', async () => {
+        const prisma = createPrismaMock();
+        let releaseLock: (() => void) | undefined;
+        prisma.$queryRaw.mockImplementation(() => new Promise((resolve) => {
+            releaseLock = () => resolve([{ id: PROJECT_ID }]);
+        }));
+        prisma.project.findFirst.mockResolvedValue(projectAccess({ status: ProjectStatus.COMPLETED }));
+        const service = createService(prisma);
+
+        const creation = service.createTask(PROJECT_ID, createTaskInput());
+
+        expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+        expect(prisma.project.findFirst).not.toHaveBeenCalled();
+        releaseLock?.();
+        await expect(creation)
+            .rejects.toMatchObject({ response: expect.objectContaining({ code: 'PROJECT_READ_ONLY' }) });
+        expect(prisma.task.create).not.toHaveBeenCalled();
+    });
+
     it('requires all assignees to be active project members', async () => {
         const prisma = createPrismaMock();
         prisma.project.findFirst.mockResolvedValue(projectAccess());
@@ -59,6 +78,10 @@ describe('TaskService', () => {
             collaboratorMembershipIds: [OTHER_MEMBERSHIP_ID],
         }));
 
+        expect(prisma.$queryRaw.mock.invocationCallOrder[0])
+            .toBeLessThan(prisma.project.findFirst.mock.invocationCallOrder[0]);
+        expect(prisma.project.findFirst.mock.invocationCallOrder[0])
+            .toBeLessThan(prisma.task.create.mock.invocationCallOrder[0]);
         expect(prisma.taskAssignee.createMany).toHaveBeenCalledWith({
             data: expect.arrayContaining([
                 expect.objectContaining({
@@ -251,6 +274,7 @@ function createPrismaMock(): Record<string, any> {
         taskActivity: { findMany: jest.fn(), create: jest.fn() },
         fileObject: { findFirst: jest.fn() },
         auditLog: { create: jest.fn() },
+        $queryRaw: jest.fn().mockResolvedValue([{ id: PROJECT_ID }]),
         $transaction: jest.fn(),
     };
     prisma.$transaction.mockImplementation(async (callback: (transaction: Record<string, any>) => Promise<unknown>) => callback(prisma));

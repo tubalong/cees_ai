@@ -249,7 +249,7 @@ pnpm --filter @cees/api dev
 | `POST /projects/{projectId}/archive` | `COMPLETED → ARCHIVED` | `ProjectVersionRequest` | 项目详情 | `project.archive` + OWNER |
 | `POST /projects/{projectId}/restore` | `ARCHIVED → COMPLETED` | `ProjectVersionRequest` | 项目详情 | `project.archive` + OWNER |
 
-同租户不自动获得项目访问权。部门只用于归属和筛选；完成、取消和归档项目禁止修改资料与成员。详细规则见 [项目与项目成员管理](project-management.md)。
+同租户不自动获得项目访问权。部门只用于归属和筛选；完成、取消和归档项目禁止修改资料与成员。项目资料、成员、状态与任务写操作会先锁定同一 `projects` 行，并在事务内重新校验最新状态和权限，避免项目完成、成员移除与任务写入之间出现并发穿透。详细规则见 [项目与项目成员管理](project-management.md)。
 
 #### 6.4.1 项目任务、评论、附件和动态
 
@@ -271,7 +271,7 @@ pnpm --filter @cees/api dev
 | `DELETE /projects/{projectId}/tasks/{taskId}/attachments/{attachmentId}` | 移除附件关系 | 查询参数 `version` | `204` | `task.attachment.manage` + 添加者或任务管理者 |
 | `GET /projects/{projectId}/tasks/{taskId}/activities` | 查询任务动态 | `limit/cursor` | 动态列表 | `task.read` + 项目成员 |
 
-任务接口不会被 `project.manage_all` 绕过：即使租户管理员拥有跨项目管理权限，也必须先加入项目才能访问任务。项目 `COMPLETED/CANCELLED/ARCHIVED` 后任务域只读。完整状态机和示例见 [项目任务管理](task-management.md) 与 [任务管理 API](../api/task-management-api.md)。
+任务接口不会被 `project.manage_all` 绕过：即使租户管理员拥有跨项目管理权限，也必须先加入项目才能访问任务。项目 `COMPLETED/CANCELLED/ARCHIVED` 后任务域只读。所有任务写操作在获得项目行锁后重新校验项目、任务、成员和父子关系；`version` 负责单资源乐观锁，项目行锁负责跨表一致性。完整状态机和示例见 [项目任务管理](task-management.md) 与 [任务管理 API](../api/task-management-api.md)。
 
 ### 6.5 成员邀请
 
@@ -1320,7 +1320,7 @@ Prisma 自动维护的迁移历史表，记录迁移名称、校验值、开始/
 
 ## 15. 项目、任务与文件表
 
-项目、项目成员、任务、评论、附件和动态均已提供公开 API。项目完成校验会读取有效任务状态，任务附件复用 COS 文件上传基础能力。
+项目、项目成员、任务、评论、附件和动态均已提供公开 API。项目完成校验会读取有效任务状态，任务附件复用 COS 文件上传基础能力。项目与任务写事务通过锁定同一 `projects` 行串行执行，并在锁内重新读取状态、权限、成员和任务关系。
 
 ### 15.1 `projects`
 

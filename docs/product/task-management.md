@@ -90,7 +90,21 @@ TODO ───────────────→ IN_PROGRESS ────�
 
 项目完成接口要求不存在 `TODO/IN_PROGRESS/BLOCKED` 任务。需要继续工作时，应先通过项目重开接口将 `COMPLETED` 恢复为 `ACTIVE`。
 
-## 8. 数据与迁移
+## 8. 并发一致性
+
+项目与任务写操作使用 `projects` 行级事务锁串行化。同一项目的任务创建、修改、删除、状态流转、执行人替换、评论和附件写入，以及项目资料、成员和状态变更，都会先执行项目行 `SELECT ... FOR UPDATE`，然后在同一个 Prisma 事务中重新查询并校验：
+
+- 项目仍存在、当前操作者仍有项目访问权且项目仍可写；
+- 任务、评论、附件和父任务仍然有效；
+- 负责人和协作人仍是有效项目成员；
+- 项目完成时仍不存在未完成任务；
+- 移除项目成员时仍不存在其承担的活动任务。
+
+因此并发请求会按获得项目锁的顺序执行。例如项目完成先提交时，等待中的任务创建会重新读取到只读状态并返回 `409 PROJECT_READ_ONLY`；任务创建先提交时，等待中的项目完成会读取到未完成任务并返回 `409 PROJECT_HAS_UNFINISHED_TASKS`。该机制也避免并发调整父任务形成循环，以及删除父任务后又写入子任务、评论或附件。
+
+`version` 乐观锁继续用于识别同一资源的客户端旧版本；项目行锁用于保护跨资源业务不变量，两者不能互相替代。
+
+## 9. 数据与迁移
 
 主要数据表：
 
@@ -105,12 +119,15 @@ TODO ───────────────→ IN_PROGRESS ────�
 - `0006_task_management`：成员关系、外键、索引、唯一负责人约束和 `task.*` 权限；
 - `0007_task_database_comments`：任务相关表和字段的 PostgreSQL 中文注释。
 
-## 9. 契约与实现入口
+本次并发加固不修改数据库结构，不需要新增 Prisma migration。
+
+## 10. 契约与实现入口
 
 - OpenAPI：`packages/contracts/openapi/openapi.yaml`
 - 生成客户端：`packages/api-client/src/services/TaskService.ts`
 - 控制器：`apps/api/src/task/task.controller.ts`
 - 服务：`apps/api/src/task/task.service.ts`
+- 项目事务锁：`apps/api/src/project/project-transaction-lock.ts`
 - DTO：`apps/api/src/task/dto.ts`
 - Prisma：`apps/api/prisma/schema.prisma`
 - API 明细：[任务管理 API](../api/task-management-api.md)

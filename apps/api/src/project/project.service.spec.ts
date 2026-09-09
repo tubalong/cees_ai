@@ -133,6 +133,8 @@ describe('ProjectService', () => {
 
         await expect(service.removeMember(PROJECT_ID, OTHER_MEMBERSHIP_ID, 1))
             .rejects.toMatchObject({ response: expect.objectContaining({ code: 'PROJECT_MEMBER_HAS_ACTIVE_TASKS' }) });
+        expect(prisma.$queryRaw.mock.invocationCallOrder[0])
+            .toBeLessThan(prisma.taskAssignee.findFirst.mock.invocationCallOrder[0]);
         expect(prisma.projectMember.updateMany).not.toHaveBeenCalled();
     });
 
@@ -190,6 +192,32 @@ describe('ProjectService', () => {
         await expect(service.complete(PROJECT_ID, { completionSummary: '完成', version: 1 }))
             .rejects.toMatchObject({ response: expect.objectContaining({ code: 'PROJECT_HAS_UNFINISHED_TASKS' }) });
         expect(prisma.project.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('checks unfinished tasks only after acquiring the project row lock', async () => {
+        const prisma = createPrismaMock();
+        let releaseLock: (() => void) | undefined;
+        prisma.$queryRaw.mockImplementation(() => new Promise((resolve) => {
+            releaseLock = () => resolve([{ id: PROJECT_ID }]);
+        }));
+        prisma.project.findFirst
+            .mockResolvedValueOnce(projectRecord({ status: ProjectStatus.ACTIVE }))
+            .mockResolvedValueOnce(projectRecord({ status: ProjectStatus.COMPLETED }));
+        prisma.task.count.mockResolvedValue(0);
+        prisma.project.updateMany.mockResolvedValue({ count: 1 });
+        const service = createService(prisma);
+
+        const completion = service.complete(PROJECT_ID, { completionSummary: '完成', version: 1 });
+
+        expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+        expect(prisma.project.findFirst).not.toHaveBeenCalled();
+        expect(prisma.task.count).not.toHaveBeenCalled();
+        releaseLock?.();
+        await completion;
+        expect(prisma.$queryRaw.mock.invocationCallOrder[0])
+            .toBeLessThan(prisma.task.count.mock.invocationCallOrder[0]);
+        expect(prisma.task.count.mock.invocationCallOrder[0])
+            .toBeLessThan(prisma.project.updateMany.mock.invocationCallOrder[0]);
     });
 
     it('records status history and audit when completing a project', async () => {
@@ -263,6 +291,7 @@ function createPrismaMock(): Record<string, any> {
         task: { count: jest.fn(), groupBy: jest.fn() },
         taskAssignee: { findFirst: jest.fn() },
         auditLog: { create: jest.fn() },
+        $queryRaw: jest.fn().mockResolvedValue([{ id: PROJECT_ID }]),
         $transaction: jest.fn(),
     };
     prisma.$transaction.mockImplementation(async (callback: (transaction: Record<string, any>) => Promise<unknown>) => callback(prisma));
