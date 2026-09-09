@@ -1,4 +1,4 @@
-import type COS from 'cos-nodejs-sdk-v5';
+import type COS = require('cos-nodejs-sdk-v5');
 import { TencentCosStorageProvider } from './tencent-cos-storage.provider';
 import { StorageObjectNotFoundError, StorageProviderError, type StorageSettings } from './storage.types';
 

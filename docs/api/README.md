@@ -10,6 +10,7 @@
 - [IAM、租户、RBAC、ACL 与审计 API 设计草案](iam-authorization-api.md)
 - [平台租户管理与租户账号激活](platform-tenant-administration.md)
 - [组织部门管理](../product/organization-department-management.md)
+- [组织架构与成员批量导入](../product/organization-member-import.md)
 - [项目管理 API](project-management-api.md)
 - [项目与项目成员管理](../product/project-management.md)
 - [用户个人资料管理](../product/user-profile-management.md)
@@ -37,6 +38,8 @@ GET    /api/v1/tenants/current/departments/{departmentId}
 PATCH  /api/v1/tenants/current/departments/{departmentId}
 DELETE /api/v1/tenants/current/departments/{departmentId}?version={version}
 GET    /api/v1/tenants/current/departments/{departmentId}/members
+POST   /api/v1/tenants/current/organization-imports/validate
+POST   /api/v1/tenants/current/organization-imports/confirm
 GET    /api/v1/tenants/current/members
 GET    /api/v1/tenants/current/members/{membershipId}
 PATCH  /api/v1/tenants/current/members/{membershipId}
@@ -198,6 +201,15 @@ POST   /api/v1/projects/{projectId}/restore
 - 同租户成员默认不能访问未参与项目，跨项目管理需要 `project.manage_all`；
 - 完成、取消和归档项目禁止修改资料与成员，完成前必须清理未完成任务；
 - 新增 Prisma 迁移 `0005_project_management`，客户端需要重新生成。
+
+## 0.12.0 迁移说明
+
+- 公开契约版本由 `0.11.0` 提升为 `0.12.0`；
+- 新增组织架构和成员批量校验、确认导入接口；
+- 前端解析 Excel，API 接收最多 200 个部门、500 名成员和 2 MiB JSON；
+- 确认导入事务创建待激活成员、角色关系和独立激活凭证；
+- 已有启用部门按路径复用，第一版只创建新成员并禁止批量分配 `tenant_admin`；
+- 复用现有 Prisma 数据模型，不需要新增数据库迁移，TypeScript 客户端需要重新生成。
 
 ## 契约事实源
 
