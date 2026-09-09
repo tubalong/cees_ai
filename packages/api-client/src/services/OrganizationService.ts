@@ -8,6 +8,9 @@ import type { DepartmentResponseEnvelope } from '../models/DepartmentResponseEnv
 import type { DepartmentStatus } from '../models/DepartmentStatus';
 import type { DepartmentTreeResponseEnvelope } from '../models/DepartmentTreeResponseEnvelope';
 import type { MemberStatus } from '../models/MemberStatus';
+import type { OrganizationImportRequest } from '../models/OrganizationImportRequest';
+import type { OrganizationImportResultResponseEnvelope } from '../models/OrganizationImportResultResponseEnvelope';
+import type { OrganizationImportValidationResponseEnvelope } from '../models/OrganizationImportValidationResponseEnvelope';
 import type { TenantMemberListResponseEnvelope } from '../models/TenantMemberListResponseEnvelope';
 import type { TenantMemberResponseEnvelope } from '../models/TenantMemberResponseEnvelope';
 import type { UpdateDepartmentRequest } from '../models/UpdateDepartmentRequest';
@@ -58,6 +61,53 @@ export class OrganizationService {
                 403: `缺少 department.create 权限`,
                 404: `父部门不存在`,
                 409: `同级部门名称冲突`,
+            },
+        });
+    }
+    /**
+     * 校验组织架构和成员批量导入数据
+     * 不写入正式业务数据，返回部门复用或创建预览、成员有效角色及逐项校验问题。
+     * @returns OrganizationImportValidationResponseEnvelope 批量导入校验结果；业务数据无效时 valid 为 false
+     * @throws ApiError
+     */
+    public static organizationImportValidate({
+        requestBody,
+    }: {
+        requestBody: OrganizationImportRequest,
+    }): CancelablePromise<OrganizationImportValidationResponseEnvelope> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/tenants/current/organization-imports/validate',
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                400: `请求结构、数组数量或字段格式无效`,
+                401: `登录状态无效或已过期`,
+                403: `缺少 department.create、member.invite 或 role.assign 权限`,
+            },
+        });
+    }
+    /**
+     * 确认导入组织架构和成员
+     * 在可串行化事务中重新校验并创建部门、待激活成员、角色关系和一次性激活凭证。
+     * @returns OrganizationImportResultResponseEnvelope 已完成批量导入；激活令牌只在本次响应返回
+     * @throws ApiError
+     */
+    public static organizationImportConfirm({
+        requestBody,
+    }: {
+        requestBody: OrganizationImportRequest,
+    }): CancelablePromise<OrganizationImportResultResponseEnvelope> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/tenants/current/organization-imports/confirm',
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                400: `批量数据校验失败，details 返回逐项问题`,
+                401: `登录状态无效或已过期`,
+                403: `缺少 department.create、member.invite 或 role.assign 权限，或尝试批量分配租户管理员角色`,
+                409: `并发导入导致部门或账号冲突`,
             },
         });
     }

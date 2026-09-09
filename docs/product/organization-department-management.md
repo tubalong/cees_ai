@@ -1,8 +1,8 @@
 # 组织部门管理
 
 > 状态：已实现  
-> 最后同步：2026-09-08  
-> 契约版本：`0.8.0`
+> 最后同步：2026-09-09
+> 契约版本：`0.12.0`
 
 ## 1. 业务边界
 
@@ -57,8 +57,12 @@
 | `DELETE /api/v1/tenants/current/departments/{departmentId}?version=1` | `department.delete` | 删除空部门 |
 | `GET /api/v1/tenants/current/departments/{departmentId}/members` | `department.read`、`member.read` | 分页查询部门成员 |
 | `PUT /api/v1/tenants/current/members/{membershipId}/department` | `department.member.assign` | 调整成员部门 |
+| `POST /api/v1/tenants/current/organization-imports/validate` | `department.create`、`member.invite`、`role.assign` | 校验部门和成员批量导入数据 |
+| `POST /api/v1/tenants/current/organization-imports/confirm` | `department.create`、`member.invite`、`role.assign` | 事务导入并返回一次性激活凭证 |
 
 公开契约事实源为 `packages/contracts/openapi/openapi.yaml`，生成的 TypeScript 客户端位于 `packages/api-client/src`。
+
+批量导入的 Excel 模板、请求结构、部门复用和激活规则见 [组织架构与成员批量导入](organization-member-import.md)。
 
 ## 5. 审计
 
@@ -70,6 +74,7 @@ DEPARTMENT_UPDATED
 DEPARTMENT_MOVED
 DEPARTMENT_DELETED
 MEMBER_DEPARTMENT_CHANGED
+ORGANIZATION_MEMBERS_IMPORTED
 ```
 
 审计记录包含租户、操作者 User、操作者 Membership、请求 ID、资源 ID 和变更前后元数据。

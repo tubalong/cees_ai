@@ -28,6 +28,9 @@ import {
     ListDepartmentsQueryDto,
     UpdateDepartmentDto,
 } from './dto';
+import { OrganizationImportDto } from './organization-import.dto';
+import { OrganizationImportService } from './organization-import.service';
+import { OrganizationImportResult, OrganizationImportValidationResult } from './organization-import.types';
 import { OrganizationService } from './organization.service';
 import { DepartmentResult, DepartmentTreeResult } from './organization.types';
 
@@ -37,7 +40,10 @@ import { DepartmentResult, DepartmentTreeResult } from './organization.types';
 @UseGuards(JwtAuthGuard, TenantGuard, PermissionGuard)
 @UseInterceptors(TenantContextInterceptor)
 export class OrganizationController {
-    constructor(private readonly organizationService: OrganizationService) { }
+    constructor(
+        private readonly organizationService: OrganizationService,
+        private readonly organizationImportService: OrganizationImportService,
+    ) { }
 
     @Get('departments')
     @RequirePermissions('department.read')
@@ -51,6 +57,21 @@ export class OrganizationController {
     @ApiCreatedResponse({ description: '已创建部门' })
     createDepartment(@Body() input: CreateDepartmentDto): Promise<DepartmentResult> {
         return this.organizationService.createDepartment(input);
+    }
+
+    @Post('organization-imports/validate')
+    @HttpCode(HttpStatus.OK)
+    @RequirePermissions('department.create', 'member.invite', 'role.assign')
+    @ApiOkResponse({ description: '组织架构和成员批量导入校验结果' })
+    validateOrganizationImport(@Body() input: OrganizationImportDto): Promise<OrganizationImportValidationResult> {
+        return this.organizationImportService.validate(input);
+    }
+
+    @Post('organization-imports/confirm')
+    @RequirePermissions('department.create', 'member.invite', 'role.assign')
+    @ApiCreatedResponse({ description: '批量导入完成；激活令牌只在本次响应返回' })
+    confirmOrganizationImport(@Body() input: OrganizationImportDto): Promise<OrganizationImportResult> {
+        return this.organizationImportService.confirm(input);
     }
 
     @Get('departments/:departmentId')

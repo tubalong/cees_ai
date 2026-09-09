@@ -1,8 +1,8 @@
 # CEES AI 平台使用、接口与数据库字典
 
 > 状态：按当前实现整理  
-> 最后同步：2026-09-08  
-> 公开契约版本：`0.11.0`
+> 最后同步：2026-09-09
+> 公开契约版本：`0.12.0`
 > 事实源：`packages/contracts/openapi/openapi.yaml`、`apps/api/prisma/schema.prisma`
 
 ## 1. 文档用途
@@ -10,7 +10,7 @@
 本文面向本地开发、接口联调、产品验收和数据库排查，统一说明：
 
 - 平台超级管理员、租户管理员和普通成员的区别；
-- 当前已经实现的 82 个 HTTP 操作；
+- 当前已经实现的 84 个 HTTP 操作；
 - 路径参数、查询参数和 JSON 请求体字段的含义；
 - PostgreSQL 中 41 张业务表、470 个业务字段及 Prisma 迁移表的用途；
 - 租户创建、成员激活、登录、授权、资源访问、审计、停用和恢复的整体流转；
@@ -34,6 +34,7 @@
 | Resource ACL | 已实现 | 按成员或角色授予文档级权限 |
 | 租户与平台审计 | 已实现 | 分域记录和查询操作审计 |
 | 组织部门管理 | 已实现 | 部门树、增删改、启停、成员列表和成员调部门 |
+| 组织人员批量导入 | 已实现 | 前端解析 Excel，后端校验并事务创建部门、待激活成员、角色和一次性激活凭证 |
 | 文件上传 | 基础接口已实现 | 通过短时预签名 PUT URL 直传私有 COS，HEAD 校验通过后登记正式文件 |
 | 项目与项目成员 | 已实现 | 项目 CRUD、成员角色、负责人转移、状态机、完成后只读和归档 |
 | 任务、评论、附件和动态 | 仅数据库结构/模块占位 | 项目完成校验已读取任务状态，任务公开 API 尚未实现 |
@@ -218,8 +219,12 @@ pnpm --filter @cees/api dev
 | `DELETE /tenants/current/departments/{departmentId}` | 删除空部门 | 路径 ID + 查询参数 `version` | `204` | `department.delete` |
 | `GET /tenants/current/departments/{departmentId}/members` | 分页查询部门成员 | `keyword/status/limit/cursor` | 成员列表 | `department.read`、`member.read` |
 | `PUT /tenants/current/members/{membershipId}/department` | 调整成员所属部门 | `AssignTenantMemberDepartmentRequest` | 修改后的成员 | `department.member.assign` |
+| `POST /tenants/current/organization-imports/validate` | 校验组织架构和成员导入数据，不落库 | `OrganizationImportRequest` | 部门创建/复用预览、成员有效角色和逐项问题 | `department.create`、`member.invite`、`role.assign` |
+| `POST /tenants/current/organization-imports/confirm` | 重新校验并事务导入 | `OrganizationImportRequest` | 部门结果和只返回一次的成员激活凭证 | `department.create`、`member.invite`、`role.assign` |
 
 部门最大 10 级，同级名称唯一，禁止父子循环；部门有子部门或成员时不能删除，只能向启用部门分配成员。
+
+批量导入由前端解析 Excel，后端只接收标准 JSON。单批最多 200 个部门、500 名成员，请求体最大 2 MiB。已有且启用的完整部门路径会复用，不更新已有部门资料；已停用部门、重复账号、有效待处理邀请、无效角色和循环层级都会阻止确认导入。第一版只创建新成员，并禁止批量分配 `tenant_admin`。
 
 ### 6.4 项目与项目成员
 
@@ -1782,7 +1787,394 @@ DELETE /api/v1/tenants/current/departments/{departmentId}?version={version}
 
 删除测试应先删除没有成员和子部门的叶子部门；删除仍有成员或子部门的部门会返回 `409 DEPARTMENT_NOT_EMPTY`。
 
-### 20.5 项目与项目成员
+### 20.5 批量导入组织架构和成员
+
+该功能适用于租户首次初始化组织架构，或者一次新增较多部门和人员。Excel 由前端解析，不上传给 API；API 只接收前端转换后的标准 JSON。
+
+建议操作顺序：
+
+1. 租户管理员下载 Excel 模板并填写部门、人员。
+2. 前端读取 Excel，检查列名、空行和部门路径格式。
+3. 前端生成账号建议以及请求内部使用的 `clientRef`。
+4. 管理员在预览页处理账号冲突、选择默认角色，必要时给个别成员单独设置角色。
+5. 前端调用 `validate`，展示后端返回的部门创建/复用结果和逐行错误。
+6. 管理员确认后调用 `confirm` 正式导入。
+7. 前端根据确认响应立即生成成员激活凭证 Excel。
+
+#### 20.5.1 Excel 模板结构
+
+一个 Excel 文件建议包含两个 Sheet，Sheet 名称固定为“部门”和“人员”。模板中不出现数据库 UUID、部门编码、角色编码或 `clientRef` 等技术字段。
+
+**Sheet 1：部门**
+
+| 部门路径 | 排序 | 部门说明 |
+| --- | ---: | --- |
+| 总部 | 0 | 公司总部 |
+| 总部/研发部 | 10 | 产品研发部门 |
+| 总部/研发部/后端组 | 10 | 后端研发小组 |
+| 总部/研发部/前端组 | 20 | 前端研发小组 |
+| 总部/销售部 | 20 | 销售与客户维护 |
+
+部门填写规则：
+
+- `部门路径` 必填，使用 `/` 表示上下级关系。
+- `总部/研发部/后端组` 表示“后端组”的父部门是“研发部”，“研发部”的父部门是“总部”。
+- 部门名称本身不能包含 `/`，路径不能以 `/` 开头或结尾，也不能包含连续的 `//`。
+- 最大支持 10 级部门。
+- 完整路径在同一 Excel 中必须唯一。
+- 父路径必须存在，例如填写“总部/研发部/后端组”时，应同时存在“总部”和“总部/研发部”。
+- `排序` 可不填写，前端按 `0` 处理；数值越小，在同级部门中越靠前。
+- `部门说明` 可不填写，最长 500 个字符。
+- 如果完整路径已经存在且部门为 `ACTIVE`，后端会复用该部门，不覆盖已有名称、排序和说明。
+- 如果匹配到的已有部门为 `DISABLED`，必须先启用部门或修改导入路径。
+
+**Sheet 2：人员**
+
+| 姓名 | 登录账号（可选） | 部门路径 |
+| --- | --- | --- |
+| 张三 |  | 总部/研发部/后端组 |
+| 李四 | lisi | 总部/研发部 |
+| 王五 |  | 总部/销售部 |
+
+人员填写规则：
+
+- `姓名` 必填，最长 120 个字符。
+- `登录账号` 可以留空；前端根据姓名拼音生成建议，例如“张三”建议为 `zhangsan`。
+- 最终提交后端前，每个人必须有确定的登录账号。
+- 登录账号长度为 3～32 位，只允许英文字母和数字，不允许中文、空格、下划线或其他特殊字符。
+- 账号不区分大小写；`ZhangSan` 和 `zhangsan` 在同一租户内视为同一个账号。
+- 同名或拼音相同导致账号冲突时，由租户管理员在预览页面修改，例如改成 `zhangsan2`。
+- `部门路径` 必填，并且必须能够匹配“部门”Sheet 中的一条完整路径。
+- 人员 Sheet 不填写角色编码。默认角色由管理员在导入页面统一选择，特殊成员可以在预览页面单独覆盖。
+- 第一版只创建新成员，不覆盖已有成员，也不支持通过批量导入分配 `tenant_admin`。
+
+#### 20.5.2 导入页面需要管理员选择的内容
+
+Excel 解析完成后，前端应展示以下批次设置：
+
+```text
+默认角色：   [普通员工 ▼]
+激活有效期： [7 天 ▼]
+```
+
+- 前端通过 `GET /api/v1/roles` 查询当前租户角色，页面显示角色名称，提交时使用角色 UUID。
+- 默认角色必须至少选择一个，普通成员统一使用批次默认角色。
+- 特殊成员可以在预览表中单独选择角色；成员单独设置角色后，不再继承批次默认角色。
+- 页面必须过滤或禁用 `tenant_admin`。即使前端没有过滤，后端也会拒绝导入。
+- 激活有效期支持 1～30 天，默认 7 天。
+
+#### 20.5.3 前端如何把 Excel 转换成 JSON
+
+管理员不需要填写 `clientRef`。前端可以按 Excel 行号生成临时引用，例如：
+
+```text
+部门 Sheet 第 2 行 → department-row-2
+部门 Sheet 第 3 行 → department-row-3
+人员 Sheet 第 2 行 → member-row-2
+```
+
+对于部门路径“总部/研发部”，前端转换结果是：
+
+```json
+{
+  clientRef: department-row-3,
+  name: 研发部,
+  parentClientRef: department-row-2,
+  sortOrder: 10,
+  description: 产品研发部门
+}
+```
+
+人员“张三”关联“总部/研发部/后端组”时，前端通过路径找到对应部门的 `clientRef`：
+
+```json
+{
+  clientRef: member-row-2,
+  account: zhangsan,
+  displayName: 张三,
+  departmentClientRef: department-row-4
+}
+```
+
+完整请求示例：
+
+```json
+{
+  defaultRoleIds: [
+    70000000-0000-0000-0000-000000000001
+  ],
+  departments: [
+    {
+      clientRef: department-row-2,
+      name: 总部,
+      parentClientRef: null,
+      sortOrder: 0,
+      description: 公司总部
+    },
+    {
+      clientRef: department-row-3,
+      name: 研发部,
+      parentClientRef: department-row-2,
+      sortOrder: 10,
+      description: 产品研发部门
+    },
+    {
+      clientRef: department-row-4,
+      name: 后端组,
+      parentClientRef: department-row-3,
+      sortOrder: 10,
+      description: 后端研发小组
+    }
+  ],
+  members: [
+    {
+      clientRef: member-row-2,
+      account: zhangsan,
+      displayName: 张三,
+      departmentClientRef: department-row-4
+    },
+    {
+      clientRef: member-row-3,
+      account: lisi,
+      displayName: 李四,
+      departmentClientRef: department-row-3,
+      roleIds: [
+        70000000-0000-0000-0000-000000000002
+      ]
+    }
+  ],
+  activationExpiresInDays: 7
+}
+```
+
+角色使用规则：
+
+```text
+成员存在 roleIds    → 使用成员自己的 roleIds
+成员不存在 roleIds  → 使用批次 defaultRoleIds
+```
+
+单批最多提交 200 个部门和 500 名成员，JSON 请求体最大 2 MiB。前端也应使用相同限制，避免管理员填写完成后才发现无法提交。
+
+#### 20.5.4 调用校验接口
+
+```http
+POST /api/v1/tenants/current/organization-imports/validate
+Authorization: Bearer <tenant-access-token>
+Content-Type: application/json
+```
+
+校验接口不写入任何正式部门或成员数据。校验通过示例：
+
+```json
+{
+  success: true,
+  data: {
+    valid: true,
+    summary: {
+      departmentCount: 3,
+      departmentCreateCount: 2,
+      departmentReuseCount: 1,
+      memberCount: 2
+    },
+    departments: [
+      {
+        clientRef: department-row-2,
+        action: REUSE,
+        departmentId: 60000000-0000-0000-0000-000000000001,
+        path: 总部
+      },
+      {
+        clientRef: department-row-3,
+        action: CREATE,
+        departmentId: null,
+        path: 总部/研发部
+      }
+    ],
+    members: [
+      {
+        clientRef: member-row-2,
+        account: zhangsan,
+        displayName: 张三,
+        departmentClientRef: department-row-4,
+        departmentPath: 总部/研发部/后端组,
+        effectiveRoleIds: [70000000-0000-0000-0000-000000000001]
+      }
+    ],
+    issues: []
+  },
+  requestId: request-id
+}
+```
+
+- `valid=true` 表示可以进入确认步骤；`valid=false` 表示必须先处理 `issues`。
+- `departmentCreateCount` 是即将新建的部门数量。
+- `departmentReuseCount` 是匹配到已有启用部门并直接复用的数量。
+- `action=CREATE` 时尚未创建正式部门，因此 `departmentId=null`。
+- `effectiveRoleIds` 是应用默认角色或成员专属角色后的最终角色集合。
+
+业务校验失败仍返回 HTTP `200`，示例：
+
+```json
+{
+  "success": true,
+  "data": {
+    "valid": false,
+    "summary": {
+      "departmentCount": 3,
+      "departmentCreateCount": 2,
+      "departmentReuseCount": 1,
+      "memberCount": 2
+    },
+    "departments": [],
+    "members": [],
+    "issues": [
+      {
+        "scope": "MEMBER",
+        "clientRef": "member-row-2",
+        "field": "account",
+        "code": "ORGANIZATION_IMPORT_ACCOUNT_EXISTS",
+        "message": "账号 zhangsan 已被当前租户使用或存在有效邀请"
+      }
+    ]
+  },
+  "requestId": "request-id"
+}
+```
+
+前端应使用 `clientRef` 找回对应 Excel 行。例如 `member-row-2` 对应人员 Sheet 第 2 行，并在预览表中直接标红该行。只有 DTO 结构、字段长度、格式或数组数量不合法时，接口才返回 HTTP `400`。
+
+#### 20.5.5 调用确认导入接口
+
+只有 `validate` 返回 `valid=true` 时，前端才应允许管理员点击“确认导入”。确认接口使用与校验接口完全相同的请求体：
+
+```http
+POST /api/v1/tenants/current/organization-imports/confirm
+Authorization: Bearer <tenant-access-token>
+Content-Type: application/json
+```
+
+后端不会直接信任之前的校验结果，而是在可串行化事务中重新检查账号、部门和角色。任意一项失败时整个事务回滚，不会出现只创建一部分成员的情况。
+
+确认成功响应示例：
+
+```json
+{
+  "success": true,
+  "data": {
+    "summary": {
+      "departmentCount": 3,
+      "departmentCreateCount": 2,
+      "departmentReuseCount": 1,
+      "memberCount": 2
+    },
+    "departments": [
+      {
+        "clientRef": "department-row-2",
+        "departmentId": "60000000-0000-0000-0000-000000000001",
+        "action": "REUSE",
+        "path": "总部"
+      },
+      {
+        "clientRef": "department-row-3",
+        "departmentId": "60000000-0000-0000-0000-000000000002",
+        "action": "CREATE",
+        "path": "总部/研发部"
+      }
+    ],
+    "members": [
+      {
+        "clientRef": "member-row-2",
+        "membershipId": "50000000-0000-0000-0000-000000000001",
+        "displayName": "张三",
+        "account": "zhangsan",
+        "departmentId": "60000000-0000-0000-0000-000000000003",
+        "departmentPath": "总部/研发部/后端组",
+        "tenantCode": "cees",
+        "activationToken": "一次性明文激活令牌",
+        "activationExpiresAt": "2026-09-16T00:00:00.000Z"
+      }
+    ]
+  },
+  "requestId": "request-id"
+}
+```
+
+确认成功后，后端在同一事务中创建：
+
+```text
+User
+TenantMembership：PENDING_ACTIVATION，passwordHash=null
+MembershipRole
+TenantInvitation：保存激活令牌 Hash
+TenantInvitationRole
+```
+
+明文 `activationToken` 只在本次响应中返回，不写入数据库明文字段、应用日志或审计元数据。前端收到响应后应立即完成 Excel 导出，不应长期保存在浏览器日志、错误监控或本地缓存中。
+
+#### 20.5.6 前端生成激活凭证 Excel
+
+确认成功后，前端应立即下载另一个 Excel。这个文件不是管理员上传的原始导入文件，而是发给员工的激活凭证文件。
+
+| 姓名 | 部门 | 租户编码 | 登录账号 | 激活码 | 过期时间 |
+| --- | --- | --- | --- | --- | --- |
+| 张三 | 总部/研发部/后端组 | cees | zhangsan | 一次性激活令牌 | 2026-09-16 08:00:00 |
+| 李四 | 总部/研发部 | cees | lisi | 一次性激活令牌 | 2026-09-16 08:00:00 |
+
+建议文件名：
+
+```text
+成员激活凭证-cees-20260909.xlsx
+```
+
+员工拿到凭证后调用 `POST /api/v1/auth/activate`：
+
+```json
+{
+  "tenantCode": "cees",
+  "account": "zhangsan",
+  "invitationToken": "激活凭证中的一次性激活码",
+  "password": "change_me"
+}
+```
+
+激活成功后，成员状态从 `PENDING_ACTIVATION` 变为 `ACTIVE`，之后使用 `tenantCode + account + password` 登录。
+
+如果确认接口响应丢失，原明文激活码无法从数据库恢复。管理员需要调用 `POST /api/v1/tenants/current/members/{membershipId}/credential-reset`，为对应成员重新生成激活凭证。
+
+#### 20.5.7 常见问题与错误处理
+
+| 错误码 | 含义 | 处理方式 |
+| --- | --- | --- |
+| `ORGANIZATION_IMPORT_CLIENT_REF_DUPLICATE` | 前端生成的临时引用重复 | 检查前端行号或路径映射逻辑 |
+| `ORGANIZATION_IMPORT_PARENT_NOT_FOUND` | 上级部门引用不存在 | 补齐父路径或修正部门路径 |
+| `ORGANIZATION_IMPORT_DEPARTMENT_DUPLICATE` | 当前批次存在同级重名部门 | 删除重复路径或修改部门名称 |
+| `ORGANIZATION_IMPORT_DEPARTMENT_CYCLE` | 部门父子关系形成循环 | 修正前端部门树构建逻辑 |
+| `ORGANIZATION_IMPORT_DEPARTMENT_DEPTH_EXCEEDED` | 部门超过 10 级 | 调整组织层级 |
+| `ORGANIZATION_IMPORT_DEPARTMENT_DISABLED` | 匹配到已停用部门 | 先启用部门或修改路径 |
+| `ORGANIZATION_IMPORT_MEMBER_DEPARTMENT_NOT_FOUND` | 人员引用的部门无效 | 检查人员 Sheet 的部门路径 |
+| `ORGANIZATION_IMPORT_ACCOUNT_DUPLICATE` | 同一批次内账号重复 | 在预览页修改其中一个账号 |
+| `ORGANIZATION_IMPORT_ACCOUNT_EXISTS` | 账号已存在或有有效邀请 | 修改账号或处理原邀请 |
+| `ORGANIZATION_IMPORT_ROLE_NOT_FOUND` | 角色不存在或已删除 | 刷新角色列表并重新选择 |
+| `ORGANIZATION_IMPORT_TENANT_ADMIN_FORBIDDEN` | 尝试批量分配租户管理员 | 使用普通角色导入，再通过正式管理员流程设置 |
+| `ORGANIZATION_IMPORT_CONFLICT` | 校验后到确认前发生并发冲突 | 重新调用 `validate` 并再次确认 |
+
+接口要求当前成员同时拥有 `department.create`、`member.invite` 和 `role.assign`。成功确认会写入一条 `ORGANIZATION_MEMBERS_IMPORTED` 汇总审计，记录部门创建数、复用数、成员数和激活过期时间，不记录明文激活码。
+
+#### 20.5.8 验收检查清单
+
+1. 已有启用部门显示为 `REUSE`，并且确认后没有被重复创建。
+2. 新部门显示为 `CREATE`，父子关系和排序正确。
+3. 重复账号能够定位到具体人员 Excel 行。
+4. 无效角色、停用部门、循环部门和超过 10 级部门不能确认导入。
+5. 确认成功后成员状态为 `PENDING_ACTIVATION`，部门和角色分配正确。
+6. 每名成员获得不同的激活码，数据库和审计中没有明文激活码。
+7. 任意数据失败时整批回滚，不产生半成品部门或成员。
+8. 激活成功后成员能够使用租户编码、账号和新密码登录。
+
+更偏设计和边界说明的内容见 [组织架构与成员批量导入](organization-member-import.md)。
+
+### 20.6 项目与项目成员
 
 先创建项目：
 
@@ -1820,7 +2212,7 @@ POST /api/v1/projects/{projectId}/archive
 
 如果项目存在 `TODO/IN_PROGRESS/BLOCKED` 任务，完成接口返回 `409 PROJECT_HAS_UNFINISHED_TASKS`。完成后修改资料和成员会返回 `409 PROJECT_READ_ONLY`，继续工作必须先调用 `reopen`。
 
-### 20.6 创建并查询受控文档
+### 20.7 创建并查询受控文档
 
 调用 `POST /api/v1/documents`：
 
@@ -1843,7 +2235,7 @@ GET /api/v1/audit-events
 
 文档创建成功后，`documents` 知识库表不会变化；应查看 `managed_documents`、`resources` 和 `audit_logs`。
 
-### 20.7 验证 COS 基础直传
+### 20.8 验证 COS 基础直传
 
 使用租户 Access Token 和客户端生成的 `Idempotency-Key` 创建上传会话：
 
@@ -1912,3 +2304,13 @@ API 只有在 COS HEAD 返回的大小和 Content-Type 与会话一致时才创�
 - `COMPLETED/CANCELLED/ARCHIVED` 项目只读，完成项目要求不存在未完成任务；
 - 数据库迁移为 `0005_project_management`，新表、枚举和字段包含 PostgreSQL 中文注释；
 - 公开契约版本由 `0.10.0` 提升为 `0.11.0`。
+
+## 25. `0.12.0` 迁移说明
+
+- 新增组织架构和成员批量校验、确认导入 2 个公开 HTTP 操作；
+- Excel 由前端解析，API 只接收标准 JSON，单批限制为 200 个部门、500 名成员和 2 MiB 请求体；
+- 已有启用部门按完整路径复用，不修改原资料；第一版只创建新成员；
+- 成员在同一事务中创建为 `PENDING_ACTIVATION`，同时创建角色关系和独立一次性激活凭证；
+- 批量导入禁止分配 `tenant_admin`，确认接口要求 `department.create`、`member.invite` 和 `role.assign`；
+- 新增 `ORGANIZATION_MEMBERS_IMPORTED` 汇总审计，明文激活令牌不会进入日志或审计；
+- 复用现有数据模型，不需要新增 Prisma migration；公开契约版本由 `0.11.0` 提升为 `0.12.0`。
