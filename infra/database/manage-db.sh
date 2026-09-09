@@ -5,16 +5,17 @@ set -Eeuo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  ./manage.sh <staging|production> [up|down|logs|ps|validate] [service...]
+  ./manage-db.sh <staging|production> [up|down|logs|ps|validate] [service...]
 
 Examples:
-  ./manage.sh staging validate
-  ./manage.sh staging
-  ./manage.sh staging logs postgres
-  ./manage.sh production
-  ./manage.sh production down
+  ./manage-db.sh staging validate
+  ./manage-db.sh staging logs postgres
+  ./manage-db.sh staging ps
+  ./manage-db.sh production down
 
-The default action is "up". The script never removes data volumes.
+Use deploy-db.sh for deployment. The default action remains "up" for operational
+compatibility, but it only uses images already prepared locally and never pulls.
+The script never removes data volumes.
 EOF
 }
 
@@ -72,8 +73,7 @@ validate_inputs() {
   local bind_ip
   bind_ip="$(read_env_value DB_BIND_IP)"
   if [[ "$bind_ip" == "0.0.0.0" || "$bind_ip" == "::" ]]; then
-    echo "Error: DB_BIND_IP must be the database server private IP, not a wildcard address." >&2
-    exit 1
+    echo "Warning: DB_BIND_IP=$bind_ip exposes database ports on all matching interfaces; restrict access with firewall or security-group rules." >&2
   fi
 
   local postgres_port
@@ -98,12 +98,12 @@ ACTION="${2:-up}"
 
 case "$ENVIRONMENT" in
   staging)
-    ENV_FILE="$BASE_DIR/staging/.env"
+    ENV_FILE="$BASE_DIR/.env.staging"
     PROJECT_NAME="cees-ai-db-staging"
     ;;
   production | prod)
     ENVIRONMENT="production"
-    ENV_FILE="$BASE_DIR/production/.env"
+    ENV_FILE="$BASE_DIR/.env.production"
     PROJECT_NAME="cees-ai-db-production"
     ;;
   -h | --help | help)
@@ -155,11 +155,8 @@ case "$ACTION" in
     echo "Validating $ENVIRONMENT database configuration..."
     "${COMPOSE[@]}" config --quiet
 
-    echo "Pulling database images..."
-    "${COMPOSE[@]}" pull
-
-    echo "Starting $ENVIRONMENT PostgreSQL and Redis..."
-    "${COMPOSE[@]}" up -d --wait --wait-timeout 120 --remove-orphans
+    echo "Starting $ENVIRONMENT PostgreSQL and Redis from prepared local images..."
+    "${COMPOSE[@]}" up -d --pull never --wait --wait-timeout 120 --remove-orphans
     "${COMPOSE[@]}" ps
     ;;
   down)

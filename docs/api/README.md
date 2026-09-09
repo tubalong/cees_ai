@@ -9,6 +9,13 @@
 
 - [IAM、租户、RBAC、ACL 与审计 API 设计草案](iam-authorization-api.md)
 - [平台租户管理与租户账号激活](platform-tenant-administration.md)
+- [组织部门管理](../product/organization-department-management.md)
+- [组织架构与成员批量导入](../product/organization-member-import.md)
+- [项目管理 API](project-management-api.md)
+- [项目与项目成员管理](../product/project-management.md)
+- [用户个人资料管理](../product/user-profile-management.md)
+- [密码修改与凭证安全](../security/password-management.md)
+- [平台使用、接口与数据库字典](../product/platform-usage-guide.md)：按当前 OpenAPI 汇总全部接口、请求参数和验证顺序。
 
 ## 已实现接口
 
@@ -18,14 +25,27 @@ POST /api/v1/auth/activate
 POST /api/v1/auth/refresh
 POST /api/v1/auth/logout
 GET  /api/v1/auth/me
+POST /api/v1/auth/change-password
+
+GET   /api/v1/users/me/profile
+PATCH /api/v1/users/me/profile
 
 GET    /api/v1/tenants/current
 PATCH  /api/v1/tenants/current
+GET    /api/v1/tenants/current/departments
+POST   /api/v1/tenants/current/departments
+GET    /api/v1/tenants/current/departments/{departmentId}
+PATCH  /api/v1/tenants/current/departments/{departmentId}
+DELETE /api/v1/tenants/current/departments/{departmentId}?version={version}
+GET    /api/v1/tenants/current/departments/{departmentId}/members
+POST   /api/v1/tenants/current/organization-imports/validate
+POST   /api/v1/tenants/current/organization-imports/confirm
 GET    /api/v1/tenants/current/members
 GET    /api/v1/tenants/current/members/{membershipId}
 PATCH  /api/v1/tenants/current/members/{membershipId}
 DELETE /api/v1/tenants/current/members/{membershipId}
 PUT    /api/v1/tenants/current/members/{membershipId}/roles
+PUT    /api/v1/tenants/current/members/{membershipId}/department
 
 GET    /api/v1/permissions
 GET    /api/v1/roles
@@ -48,10 +68,14 @@ DELETE /api/v1/resources/{resourceId}/acl/{aclEntryId}?version={version}
 GET /api/v1/audit-events
 GET /api/v1/audit-events/{auditEventId}
 
+POST /api/v1/upload-sessions
+POST /api/v1/upload-sessions/{uploadSessionId}/complete
+
 POST /api/v1/platform/auth/login
 POST /api/v1/platform/auth/refresh
 POST /api/v1/platform/auth/logout
 GET  /api/v1/platform/auth/me
+POST /api/v1/platform/auth/change-password
 
 GET    /api/v1/platform/tenants
 POST   /api/v1/platform/tenants
@@ -72,14 +96,35 @@ POST   /api/v1/tenants/current/members/{membershipId}/credential-reset
 
 GET /api/v1/platform/audit-events
 GET /api/v1/platform/audit-events/{auditEventId}
+
+GET    /api/v1/projects
+POST   /api/v1/projects
+GET    /api/v1/projects/{projectId}
+PATCH  /api/v1/projects/{projectId}
+DELETE /api/v1/projects/{projectId}?version={version}
+GET    /api/v1/projects/{projectId}/members
+POST   /api/v1/projects/{projectId}/members
+PATCH  /api/v1/projects/{projectId}/members/{membershipId}
+DELETE /api/v1/projects/{projectId}/members/{membershipId}?version={version}
+PUT    /api/v1/projects/{projectId}/owner
+POST   /api/v1/projects/{projectId}/start
+POST   /api/v1/projects/{projectId}/pause
+POST   /api/v1/projects/{projectId}/resume
+POST   /api/v1/projects/{projectId}/complete
+POST   /api/v1/projects/{projectId}/reopen
+POST   /api/v1/projects/{projectId}/cancel
+POST   /api/v1/projects/{projectId}/archive
+POST   /api/v1/projects/{projectId}/restore
 ```
 
-截至 2026-09-07，身份、租户、RBAC、ACL、审计、平台租户管理和租户账号激活接口均已实现。
+截至 2026-09-08，身份、本人密码修改、用户个人资料、租户、组织部门、项目与项目成员、RBAC、ACL、审计、平台租户管理、租户账号激活和 COS 基础上传接口均已实现。
 
 - `refresh` 每次成功后都会轮换 Refresh Token，旧 Token 立即失效；
 - `logout` 撤销当前 Access Token 对应的 Session；
 - `me` 返回当前用户、租户、角色和实时计算的权限；
-- `logout` 和 `me` 必须携带 `Authorization: Bearer <access-token>`。
+- 个人资料接口允许有效成员查询并修改自己在当前租户内的展示名，不要求额外 RBAC 权限；
+- 改密接口校验当前密码，成功后保留当前 Session 并撤销其他 Session；
+- `logout`、`me`、个人资料和改密接口必须携带对应身份域的 Bearer Token。
 
 ## 身份与会话
 
@@ -130,6 +175,44 @@ GET /api/v1/platform/audit-events/{auditEventId}
 - 新增拼音账号建议、账号修改和管理员凭证重置接口；
 - 手机和邮箱绑定、自助密码找回暂不实现；忘记密码由租户管理员签发新激活令牌；
 - 数据库迁移仍在未发布的 `0002_platform_tenant_administration` 中同步调整，契约版本提升为 `0.7.0`。
+
+## 0.9.0 迁移说明
+
+- 公开契约版本由 `0.8.0` 提升为 `0.9.0`；
+- 新增 `POST /upload-sessions`，要求 JWT、有效 TenantContext 和 `Idempotency-Key`，返回单对象预签名 PUT URL；
+- 新增 `POST /upload-sessions/{uploadSessionId}/complete`，服务端通过 COS HEAD 校验对象后创建正式文件记录；
+- 第一版只支持 `purpose=attachment` 和 `uploadMode=single`；默认技术上限为 100 MiB，系统硬上限为 500 MiB；
+- COS 对象键由服务端按 `cees/{environment}/tenants/{tenantId}/files/{yyyy}/{mm}/{fileId}/source` 生成；
+- 当前尚未启用 `file.*` 细粒度权限和租户额度，调用者必须至少是当前租户的有效登录成员；
+- 新增 Prisma 迁移 `0004_redis_cos_upload_foundation`；
+- 公开 TypeScript 客户端生成已接入 `pnpm contracts:gen`，生成物禁止手改。
+
+## 0.10.0 迁移说明
+
+- 公开契约版本由 `0.9.0` 提升为 `0.10.0`；
+- 新增租户成员和平台管理员本人修改密码接口；
+- 成功改密会撤销除当前 Session 之外的其他 Session；
+- 接口复用现有数据模型，不需要数据库迁移。
+
+## 0.11.0 迁移说明
+
+- 公开契约版本由 `0.10.0` 提升为 `0.11.0`；
+- 新增项目 CRUD、项目成员、负责人转移和项目状态命令；
+- 同租户成员默认不能访问未参与项目，跨项目管理需要 `project.manage_all`；
+- 完成、取消和归档项目禁止修改资料与成员，完成前必须清理未完成任务；
+- 新增 Prisma 迁移 `0005_project_management`，客户端需要重新生成。
+
+## 0.12.0 迁移说明
+
+- 公开契约版本由 `0.11.0` 提升为 `0.12.0`；
+- 新增组织架构和成员批量校验、确认导入接口；
+- 前端解析 Excel，API 接收最多 200 个部门、500 名成员和 2 MiB JSON；
+- 确认导入事务创建待激活成员、角色关系和独立激活凭证；
+- 已有启用部门按路径复用，第一版只创建新成员并禁止批量分配 `tenant_admin`；
+- 复用现有 Prisma 数据模型，不需要新增数据库迁移，TypeScript 客户端需要重新生成。
+
+## 契约事实源
+
 - `packages/contracts/openapi/openapi.yaml` 是 NestJS 公开 API 的事实源。
 - `packages/contracts/openapi/ai-service.openapi.yaml` 是 NestJS 调用 ai-service 的内部契约。
 - 桌面端和移动端不得调用 ai-service 的通用 invoke 或 stream。
@@ -151,4 +234,4 @@ GET /api/v1/platform/audit-events/{auditEventId}
 - 部署拥有的 `AI_MODEL_CONFIG_PATH` 文件必须增加 `[chat]`、`[chat.modes.standard]` 和 `[chat.modes.ultra]`，否则服务 readiness 返回 503；
 - Chat API 不接受 `llm_profile`、Provider、模型名、temperature 或 reasoning effort 覆盖，这些参数由 ai-service 模式配置控制。
 
-文件上传的跨领域设计草案见 [文件上传设计](../architecture/file-upload.md)。其中路径和 Schema 只有写入公开 OpenAPI 并通过评审后，才构成正式 API。
+文件上传的已实现范围和后续设计见 [文件上传与 COS 设计](../architecture/file-upload.md)。正式路径和 Schema 以公开 OpenAPI 为准。

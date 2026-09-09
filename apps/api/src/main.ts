@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import type { NextFunction, Request, Response } from 'express';
 import { randomUUID } from 'node:crypto';
@@ -13,7 +14,8 @@ const localEnvFile = resolve(__dirname, '../../../.env');
 if (!process.env.NODE_ENV && existsSync(localEnvFile)) process.loadEnvFile(localEnvFile);
 
 async function bootstrap(): Promise<void> {
-    const app = await NestFactory.create(AppModule);
+    const app = await NestFactory.create<NestExpressApplication>(AppModule);
+    app.useBodyParser('json', { limit: '2mb' });
     app.setGlobalPrefix('api/v1');
     app.enableCors();
     app.use((request: Request, response: Response, next: NextFunction) => {

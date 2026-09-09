@@ -1,0 +1,49 @@
+{
+  "version": "2.0",
+  "statement": [
+    {
+      "effect": "allow",
+      "action": [
+        "name/cos:HeadBucket"
+      ],
+      "resource": [
+        "qcs::cos:ap-chengdu:uid/1403013862:cees-ai-1403013862/*"
+      ]
+    },
+    {
+      "effect": "allow",
+      "action": [
+        "name/cos:GetBucket",
+        "name/cos:ListMultipartUploads"
+      ],
+      "resource": [
+        "qcs::cos:ap-chengdu:uid/1403013862:cees-ai-1403013862/*"
+      ],
+      "condition": {
+        "string_like": {
+          "cos:prefix": [
+            "releases%2Fstaging%2F*",
+            "releases%2Fprod%2F*"
+          ]
+        }
+      }
+    },
+    {
+      "effect": "allow",
+      "action": [
+        "name/cos:GetObject",
+        "name/cos:HeadObject",
+        "name/cos:PutObject",
+        "name/cos:InitiateMultipartUpload",
+        "name/cos:ListParts",
+        "name/cos:UploadPart",
+        "name/cos:CompleteMultipartUpload",
+        "name/cos:AbortMultipartUpload"
+      ],
+      "resource": [
+        "qcs::cos:ap-chengdu:uid/1403013862:cees-ai-1403013862/releases/staging/*",
+        "qcs::cos:ap-chengdu:uid/1403013862:cees-ai-1403013862/releases/prod/*"
+      ]
+    }
+  ]
+}

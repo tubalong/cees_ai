@@ -139,7 +139,7 @@ export class TenantService {
             errors: {
                 400: `请求字段校验失败`,
                 401: `登录状态无效或已过期`,
-                403: `缺少 member.update 权限`,
+                403: `缺少 member.update 或 department.member.assign 权限`,
                 404: `当前租户内成员或部门不存在`,
                 409: `最后一名管理员、自操作或版本冲突`,
             },

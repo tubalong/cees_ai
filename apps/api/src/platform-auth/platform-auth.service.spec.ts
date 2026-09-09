@@ -57,6 +57,76 @@ describe('PlatformAuthService', () => {
             data: expect.objectContaining({ action: 'PLATFORM_LOGIN_SUCCEEDED' }),
         });
     });
+
+    it('changes the current platform password and revokes other platform sessions', async () => {
+        const prisma = createPrismaMock();
+        const jwtService = { signAsync: jest.fn() } as unknown as JwtService;
+        const passwordHash = await argon2.hash('current-password');
+        prisma.platformAdministrator.findUnique.mockResolvedValue(platformAdministrator(passwordHash));
+        prisma.platformAdministrator.updateMany.mockResolvedValue({ count: 1 });
+        prisma.platformAuthSession.updateMany.mockResolvedValue({ count: 3 });
+        const service = new PlatformAuthService(prisma as unknown as PrismaService, jwtService);
+
+        await service.changePassword(
+            platformPrincipal(),
+            { currentPassword: 'current-password', newPassword: 'new-password' },
+            { requestId: 'platform-password-request', ipAddress: '127.0.0.1', userAgent: 'jest' },
+        );
+
+        const update = prisma.platformAdministrator.updateMany.mock.calls[0][0];
+        expect(await argon2.verify(update.data.passwordHash, 'new-password')).toBe(true);
+        expect(update.where).toEqual(expect.objectContaining({ id: ADMINISTRATOR_ID, passwordHash }));
+        expect(prisma.platformAuthSession.updateMany).toHaveBeenCalledWith({
+            where: {
+                platformAdministratorId: ADMINISTRATOR_ID,
+                userId: USER_ID,
+                id: { not: '30000000-0000-0000-0000-000000000001' },
+                revokedAt: null,
+            },
+            data: { revokedAt: expect.any(Date), lastUsedAt: expect.any(Date) },
+        });
+        expect(prisma.platformAuditLog.create).toHaveBeenCalledWith({
+            data: expect.objectContaining({
+                action: 'PLATFORM_PASSWORD_CHANGED',
+                metadata: expect.objectContaining({ revokedOtherSessionCount: 3 }),
+            }),
+        });
+    });
+
+    it('rejects an invalid current platform password and writes failure audit', async () => {
+        const prisma = createPrismaMock();
+        const jwtService = { signAsync: jest.fn() } as unknown as JwtService;
+        prisma.platformAdministrator.findUnique.mockResolvedValue(platformAdministrator(await argon2.hash('current-password')));
+        const service = new PlatformAuthService(prisma as unknown as PrismaService, jwtService);
+
+        await expect(service.changePassword(
+            platformPrincipal(),
+            { currentPassword: 'wrong-password', newPassword: 'new-password' },
+            { requestId: 'platform-password-request' },
+        )).rejects.toMatchObject({ response: { code: 'AUTH_CURRENT_PASSWORD_INVALID' } });
+        expect(prisma.platformAdministrator.updateMany).not.toHaveBeenCalled();
+        expect(prisma.platformAuditLog.create).toHaveBeenCalledWith({
+            data: expect.objectContaining({
+                action: 'PLATFORM_PASSWORD_CHANGE_FAILED',
+                outcome: 'FAILURE',
+            }),
+        });
+    });
+
+    it('rejects reusing the current platform password', async () => {
+        const prisma = createPrismaMock();
+        const jwtService = { signAsync: jest.fn() } as unknown as JwtService;
+        prisma.platformAdministrator.findUnique.mockResolvedValue(platformAdministrator(await argon2.hash('same-password')));
+        const service = new PlatformAuthService(prisma as unknown as PrismaService, jwtService);
+
+        await expect(service.changePassword(
+            platformPrincipal(),
+            { currentPassword: 'same-password', newPassword: 'same-password' },
+            { requestId: 'platform-password-request' },
+        )).rejects.toMatchObject({ response: { code: 'AUTH_NEW_PASSWORD_SAME_AS_CURRENT' } });
+        expect(prisma.platformAdministrator.updateMany).not.toHaveBeenCalled();
+        expect(prisma.platformAuthSession.updateMany).not.toHaveBeenCalled();
+    });
 });
 
 const USER_ID = '10000000-0000-0000-0000-000000000001';
@@ -65,11 +135,39 @@ const ADMINISTRATOR_ID = '20000000-0000-0000-0000-000000000001';
 function createPrismaMock(): Record<string, any> {
     const prisma: Record<string, any> = {
         user: { findUnique: jest.fn(), update: jest.fn() },
-        platformAdministrator: { findUnique: jest.fn(), update: jest.fn() },
-        platformAuthSession: { create: jest.fn() },
+        platformAdministrator: { findUnique: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
+        platformAuthSession: { create: jest.fn(), updateMany: jest.fn() },
         platformAuditLog: { create: jest.fn() },
         $transaction: jest.fn(),
     };
     prisma.$transaction.mockImplementation(async (callback: (transaction: Record<string, any>) => Promise<unknown>) => callback(prisma));
     return prisma;
+}
+
+function platformAdministrator(passwordHash: string): Record<string, unknown> {
+    return {
+        id: ADMINISTRATOR_ID,
+        userId: USER_ID,
+        account: 'superadmin',
+        normalizedAccount: 'superadmin',
+        passwordHash,
+        role: PlatformRole.SUPER_ADMIN,
+        status: PlatformAdministratorStatus.ACTIVE,
+        failedLoginCount: 0,
+        lockedUntil: null,
+        deletedAt: null,
+        version: 1,
+    };
+}
+
+function platformPrincipal() {
+    return {
+        id: USER_ID,
+        platformAdministratorId: ADMINISTRATOR_ID,
+        sessionId: '30000000-0000-0000-0000-000000000001',
+        account: 'superadmin',
+        displayName: 'Platform Administrator',
+        role: PlatformRole.SUPER_ADMIN,
+        permissions: ['platform.tenant.create'],
+    };
 }

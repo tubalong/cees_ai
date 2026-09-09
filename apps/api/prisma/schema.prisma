@@ -41,6 +41,11 @@ enum MembershipStatus {
   DISABLED
 }
 
+enum DepartmentStatus {
+  ACTIVE
+  DISABLED
+}
+
 enum AuditOutcome {
   SUCCESS
   FAILURE
@@ -92,6 +97,21 @@ enum TaskPriority {
   URGENT
 }
 
+enum ProjectStatus {
+  PLANNING
+  ACTIVE
+  PAUSED
+  COMPLETED
+  CANCELLED
+  ARCHIVED
+}
+
+enum ProjectMemberRole {
+  OWNER
+  MANAGER
+  MEMBER
+}
+
 enum DraftStatus {
   DRAFT
   PENDING_CONFIRMATION
@@ -102,78 +122,99 @@ enum DraftStatus {
   FAILED
 }
 
+enum FilePurpose {
+  ATTACHMENT
+}
+
+enum UploadSessionStatus {
+  PENDING
+  COMPLETED
+  EXPIRED
+  FAILED
+}
+
 model Tenant {
-  id String @id @default(uuid()) @db.Uuid
-  code String @unique
-  name String
-  status TenantStatus @default(ACTIVE)
-  memberships TenantMembership[]
-  authSessions AuthSession[]
-  departments Department[]
-  roles Role[]
-  membershipRoles MembershipRole[]
-  rolePermissions RolePermission[]
-  resources Resource[]
-  managedDocuments ManagedDocument[]
-  resourceAcls ResourceAcl[]
-  invitations TenantInvitation[]
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  deletedAt DateTime? @map("deleted_at")
-  version Int @default(1)
+  id                   String                 @id @default(uuid()) @db.Uuid
+  code                 String                 @unique
+  name                 String
+  status               TenantStatus           @default(ACTIVE)
+  memberships          TenantMembership[]
+  authSessions         AuthSession[]
+  departments          Department[]
+  roles                Role[]
+  membershipRoles      MembershipRole[]
+  rolePermissions      RolePermission[]
+  resources            Resource[]
+  managedDocuments     ManagedDocument[]
+  resourceAcls         ResourceAcl[]
+  invitations          TenantInvitation[]
+  projects             Project[]
+  projectMembers       ProjectMember[]
+  projectStatusHistory ProjectStatusHistory[]
+  createdAt            DateTime               @default(now()) @map("created_at")
+  updatedAt            DateTime               @updatedAt @map("updated_at")
+  deletedAt            DateTime?              @map("deleted_at")
+  version              Int                    @default(1)
+
   @@map("tenants")
 }
 
 model User {
-  id String @id @default(uuid()) @db.Uuid
-  email String?
-  normalizedEmail String? @unique @map("normalized_email")
-  passwordHash String? @map("password_hash")
-  displayName String @map("display_name")
-  status UserStatus @default(ACTIVE)
-  failedLoginCount Int @default(0) @map("failed_login_count")
-  lockedUntil DateTime? @map("locked_until")
-  lastLoginAt DateTime? @map("last_login_at")
-  memberships TenantMembership[]
-  authSessions AuthSession[]
-  platformAdministrator PlatformAdministrator?
-  platformAuthSessions PlatformAuthSession[]
-  acceptedTenantInvitations TenantInvitation[] @relation("AcceptedTenantInvitations")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  createdBy String? @map("created_by") @db.Uuid
-  updatedBy String? @map("updated_by") @db.Uuid
-  deletedAt DateTime? @map("deleted_at")
-  version Int @default(1)
+  id                        String                 @id @default(uuid()) @db.Uuid
+  email                     String?
+  normalizedEmail           String?                @unique @map("normalized_email")
+  passwordHash              String?                @map("password_hash")
+  displayName               String                 @map("display_name")
+  status                    UserStatus             @default(ACTIVE)
+  failedLoginCount          Int                    @default(0) @map("failed_login_count")
+  lockedUntil               DateTime?              @map("locked_until")
+  lastLoginAt               DateTime?              @map("last_login_at")
+  memberships               TenantMembership[]
+  authSessions              AuthSession[]
+  platformAdministrator     PlatformAdministrator?
+  platformAuthSessions      PlatformAuthSession[]
+  acceptedTenantInvitations TenantInvitation[]     @relation("AcceptedTenantInvitations")
+  createdAt                 DateTime               @default(now()) @map("created_at")
+  updatedAt                 DateTime               @updatedAt @map("updated_at")
+  createdBy                 String?                @map("created_by") @db.Uuid
+  updatedBy                 String?                @map("updated_by") @db.Uuid
+  deletedAt                 DateTime?              @map("deleted_at")
+  version                   Int                    @default(1)
+
   @@map("users")
 }
 
 model TenantMembership {
-  id String @id @default(uuid()) @db.Uuid
-  tenantId String @map("tenant_id") @db.Uuid
-  tenant Tenant @relation(fields: [tenantId], references: [id])
-  userId String @map("user_id") @db.Uuid
-  user User @relation(fields: [userId], references: [id])
-  departmentId String? @map("department_id") @db.Uuid
-  department Department? @relation(fields: [departmentId], references: [id])
-  displayName String? @map("display_name")
-  account String
-  normalizedAccount String @map("normalized_account")
-  passwordHash String? @map("password_hash")
-  status MembershipStatus @default(ACTIVE)
-  failedLoginCount Int @default(0) @map("failed_login_count")
-  lockedUntil DateTime? @map("locked_until")
-  lastLoginAt DateTime? @map("last_login_at")
-  joinedAt DateTime @default(now()) @map("joined_at")
-  authSessions AuthSession[]
-  membershipRoles MembershipRole[]
-  ownedResources Resource[]
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  createdBy String? @map("created_by") @db.Uuid
-  updatedBy String? @map("updated_by") @db.Uuid
-  deletedAt DateTime? @map("deleted_at")
-  version Int @default(1)
+  id                   String                 @id @default(uuid()) @db.Uuid
+  tenantId             String                 @map("tenant_id") @db.Uuid
+  tenant               Tenant                 @relation(fields: [tenantId], references: [id])
+  userId               String                 @map("user_id") @db.Uuid
+  user                 User                   @relation(fields: [userId], references: [id])
+  departmentId         String?                @map("department_id") @db.Uuid
+  department           Department?            @relation(fields: [departmentId], references: [id])
+  displayName          String?                @map("display_name")
+  account              String
+  normalizedAccount    String                 @map("normalized_account")
+  passwordHash         String?                @map("password_hash")
+  status               MembershipStatus       @default(ACTIVE)
+  failedLoginCount     Int                    @default(0) @map("failed_login_count")
+  lockedUntil          DateTime?              @map("locked_until")
+  lastLoginAt          DateTime?              @map("last_login_at")
+  joinedAt             DateTime               @default(now()) @map("joined_at")
+  authSessions         AuthSession[]
+  membershipRoles      MembershipRole[]
+  ownedResources       Resource[]
+  ownedProjects        Project[]              @relation("ProjectOwner")
+  completedProjects    Project[]              @relation("ProjectCompleter")
+  projectMemberships   ProjectMember[]        @relation("ProjectMembership")
+  projectStatusChanges ProjectStatusHistory[] @relation("ProjectStatusChangedBy")
+  createdAt            DateTime               @default(now()) @map("created_at")
+  updatedAt            DateTime               @updatedAt @map("updated_at")
+  createdBy            String?                @map("created_by") @db.Uuid
+  updatedBy            String?                @map("updated_by") @db.Uuid
+  deletedAt            DateTime?              @map("deleted_at")
+  version              Int                    @default(1)
+
   @@unique([tenantId, userId])
   @@unique([tenantId, normalizedAccount])
   @@index([tenantId, departmentId])
@@ -182,22 +223,23 @@ model TenantMembership {
 }
 
 model AuthSession {
-  id String @id @default(uuid()) @db.Uuid
-  tenantId String @map("tenant_id") @db.Uuid
-  tenant Tenant @relation(fields: [tenantId], references: [id])
-  userId String @map("user_id") @db.Uuid
-  user User @relation(fields: [userId], references: [id])
-  membershipId String @map("membership_id") @db.Uuid
-  membership TenantMembership @relation(fields: [membershipId], references: [id])
-  refreshTokenHash String @unique @map("refresh_token_hash")
-  deviceName String? @map("device_name")
-  ipAddress String? @map("ip_address")
-  userAgent String? @map("user_agent")
-  expiresAt DateTime @map("expires_at")
-  lastUsedAt DateTime? @map("last_used_at")
-  revokedAt DateTime? @map("revoked_at")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id               String           @id @default(uuid()) @db.Uuid
+  tenantId         String           @map("tenant_id") @db.Uuid
+  tenant           Tenant           @relation(fields: [tenantId], references: [id])
+  userId           String           @map("user_id") @db.Uuid
+  user             User             @relation(fields: [userId], references: [id])
+  membershipId     String           @map("membership_id") @db.Uuid
+  membership       TenantMembership @relation(fields: [membershipId], references: [id])
+  refreshTokenHash String           @unique @map("refresh_token_hash")
+  deviceName       String?          @map("device_name")
+  ipAddress        String?          @map("ip_address")
+  userAgent        String?          @map("user_agent")
+  expiresAt        DateTime         @map("expires_at")
+  lastUsedAt       DateTime?        @map("last_used_at")
+  revokedAt        DateTime?        @map("revoked_at")
+  createdAt        DateTime         @default(now()) @map("created_at")
+  updatedAt        DateTime         @updatedAt @map("updated_at")
+
   @@index([tenantId, userId])
   @@index([tenantId, membershipId])
   @@index([expiresAt])
@@ -205,43 +247,45 @@ model AuthSession {
 }
 
 model PlatformAdministrator {
-  id String @id @default(uuid()) @db.Uuid
-  userId String @unique @map("user_id") @db.Uuid
-  user User @relation(fields: [userId], references: [id])
-  account String
-  normalizedAccount String @unique @map("normalized_account")
-  passwordHash String @map("password_hash")
-  role PlatformRole @default(SUPER_ADMIN)
-  status PlatformAdministratorStatus @default(ACTIVE)
-  failedLoginCount Int @default(0) @map("failed_login_count")
-  lockedUntil DateTime? @map("locked_until")
-  lastLoginAt DateTime? @map("last_login_at")
-  sessions PlatformAuthSession[]
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  createdBy String? @map("created_by") @db.Uuid
-  updatedBy String? @map("updated_by") @db.Uuid
-  deletedAt DateTime? @map("deleted_at")
-  version Int @default(1)
+  id                String                      @id @default(uuid()) @db.Uuid
+  userId            String                      @unique @map("user_id") @db.Uuid
+  user              User                        @relation(fields: [userId], references: [id])
+  account           String
+  normalizedAccount String                      @unique @map("normalized_account")
+  passwordHash      String                      @map("password_hash")
+  role              PlatformRole                @default(SUPER_ADMIN)
+  status            PlatformAdministratorStatus @default(ACTIVE)
+  failedLoginCount  Int                         @default(0) @map("failed_login_count")
+  lockedUntil       DateTime?                   @map("locked_until")
+  lastLoginAt       DateTime?                   @map("last_login_at")
+  sessions          PlatformAuthSession[]
+  createdAt         DateTime                    @default(now()) @map("created_at")
+  updatedAt         DateTime                    @updatedAt @map("updated_at")
+  createdBy         String?                     @map("created_by") @db.Uuid
+  updatedBy         String?                     @map("updated_by") @db.Uuid
+  deletedAt         DateTime?                   @map("deleted_at")
+  version           Int                         @default(1)
+
   @@index([status, deletedAt])
   @@map("platform_administrators")
 }
 
 model PlatformAuthSession {
-  id String @id @default(uuid()) @db.Uuid
-  platformAdministratorId String @map("platform_administrator_id") @db.Uuid
-  platformAdministrator PlatformAdministrator @relation(fields: [platformAdministratorId], references: [id])
-  userId String @map("user_id") @db.Uuid
-  user User @relation(fields: [userId], references: [id])
-  refreshTokenHash String @unique @map("refresh_token_hash")
-  deviceName String? @map("device_name")
-  ipAddress String? @map("ip_address")
-  userAgent String? @map("user_agent")
-  expiresAt DateTime @map("expires_at")
-  lastUsedAt DateTime? @map("last_used_at")
-  revokedAt DateTime? @map("revoked_at")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id                      String                @id @default(uuid()) @db.Uuid
+  platformAdministratorId String                @map("platform_administrator_id") @db.Uuid
+  platformAdministrator   PlatformAdministrator @relation(fields: [platformAdministratorId], references: [id])
+  userId                  String                @map("user_id") @db.Uuid
+  user                    User                  @relation(fields: [userId], references: [id])
+  refreshTokenHash        String                @unique @map("refresh_token_hash")
+  deviceName              String?               @map("device_name")
+  ipAddress               String?               @map("ip_address")
+  userAgent               String?               @map("user_agent")
+  expiresAt               DateTime              @map("expires_at")
+  lastUsedAt              DateTime?             @map("last_used_at")
+  revokedAt               DateTime?             @map("revoked_at")
+  createdAt               DateTime              @default(now()) @map("created_at")
+  updatedAt               DateTime              @updatedAt @map("updated_at")
+
   @@index([platformAdministratorId, revokedAt])
   @@index([userId, revokedAt])
   @@index([expiresAt])
@@ -249,65 +293,76 @@ model PlatformAuthSession {
 }
 
 model Department {
-  id String @id @default(uuid()) @db.Uuid
-  tenantId String @map("tenant_id") @db.Uuid
-  tenant Tenant @relation(fields: [tenantId], references: [id])
-  parentId String? @map("parent_id") @db.Uuid
-  name String
-  memberships TenantMembership[]
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  createdBy String? @map("created_by") @db.Uuid
-  updatedBy String? @map("updated_by") @db.Uuid
-  deletedAt DateTime? @map("deleted_at")
-  version Int @default(1)
+  id             String             @id @default(uuid()) @db.Uuid
+  tenantId       String             @map("tenant_id") @db.Uuid
+  tenant         Tenant             @relation(fields: [tenantId], references: [id])
+  parentId       String?            @map("parent_id") @db.Uuid
+  parent         Department?        @relation("DepartmentHierarchy", fields: [parentId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  children       Department[]       @relation("DepartmentHierarchy")
+  name           String
+  normalizedName String             @map("normalized_name")
+  description    String?
+  sortOrder      Int                @default(0) @map("sort_order")
+  status         DepartmentStatus   @default(ACTIVE)
+  memberships    TenantMembership[]
+  projects       Project[]
+  createdAt      DateTime           @default(now()) @map("created_at")
+  updatedAt      DateTime           @updatedAt @map("updated_at")
+  createdBy      String?            @map("created_by") @db.Uuid
+  updatedBy      String?            @map("updated_by") @db.Uuid
+  deletedAt      DateTime?          @map("deleted_at")
+  version        Int                @default(1)
+
   @@index([tenantId, parentId])
+  @@index([tenantId, status, sortOrder])
   @@map("departments")
 }
 
 model Role {
-  id String @id @default(uuid()) @db.Uuid
-  tenantId String @map("tenant_id") @db.Uuid
-  tenant Tenant @relation(fields: [tenantId], references: [id])
-  code String
-  name String
-  description String?
-  isSystem Boolean @default(false) @map("is_system")
-  dataScope DataScope @default(SELF) @map("data_scope")
+  id              String                 @id @default(uuid()) @db.Uuid
+  tenantId        String                 @map("tenant_id") @db.Uuid
+  tenant          Tenant                 @relation(fields: [tenantId], references: [id])
+  code            String
+  name            String
+  description     String?
+  isSystem        Boolean                @default(false) @map("is_system")
+  dataScope       DataScope              @default(SELF) @map("data_scope")
   membershipRoles MembershipRole[]
   rolePermissions RolePermission[]
   invitationRoles TenantInvitationRole[]
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  createdBy String? @map("created_by") @db.Uuid
-  updatedBy String? @map("updated_by") @db.Uuid
-  deletedAt DateTime? @map("deleted_at")
-  version Int @default(1)
+  createdAt       DateTime               @default(now()) @map("created_at")
+  updatedAt       DateTime               @updatedAt @map("updated_at")
+  createdBy       String?                @map("created_by") @db.Uuid
+  updatedBy       String?                @map("updated_by") @db.Uuid
+  deletedAt       DateTime?              @map("deleted_at")
+  version         Int                    @default(1)
+
   @@unique([tenantId, code])
   @@index([tenantId, deletedAt])
   @@map("roles")
 }
 
 model TenantInvitation {
-  id String @id @default(uuid()) @db.Uuid
-  tenantId String @map("tenant_id") @db.Uuid
-  tenant Tenant @relation(fields: [tenantId], references: [id])
-  account String
-  normalizedAccount String @map("normalized_account")
-  displayName String @map("display_name")
-  targetMembershipId String? @map("target_membership_id") @db.Uuid
-  tokenHash String @unique @map("token_hash")
-  status TenantInvitationStatus @default(PENDING)
-  isInitialAdministrator Boolean @default(false) @map("is_initial_administrator")
-  expiresAt DateTime @map("expires_at")
-  acceptedAt DateTime? @map("accepted_at")
-  acceptedByUserId String? @map("accepted_by_user_id") @db.Uuid
-  acceptedByUser User? @relation("AcceptedTenantInvitations", fields: [acceptedByUserId], references: [id])
-  invitedByUserId String @map("invited_by_user_id") @db.Uuid
-  revokedAt DateTime? @map("revoked_at")
-  roles TenantInvitationRole[]
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id                     String                 @id @default(uuid()) @db.Uuid
+  tenantId               String                 @map("tenant_id") @db.Uuid
+  tenant                 Tenant                 @relation(fields: [tenantId], references: [id])
+  account                String
+  normalizedAccount      String                 @map("normalized_account")
+  displayName            String                 @map("display_name")
+  targetMembershipId     String?                @map("target_membership_id") @db.Uuid
+  tokenHash              String                 @unique @map("token_hash")
+  status                 TenantInvitationStatus @default(PENDING)
+  isInitialAdministrator Boolean                @default(false) @map("is_initial_administrator")
+  expiresAt              DateTime               @map("expires_at")
+  acceptedAt             DateTime?              @map("accepted_at")
+  acceptedByUserId       String?                @map("accepted_by_user_id") @db.Uuid
+  acceptedByUser         User?                  @relation("AcceptedTenantInvitations", fields: [acceptedByUserId], references: [id])
+  invitedByUserId        String                 @map("invited_by_user_id") @db.Uuid
+  revokedAt              DateTime?              @map("revoked_at")
+  roles                  TenantInvitationRole[]
+  createdAt              DateTime               @default(now()) @map("created_at")
+  updatedAt              DateTime               @updatedAt @map("updated_at")
+
   @@index([tenantId, status, createdAt])
   @@index([tenantId, normalizedAccount, status])
   @@index([expiresAt])
@@ -315,70 +370,75 @@ model TenantInvitation {
 }
 
 model TenantInvitationRole {
-  id String @id @default(uuid()) @db.Uuid
-  invitationId String @map("invitation_id") @db.Uuid
-  invitation TenantInvitation @relation(fields: [invitationId], references: [id], onDelete: Cascade)
-  roleId String @map("role_id") @db.Uuid
-  role Role @relation(fields: [roleId], references: [id])
-  createdAt DateTime @default(now()) @map("created_at")
+  id           String           @id @default(uuid()) @db.Uuid
+  invitationId String           @map("invitation_id") @db.Uuid
+  invitation   TenantInvitation @relation(fields: [invitationId], references: [id], onDelete: Cascade)
+  roleId       String           @map("role_id") @db.Uuid
+  role         Role             @relation(fields: [roleId], references: [id])
+  createdAt    DateTime         @default(now()) @map("created_at")
+
   @@unique([invitationId, roleId])
   @@index([roleId])
   @@map("tenant_invitation_roles")
 }
 
 model Permission {
-  id String @id @default(uuid()) @db.Uuid
-  code String @unique
-  name String
+  id              String           @id @default(uuid()) @db.Uuid
+  code            String           @unique
+  name            String
   rolePermissions RolePermission[]
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+
   @@map("permissions")
 }
 
 model MembershipRole {
-  id String @id @default(uuid()) @db.Uuid
-  tenantId String @map("tenant_id") @db.Uuid
-  tenant Tenant @relation(fields: [tenantId], references: [id])
-  membershipId String @map("membership_id") @db.Uuid
-  membership TenantMembership @relation(fields: [membershipId], references: [id])
-  roleId String @map("role_id") @db.Uuid
-  role Role @relation(fields: [roleId], references: [id])
-  createdAt DateTime @default(now()) @map("created_at")
+  id           String           @id @default(uuid()) @db.Uuid
+  tenantId     String           @map("tenant_id") @db.Uuid
+  tenant       Tenant           @relation(fields: [tenantId], references: [id])
+  membershipId String           @map("membership_id") @db.Uuid
+  membership   TenantMembership @relation(fields: [membershipId], references: [id])
+  roleId       String           @map("role_id") @db.Uuid
+  role         Role             @relation(fields: [roleId], references: [id])
+  createdAt    DateTime         @default(now()) @map("created_at")
+
   @@unique([tenantId, membershipId, roleId])
   @@index([tenantId, membershipId])
   @@map("membership_roles")
 }
 
 model RolePermission {
-  id String @id @default(uuid()) @db.Uuid
-  tenantId String @map("tenant_id") @db.Uuid
-  tenant Tenant @relation(fields: [tenantId], references: [id])
-  roleId String @map("role_id") @db.Uuid
-  role Role @relation(fields: [roleId], references: [id])
-  permissionId String @map("permission_id") @db.Uuid
-  permission Permission @relation(fields: [permissionId], references: [id])
-  createdAt DateTime @default(now()) @map("created_at")
+  id           String     @id @default(uuid()) @db.Uuid
+  tenantId     String     @map("tenant_id") @db.Uuid
+  tenant       Tenant     @relation(fields: [tenantId], references: [id])
+  roleId       String     @map("role_id") @db.Uuid
+  role         Role       @relation(fields: [roleId], references: [id])
+  permissionId String     @map("permission_id") @db.Uuid
+  permission   Permission @relation(fields: [permissionId], references: [id])
+  createdAt    DateTime   @default(now()) @map("created_at")
+
   @@unique([tenantId, roleId, permissionId])
   @@map("role_permissions")
 }
 
 model ResourceAcl {
-  id String @id @default(uuid()) @db.Uuid
-  tenantId String @map("tenant_id") @db.Uuid
-  tenant Tenant @relation(fields: [tenantId], references: [id])
-  resourceId String @map("resource_id") @db.Uuid
-  resource Resource @relation(fields: [resourceId], references: [id])
-  subjectType AclSubjectType @map("subject_type")
-  subjectId String @map("subject_id") @db.Uuid
-  permissionCodes String[] @map("permission_codes")
-  expiresAt DateTime? @map("expires_at")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  createdBy String? @map("created_by") @db.Uuid
-  updatedBy String? @map("updated_by") @db.Uuid
-  deletedAt DateTime? @map("deleted_at")
-  version Int @default(1)
+  id              String         @id @default(uuid()) @db.Uuid
+  tenantId        String         @map("tenant_id") @db.Uuid
+  tenant          Tenant         @relation(fields: [tenantId], references: [id])
+  resourceId      String         @map("resource_id") @db.Uuid
+  resource        Resource       @relation(fields: [resourceId], references: [id])
+  subjectType     AclSubjectType @map("subject_type")
+  subjectId       String         @map("subject_id") @db.Uuid
+  permissionCodes String[]       @map("permission_codes")
+  expiresAt       DateTime?      @map("expires_at")
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+  createdBy       String?        @map("created_by") @db.Uuid
+  updatedBy       String?        @map("updated_by") @db.Uuid
+  deletedAt       DateTime?      @map("deleted_at")
+  version         Int            @default(1)
+
   @@unique([tenantId, resourceId, subjectType, subjectId])
   @@index([tenantId, resourceId])
   @@index([tenantId, subjectType, subjectId])
@@ -387,382 +447,487 @@ model ResourceAcl {
 }
 
 model Resource {
-  id String @id @default(uuid()) @db.Uuid
-  tenantId String @map("tenant_id") @db.Uuid
-  tenant Tenant @relation(fields: [tenantId], references: [id])
-  type ResourceType
-  ownerMembershipId String @map("owner_membership_id") @db.Uuid
-  ownerMembership TenantMembership @relation(fields: [ownerMembershipId], references: [id])
-  document ManagedDocument?
-  acls ResourceAcl[]
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  createdBy String? @map("created_by") @db.Uuid
-  updatedBy String? @map("updated_by") @db.Uuid
-  deletedAt DateTime? @map("deleted_at")
-  version Int @default(1)
+  id                String           @id @default(uuid()) @db.Uuid
+  tenantId          String           @map("tenant_id") @db.Uuid
+  tenant            Tenant           @relation(fields: [tenantId], references: [id])
+  type              ResourceType
+  ownerMembershipId String           @map("owner_membership_id") @db.Uuid
+  ownerMembership   TenantMembership @relation(fields: [ownerMembershipId], references: [id])
+  document          ManagedDocument?
+  acls              ResourceAcl[]
+  createdAt         DateTime         @default(now()) @map("created_at")
+  updatedAt         DateTime         @updatedAt @map("updated_at")
+  createdBy         String?          @map("created_by") @db.Uuid
+  updatedBy         String?          @map("updated_by") @db.Uuid
+  deletedAt         DateTime?        @map("deleted_at")
+  version           Int              @default(1)
+
   @@index([tenantId, type, ownerMembershipId])
   @@map("resources")
 }
 
 model ManagedDocument {
-  id String @id @db.Uuid
-  tenantId String @map("tenant_id") @db.Uuid
-  tenant Tenant @relation(fields: [tenantId], references: [id])
-  resource Resource @relation(fields: [id], references: [id])
-  title String
-  content String @db.Text
+  id         String             @id @db.Uuid
+  tenantId   String             @map("tenant_id") @db.Uuid
+  tenant     Tenant             @relation(fields: [tenantId], references: [id])
+  resource   Resource           @relation(fields: [id], references: [id])
+  title      String
+  content    String             @db.Text
   visibility DocumentVisibility @default(PRIVATE)
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  createdBy String? @map("created_by") @db.Uuid
-  updatedBy String? @map("updated_by") @db.Uuid
-  deletedAt DateTime? @map("deleted_at")
-  version Int @default(1)
+  createdAt  DateTime           @default(now()) @map("created_at")
+  updatedAt  DateTime           @updatedAt @map("updated_at")
+  createdBy  String?            @map("created_by") @db.Uuid
+  updatedBy  String?            @map("updated_by") @db.Uuid
+  deletedAt  DateTime?          @map("deleted_at")
+  version    Int                @default(1)
+
   @@index([tenantId, visibility, createdAt])
   @@map("managed_documents")
 }
 
 model Project {
-  id String @id @default(uuid()) @db.Uuid
-  tenantId String @map("tenant_id") @db.Uuid
-  departmentId String? @map("department_id") @db.Uuid
-  name String
-  description String?
-  status String @default("ACTIVE")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  createdBy String? @map("created_by") @db.Uuid
-  updatedBy String? @map("updated_by") @db.Uuid
-  deletedAt DateTime? @map("deleted_at")
-  version Int @default(1)
+  id                      String                 @id @default(uuid()) @db.Uuid
+  tenantId                String                 @map("tenant_id") @db.Uuid
+  tenant                  Tenant                 @relation(fields: [tenantId], references: [id])
+  code                    String
+  normalizedCode          String                 @map("normalized_code")
+  departmentId            String?                @map("department_id") @db.Uuid
+  department              Department?            @relation(fields: [departmentId], references: [id])
+  ownerMembershipId       String?                @map("owner_membership_id") @db.Uuid
+  ownerMembership         TenantMembership?      @relation("ProjectOwner", fields: [ownerMembershipId], references: [id])
+  name                    String
+  description             String?
+  status                  ProjectStatus          @default(PLANNING)
+  startsAt                DateTime?              @map("starts_at")
+  endsAt                  DateTime?              @map("ends_at")
+  completedAt             DateTime?              @map("completed_at")
+  completedByMembershipId String?                @map("completed_by_membership_id") @db.Uuid
+  completedByMembership   TenantMembership?      @relation("ProjectCompleter", fields: [completedByMembershipId], references: [id])
+  completionSummary       String?                @map("completion_summary") @db.Text
+  members                 ProjectMember[]
+  statusHistory           ProjectStatusHistory[]
+  createdAt               DateTime               @default(now()) @map("created_at")
+  updatedAt               DateTime               @updatedAt @map("updated_at")
+  createdBy               String?                @map("created_by") @db.Uuid
+  updatedBy               String?                @map("updated_by") @db.Uuid
+  deletedAt               DateTime?              @map("deleted_at")
+  version                 Int                    @default(1)
+
+  @@unique([tenantId, normalizedCode])
   @@index([tenantId, departmentId])
+  @@index([tenantId, ownerMembershipId])
+  @@index([tenantId, status, updatedAt])
   @@map("projects")
 }
 
 model ProjectMember {
-  id String @id @default(uuid()) @db.Uuid
-  tenantId String @map("tenant_id") @db.Uuid
-  projectId String @map("project_id") @db.Uuid
-  userId String @map("user_id") @db.Uuid
-  role String @default("MEMBER")
-  createdAt DateTime @default(now()) @map("created_at")
-  @@unique([tenantId, projectId, userId])
-  @@index([tenantId, userId])
+  id           String            @id @default(uuid()) @db.Uuid
+  tenantId     String            @map("tenant_id") @db.Uuid
+  tenant       Tenant            @relation(fields: [tenantId], references: [id])
+  projectId    String            @map("project_id") @db.Uuid
+  project      Project           @relation(fields: [projectId], references: [id])
+  membershipId String            @map("membership_id") @db.Uuid
+  membership   TenantMembership  @relation("ProjectMembership", fields: [membershipId], references: [id])
+  role         ProjectMemberRole @default(MEMBER)
+  joinedAt     DateTime          @default(now()) @map("joined_at")
+  createdAt    DateTime          @default(now()) @map("created_at")
+  updatedAt    DateTime          @updatedAt @map("updated_at")
+  createdBy    String?           @map("created_by") @db.Uuid
+  updatedBy    String?           @map("updated_by") @db.Uuid
+  deletedAt    DateTime?         @map("deleted_at")
+  version      Int               @default(1)
+
+  @@unique([tenantId, projectId, membershipId])
+  @@index([tenantId, membershipId])
+  @@index([tenantId, projectId, role])
   @@map("project_members")
 }
 
+model ProjectStatusHistory {
+  id                    String           @id @default(uuid()) @db.Uuid
+  tenantId              String           @map("tenant_id") @db.Uuid
+  tenant                Tenant           @relation(fields: [tenantId], references: [id])
+  projectId             String           @map("project_id") @db.Uuid
+  project               Project          @relation(fields: [projectId], references: [id])
+  fromStatus            ProjectStatus    @map("from_status")
+  toStatus              ProjectStatus    @map("to_status")
+  reason                String?
+  changedByMembershipId String           @map("changed_by_membership_id") @db.Uuid
+  changedByMembership   TenantMembership @relation("ProjectStatusChangedBy", fields: [changedByMembershipId], references: [id])
+  createdAt             DateTime         @default(now()) @map("created_at")
+
+  @@index([tenantId, projectId, createdAt])
+  @@index([tenantId, changedByMembershipId, createdAt])
+  @@map("project_status_history")
+}
+
 model Task {
-  id String @id @default(uuid()) @db.Uuid
-  tenantId String @map("tenant_id") @db.Uuid
-  projectId String? @map("project_id") @db.Uuid
-  parentId String? @map("parent_id") @db.Uuid
-  title String
-  description String?
-  status TaskStatus @default(TODO)
-  priority TaskPriority @default(MEDIUM)
-  dueDate DateTime? @map("due_date")
-  relationType String? @map("relation_type")
-  relationId String? @map("relation_id") @db.Uuid
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  createdBy String? @map("created_by") @db.Uuid
-  updatedBy String? @map("updated_by") @db.Uuid
-  deletedAt DateTime? @map("deleted_at")
-  version Int @default(1)
+  id           String       @id @default(uuid()) @db.Uuid
+  tenantId     String       @map("tenant_id") @db.Uuid
+  projectId    String?      @map("project_id") @db.Uuid
+  parentId     String?      @map("parent_id") @db.Uuid
+  title        String
+  description  String?
+  status       TaskStatus   @default(TODO)
+  priority     TaskPriority @default(MEDIUM)
+  dueDate      DateTime?    @map("due_date")
+  relationType String?      @map("relation_type")
+  relationId   String?      @map("relation_id") @db.Uuid
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
+  createdBy    String?      @map("created_by") @db.Uuid
+  updatedBy    String?      @map("updated_by") @db.Uuid
+  deletedAt    DateTime?    @map("deleted_at")
+  version      Int          @default(1)
+
   @@index([tenantId, status, dueDate])
   @@index([tenantId, projectId])
   @@map("tasks")
 }
 
 model TaskAssignee {
-  id String @id @default(uuid()) @db.Uuid
-  tenantId String @map("tenant_id") @db.Uuid
-  taskId String @map("task_id") @db.Uuid
-  userId String @map("user_id") @db.Uuid
-  assigneeType String @default("OWNER") @map("assignee_type")
-  createdAt DateTime @default(now()) @map("created_at")
+  id           String   @id @default(uuid()) @db.Uuid
+  tenantId     String   @map("tenant_id") @db.Uuid
+  taskId       String   @map("task_id") @db.Uuid
+  userId       String   @map("user_id") @db.Uuid
+  assigneeType String   @default("OWNER") @map("assignee_type")
+  createdAt    DateTime @default(now()) @map("created_at")
+
   @@unique([tenantId, taskId, userId])
   @@index([tenantId, userId])
   @@map("task_assignees")
 }
 
 model TaskComment {
-  id String @id @default(uuid()) @db.Uuid
-  tenantId String @map("tenant_id") @db.Uuid
-  taskId String @map("task_id") @db.Uuid
-  content String
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  createdBy String? @map("created_by") @db.Uuid
-  updatedBy String? @map("updated_by") @db.Uuid
+  id        String    @id @default(uuid()) @db.Uuid
+  tenantId  String    @map("tenant_id") @db.Uuid
+  taskId    String    @map("task_id") @db.Uuid
+  content   String
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  createdBy String?   @map("created_by") @db.Uuid
+  updatedBy String?   @map("updated_by") @db.Uuid
   deletedAt DateTime? @map("deleted_at")
-  version Int @default(1)
+  version   Int       @default(1)
+
   @@index([tenantId, taskId])
   @@map("task_comments")
 }
 
 model TaskAttachment {
-  id String @id @default(uuid()) @db.Uuid
-  tenantId String @map("tenant_id") @db.Uuid
-  taskId String @map("task_id") @db.Uuid
-  fileObjectId String @map("file_object_id") @db.Uuid
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  createdBy String? @map("created_by") @db.Uuid
-  updatedBy String? @map("updated_by") @db.Uuid
-  deletedAt DateTime? @map("deleted_at")
-  version Int @default(1)
+  id           String    @id @default(uuid()) @db.Uuid
+  tenantId     String    @map("tenant_id") @db.Uuid
+  taskId       String    @map("task_id") @db.Uuid
+  fileObjectId String    @map("file_object_id") @db.Uuid
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+  createdBy    String?   @map("created_by") @db.Uuid
+  updatedBy    String?   @map("updated_by") @db.Uuid
+  deletedAt    DateTime? @map("deleted_at")
+  version      Int       @default(1)
+
   @@index([tenantId, taskId])
   @@map("task_attachments")
 }
 
 model TaskActivity {
-  id String @id @default(uuid()) @db.Uuid
-  tenantId String @map("tenant_id") @db.Uuid
-  taskId String @map("task_id") @db.Uuid
-  action String
-  metadata Json?
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  taskId    String   @map("task_id") @db.Uuid
+  action    String
+  metadata  Json?
   createdAt DateTime @default(now()) @map("created_at")
-  createdBy String? @map("created_by") @db.Uuid
+  createdBy String?  @map("created_by") @db.Uuid
+
   @@index([tenantId, taskId])
   @@map("task_activities")
 }
 
 model FileObject {
-  id String @id @default(uuid()) @db.Uuid
-  tenantId String @map("tenant_id") @db.Uuid
-  objectKey String @map("object_key")
-  mimeType String @map("mime_type")
-  sizeBytes BigInt @map("size_bytes")
-  checksum String?
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  createdBy String? @map("created_by") @db.Uuid
-  updatedBy String? @map("updated_by") @db.Uuid
-  deletedAt DateTime? @map("deleted_at")
-  version Int @default(1)
+  id              String      @id @default(uuid()) @db.Uuid
+  tenantId        String      @map("tenant_id") @db.Uuid
+  originalName    String      @map("original_name")
+  purpose         FilePurpose @default(ATTACHMENT)
+  storageProvider String      @default("TENCENT_COS") @map("storage_provider")
+  bucket          String
+  region          String
+  objectKey       String      @map("object_key")
+  mimeType        String      @map("mime_type")
+  sizeBytes       BigInt      @map("size_bytes")
+  checksum        String?
+  etag            String?
+  createdAt       DateTime    @default(now()) @map("created_at")
+  updatedAt       DateTime    @updatedAt @map("updated_at")
+  createdBy       String?     @map("created_by") @db.Uuid
+  updatedBy       String?     @map("updated_by") @db.Uuid
+  deletedAt       DateTime?   @map("deleted_at")
+  version         Int         @default(1)
+
+  @@unique([bucket, objectKey])
   @@index([tenantId])
   @@map("file_objects")
 }
 
+model UploadSession {
+  id                    String              @id @default(uuid()) @db.Uuid
+  tenantId              String              @map("tenant_id") @db.Uuid
+  fileId                String              @unique @map("file_id") @db.Uuid
+  createdBy             String              @map("created_by") @db.Uuid
+  createdByMembershipId String              @map("created_by_membership_id") @db.Uuid
+  idempotencyKey        String              @map("idempotency_key")
+  requestFingerprint    String              @map("request_fingerprint")
+  purpose               FilePurpose         @default(ATTACHMENT)
+  originalName          String              @map("original_name")
+  mimeType              String              @map("mime_type")
+  expectedSizeBytes     BigInt              @map("expected_size_bytes")
+  storageProvider       String              @default("TENCENT_COS") @map("storage_provider")
+  bucket                String
+  region                String
+  objectKey             String              @map("object_key")
+  status                UploadSessionStatus @default(PENDING)
+  expiresAt             DateTime            @map("expires_at")
+  completedAt           DateTime?           @map("completed_at")
+  failureCode           String?             @map("failure_code")
+  createdAt             DateTime            @default(now()) @map("created_at")
+  updatedAt             DateTime            @updatedAt @map("updated_at")
+
+  @@unique([tenantId, createdByMembershipId, idempotencyKey], map: "upload_sessions_idempotency_key")
+  @@unique([bucket, objectKey])
+  @@index([tenantId, status, expiresAt])
+  @@map("upload_sessions")
+}
+
 model KnowledgeBase {
-  id String @id @default(uuid()) @db.Uuid
-  tenantId String @map("tenant_id") @db.Uuid
-  name String
+  id          String    @id @default(uuid()) @db.Uuid
+  tenantId    String    @map("tenant_id") @db.Uuid
+  name        String
   description String?
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  createdBy String? @map("created_by") @db.Uuid
-  updatedBy String? @map("updated_by") @db.Uuid
-  deletedAt DateTime? @map("deleted_at")
-  version Int @default(1)
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  createdBy   String?   @map("created_by") @db.Uuid
+  updatedBy   String?   @map("updated_by") @db.Uuid
+  deletedAt   DateTime? @map("deleted_at")
+  version     Int       @default(1)
+
   @@index([tenantId])
   @@map("knowledge_bases")
 }
 
 model KnowledgeBaseMember {
-  id String @id @default(uuid()) @db.Uuid
-  tenantId String @map("tenant_id") @db.Uuid
-  knowledgeBaseId String @map("knowledge_base_id") @db.Uuid
-  userId String @map("user_id") @db.Uuid
-  permission String
-  createdAt DateTime @default(now()) @map("created_at")
+  id              String   @id @default(uuid()) @db.Uuid
+  tenantId        String   @map("tenant_id") @db.Uuid
+  knowledgeBaseId String   @map("knowledge_base_id") @db.Uuid
+  userId          String   @map("user_id") @db.Uuid
+  permission      String
+  createdAt       DateTime @default(now()) @map("created_at")
+
   @@unique([tenantId, knowledgeBaseId, userId])
   @@map("knowledge_base_members")
 }
 
 model KnowledgeDocument {
-  id String @id @default(uuid()) @db.Uuid
-  tenantId String @map("tenant_id") @db.Uuid
-  knowledgeBaseId String @map("knowledge_base_id") @db.Uuid
-  fileObjectId String @map("file_object_id") @db.Uuid
-  name String
-  status String @default("PENDING")
-  departmentId String? @map("department_id") @db.Uuid
-  projectId String? @map("project_id") @db.Uuid
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  createdBy String? @map("created_by") @db.Uuid
-  updatedBy String? @map("updated_by") @db.Uuid
-  deletedAt DateTime? @map("deleted_at")
-  version Int @default(1)
+  id              String    @id @default(uuid()) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  knowledgeBaseId String    @map("knowledge_base_id") @db.Uuid
+  fileObjectId    String    @map("file_object_id") @db.Uuid
+  name            String
+  status          String    @default("PENDING")
+  departmentId    String?   @map("department_id") @db.Uuid
+  projectId       String?   @map("project_id") @db.Uuid
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  createdBy       String?   @map("created_by") @db.Uuid
+  updatedBy       String?   @map("updated_by") @db.Uuid
+  deletedAt       DateTime? @map("deleted_at")
+  version         Int       @default(1)
+
   @@index([tenantId, knowledgeBaseId])
   @@map("documents")
 }
 
 model DocumentVersion {
-  id String @id @default(uuid()) @db.Uuid
-  tenantId String @map("tenant_id") @db.Uuid
-  documentId String @map("document_id") @db.Uuid
-  fileObjectId String @map("file_object_id") @db.Uuid
-  versionNumber Int @map("version_number")
-  createdAt DateTime @default(now()) @map("created_at")
-  createdBy String? @map("created_by") @db.Uuid
+  id            String   @id @default(uuid()) @db.Uuid
+  tenantId      String   @map("tenant_id") @db.Uuid
+  documentId    String   @map("document_id") @db.Uuid
+  fileObjectId  String   @map("file_object_id") @db.Uuid
+  versionNumber Int      @map("version_number")
+  createdAt     DateTime @default(now()) @map("created_at")
+  createdBy     String?  @map("created_by") @db.Uuid
+
   @@unique([tenantId, documentId, versionNumber])
   @@map("document_versions")
 }
 
 model DocumentChunk {
-  id String @id @default(uuid()) @db.Uuid
-  tenantId String @map("tenant_id") @db.Uuid
-  knowledgeBaseId String @map("knowledge_base_id") @db.Uuid
-  documentId String @map("document_id") @db.Uuid
-  departmentId String? @map("department_id") @db.Uuid
-  projectId String? @map("project_id") @db.Uuid
-  visibilityScope VisibilityScope @map("visibility_scope")
-  content String @db.Text
-  embedding Unsupported("vector")
-  metadata Json
-  chunkIndex Int @map("chunk_index")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  createdBy String? @map("created_by") @db.Uuid
-  updatedBy String? @map("updated_by") @db.Uuid
-  deletedAt DateTime? @map("deleted_at")
-  version Int @default(1)
+  id              String                @id @default(uuid()) @db.Uuid
+  tenantId        String                @map("tenant_id") @db.Uuid
+  knowledgeBaseId String                @map("knowledge_base_id") @db.Uuid
+  documentId      String                @map("document_id") @db.Uuid
+  departmentId    String?               @map("department_id") @db.Uuid
+  projectId       String?               @map("project_id") @db.Uuid
+  visibilityScope VisibilityScope       @map("visibility_scope")
+  content         String                @db.Text
+  embedding       Unsupported("vector")
+  metadata        Json
+  chunkIndex      Int                   @map("chunk_index")
+  createdAt       DateTime              @default(now()) @map("created_at")
+  updatedAt       DateTime              @updatedAt @map("updated_at")
+  createdBy       String?               @map("created_by") @db.Uuid
+  updatedBy       String?               @map("updated_by") @db.Uuid
+  deletedAt       DateTime?             @map("deleted_at")
+  version         Int                   @default(1)
+
   @@index([tenantId, knowledgeBaseId, documentId])
   @@map("document_chunks")
 }
 
 model KnowledgeQueryLog {
-  id String @id @default(uuid()) @db.Uuid
-  tenantId String @map("tenant_id") @db.Uuid
-  userId String @map("user_id") @db.Uuid
-  query String
-  answer String?
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  query     String
+  answer    String?
   citations Json?
-  requestId String @map("request_id")
+  requestId String   @map("request_id")
   createdAt DateTime @default(now()) @map("created_at")
+
   @@index([tenantId, userId, createdAt])
   @@map("knowledge_query_logs")
 }
 
 model Meeting {
-  id String @id @default(uuid()) @db.Uuid
-  tenantId String @map("tenant_id") @db.Uuid
-  title String
-  startsAt DateTime @map("starts_at")
-  durationMinutes Int @map("duration_minutes")
-  departmentId String? @map("department_id") @db.Uuid
-  agenda Json?
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  createdBy String? @map("created_by") @db.Uuid
-  updatedBy String? @map("updated_by") @db.Uuid
-  deletedAt DateTime? @map("deleted_at")
-  version Int @default(1)
+  id              String    @id @default(uuid()) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  title           String
+  startsAt        DateTime  @map("starts_at")
+  durationMinutes Int       @map("duration_minutes")
+  departmentId    String?   @map("department_id") @db.Uuid
+  agenda          Json?
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  createdBy       String?   @map("created_by") @db.Uuid
+  updatedBy       String?   @map("updated_by") @db.Uuid
+  deletedAt       DateTime? @map("deleted_at")
+  version         Int       @default(1)
+
   @@index([tenantId, startsAt])
   @@map("meetings")
 }
 
 model MeetingParticipant {
-  id String @id @default(uuid()) @db.Uuid
-  tenantId String @map("tenant_id") @db.Uuid
-  meetingId String @map("meeting_id") @db.Uuid
-  userId String @map("user_id") @db.Uuid
-  status String @default("INVITED")
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  meetingId String   @map("meeting_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  status    String   @default("INVITED")
   createdAt DateTime @default(now()) @map("created_at")
+
   @@unique([tenantId, meetingId, userId])
   @@map("meeting_participants")
 }
 
 model MeetingMinutes {
-  id String @id @default(uuid()) @db.Uuid
-  tenantId String @map("tenant_id") @db.Uuid
-  meetingId String @map("meeting_id") @db.Uuid
-  content Json
-  status String @default("DRAFT")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  createdBy String? @map("created_by") @db.Uuid
-  updatedBy String? @map("updated_by") @db.Uuid
+  id        String    @id @default(uuid()) @db.Uuid
+  tenantId  String    @map("tenant_id") @db.Uuid
+  meetingId String    @map("meeting_id") @db.Uuid
+  content   Json
+  status    String    @default("DRAFT")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  createdBy String?   @map("created_by") @db.Uuid
+  updatedBy String?   @map("updated_by") @db.Uuid
   deletedAt DateTime? @map("deleted_at")
-  version Int @default(1)
+  version   Int       @default(1)
+
   @@index([tenantId, meetingId])
   @@map("meeting_minutes")
 }
 
 model Notification {
-  id String @id @default(uuid()) @db.Uuid
-  tenantId String @map("tenant_id") @db.Uuid
-  title String
-  content String
-  channel String @default("IN_APP")
-  relationType String? @map("relation_type")
-  relationId String? @map("relation_id") @db.Uuid
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  createdBy String? @map("created_by") @db.Uuid
-  updatedBy String? @map("updated_by") @db.Uuid
-  deletedAt DateTime? @map("deleted_at")
-  version Int @default(1)
+  id           String    @id @default(uuid()) @db.Uuid
+  tenantId     String    @map("tenant_id") @db.Uuid
+  title        String
+  content      String
+  channel      String    @default("IN_APP")
+  relationType String?   @map("relation_type")
+  relationId   String?   @map("relation_id") @db.Uuid
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+  createdBy    String?   @map("created_by") @db.Uuid
+  updatedBy    String?   @map("updated_by") @db.Uuid
+  deletedAt    DateTime? @map("deleted_at")
+  version      Int       @default(1)
+
   @@index([tenantId, createdAt])
   @@map("notifications")
 }
 
 model NotificationRecipient {
-  id String @id @default(uuid()) @db.Uuid
-  tenantId String @map("tenant_id") @db.Uuid
-  notificationId String @map("notification_id") @db.Uuid
-  userId String @map("user_id") @db.Uuid
-  readAt DateTime? @map("read_at")
-  createdAt DateTime @default(now()) @map("created_at")
+  id             String    @id @default(uuid()) @db.Uuid
+  tenantId       String    @map("tenant_id") @db.Uuid
+  notificationId String    @map("notification_id") @db.Uuid
+  userId         String    @map("user_id") @db.Uuid
+  readAt         DateTime? @map("read_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
   @@unique([tenantId, notificationId, userId])
   @@map("notification_recipients")
 }
 
 model AIActionDraft {
-  id String @id @default(uuid()) @db.Uuid
-  tenantId String @map("tenant_id") @db.Uuid
-  userId String @map("user_id") @db.Uuid
-  actionType String @map("action_type")
-  payload Json
-  status DraftStatus @default(DRAFT)
-  expiresAt DateTime? @map("expires_at")
-  executedResourceType String? @map("executed_resource_type")
-  executedResourceId String? @map("executed_resource_id") @db.Uuid
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  createdBy String? @map("created_by") @db.Uuid
-  updatedBy String? @map("updated_by") @db.Uuid
-  deletedAt DateTime? @map("deleted_at")
-  version Int @default(1)
+  id                   String      @id @default(uuid()) @db.Uuid
+  tenantId             String      @map("tenant_id") @db.Uuid
+  userId               String      @map("user_id") @db.Uuid
+  actionType           String      @map("action_type")
+  payload              Json
+  status               DraftStatus @default(DRAFT)
+  expiresAt            DateTime?   @map("expires_at")
+  executedResourceType String?     @map("executed_resource_type")
+  executedResourceId   String?     @map("executed_resource_id") @db.Uuid
+  createdAt            DateTime    @default(now()) @map("created_at")
+  updatedAt            DateTime    @updatedAt @map("updated_at")
+  createdBy            String?     @map("created_by") @db.Uuid
+  updatedBy            String?     @map("updated_by") @db.Uuid
+  deletedAt            DateTime?   @map("deleted_at")
+  version              Int         @default(1)
+
   @@index([tenantId, userId, status])
   @@map("ai_action_drafts")
 }
 
 model AIInvocationLog {
-  id String @id @default(uuid()) @db.Uuid
-  tenantId String @map("tenant_id") @db.Uuid
-  userId String @map("user_id") @db.Uuid
-  requestId String @map("request_id")
-  traceId String? @map("trace_id")
-  model String
-  latencyMs Int @map("latency_ms")
-  inputTokens Int? @map("input_tokens")
-  outputTokens Int? @map("output_tokens")
-  operation String
-  metadata Json?
-  createdAt DateTime @default(now()) @map("created_at")
+  id           String   @id @default(uuid()) @db.Uuid
+  tenantId     String   @map("tenant_id") @db.Uuid
+  userId       String   @map("user_id") @db.Uuid
+  requestId    String   @map("request_id")
+  traceId      String?  @map("trace_id")
+  model        String
+  latencyMs    Int      @map("latency_ms")
+  inputTokens  Int?     @map("input_tokens")
+  outputTokens Int?     @map("output_tokens")
+  operation    String
+  metadata     Json?
+  createdAt    DateTime @default(now()) @map("created_at")
+
   @@index([tenantId, requestId])
   @@map("ai_invocation_logs")
 }
 
 model AuditLog {
-  id String @id @default(uuid()) @db.Uuid
-  tenantId String @map("tenant_id") @db.Uuid
-  actorUserId String? @map("actor_user_id") @db.Uuid
-  actorMembershipId String? @map("actor_membership_id") @db.Uuid
-  action String
-  outcome AuditOutcome @default(SUCCESS)
-  resourceType String @map("resource_type")
-  resourceId String? @map("resource_id") @db.Uuid
-  requestId String @map("request_id")
-  ipAddress String? @map("ip_address")
-  userAgent String? @map("user_agent")
-  metadata Json?
-  createdAt DateTime @default(now()) @map("created_at")
+  id                String       @id @default(uuid()) @db.Uuid
+  tenantId          String       @map("tenant_id") @db.Uuid
+  actorUserId       String?      @map("actor_user_id") @db.Uuid
+  actorMembershipId String?      @map("actor_membership_id") @db.Uuid
+  action            String
+  outcome           AuditOutcome @default(SUCCESS)
+  resourceType      String       @map("resource_type")
+  resourceId        String?      @map("resource_id") @db.Uuid
+  requestId         String       @map("request_id")
+  ipAddress         String?      @map("ip_address")
+  userAgent         String?      @map("user_agent")
+  metadata          Json?
+  createdAt         DateTime     @default(now()) @map("created_at")
+
   @@index([tenantId, createdAt, id])
   @@index([tenantId, action, createdAt])
   @@index([tenantId, outcome, createdAt])
@@ -773,18 +938,19 @@ model AuditLog {
 }
 
 model PlatformAuditLog {
-  id String @id @default(uuid()) @db.Uuid
-  actorUserId String? @map("actor_user_id") @db.Uuid
-  actorPlatformAdministratorId String? @map("actor_platform_administrator_id") @db.Uuid
-  action String
-  outcome AuditOutcome @default(SUCCESS)
-  resourceType String @map("resource_type")
-  resourceId String? @map("resource_id") @db.Uuid
-  requestId String @map("request_id")
-  ipAddress String? @map("ip_address")
-  userAgent String? @map("user_agent")
-  metadata Json?
-  createdAt DateTime @default(now()) @map("created_at")
+  id                           String       @id @default(uuid()) @db.Uuid
+  actorUserId                  String?      @map("actor_user_id") @db.Uuid
+  actorPlatformAdministratorId String?      @map("actor_platform_administrator_id") @db.Uuid
+  action                       String
+  outcome                      AuditOutcome @default(SUCCESS)
+  resourceType                 String       @map("resource_type")
+  resourceId                   String?      @map("resource_id") @db.Uuid
+  requestId                    String       @map("request_id")
+  ipAddress                    String?      @map("ip_address")
+  userAgent                    String?      @map("user_agent")
+  metadata                     Json?
+  createdAt                    DateTime     @default(now()) @map("created_at")
+
   @@index([createdAt, id])
   @@index([action, createdAt])
   @@index([outcome, createdAt])

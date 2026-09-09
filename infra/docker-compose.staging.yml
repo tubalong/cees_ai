@@ -3,8 +3,10 @@ name: cees-ai-staging
 services:
   ai-service:
     restart: unless-stopped
+    ports:
+      - "${AI_SERVICE_PORT:-8000}:8000"
 
   api:
     restart: unless-stopped
     ports:
-      - "${API_PORT:-13000}:3000"
+      - "${API_PORT:-3000}:3000"

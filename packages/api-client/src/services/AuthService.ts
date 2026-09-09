@@ -3,6 +3,7 @@
 /* tslint:disable */
 /* eslint-disable */
 import type { AcceptTenantInvitationRequest } from '../models/AcceptTenantInvitationRequest';
+import type { ChangePasswordRequest } from '../models/ChangePasswordRequest';
 import type { LoginRequest } from '../models/LoginRequest';
 import type { LoginResponseEnvelope } from '../models/LoginResponseEnvelope';
 import type { MeResponseEnvelope } from '../models/MeResponseEnvelope';
@@ -100,6 +101,27 @@ export class AuthService {
             url: '/auth/me',
             errors: {
                 401: `Access Token 无效或 Session 已失效`,
+            },
+        });
+    }
+    /**
+     * 修改当前租户成员密码
+     * @returns void
+     * @throws ApiError
+     */
+    public static authChangePassword({
+        requestBody,
+    }: {
+        requestBody: ChangePasswordRequest,
+    }): CancelablePromise<void> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/auth/change-password',
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                400: `请求字段校验失败或新旧密码相同`,
+                401: `登录状态无效、已过期或当前密码错误`,
             },
         });
     }

@@ -1,8 +1,13 @@
 # 数据库约定
 
-> 当前数据库迁移以 `0001_init` 作为完整空库基线，与现有 `schema.prisma` 保持一致；新环境直接执行该迁移，不需要历史数据回填。
+完整表级字段说明和 Navicat 只读查询见 [平台使用、接口与数据库字典](../product/platform-usage-guide.md)。
+部门树模型、约束和成员归属见 [组织部门管理](../product/organization-department-management.md)。
+项目、项目成员和状态历史见 [项目与项目成员管理](../product/project-management.md)。
+
+> 新环境使用 `prisma migrate deploy` 按 `0001_init` 到 `0005_project_management` 的目录顺序执行迁移；全部迁移完成后与当前 `schema.prisma` 保持一致。
 
 - `apps/api/prisma/schema.prisma` 是数据模型唯一事实源，迁移提交 `prisma/migrations`。
+- 新建表和字段必须在同一迁移中使用 `COMMENT ON TABLE`、`COMMENT ON COLUMN` 添加 PostgreSQL 注释；`0003_organization_departments_and_database_comments` 已补齐此前全部业务表和字段注释。
 - PostgreSQL/pgvector 与 Redis 的精确镜像标签只在 `infra/database/docker-compose.yml` 维护。
 - 向量检索使用 pgvector；扩展由 `0001_init` 在创建向量字段前启用，不使用环境专属初始化 SQL。
 - AI 服务对业务库只读；正式写入统一经 NestJS。
@@ -70,10 +75,38 @@ Resource
 - `TENANT` 可见性只扩展读取范围，不能授予修改、删除或分享能力；
 - Document 删除会软删除 ManagedDocument、Resource 和 ACL，正常 ACL 撤销采用硬删除以允许后续重新授权；
 - 原知识库文档 Prisma 模型已更名为 KnowledgeDocument，仍映射原 `documents` 表，与 ManagedDocument 分离。
+
+## 基础文件上传模型
+
+```text
+UploadSession --COS HEAD 校验通过--> FileObject
+```
+
+- `UploadSession` 保存租户、创建成员、幂等键、预期大小与 Content-Type、COS Bucket/Region/对象键、过期时间和完成状态；
+- `FileObject` 只在 COS 对象校验通过后创建，保存原文件名、用途、存储提供商、Bucket、Region、对象键、大小、Content-Type 和 ETag；
+- COS 对象键唯一约束为 `bucket + objectKey`，规范格式是 `cees/{environment}/tenants/{tenantId}/files/{yyyy}/{mm}/{fileId}/source`；
+- `0004_redis_cos_upload_foundation` 新增上传会话、文件存储元数据和相关枚举；本期不创建额度预占、租户用量或通用文件绑定表；
+- 文件大小使用 PostgreSQL `BIGINT`，API 返回前转换为 JavaScript 安全整数；当前硬上限 500 MiB。
+
+## 项目模型
+
+```text
+Project
+  ├── ownerMembership -> TenantMembership
+  ├── members -> ProjectMember[] -> TenantMembership
+  └── statusHistory -> ProjectStatusHistory[]
+```
+
+- 项目成员外键指向 `TenantMembership`，不直接使用全局 User；
+- 项目编码使用 `tenantId + normalizedCode` 唯一约束；
+- `ownerMembershipId` 保存唯一当前负责人，项目成员角色同步为 `OWNER`；
+- `project_status_history` 保存每次状态变化及操作者 Membership；
+- `0005_project_management` 迁移旧成员关系、项目状态和编码，并为新增结构添加 PostgreSQL 中文注释。
+
 - `apps/api/prisma/schema.prisma` 是数据模型唯一事实源，迁移提交到 `apps/api/prisma/migrations`。
 - `0001_init` 包含 pgvector 扩展和当前 `schema.prisma` 的完整空库结构；共享环境首次执行后，后续结构变化必须新增前向迁移，不再重写该基线。
-- 本地 PostgreSQL 与 Redis 由 `infra/database/docker-compose.yml` 和本地开发覆盖启动；共享环境数据库由独立数据库服务器运行，Redis 必须启用密码。
-- Staging API 使用数据库服务器内网端口 `15432`/`16379`，Production 使用 `25432`/`26379`；两个环境使用独立容器和数据卷。
+- 本地 PostgreSQL 与 Redis 由 `infra/database/docker-compose.yml` 和本地开发覆盖启动；Staging 与 Production 数据库部署在各自独立服务器或服务器组，Redis 必须启用密码。
+- Staging 与 Production 均使用 PostgreSQL `5432` 和 Redis `6379`；两个环境位于不同服务器并使用独立容器、账号、密码和数据卷。
 - 二进制文件不进入数据库，存放于私有腾讯云 COS；数据库只保存对象键、校验值、大小、内容类型和审计元数据。
 - ai-service 当前不直接连接业务数据库；正式数据读取、写入和 AI 调用审计统一由 NestJS 处理。
 - 未确认的业务实体不得提前加入 Prisma schema。

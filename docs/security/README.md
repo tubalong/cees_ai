@@ -1,5 +1,7 @@
 # 安全模型
 
+- [密码修改与凭证安全](password-management.md)：租户成员和平台超级管理员修改自己的密码、会话撤销与审计规则。
+
 - API 入口由 JWT 建立用户身份，再由租户守卫建立租户上下文。
 - 平台超级管理员使用独立 Platform JWT、PlatformAuthSession 和权限 Guard，不能通过租户 `tenant_admin` 角色获得平台权限。
 - Production 必须为平台 JWT 配置独立的 `JWT_PLATFORM_ACCESS_SECRET`，不得与租户 Access Token 共用 Secret。
@@ -11,8 +13,9 @@
 - Secret 只允许来自环境变量或平台 Secrets，示例值一律 `change_me`。
 - 腾讯云 COS Bucket 默认私有；长期凭据只注入 NestJS，并使用限定 Bucket 和操作范围的 CAM 子账号或角色。
 - 客户端与 AI 服务访问 COS 时使用短时签名 URL 或 STS 临时凭证，不得获得长期 SecretId/SecretKey。
+- COS 基础上传接口必须经过 JWT 和 TenantContext，只签名单一服务端对象键，并在完成时通过 COS HEAD 校验；当前尚未启用 `file.*` 细粒度权限和租户额度，不应在补齐这些策略前扩大正式生产使用范围。
 - 本地、Staging 和 Production 使用独立数据库与 Redis 命名空间；COS 在同一 Bucket 中以 `cees/local`、`cees/staging`、`cees/prod` 前缀隔离，并使用权限互斥的三套 CAM 凭据。
-- 应用服务器 `172.27.0.2` 与数据库服务器 `172.27.0.3` 只通过腾讯云 VPC 通信；应用连接串不得使用两台服务器的公网 IP。
-- 数据库服务器分别运行 Staging/Production PostgreSQL 与 Redis 容器，两个环境不得共享容器、数据库账号、密码或数据卷。
-- 腾讯云安全组只允许来源 `172.27.0.2` 访问数据库服务器对应端口，不得向 `0.0.0.0/0` 开放 PostgreSQL 或 Redis。
-- ai-service 在 Staging/Production 不映射宿主机端口，内部接口只允许同一应用 Compose 项目中的 NestJS 访问。
+- 应用与数据库通过各自环境的私网通信；数据库连接串不得使用数据库主机公网 IP。
+- Staging 与 Production 部署在不同服务器；两个环境不得共享数据库容器、账号、密码或数据卷。
+- 安全组只允许对应环境的应用来源访问 PostgreSQL `5432` 和 Redis `6379`，不得向 `0.0.0.0/0` 开放数据库端口。
+- ai-service 在 Production 不映射宿主机端口；Staging 为调试文档映射 `AI_SERVICE_PORT`（默认 `8000`）。Staging 对外端口必须通过安全组或防火墙限制来源，内部业务接口仍要求 `AI_INTERNAL_TOKEN`。

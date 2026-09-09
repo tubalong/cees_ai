@@ -1,5 +1,5 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { AuditOutcome, MembershipStatus, Prisma } from '@prisma/client';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { AuditOutcome, DepartmentStatus, MembershipStatus, Prisma } from '@prisma/client';
 import { normalizeAccount } from '../auth/account';
 import { PrismaService } from '../database/prisma.service';
 import { TENANT_ADMIN_ROLE_CODE } from '../rbac/permission-catalog';
@@ -73,11 +73,11 @@ export class TenantService {
         return this.getCurrentTenant();
     }
 
-    async listMembers(query: ListTenantMembersQueryDto): Promise<TenantMemberListResult> {
+    async listMembers(query: ListTenantMembersQueryDto, departmentId?: string): Promise<TenantMemberListResult> {
         const { tenantId } = this.tenantContext.require();
         if (query.cursor) {
             const cursorExists = await this.prisma.tenantMembership.findFirst({
-                where: { id: query.cursor, tenantId, deletedAt: null },
+                where: { id: query.cursor, tenantId, departmentId, deletedAt: null },
                 select: { id: true },
             });
             if (!cursorExists) {
@@ -89,6 +89,7 @@ export class TenantService {
         const members = await this.prisma.tenantMembership.findMany({
             where: {
                 tenantId,
+                departmentId,
                 deletedAt: null,
                 status: query.status,
                 membershipRoles: query.roleId ? { some: { roleId: query.roleId } } : undefined,
@@ -134,7 +135,14 @@ export class TenantService {
         if (input.status === MembershipStatus.DISABLED && membershipId === context.membershipId) {
             throw this.selfOperationConflict();
         }
-        if (input.departmentId) await this.requireDepartment(context.tenantId, input.departmentId);
+        if (input.departmentId !== undefined && !context.permissions.includes('department.member.assign')) {
+            throw new ForbiddenException({
+                code: 'AUTH_PERMISSION_DENIED',
+                message: '权限不足',
+                details: { required: ['department.member.assign'] },
+            });
+        }
+        if (input.departmentId) await this.requireActiveDepartment(context.tenantId, input.departmentId);
         if (input.status === MembershipStatus.DISABLED && isTenantAdmin(member)) {
             await this.assertAnotherActiveAdmin(context.tenantId, membershipId);
         }
@@ -169,7 +177,11 @@ export class TenantService {
                     tenantId: context.tenantId,
                     actorUserId: context.userId,
                     actorMembershipId: context.membershipId,
-                    action: input.status === MembershipStatus.DISABLED ? 'MEMBER_DISABLED' : 'MEMBER_UPDATED',
+                    action: input.status === MembershipStatus.DISABLED
+                        ? 'MEMBER_DISABLED'
+                        : input.departmentId !== undefined && input.displayName === undefined && input.status === undefined
+                            ? 'MEMBER_DEPARTMENT_CHANGED'
+                            : 'MEMBER_UPDATED',
                     outcome: AuditOutcome.SUCCESS,
                     resourceType: 'TENANT_MEMBERSHIP',
                     resourceId: membershipId,
@@ -358,13 +370,16 @@ export class TenantService {
         return member;
     }
 
-    private async requireDepartment(tenantId: string, departmentId: string): Promise<void> {
+    private async requireActiveDepartment(tenantId: string, departmentId: string): Promise<void> {
         const department = await this.prisma.department.findFirst({
             where: { id: departmentId, tenantId, deletedAt: null },
-            select: { id: true },
+            select: { id: true, status: true },
         });
         if (!department) {
             throw new NotFoundException({ code: 'TENANT_DEPARTMENT_NOT_FOUND', message: '当前租户内部门不存在' });
+        }
+        if (department.status !== DepartmentStatus.ACTIVE) {
+            throw new BadRequestException({ code: 'DEPARTMENT_DISABLED', message: '不能向已停用部门分配成员' });
         }
     }
 

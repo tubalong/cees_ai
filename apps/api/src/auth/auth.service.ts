@@ -1,4 +1,4 @@
-import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { AuditOutcome, MembershipStatus, TenantStatus, UserStatus } from '@prisma/client';
 import * as argon2 from 'argon2';
@@ -13,7 +13,7 @@ import {
     AuthTokenPair,
     MeResult,
 } from './auth.types';
-import { LoginDto, RefreshTokenDto } from './dto';
+import { ChangePasswordDto, LoginDto, RefreshTokenDto } from './dto';
 
 export interface LoginRequestMetadata {
     requestId: string;
@@ -293,6 +293,80 @@ export class AuthService {
         });
     }
 
+    async changePassword(
+        principal: AuthenticatedPrincipal,
+        input: ChangePasswordDto,
+        metadata: LoginRequestMetadata,
+    ): Promise<void> {
+        const membership = await this.prisma.tenantMembership.findUnique({
+            where: { id: principal.membershipId },
+        });
+        if (
+            !membership || membership.deletedAt || membership.status !== MembershipStatus.ACTIVE
+            || membership.tenantId !== principal.tenantId || membership.userId !== principal.id
+        ) throw this.unauthorized();
+
+        if (!await this.verifyPassword(membership.passwordHash, input.currentPassword)) {
+            await this.writePasswordChangeFailure(principal, metadata, 'CURRENT_PASSWORD_INVALID');
+            throw this.invalidCurrentPassword();
+        }
+        if (await this.verifyPassword(membership.passwordHash, input.newPassword)) {
+            throw this.samePassword();
+        }
+
+        const passwordHash = await argon2.hash(input.newPassword);
+        const now = new Date();
+        await this.prisma.$transaction(async (transaction) => {
+            const updated = await transaction.tenantMembership.updateMany({
+                where: {
+                    id: principal.membershipId,
+                    tenantId: principal.tenantId,
+                    userId: principal.id,
+                    passwordHash: membership.passwordHash,
+                    status: MembershipStatus.ACTIVE,
+                    deletedAt: null,
+                },
+                data: {
+                    passwordHash,
+                    failedLoginCount: 0,
+                    lockedUntil: null,
+                    updatedBy: principal.id,
+                    version: { increment: 1 },
+                },
+            });
+            if (updated.count !== 1) throw this.invalidCurrentPassword();
+
+            const revoked = await transaction.authSession.updateMany({
+                where: {
+                    tenantId: principal.tenantId,
+                    userId: principal.id,
+                    membershipId: principal.membershipId,
+                    id: { not: principal.sessionId },
+                    revokedAt: null,
+                },
+                data: { revokedAt: now, lastUsedAt: now },
+            });
+            await transaction.auditLog.create({
+                data: {
+                    tenantId: principal.tenantId,
+                    actorUserId: principal.id,
+                    actorMembershipId: principal.membershipId,
+                    action: 'AUTH_PASSWORD_CHANGED',
+                    outcome: AuditOutcome.SUCCESS,
+                    resourceType: 'TENANT_MEMBERSHIP',
+                    resourceId: principal.membershipId,
+                    requestId: metadata.requestId,
+                    ipAddress: metadata.ipAddress,
+                    userAgent: metadata.userAgent,
+                    metadata: {
+                        currentSessionId: principal.sessionId,
+                        revokedOtherSessionCount: revoked.count,
+                    },
+                },
+            });
+        });
+    }
+
     me(principal: AuthenticatedPrincipal): MeResult {
         return {
             user: {
@@ -418,6 +492,32 @@ export class AuthService {
         }
     }
 
+    private async writePasswordChangeFailure(
+        principal: AuthenticatedPrincipal,
+        metadata: LoginRequestMetadata,
+        reason: string,
+    ): Promise<void> {
+        try {
+            await this.prisma.auditLog.create({
+                data: {
+                    tenantId: principal.tenantId,
+                    actorUserId: principal.id,
+                    actorMembershipId: principal.membershipId,
+                    action: 'AUTH_PASSWORD_CHANGE_FAILED',
+                    outcome: AuditOutcome.FAILURE,
+                    resourceType: 'TENANT_MEMBERSHIP',
+                    resourceId: principal.membershipId,
+                    requestId: metadata.requestId,
+                    ipAddress: metadata.ipAddress,
+                    userAgent: metadata.userAgent,
+                    metadata: { reason },
+                },
+            });
+        } catch (error) {
+            this.logger.error('Failed to write password change audit event', error instanceof Error ? error.stack : undefined);
+        }
+    }
+
     private async verifyDummyPassword(password: string): Promise<void> {
         await argon2.verify(await this.dummyPasswordHash, password).catch(() => false);
     }
@@ -438,6 +538,20 @@ export class AuthService {
         return new UnauthorizedException({
             code: 'AUTH_INVALID_REFRESH_TOKEN',
             message: '刷新令牌无效或已过期',
+        });
+    }
+
+    private invalidCurrentPassword(): UnauthorizedException {
+        return new UnauthorizedException({
+            code: 'AUTH_CURRENT_PASSWORD_INVALID',
+            message: '当前密码错误',
+        });
+    }
+
+    private samePassword(): BadRequestException {
+        return new BadRequestException({
+            code: 'AUTH_NEW_PASSWORD_SAME_AS_CURRENT',
+            message: '新密码不能与当前密码相同',
         });
     }
 

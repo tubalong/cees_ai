@@ -1,10 +1,17 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Post, Req, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiNoContentResponse, ApiOkResponse, ApiTags, ApiUnauthorizedResponse } from '@nestjs/swagger';
+import {
+    ApiBadRequestResponse,
+    ApiBearerAuth,
+    ApiNoContentResponse,
+    ApiOkResponse,
+    ApiTags,
+    ApiUnauthorizedResponse,
+} from '@nestjs/swagger';
 import type { Request } from 'express';
 import { randomUUID } from 'node:crypto';
 import { AuthService, LoginResult } from './auth.service';
 import { AuthenticatedPrincipal, AuthTokenPair, MeResult } from './auth.types';
-import { LoginDto, RefreshTokenDto } from './dto';
+import { ChangePasswordDto, LoginDto, RefreshTokenDto } from './dto';
 import { JwtAuthGuard } from './jwt-auth.guard';
 
 type AuthenticatedRequest = Request & { user: AuthenticatedPrincipal };
@@ -38,6 +45,20 @@ export class AuthController {
     @ApiUnauthorizedResponse({ description: '登录状态无效或已过期' })
     async logout(@Req() request: AuthenticatedRequest): Promise<void> {
         await this.authService.logout(request.user, getRequestMetadata(request));
+    }
+
+    @Post('change-password')
+    @UseGuards(JwtAuthGuard)
+    @ApiBearerAuth()
+    @HttpCode(HttpStatus.NO_CONTENT)
+    @ApiNoContentResponse({ description: '密码修改成功，其他租户会话已撤销' })
+    @ApiBadRequestResponse({ description: '新密码与当前密码相同或请求字段校验失败' })
+    @ApiUnauthorizedResponse({ description: '登录状态无效、已过期或当前密码错误' })
+    async changePassword(
+        @Body() input: ChangePasswordDto,
+        @Req() request: AuthenticatedRequest,
+    ): Promise<void> {
+        await this.authService.changePassword(request.user, input, getRequestMetadata(request));
     }
 
     @Get('me')

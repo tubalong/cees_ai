@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CEES AI API
-  version: 0.7.0
+  version: 0.12.0
   description: 以本文件为唯一事实源的公开 API 契约。资源与操作按 docs/api 约定补充。
 
 servers:
@@ -103,13 +103,13 @@ paths:
             schema:
               $ref: "#/components/schemas/AcceptTenantInvitationRequest"
       responses:
-        200:
+        '200':
           description: 租户账号激活成功
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/TenantInvitationAcceptanceResponseEnvelope"
-        401:
+        '401':
           description: 激活令牌无效、过期或已使用
           content:
             application/json:
@@ -151,6 +151,96 @@ paths:
                 $ref: "#/components/schemas/MeResponseEnvelope"
         "401":
           description: Access Token 无效或 Session 已失效
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /auth/change-password:
+    post:
+      summary: 修改当前租户成员密码
+      operationId: authChangePassword
+      tags:
+        - Auth
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangePasswordRequest"
+      responses:
+        "204":
+          description: 密码修改成功，其他租户会话已撤销
+        "400":
+          description: 请求字段校验失败或新旧密码相同
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "401":
+          description: 登录状态无效、已过期或当前密码错误
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /users/me/profile:
+    get:
+      summary: 获取当前租户内的个人资料
+      operationId: userProfileGetCurrent
+      tags:
+        - User
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 当前用户在当前租户内的个人资料
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfileResponseEnvelope"
+        "401":
+          description: 登录状态无效或已过期
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+    patch:
+      summary: 修改当前租户内的个人资料
+      operationId: userProfileUpdateCurrent
+      tags:
+        - User
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateUserProfileRequest"
+      responses:
+        "200":
+          description: 修改后的个人资料
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfileResponseEnvelope"
+        "400":
+          description: 请求字段校验失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "401":
+          description: 登录状态无效或已过期
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "409":
+          description: 个人资料版本冲突
           content:
             application/json:
               schema:
@@ -227,6 +317,443 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /tenants/current/departments:
+    get:
+      summary: 查询当前租户部门树
+      operationId: departmentListTree
+      tags:
+        - Organization
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/DepartmentStatus'
+      responses:
+        '200':
+          description: 当前租户部门树
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DepartmentTreeResponseEnvelope'
+        '401':
+          description: 登录状态无效或已过期
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '403':
+          description: 缺少 department.read 权限
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+    post:
+      summary: 创建当前租户部门
+      operationId: departmentCreate
+      tags:
+        - Organization
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDepartmentRequest'
+      responses:
+        '201':
+          description: 已创建部门
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DepartmentResponseEnvelope'
+        '400':
+          description: 请求字段或部门层级无效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '401':
+          description: 登录状态无效或已过期
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '403':
+          description: 缺少 department.create 权限
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '404':
+          description: 父部门不存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '409':
+          description: 同级部门名称冲突
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+  /tenants/current/organization-imports/validate:
+    post:
+      summary: 校验组织架构和成员批量导入数据
+      description: 不写入正式业务数据，返回部门复用或创建预览、成员有效角色及逐项校验问题。
+      operationId: organizationImportValidate
+      tags:
+        - Organization
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrganizationImportRequest'
+      responses:
+        '200':
+          description: 批量导入校验结果；业务数据无效时 valid 为 false
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationImportValidationResponseEnvelope'
+        '400':
+          description: 请求结构、数组数量或字段格式无效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '401':
+          description: 登录状态无效或已过期
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '403':
+          description: 缺少 department.create、member.invite 或 role.assign 权限
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+  /tenants/current/organization-imports/confirm:
+    post:
+      summary: 确认导入组织架构和成员
+      description: 在可串行化事务中重新校验并创建部门、待激活成员、角色关系和一次性激活凭证。
+      operationId: organizationImportConfirm
+      tags:
+        - Organization
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrganizationImportRequest'
+      responses:
+        '201':
+          description: 已完成批量导入；激活令牌只在本次响应返回
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationImportResultResponseEnvelope'
+        '400':
+          description: 批量数据校验失败，details 返回逐项问题
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '401':
+          description: 登录状态无效或已过期
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '403':
+          description: 缺少 department.create、member.invite 或 role.assign 权限，或尝试批量分配租户管理员角色
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '409':
+          description: 并发导入导致部门或账号冲突
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+  /tenants/current/departments/{departmentId}:
+    parameters:
+      - name: departmentId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      summary: 获取当前租户部门详情
+      operationId: departmentGet
+      tags:
+        - Organization
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 部门详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DepartmentResponseEnvelope'
+        '401':
+          description: 登录状态无效或已过期
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '403':
+          description: 缺少 department.read 权限
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '404':
+          description: 当前租户内部门不存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+    patch:
+      summary: 修改当前租户部门
+      operationId: departmentUpdate
+      tags:
+        - Organization
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateDepartmentRequest'
+      responses:
+        '200':
+          description: 修改后的部门
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DepartmentResponseEnvelope'
+        '400':
+          description: 请求字段、父子关系或部门层级无效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '401':
+          description: 登录状态无效或已过期
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '403':
+          description: 缺少 department.update 权限
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '404':
+          description: 当前部门或父部门不存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '409':
+          description: 版本或同级部门名称冲突
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+    delete:
+      summary: 删除当前租户部门
+      operationId: departmentDelete
+      tags:
+        - Organization
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: version
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        '204':
+          description: 部门已删除
+        '400':
+          description: 版本参数无效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '401':
+          description: 登录状态无效或已过期
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '403':
+          description: 缺少 department.delete 权限
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '404':
+          description: 当前租户内部门不存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '409':
+          description: 版本冲突或部门仍有子部门、成员
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+  /tenants/current/departments/{departmentId}/members:
+    parameters:
+      - name: departmentId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      summary: 查询当前租户部门成员
+      operationId: departmentListMembers
+      tags:
+        - Organization
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: keyword
+          in: query
+          schema:
+            type: string
+            maxLength: 100
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/MemberStatus'
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: cursor
+          in: query
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: 当前部门成员列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantMemberListResponseEnvelope'
+        '400':
+          description: 查询参数校验失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '401':
+          description: 登录状态无效或已过期
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '403':
+          description: 缺少 department.read 或 member.read 权限
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '404':
+          description: 当前租户内部门不存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+  /tenants/current/members/{membershipId}/department:
+    parameters:
+      - name: membershipId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    put:
+      summary: 调整当前租户成员部门
+      operationId: departmentAssignMember
+      tags:
+        - Organization
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssignTenantMemberDepartmentRequest'
+      responses:
+        '200':
+          description: 调整部门后的成员
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantMemberResponseEnvelope'
+        '400':
+          description: 请求字段校验失败或目标部门已停用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '401':
+          description: 登录状态无效或已过期
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '403':
+          description: 缺少 department.member.assign 权限
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '404':
+          description: 当前租户内成员或部门不存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '409':
+          description: 成员版本冲突
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
 
   /tenants/current/members:
     get:
@@ -362,7 +889,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponseEnvelope"
         "403":
-          description: 缺少 member.update 权限
+          description: 缺少 member.update 或 department.member.assign 权限
           content:
             application/json:
               schema:
@@ -487,7 +1014,7 @@ paths:
             schema:
               $ref: "#/components/schemas/AccountSuggestionRequest"
       responses:
-        200:
+        '200':
           description: 账号建议
           content:
             application/json:
@@ -515,13 +1042,13 @@ paths:
             schema:
               $ref: "#/components/schemas/UpdateTenantMemberAccountRequest"
       responses:
-        200:
+        '200':
           description: 修改账号后的成员
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/TenantMemberResponseEnvelope"
-        409:
+        '409':
           description: 账号已存在或版本冲突
           content:
             application/json:
@@ -543,13 +1070,13 @@ paths:
             type: string
             format: uuid
       responses:
-        201:
+        '201':
           description: 凭证重置成功；激活令牌只在本次响应返回
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/TenantInvitationCreatedResponseEnvelope"
-        409:
+        '409':
           description: 不能重置自己或最后一名有效管理员
           content:
             application/json:
@@ -1091,6 +1618,138 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponseEnvelope"
 
+  /upload-sessions:
+    post:
+      summary: 创建单文件 COS 直传会话
+      description: >-
+        为当前登录成员生成仅绑定单一 COS 对象键的短时 PUT URL。对象键由服务端按照
+        cees/{environment}/tenants/{tenantId}/files/{yyyy}/{mm}/{fileId}/source 生成，
+        客户端不得指定租户、Bucket 或对象键。
+      operationId: fileCreateUploadSession
+      tags: [File]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: 同一成员重试同一请求时复用的幂等键
+          schema:
+            type: string
+            minLength: 8
+            maxLength: 128
+            pattern: ^[A-Za-z0-9._:-]+$
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateUploadSessionRequest"
+      responses:
+        "201":
+          description: 已创建上传会话并签发短时 PUT URL
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadSessionResponseEnvelope"
+        "400":
+          description: 请求字段、文件类型或幂等键无效
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "401":
+          description: 登录状态无效或已过期
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "409":
+          description: 幂等键已用于不同请求或对应会话已不可继续上传
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "410":
+          description: 幂等键对应的待上传会话已经过期
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "413":
+          description: 文件超过当前技术上限
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "502":
+          description: COS 上传地址签发失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /upload-sessions/{uploadSessionId}/complete:
+    post:
+      summary: 校验并完成 COS 直传会话
+      description: >-
+        向 COS 发起 HEAD 请求校验对象存在、大小和 Content-Type，校验通过后创建正式文件记录。
+        客户端调用本接口不代表服务端会信任客户端声明的上传结果。
+      operationId: fileCompleteUploadSession
+      tags: [File]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: uploadSessionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 上传对象校验通过并已登记为正式文件
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileMetadataResponseEnvelope"
+        "400":
+          description: 上传会话 ID 不是有效 UUID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "401":
+          description: 登录状态无效或已过期
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "404":
+          description: 当前成员的上传会话不存在
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "409":
+          description: COS 对象不存在、元数据不匹配或会话状态冲突
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "410":
+          description: 上传会话已过期
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "502":
+          description: COS 暂时不可用或返回无效响应
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
   /resources/{resourceId}/acl:
     parameters:
       - name: resourceId
@@ -1462,6 +2121,35 @@ paths:
                 $ref: "#/components/schemas/PlatformMeResponseEnvelope"
         "401":
           description: 平台登录状态无效或已过期
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /platform/auth/change-password:
+    post:
+      summary: 修改当前平台管理员密码
+      operationId: platformAuthChangePassword
+      tags: [Platform Auth]
+      security:
+        - platformBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangePasswordRequest"
+      responses:
+        "204":
+          description: 密码修改成功，其他平台会话已撤销
+        "400":
+          description: 请求字段校验失败或新旧密码相同
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "401":
+          description: 平台登录状态无效、已过期或当前密码错误
           content:
             application/json:
               schema:
@@ -1844,6 +2532,451 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponseEnvelope"
 
+  /projects:
+    get:
+      summary: 查询当前成员可见的项目
+      operationId: projectList
+      tags: [Project]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: keyword
+          in: query
+          schema: { type: string, maxLength: 100 }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/ProjectStatus' }
+        - name: departmentId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: ownerMembershipId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: includeArchived
+          in: query
+          schema: { type: boolean, default: false }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - name: cursor
+          in: query
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: 项目列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProjectListResponseEnvelope' }
+        '403':
+          description: 缺少 project.read 权限
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
+    post:
+      summary: 创建项目并设置负责人
+      operationId: projectCreate
+      tags: [Project]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateProjectRequest' }
+      responses:
+        '201':
+          description: 项目已创建
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProjectResponseEnvelope' }
+        '403':
+          description: 缺少 project.create 权限或无权指定其他负责人
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
+        '409':
+          description: 项目编码已存在
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
+
+  /projects/{projectId}:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: 查询项目详情
+      operationId: projectGet
+      tags: [Project]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 项目详情
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProjectResponseEnvelope' }
+        '404':
+          description: 项目不存在或当前成员不可见
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
+    patch:
+      summary: 修改未完成项目的核心信息
+      operationId: projectUpdate
+      tags: [Project]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateProjectRequest' }
+      responses:
+        '200':
+          description: 项目已修改
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProjectResponseEnvelope' }
+        '409':
+          description: 项目已只读、编码重复或版本冲突
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
+    delete:
+      summary: 删除没有业务数据的错误项目
+      operationId: projectDelete
+      tags: [Project]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: version
+          in: query
+          required: true
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '204': { description: 项目已软删除 }
+        '409':
+          description: 项目存在任务或版本冲突
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
+
+  /projects/{projectId}/members:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: 查询项目成员
+      operationId: projectMemberList
+      tags: [Project]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 项目成员列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProjectMemberListResponseEnvelope' }
+    post:
+      summary: 添加项目成员
+      operationId: projectMemberAdd
+      tags: [Project]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AddProjectMemberRequest' }
+      responses:
+        '201':
+          description: 项目成员已添加
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProjectMemberResponseEnvelope' }
+        '409':
+          description: 项目已只读或成员已经存在
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
+
+  /projects/{projectId}/members/{membershipId}:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: membershipId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    patch:
+      summary: 修改项目成员角色
+      operationId: projectMemberUpdate
+      tags: [Project]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateProjectMemberRequest' }
+      responses:
+        '200':
+          description: 项目成员角色已修改
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProjectMemberResponseEnvelope' }
+        '409':
+          description: 不能通过成员接口修改负责人、项目已只读或版本冲突
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
+    delete:
+      summary: 移除项目成员
+      operationId: projectMemberRemove
+      tags: [Project]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: version
+          in: query
+          required: true
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '204': { description: 项目成员已移除 }
+        '409':
+          description: 不能移除负责人、项目已只读或版本冲突
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
+
+  /projects/{projectId}/owner:
+    put:
+      summary: 转移项目负责人
+      operationId: projectTransferOwner
+      tags: [Project]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TransferProjectOwnerRequest' }
+      responses:
+        '200':
+          description: 项目负责人已转移
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProjectResponseEnvelope' }
+        '409':
+          description: 项目已只读、目标不是项目成员或版本冲突
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
+
+  /projects/{projectId}/start:
+    post:
+      summary: 启动规划中的项目
+      operationId: projectStart
+      tags: [Project]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProjectVersionRequest' }
+      responses:
+        '200':
+          description: 项目已启动
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProjectResponseEnvelope' }
+        '409': { description: 状态或版本冲突 }
+
+  /projects/{projectId}/pause:
+    post:
+      summary: 暂停进行中的项目
+      operationId: projectPause
+      tags: [Project]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProjectVersionRequest' }
+      responses:
+        '200':
+          description: 项目已暂停
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProjectResponseEnvelope' }
+        '409': { description: 状态或版本冲突 }
+
+  /projects/{projectId}/resume:
+    post:
+      summary: 恢复暂停中的项目
+      operationId: projectResume
+      tags: [Project]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProjectVersionRequest' }
+      responses:
+        '200':
+          description: 项目已恢复
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProjectResponseEnvelope' }
+        '409': { description: 状态或版本冲突 }
+
+  /projects/{projectId}/complete:
+    post:
+      summary: 完成项目并进入只读状态
+      operationId: projectComplete
+      tags: [Project]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CompleteProjectRequest' }
+      responses:
+        '200':
+          description: 项目已完成
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProjectResponseEnvelope' }
+        '409': { description: 项目存在未完成任务、状态或版本冲突 }
+
+  /projects/{projectId}/reopen:
+    post:
+      summary: 重新开启已完成项目
+      operationId: projectReopen
+      tags: [Project]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProjectReasonRequest' }
+      responses:
+        '200':
+          description: 项目已重新开启
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProjectResponseEnvelope' }
+        '409': { description: 状态或版本冲突 }
+
+  /projects/{projectId}/cancel:
+    post:
+      summary: 取消未完成项目
+      operationId: projectCancel
+      tags: [Project]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProjectReasonRequest' }
+      responses:
+        '200':
+          description: 项目已取消
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProjectResponseEnvelope' }
+        '409': { description: 状态或版本冲突 }
+
+  /projects/{projectId}/archive:
+    post:
+      summary: 归档已完成项目
+      operationId: projectArchive
+      tags: [Project]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProjectVersionRequest' }
+      responses:
+        '200':
+          description: 项目已归档
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProjectResponseEnvelope' }
+        '409': { description: 状态或版本冲突 }
+
+  /projects/{projectId}/restore:
+    post:
+      summary: 将归档项目恢复为已完成
+      operationId: projectRestore
+      tags: [Project]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProjectVersionRequest' }
+      responses:
+        '200':
+          description: 项目已恢复为已完成
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProjectResponseEnvelope' }
+        '409': { description: 状态或版本冲突 }
+
   /tenants/current/invitations/{invitationId}:
     delete:
       summary: 撤销当前租户成员邀请
@@ -1874,6 +3007,232 @@ components:
       bearerFormat: JWT
 
   schemas:
+    ProjectStatus:
+      type: string
+      enum: [PLANNING, ACTIVE, PAUSED, COMPLETED, CANCELLED, ARCHIVED]
+
+    ProjectMemberRole:
+      type: string
+      enum: [OWNER, MANAGER, MEMBER]
+
+    CreateProjectRequest:
+      type: object
+      additionalProperties: false
+      required: [code, name]
+      properties:
+        code:
+          type: string
+          pattern: '^[A-Za-z0-9_-]+$'
+          minLength: 2
+          maxLength: 32
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        description:
+          type: [string, 'null']
+          maxLength: 2000
+        departmentId:
+          type: [string, 'null']
+          format: uuid
+        ownerMembershipId:
+          type: string
+          format: uuid
+          description: 不传时默认当前租户成员；指定其他成员需要 project.manage_all
+        startsAt:
+          type: [string, 'null']
+          format: date-time
+        endsAt:
+          type: [string, 'null']
+          format: date-time
+
+    UpdateProjectRequest:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        code:
+          type: string
+          pattern: '^[A-Za-z0-9_-]+$'
+          minLength: 2
+          maxLength: 32
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        description:
+          type: [string, 'null']
+          maxLength: 2000
+        departmentId:
+          type: [string, 'null']
+          format: uuid
+        startsAt:
+          type: [string, 'null']
+          format: date-time
+        endsAt:
+          type: [string, 'null']
+          format: date-time
+        version:
+          type: integer
+          minimum: 1
+
+    ProjectVersionRequest:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        version:
+          type: integer
+          minimum: 1
+
+    ProjectReasonRequest:
+      type: object
+      additionalProperties: false
+      required: [reason, version]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+        version:
+          type: integer
+          minimum: 1
+
+    CompleteProjectRequest:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        completionSummary:
+          type: [string, 'null']
+          maxLength: 2000
+        version:
+          type: integer
+          minimum: 1
+
+    TransferProjectOwnerRequest:
+      type: object
+      additionalProperties: false
+      required: [membershipId, version]
+      properties:
+        membershipId:
+          type: string
+          format: uuid
+        version:
+          type: integer
+          minimum: 1
+
+    AddProjectMemberRequest:
+      type: object
+      additionalProperties: false
+      required: [membershipId]
+      properties:
+        membershipId:
+          type: string
+          format: uuid
+        role:
+          type: string
+          enum: [MANAGER, MEMBER]
+          default: MEMBER
+
+    UpdateProjectMemberRequest:
+      type: object
+      additionalProperties: false
+      required: [role, version]
+      properties:
+        role:
+          type: string
+          enum: [MANAGER, MEMBER]
+        version:
+          type: integer
+          minimum: 1
+
+    ProjectMemberSummary:
+      type: object
+      required: [id, membershipId, account, displayName, role, joinedAt, version]
+      properties:
+        id: { type: string, format: uuid }
+        membershipId: { type: string, format: uuid }
+        account: { type: string }
+        displayName: { type: string }
+        departmentId:
+          type: [string, 'null']
+          format: uuid
+        role: { $ref: '#/components/schemas/ProjectMemberRole' }
+        joinedAt: { type: string, format: date-time }
+        version: { type: integer, minimum: 1 }
+
+    ProjectSummary:
+      type: object
+      required:
+        - id
+        - code
+        - name
+        - status
+        - owner
+        - currentMemberRole
+        - memberCount
+        - taskCount
+        - createdAt
+        - updatedAt
+        - version
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
+        description: { type: [string, 'null'] }
+        status: { $ref: '#/components/schemas/ProjectStatus' }
+        departmentId:
+          type: [string, 'null']
+          format: uuid
+        owner:
+          oneOf:
+            - $ref: '#/components/schemas/ProjectMemberSummary'
+            - type: 'null'
+          description: 仅无法推断负责人的迁移旧数据可能为空；新项目始终存在负责人
+        currentMemberRole:
+          oneOf:
+            - $ref: '#/components/schemas/ProjectMemberRole'
+            - type: 'null'
+          description: project.manage_all 跨项目访问时可能为空
+        startsAt:
+          type: [string, 'null']
+          format: date-time
+        endsAt:
+          type: [string, 'null']
+          format: date-time
+        completedAt:
+          type: [string, 'null']
+          format: date-time
+        completedByMembershipId:
+          type: [string, 'null']
+          format: uuid
+        completionSummary: { type: [string, 'null'] }
+        memberCount: { type: integer, minimum: 0 }
+        taskCount: { type: integer, minimum: 0 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        version: { type: integer, minimum: 1 }
+
+    ProjectList:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/ProjectSummary' }
+        nextCursor:
+          type: [string, 'null']
+          format: uuid
+
+    ProjectMemberList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/ProjectMemberSummary' }
+
     TenantStatus:
       type: string
       enum:
@@ -2387,6 +3746,24 @@ components:
           minLength: 32
           maxLength: 512
 
+    ChangePasswordRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - currentPassword
+        - newPassword
+      properties:
+        currentPassword:
+          type: string
+          format: password
+          minLength: 8
+          maxLength: 128
+        newPassword:
+          type: string
+          format: password
+          minLength: 8
+          maxLength: 128
+
     AuthUser:
       type: object
       required:
@@ -2435,6 +3812,72 @@ components:
           type: array
           items:
             type: string
+
+    UserProfileDepartment:
+      type: object
+      required:
+        - id
+        - name
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+
+    UserProfile:
+      type: object
+      required:
+        - userId
+        - membershipId
+        - tenantId
+        - account
+        - displayName
+        - department
+        - version
+        - updatedAt
+      properties:
+        userId:
+          type: string
+          format: uuid
+        membershipId:
+          type: string
+          format: uuid
+        tenantId:
+          type: string
+          format: uuid
+        account:
+          type: string
+          description: 当前租户登录账号，只读
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 120
+        department:
+          oneOf:
+            - $ref: "#/components/schemas/UserProfileDepartment"
+            - type: "null"
+        version:
+          type: integer
+          minimum: 1
+        updatedAt:
+          type: string
+          format: date-time
+
+    UpdateUserProfileRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - displayName
+        - version
+      properties:
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 120
+        version:
+          type: integer
+          minimum: 1
 
     MemberStatus:
       type: string
@@ -2573,6 +4016,415 @@ components:
         status:
           type: string
           enum: [ACTIVE, DISABLED]
+        version:
+          type: integer
+          minimum: 1
+
+    DepartmentStatus:
+      type: string
+      enum: [ACTIVE, DISABLED]
+
+    DepartmentSummary:
+      type: object
+      required:
+        - id
+        - parentId
+        - name
+        - description
+        - sortOrder
+        - status
+        - memberCount
+        - childCount
+        - version
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        parentId:
+          type:
+            - string
+            - 'null'
+          format: uuid
+        name:
+          type: string
+        description:
+          type:
+            - string
+            - 'null'
+        sortOrder:
+          type: integer
+        status:
+          $ref: '#/components/schemas/DepartmentStatus'
+        memberCount:
+          type: integer
+          minimum: 0
+        childCount:
+          type: integer
+          minimum: 0
+        version:
+          type: integer
+          minimum: 1
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    DepartmentTreeNode:
+      allOf:
+        - $ref: '#/components/schemas/DepartmentSummary'
+        - type: object
+          required:
+            - children
+          properties:
+            children:
+              type: array
+              items:
+                $ref: '#/components/schemas/DepartmentTreeNode'
+
+    DepartmentTree:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/DepartmentTreeNode'
+
+    CreateDepartmentRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        parentId:
+          type:
+            - string
+            - 'null'
+          format: uuid
+          default: null
+        description:
+          type:
+            - string
+            - 'null'
+          maxLength: 500
+          default: null
+        sortOrder:
+          type: integer
+          minimum: 0
+          maximum: 2147483647
+          default: 0
+
+    OrganizationImportDepartmentInput:
+      type: object
+      additionalProperties: false
+      required: [clientRef, name]
+      properties:
+        clientRef:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: '^[A-Za-z0-9_-]+$'
+          description: 前端为本次导入生成的临时标识，不落库
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+          description: 单级部门名称，不能包含斜杠
+        parentClientRef:
+          type: [string, 'null']
+          minLength: 1
+          maxLength: 100
+          pattern: '^[A-Za-z0-9_-]+$'
+          default: null
+        description:
+          type: [string, 'null']
+          maxLength: 500
+          default: null
+        sortOrder:
+          type: integer
+          minimum: 0
+          maximum: 2147483647
+          default: 0
+
+    OrganizationImportMemberInput:
+      type: object
+      additionalProperties: false
+      required: [clientRef, account, displayName, departmentClientRef]
+      properties:
+        clientRef:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: '^[A-Za-z0-9_-]+$'
+        account:
+          type: string
+          pattern: '^[A-Za-z0-9]+$'
+          minLength: 3
+          maxLength: 32
+          description: 前端完成拼音建议和冲突裁定后的最终账号
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 120
+        departmentClientRef:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: '^[A-Za-z0-9_-]+$'
+        roleIds:
+          type: array
+          minItems: 1
+          maxItems: 100
+          uniqueItems: true
+          items:
+            type: string
+            format: uuid
+          description: 不传时使用批次 defaultRoleIds；第一版禁止 tenant_admin
+
+    OrganizationImportRequest:
+      type: object
+      additionalProperties: false
+      required: [defaultRoleIds, departments, members]
+      properties:
+        defaultRoleIds:
+          type: array
+          minItems: 1
+          maxItems: 100
+          uniqueItems: true
+          items:
+            type: string
+            format: uuid
+          description: 批次默认角色；第一版禁止 tenant_admin
+        departments:
+          type: array
+          minItems: 1
+          maxItems: 200
+          items:
+            $ref: '#/components/schemas/OrganizationImportDepartmentInput'
+        members:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            $ref: '#/components/schemas/OrganizationImportMemberInput'
+        activationExpiresInDays:
+          type: integer
+          minimum: 1
+          maximum: 30
+          default: 7
+
+    OrganizationImportDepartmentAction:
+      type: string
+      enum: [CREATE, REUSE]
+
+    OrganizationImportIssueScope:
+      type: string
+      enum: [REQUEST, DEPARTMENT, MEMBER]
+
+    OrganizationImportIssue:
+      type: object
+      required: [scope, code, message]
+      properties:
+        scope:
+          $ref: '#/components/schemas/OrganizationImportIssueScope'
+        clientRef:
+          type: [string, 'null']
+        field:
+          type: [string, 'null']
+        code:
+          type: string
+        message:
+          type: string
+
+    OrganizationImportSummary:
+      type: object
+      required: [departmentCount, departmentCreateCount, departmentReuseCount, memberCount]
+      properties:
+        departmentCount:
+          type: integer
+          minimum: 0
+        departmentCreateCount:
+          type: integer
+          minimum: 0
+        departmentReuseCount:
+          type: integer
+          minimum: 0
+        memberCount:
+          type: integer
+          minimum: 0
+
+    OrganizationImportDepartmentPreview:
+      type: object
+      required: [clientRef, action, departmentId, path]
+      properties:
+        clientRef:
+          type: string
+        action:
+          $ref: '#/components/schemas/OrganizationImportDepartmentAction'
+        departmentId:
+          type: [string, 'null']
+          format: uuid
+        path:
+          type: string
+
+    OrganizationImportMemberPreview:
+      type: object
+      required: [clientRef, account, displayName, departmentClientRef, departmentPath, effectiveRoleIds]
+      properties:
+        clientRef:
+          type: string
+        account:
+          type: string
+        displayName:
+          type: string
+        departmentClientRef:
+          type: string
+        departmentPath:
+          type: string
+        effectiveRoleIds:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+            format: uuid
+
+    OrganizationImportValidation:
+      type: object
+      required: [valid, summary, departments, members, issues]
+      properties:
+        valid:
+          type: boolean
+        summary:
+          $ref: '#/components/schemas/OrganizationImportSummary'
+        departments:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrganizationImportDepartmentPreview'
+        members:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrganizationImportMemberPreview'
+        issues:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrganizationImportIssue'
+
+    OrganizationImportDepartmentResult:
+      type: object
+      required: [clientRef, departmentId, action, path]
+      properties:
+        clientRef:
+          type: string
+        departmentId:
+          type: string
+          format: uuid
+        action:
+          $ref: '#/components/schemas/OrganizationImportDepartmentAction'
+        path:
+          type: string
+
+    OrganizationImportMemberCredential:
+      type: object
+      required:
+        - clientRef
+        - membershipId
+        - displayName
+        - account
+        - departmentId
+        - departmentPath
+        - tenantCode
+        - activationToken
+        - activationExpiresAt
+      properties:
+        clientRef:
+          type: string
+        membershipId:
+          type: string
+          format: uuid
+        displayName:
+          type: string
+        account:
+          type: string
+        departmentId:
+          type: string
+          format: uuid
+        departmentPath:
+          type: string
+        tenantCode:
+          type: string
+        activationToken:
+          type: string
+          description: 一次性明文激活令牌，仅在确认导入响应返回
+        activationExpiresAt:
+          type: string
+          format: date-time
+
+    OrganizationImportResult:
+      type: object
+      required: [summary, departments, members]
+      properties:
+        summary:
+          $ref: '#/components/schemas/OrganizationImportSummary'
+        departments:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrganizationImportDepartmentResult'
+        members:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrganizationImportMemberCredential'
+
+    UpdateDepartmentRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - version
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        parentId:
+          type:
+            - string
+            - 'null'
+          format: uuid
+        description:
+          type:
+            - string
+            - 'null'
+          maxLength: 500
+        sortOrder:
+          type: integer
+          minimum: 0
+          maximum: 2147483647
+        status:
+          $ref: '#/components/schemas/DepartmentStatus'
+        version:
+          type: integer
+          minimum: 1
+
+    AssignTenantMemberDepartmentRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - departmentId
+        - version
+      properties:
+        departmentId:
+          type:
+            - string
+            - 'null'
+          format: uuid
         version:
           type: integer
           minimum: 1
@@ -2874,6 +4726,103 @@ components:
           type: integer
           minimum: 1
 
+    FileUploadPurpose:
+      type: string
+      description: 第一版仅开放普通附件；后续用途以兼容枚举值扩展
+      enum: [attachment]
+
+    UploadMode:
+      type: string
+      enum: [single]
+
+    UploadSessionStatus:
+      type: string
+      enum: [PENDING, COMPLETED, EXPIRED, FAILED]
+
+    CreateUploadSessionRequest:
+      type: object
+      additionalProperties: false
+      required: [purpose, fileName, contentType, sizeBytes]
+      properties:
+        purpose:
+          $ref: "#/components/schemas/FileUploadPurpose"
+        fileName:
+          type: string
+          minLength: 1
+          maxLength: 255
+          description: 仅作为元数据保存，不参与 COS 对象键生成
+        contentType:
+          type: string
+          minLength: 3
+          maxLength: 255
+        sizeBytes:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 524288000
+          description: 系统硬上限为 500 MiB，环境配置可以设置更低的实际上限
+
+    UploadInstruction:
+      type: object
+      required: [method, url, headers]
+      properties:
+        method:
+          type: string
+          const: PUT
+        url:
+          type: string
+          format: uri
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+          description: 客户端上传时必须原样携带的请求头
+
+    UploadSession:
+      type: object
+      required: [uploadSessionId, fileId, purpose, uploadMode, status, expiresAt, upload]
+      properties:
+        uploadSessionId:
+          type: string
+          format: uuid
+        fileId:
+          type: string
+          format: uuid
+        purpose:
+          $ref: "#/components/schemas/FileUploadPurpose"
+        uploadMode:
+          $ref: "#/components/schemas/UploadMode"
+        status:
+          $ref: "#/components/schemas/UploadSessionStatus"
+        expiresAt:
+          type: string
+          format: date-time
+        upload:
+          $ref: "#/components/schemas/UploadInstruction"
+
+    FileMetadata:
+      type: object
+      required: [id, purpose, fileName, contentType, sizeBytes, etag, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        purpose:
+          $ref: "#/components/schemas/FileUploadPurpose"
+        fileName:
+          type: string
+        contentType:
+          type: string
+        sizeBytes:
+          type: integer
+          format: int64
+          minimum: 1
+        etag:
+          type: [string, "null"]
+        createdAt:
+          type: string
+          format: date-time
+
     AclSubjectType:
       type: string
       enum: [MEMBERSHIP, ROLE]
@@ -3119,6 +5068,22 @@ components:
             - string
             - "null"
 
+    UserProfileResponseEnvelope:
+      type: object
+      required:
+        - success
+        - data
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: "#/components/schemas/UserProfile"
+        requestId:
+          type:
+            - string
+            - "null"
+
     TenantResponseEnvelope:
       type: object
       required:
@@ -3166,6 +5131,106 @@ components:
           type:
             - string
             - "null"
+
+    OrganizationImportValidationResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: '#/components/schemas/OrganizationImportValidation'
+        requestId:
+          type: [string, 'null']
+
+    OrganizationImportResultResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: '#/components/schemas/OrganizationImportResult'
+        requestId:
+          type: [string, 'null']
+
+    DepartmentResponseEnvelope:
+      type: object
+      required:
+        - success
+        - data
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: '#/components/schemas/DepartmentSummary'
+        requestId:
+          type:
+            - string
+            - 'null'
+
+    DepartmentTreeResponseEnvelope:
+      type: object
+      required:
+        - success
+        - data
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: '#/components/schemas/DepartmentTree'
+        requestId:
+          type:
+            - string
+            - 'null'
+
+    ProjectResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data: { $ref: '#/components/schemas/ProjectSummary' }
+        requestId:
+          type: [string, 'null']
+
+    ProjectListResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data: { $ref: '#/components/schemas/ProjectList' }
+        requestId:
+          type: [string, 'null']
+
+    ProjectMemberResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data: { $ref: '#/components/schemas/ProjectMemberSummary' }
+        requestId:
+          type: [string, 'null']
+
+    ProjectMemberListResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data: { $ref: '#/components/schemas/ProjectMemberList' }
+        requestId:
+          type: [string, 'null']
 
     PermissionListResponseEnvelope:
       type: object
@@ -3224,6 +5289,30 @@ components:
           const: true
         data:
           $ref: "#/components/schemas/DocumentList"
+        requestId:
+          type: [string, "null"]
+
+    UploadSessionResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: "#/components/schemas/UploadSession"
+        requestId:
+          type: [string, "null"]
+
+    FileMetadataResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: "#/components/schemas/FileMetadata"
         requestId:
           type: [string, "null"]
 

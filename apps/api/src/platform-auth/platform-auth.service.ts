@@ -1,4 +1,4 @@
-import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { AuditOutcome, PlatformAdministratorStatus, PlatformRole, UserStatus } from '@prisma/client';
 import * as argon2 from 'argon2';
@@ -9,6 +9,7 @@ import {
     platformJwtIssuer,
     requirePlatformAccessTokenSecret,
 } from '../auth/auth.config';
+import { ChangePasswordDto } from '../auth/dto';
 import { PrismaService } from '../database/prisma.service';
 import { normalizeAccount } from '../auth/account';
 import { PlatformLoginDto, PlatformRefreshTokenDto } from './dto';
@@ -244,6 +245,77 @@ export class PlatformAuthService {
         });
     }
 
+    async changePassword(
+        principal: PlatformAuthenticatedPrincipal,
+        input: ChangePasswordDto,
+        metadata: PlatformRequestMetadata,
+    ): Promise<void> {
+        const administrator = await this.prisma.platformAdministrator.findUnique({
+            where: { id: principal.platformAdministratorId },
+        });
+        if (
+            !administrator || administrator.deletedAt || administrator.status !== PlatformAdministratorStatus.ACTIVE
+            || administrator.userId !== principal.id
+        ) throw this.unauthorized();
+
+        if (!await this.verifyPassword(administrator.passwordHash, input.currentPassword)) {
+            await this.writePasswordChangeFailure(principal, metadata, 'CURRENT_PASSWORD_INVALID');
+            throw this.invalidCurrentPassword();
+        }
+        if (await this.verifyPassword(administrator.passwordHash, input.newPassword)) {
+            throw this.samePassword();
+        }
+
+        const passwordHash = await argon2.hash(input.newPassword);
+        const now = new Date();
+        await this.prisma.$transaction(async (transaction) => {
+            const updated = await transaction.platformAdministrator.updateMany({
+                where: {
+                    id: principal.platformAdministratorId,
+                    userId: principal.id,
+                    passwordHash: administrator.passwordHash,
+                    status: PlatformAdministratorStatus.ACTIVE,
+                    deletedAt: null,
+                },
+                data: {
+                    passwordHash,
+                    failedLoginCount: 0,
+                    lockedUntil: null,
+                    updatedBy: principal.id,
+                    version: { increment: 1 },
+                },
+            });
+            if (updated.count !== 1) throw this.invalidCurrentPassword();
+
+            const revoked = await transaction.platformAuthSession.updateMany({
+                where: {
+                    platformAdministratorId: principal.platformAdministratorId,
+                    userId: principal.id,
+                    id: { not: principal.sessionId },
+                    revokedAt: null,
+                },
+                data: { revokedAt: now, lastUsedAt: now },
+            });
+            await transaction.platformAuditLog.create({
+                data: {
+                    actorUserId: principal.id,
+                    actorPlatformAdministratorId: principal.platformAdministratorId,
+                    action: 'PLATFORM_PASSWORD_CHANGED',
+                    outcome: AuditOutcome.SUCCESS,
+                    resourceType: 'PLATFORM_ADMINISTRATOR',
+                    resourceId: principal.platformAdministratorId,
+                    requestId: metadata.requestId,
+                    ipAddress: metadata.ipAddress,
+                    userAgent: metadata.userAgent,
+                    metadata: {
+                        currentSessionId: principal.sessionId,
+                        revokedOtherSessionCount: revoked.count,
+                    },
+                },
+            });
+        });
+    }
+
     me(principal: PlatformAuthenticatedPrincipal): PlatformMeResult {
         return {
             administrator: {
@@ -332,6 +404,31 @@ export class PlatformAuthService {
         }
     }
 
+    private async writePasswordChangeFailure(
+        principal: PlatformAuthenticatedPrincipal,
+        metadata: PlatformRequestMetadata,
+        reason: string,
+    ): Promise<void> {
+        try {
+            await this.prisma.platformAuditLog.create({
+                data: {
+                    actorUserId: principal.id,
+                    actorPlatformAdministratorId: principal.platformAdministratorId,
+                    action: 'PLATFORM_PASSWORD_CHANGE_FAILED',
+                    outcome: AuditOutcome.FAILURE,
+                    resourceType: 'PLATFORM_ADMINISTRATOR',
+                    resourceId: principal.platformAdministratorId,
+                    requestId: metadata.requestId,
+                    ipAddress: metadata.ipAddress,
+                    userAgent: metadata.userAgent,
+                    metadata: { reason },
+                },
+            });
+        } catch (error) {
+            this.logger.error('Failed to write platform password change audit event', error instanceof Error ? error.stack : undefined);
+        }
+    }
+
     private async verifyDummyPassword(password: string): Promise<void> {
         await argon2.verify(await this.dummyPasswordHash, password).catch(() => false);
     }
@@ -351,6 +448,20 @@ export class PlatformAuthService {
         return new UnauthorizedException({
             code: 'PLATFORM_AUTH_INVALID_REFRESH_TOKEN',
             message: '平台刷新令牌无效或已过期',
+        });
+    }
+
+    private invalidCurrentPassword(): UnauthorizedException {
+        return new UnauthorizedException({
+            code: 'AUTH_CURRENT_PASSWORD_INVALID',
+            message: '当前密码错误',
+        });
+    }
+
+    private samePassword(): BadRequestException {
+        return new BadRequestException({
+            code: 'AUTH_NEW_PASSWORD_SAME_AS_CURRENT',
+            message: '新密码不能与当前密码相同',
         });
     }
 

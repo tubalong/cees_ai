@@ -1,7 +1,15 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Post, Req, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiNoContentResponse, ApiOkResponse, ApiTags, ApiUnauthorizedResponse } from '@nestjs/swagger';
+import {
+    ApiBadRequestResponse,
+    ApiBearerAuth,
+    ApiNoContentResponse,
+    ApiOkResponse,
+    ApiTags,
+    ApiUnauthorizedResponse,
+} from '@nestjs/swagger';
 import type { Request } from 'express';
 import { randomUUID } from 'node:crypto';
+import { ChangePasswordDto } from '../auth/dto';
 import { PlatformLoginDto, PlatformRefreshTokenDto } from './dto';
 import { PlatformAuthService } from './platform-auth.service';
 import {
@@ -42,6 +50,20 @@ export class PlatformAuthController {
     @ApiNoContentResponse({ description: '当前平台管理员会话已撤销' })
     logout(@Req() request: PlatformAuthenticatedRequest): Promise<void> {
         return this.platformAuthService.logout(request.user, getRequestMetadata(request));
+    }
+
+    @Post('change-password')
+    @UseGuards(PlatformJwtAuthGuard)
+    @ApiBearerAuth('platformBearerAuth')
+    @HttpCode(HttpStatus.NO_CONTENT)
+    @ApiNoContentResponse({ description: '密码修改成功，其他平台会话已撤销' })
+    @ApiBadRequestResponse({ description: '新密码与当前密码相同或请求字段校验失败' })
+    @ApiUnauthorizedResponse({ description: '平台登录状态无效、已过期或当前密码错误' })
+    changePassword(
+        @Body() input: ChangePasswordDto,
+        @Req() request: PlatformAuthenticatedRequest,
+    ): Promise<void> {
+        return this.platformAuthService.changePassword(request.user, input, getRequestMetadata(request));
     }
 
     @Get('me')

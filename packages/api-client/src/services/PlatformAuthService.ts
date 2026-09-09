@@ -2,6 +2,7 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
+import type { ChangePasswordRequest } from '../models/ChangePasswordRequest';
 import type { PlatformLoginRequest } from '../models/PlatformLoginRequest';
 import type { PlatformLoginResponseEnvelope } from '../models/PlatformLoginResponseEnvelope';
 import type { PlatformMeResponseEnvelope } from '../models/PlatformMeResponseEnvelope';
@@ -77,6 +78,27 @@ export class PlatformAuthService {
             url: '/platform/auth/me',
             errors: {
                 401: `平台登录状态无效或已过期`,
+            },
+        });
+    }
+    /**
+     * 修改当前平台管理员密码
+     * @returns void
+     * @throws ApiError
+     */
+    public static platformAuthChangePassword({
+        requestBody,
+    }: {
+        requestBody: ChangePasswordRequest,
+    }): CancelablePromise<void> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/platform/auth/change-password',
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                400: `请求字段校验失败或新旧密码相同`,
+                401: `平台登录状态无效、已过期或当前密码错误`,
             },
         });
     }

@@ -1,9 +1,6 @@
 services:
   migrate:
     image: "${API_IMAGE:-cees-api}:${IMAGE_TAG:-latest}"
-    build:
-      context: ..
-      dockerfile: apps/api/Dockerfile
     command:
       - node
       - node_modules/prisma/build/index.js
@@ -17,9 +14,6 @@ services:
 
   ai-service:
     image: "${AI_SERVICE_IMAGE:-cees-ai-service}:${IMAGE_TAG:-latest}"
-    build:
-      context: ../apps/ai-service
-      dockerfile: Dockerfile
     environment:
       NODE_ENV: ${NODE_ENV}
       AI_INTERNAL_TOKEN: ${AI_INTERNAL_TOKEN}
@@ -40,7 +34,7 @@ services:
         - CMD
         - python
         - -c
-        - import urllib.request; urllib.request.urlopen('http://localhost:8000/ready', timeout=3)
+        - import http.client,sys; connection=http.client.HTTPConnection('localhost',8000,timeout=3); connection.request('GET','/ready'); response=connection.getresponse(); body=response.read().decode(); print(body); sys.exit(0 if response.status == 200 else 1)
       interval: 10s
       timeout: 5s
       retries: 12
@@ -48,9 +42,6 @@ services:
 
   api:
     image: "${API_IMAGE:-cees-api}:${IMAGE_TAG:-latest}"
-    build:
-      context: ..
-      dockerfile: apps/api/Dockerfile
     environment:
       NODE_ENV: ${NODE_ENV}
       DATABASE_URL: ${DATABASE_URL}
@@ -70,6 +61,7 @@ services:
       TENCENT_COS_BUCKET: ${TENCENT_COS_BUCKET}
       TENCENT_COS_OBJECT_PREFIX: ${TENCENT_COS_OBJECT_PREFIX}
       TENCENT_COS_SIGNED_URL_TTL_SECONDS: ${TENCENT_COS_SIGNED_URL_TTL_SECONDS}
+      TENCENT_COS_UPLOAD_MAX_BYTES: ${TENCENT_COS_UPLOAD_MAX_BYTES:-104857600}
       AI_SERVICE_URL: http://ai-service:8000
       AI_INTERNAL_TOKEN: ${AI_INTERNAL_TOKEN}
       API_PORT: "3000"
