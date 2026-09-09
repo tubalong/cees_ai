@@ -86,7 +86,7 @@ pnpm contracts:lint
 pnpm contracts:check
 ```
 
-本地 FastAPI 文档：`http://localhost:8000/docs`。Staging/Production 中 ai-service 只在应用 Compose 网络内监听，不映射应用服务器宿主机端口。
+本地 FastAPI 文档：`http://localhost:8000/docs`。Staging 通过 `AI_SERVICE_PORT`（默认 `8000`）映射 `/docs` 供受控调试访问；Production 只在应用 Compose 网络内监听，不映射宿主机端口。
 
 容器构建使用 ai-service 目录作为上下文：
 

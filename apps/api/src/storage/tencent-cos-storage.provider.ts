@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import COS from 'cos-nodejs-sdk-v5';
+import type COS = require('cos-nodejs-sdk-v5');
 import { STORAGE_SETTINGS, TENCENT_COS_CLIENT } from './storage.tokens';
 import {
     CreateSignedUploadInput,

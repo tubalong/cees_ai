@@ -134,10 +134,9 @@ Resource 作为统一授权根，ManagedDocument
 Membership ACL、Role ACL 或 `document.manage_all` 判断资源范围；ACL 不能绕过 RBAC。
 
 本地开发从宿主机运行 API、Prisma migration 或 seed 时，`DATABASE_URL` 使用
-`localhost:5432`。共享环境的 API 和 migration 位于独立应用服务器，通过腾讯云
-VPC 连接数据库服务器 `172.27.0.3`：Staging 使用端口 `15432`，Production 使用
-端口 `25432`。共享环境不得再使用只适用于同机 Compose 的 `postgres` 服务名。
-执行 `0002_platform_tenant_administration` 后，平台超级管理员使用独立平台 JWT 和
+`localhost:5432`。Staging 与 Production 部署在不同服务器或服务器组，均通过对应
+数据库主机的私网地址连接 PostgreSQL `5432` 和 Redis `6379`。跨 Compose 项目时
+不得使用只在单个 Compose 网络内有效的 `postgres` 或 `redis` 服务名。执行 `0002_platform_tenant_administration` 后，平台超级管理员使用独立平台 JWT 和
 PlatformAuthSession；平台可创建、停用、恢复租户并设置管理员。新用户通过一次性
 TenantInvitation 设置密码并加入租户，首位管理员接受邀请后激活待激活租户。
 

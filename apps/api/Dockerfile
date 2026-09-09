@@ -1,4 +1,5 @@
-FROM node:24-alpine AS build
+ARG NODE_BASE_IMAGE=node:24-alpine
+FROM ${NODE_BASE_IMAGE} AS build
 RUN corepack enable && corepack prepare pnpm@12.3.4 --activate
 WORKDIR /workspace
 ENV ELECTRON_SKIP_BINARY_DOWNLOAD=1
@@ -9,7 +10,7 @@ RUN pnpm --filter @cees/ai-service-client build \
     && DATABASE_URL=postgresql://cees:change_me@localhost:5432/cees_ai pnpm --filter @cees/api prisma:generate \
     && pnpm --filter @cees/api build
 
-FROM node:24-alpine
+FROM ${NODE_BASE_IMAGE}
 WORKDIR /workspace
 ENV NODE_ENV=production
 
