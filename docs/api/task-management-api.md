@@ -2,7 +2,7 @@
 
 > 状态：已实现
 > 最后同步：2026-09-09
-> 契约版本：`0.13.0`
+> 契约版本：`0.13.1`
 
 ## 1. 接口列表
 
@@ -64,9 +64,9 @@ Content-Type: application/json
 | `assigneeMembershipId` | 查询某成员负责或协作的任务 |
 | `parentId` | 查询指定父任务的直接子任务 |
 | `rootOnly` | 为 `true` 时只查询根任务，不能和 `parentId` 同时使用 |
-| `limit/cursor` | UUID 游标分页，单页最多 100 条 |
+| `limit/cursor` | UUID 游标分页，`limit` 默认 20，单页最多 100 条 |
 
-评论和动态使用 `limit/cursor` 分页，附件当前一次返回全部有效关系。
+评论和动态使用 `limit/cursor` 分页，`limit` 均默认 20、最大 100；附件当前一次返回全部有效关系。创建任务未提交 `priority` 时，服务端按 `MEDIUM` 处理。
 
 ## 4. 乐观锁
 

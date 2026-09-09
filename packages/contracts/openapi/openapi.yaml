@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CEES AI API
-  version: 0.13.0
+  version: 0.13.1
   description: 以本文件为唯一事实源的公开 API 契约。资源与操作按 docs/api 约定补充。
 
 servers:
@@ -3292,7 +3292,7 @@ paths:
       tags: [Task]
       security: [{ bearerAuth: [] }]
       parameters:
-        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
         - { name: cursor, in: query, schema: { type: string, format: uuid } }
       responses:
         '200':
@@ -3339,7 +3339,10 @@ components:
         title: { type: string, minLength: 1, maxLength: 200 }
         description: { type: [string, 'null'], maxLength: 10000, default: null }
         parentId: { type: [string, 'null'], format: uuid, default: null }
-        priority: { $ref: '#/components/schemas/TaskPriority' }
+        priority:
+          allOf:
+            - $ref: '#/components/schemas/TaskPriority'
+          default: MEDIUM
         dueDate: { type: [string, 'null'], format: date-time, default: null }
         ownerMembershipId: { type: string, format: uuid }
         collaboratorMembershipIds:

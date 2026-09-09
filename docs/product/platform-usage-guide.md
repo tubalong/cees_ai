@@ -2,7 +2,7 @@
 
 > 状态：按当前实现整理  
 > 最后同步：2026-09-09
-> 公开契约版本：`0.13.0`
+> 公开契约版本：`0.13.1`
 > 事实源：`packages/contracts/openapi/openapi.yaml`、`apps/api/prisma/schema.prisma`
 
 ## 1. 文档用途
@@ -2542,3 +2542,10 @@ API 只有在 COS HEAD 返回的大小和 Content-Type 与会话一致时才创�
 - `COMPLETED/CANCELLED/ARCHIVED` 项目任务域只读，成员承担未完成任务时不能移出项目；
 - 数据库迁移为 `0006_task_management` 和 `0007_task_database_comments`；
 - 修改契约后已经重新生成 `packages/api-client`，公开契约版本由 `0.12.0` 提升为 `0.13.0`。
+
+## 27. `0.13.1` 契约修正说明
+
+- 任务操作动态列表的 `limit` 默认值由契约中的 50 修正为 20，与 NestJS DTO 和其他任务普通分页接口保持一致；
+- `CreateTaskRequest.priority` 在公开契约中明确声明默认值为 `MEDIUM`；
+- 本次只修正公开契约描述，不改变现有服务端运行行为，不需要新增 Prisma migration；
+- 修改契约后需要重新生成 `packages/api-client`，公开契约版本由 `0.13.0` 提升为 `0.13.1`。

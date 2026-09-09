@@ -476,7 +476,7 @@ export class TaskService {
     public static taskActivityList({
         projectId,
         taskId,
-        limit = 50,
+        limit = 20,
         cursor,
     }: {
         projectId: string,

@@ -4,7 +4,7 @@
 
 截至 2026-09-09，本功能已经落地项目 CRUD、项目成员、负责人转移、项目状态机、完成后只读、归档恢复、乐观锁和租户审计。项目任务、评论、附件和动态接口已经落地，详细规则见 [项目任务管理](task-management.md)。
 
-公开契约以 `packages/contracts/openapi/openapi.yaml` 的 `0.13.0` 为准，项目 NestJS 实现在 `apps/api/src/project`，任务实现在 `apps/api/src/task`；数据库迁移包括 `0005_project_management`、`0006_task_management` 和 `0007_task_database_comments`。
+公开契约以 `packages/contracts/openapi/openapi.yaml` 的 `0.13.1` 为准，项目 NestJS 实现在 `apps/api/src/project`，任务实现在 `apps/api/src/task`；数据库迁移包括 `0005_project_management`、`0006_task_management` 和 `0007_task_database_comments`。
 
 ## 2. 租户与可见性边界
 
