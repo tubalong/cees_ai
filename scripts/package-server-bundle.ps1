@@ -25,7 +25,7 @@ Optional models.*.toml override. Relative paths are resolved from the repository
 the script searches the standard runtime locations before falling back to the matching example file.
 
 .PARAMETER OutputDirectory
-Archive output directory. Defaults to dist/server-bundles.
+Archive output root. Defaults to dist/server-bundles. Each run clears and writes only the selected environment subdirectory.
 
 .PARAMETER KeepExpandedDirectory
 Keeps a copy of the generated server directory next to the tar.gz archive.
@@ -201,6 +201,47 @@ function Assert-SafeCleanupPath {
     }
 }
 
+function Reset-EnvironmentOutputDirectory {
+    param(
+        [Parameter(Mandatory)][string]$OutputRoot,
+        [Parameter(Mandatory)][string]$Environment
+    )
+
+    New-Item -ItemType Directory -Path $OutputRoot -Force | Out-Null
+
+    $resolvedRoot = [System.IO.Path]::GetFullPath($OutputRoot).TrimEnd(
+        [System.IO.Path]::DirectorySeparatorChar,
+        [System.IO.Path]::AltDirectorySeparatorChar
+    )
+    $resolvedTarget = [System.IO.Path]::GetFullPath((Join-Path $resolvedRoot $Environment)).TrimEnd(
+        [System.IO.Path]::DirectorySeparatorChar,
+        [System.IO.Path]::AltDirectorySeparatorChar
+    )
+    $expectedPrefix = $resolvedRoot + [System.IO.Path]::DirectorySeparatorChar
+
+    if (-not $resolvedTarget.StartsWith($expectedPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to reset environment output outside output root: $resolvedTarget"
+    }
+    if (-not [System.IO.Path]::GetFileName($resolvedTarget).Equals($Environment, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to reset unexpected environment output directory: $resolvedTarget"
+    }
+
+    if (Test-Path -LiteralPath $resolvedTarget) {
+        $targetItem = Get-Item -LiteralPath $resolvedTarget -Force
+        if (-not $targetItem.PSIsContainer) {
+            throw "Environment output path is not a directory: $resolvedTarget"
+        }
+        if (($targetItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Refusing to reset environment output through a reparse point: $resolvedTarget"
+        }
+        Write-Host "Clearing previous environment output: $resolvedTarget"
+        Remove-Item -LiteralPath $resolvedTarget -Recurse -Force
+    }
+
+    New-Item -ItemType Directory -Path $resolvedTarget -Force | Out-Null
+    return $resolvedTarget
+}
+
 $scriptDirectory = Split-Path -Parent $PSCommandPath
 $repositoryRoot = [System.IO.Path]::GetFullPath((Join-Path $scriptDirectory '..'))
 
@@ -302,9 +343,10 @@ $createdAtUtc = $createdAt.UtcDateTime.ToString('o')
 $timeZoneId = [TimeZoneInfo]::Local.Id
 $timestamp = $createdAt.ToString('yyyyMMddTHHmmss')
 
-New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
+$OutputDirectory = Reset-EnvironmentOutputDirectory -OutputRoot $OutputDirectory -Environment $Environment
 $workRoot = Join-Path $OutputDirectory ('.work-' + [Guid]::NewGuid().ToString('N'))
-$bundleRoot = Join-Path $workRoot $Environment
+$bundleDirectoryName = 'cees-ai'
+$bundleRoot = Join-Path $workRoot $bundleDirectoryName
 $infraDirectory = Join-Path $bundleRoot 'infra'
 $configDirectory = Join-Path $bundleRoot 'config'
 
@@ -359,6 +401,7 @@ Git Commit：$gitCommit
 ## 目录用途
 
 此目录包含应用服务器运行所需的最小部署单元，不包含应用源码、Dockerfile、Git 仓库或 COSCLI 凭据。
+应用服务器一次只部署一个环境；将此包解压到 /opt 后固定生成 /opt/cees-ai，本目录内容即应用运行根目录。
 
 ## 首次部署
 
@@ -447,7 +490,7 @@ bash infra/manage-app.sh $deployArgument logs
 
     Push-Location $workRoot
     try {
-        & tar -czf $archivePath $Environment
+        & tar -czf $archivePath $bundleDirectoryName
         if ($LASTEXITCODE -ne 0) {
             throw "tar failed with exit code $LASTEXITCODE"
         }
@@ -458,14 +501,14 @@ bash infra/manage-app.sh $deployArgument logs
 
     $archiveListing = (Invoke-CapturedCommand -Command 'tar' -Arguments @('-tzf', $archivePath)).Replace("`r`n", "`n").Replace("`r", "`n")
     foreach ($requiredPath in @(
-        "$Environment/$environmentFileName",
-        "$Environment/config/$modelFileName",
-        "$Environment/infra/deploy-cos-release.sh",
-        "$Environment/infra/manage-app.sh",
-        "$Environment/infra/docker-compose.deploy.yml",
-        "$Environment/infra/$composeOverrideName",
-        "$Environment/DEPLOY.md",
-        "$Environment/bundle-manifest.json"
+        "$bundleDirectoryName/$environmentFileName",
+        "$bundleDirectoryName/config/$modelFileName",
+        "$bundleDirectoryName/infra/deploy-cos-release.sh",
+        "$bundleDirectoryName/infra/manage-app.sh",
+        "$bundleDirectoryName/infra/docker-compose.deploy.yml",
+        "$bundleDirectoryName/infra/$composeOverrideName",
+        "$bundleDirectoryName/DEPLOY.md",
+        "$bundleDirectoryName/bundle-manifest.json"
     )) {
         if ($archiveListing -notmatch "(?m)^$([regex]::Escape($requiredPath))$") {
             throw "Archive verification failed; missing: $requiredPath"
@@ -478,7 +521,7 @@ bash infra/manage-app.sh $deployArgument logs
 
     $expandedPath = $null
     if ($KeepExpandedDirectory) {
-        $expandedPath = Join-Path $OutputDirectory "$Environment-$timestamp-$shortCommit"
+        $expandedPath = Join-Path $OutputDirectory "$bundleDirectoryName-$Environment-$timestamp-$shortCommit"
         if (Test-Path -LiteralPath $expandedPath) {
             throw "Expanded output already exists: $expandedPath"
         }

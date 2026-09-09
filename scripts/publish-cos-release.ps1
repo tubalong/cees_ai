@@ -48,6 +48,10 @@ Optional uv base image override. Defaults to ghcr.io/astral-sh/uv:0.12.7.
 Optional immutable release identifier and Docker image tag. By default, the script generates
 <system-local timestamp>-<12-character Git SHA>. Dirty staging builds receive a -dirty suffix.
 
+.PARAMETER OutputRoot
+Local release output root. Defaults to dist/releases. Each run clears and writes only the selected
+environment subdirectory; local production output uses production while the COS channel remains prod.
+
 .PARAMETER AllowDirty
 Allows a dirty working tree for staging only. Production releases always require a clean tree.
 
@@ -249,6 +253,47 @@ function Invoke-CosUpload {
     Invoke-NativeCommand -Command 'coscli' -Arguments $arguments
 }
 
+function Reset-EnvironmentOutputDirectory {
+    param(
+        [Parameter(Mandatory)][string]$OutputRoot,
+        [Parameter(Mandatory)][string]$Environment
+    )
+
+    New-Item -ItemType Directory -Path $OutputRoot -Force | Out-Null
+
+    $resolvedRoot = [System.IO.Path]::GetFullPath($OutputRoot).TrimEnd(
+        [System.IO.Path]::DirectorySeparatorChar,
+        [System.IO.Path]::AltDirectorySeparatorChar
+    )
+    $resolvedTarget = [System.IO.Path]::GetFullPath((Join-Path $resolvedRoot $Environment)).TrimEnd(
+        [System.IO.Path]::DirectorySeparatorChar,
+        [System.IO.Path]::AltDirectorySeparatorChar
+    )
+    $expectedPrefix = $resolvedRoot + [System.IO.Path]::DirectorySeparatorChar
+
+    if (-not $resolvedTarget.StartsWith($expectedPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to reset environment output outside output root: $resolvedTarget"
+    }
+    if (-not [System.IO.Path]::GetFileName($resolvedTarget).Equals($Environment, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to reset unexpected environment output directory: $resolvedTarget"
+    }
+
+    if (Test-Path -LiteralPath $resolvedTarget) {
+        $targetItem = Get-Item -LiteralPath $resolvedTarget -Force
+        if (-not $targetItem.PSIsContainer) {
+            throw "Environment output path is not a directory: $resolvedTarget"
+        }
+        if (($targetItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Refusing to reset environment output through a reparse point: $resolvedTarget"
+        }
+        Write-Host "Clearing previous environment output: $resolvedTarget"
+        Remove-Item -LiteralPath $resolvedTarget -Recurse -Force
+    }
+
+    New-Item -ItemType Directory -Path $resolvedTarget -Force | Out-Null
+    return $resolvedTarget
+}
+
 $scriptDirectory = Split-Path -Parent $PSCommandPath
 $repositoryRoot = [System.IO.Path]::GetFullPath((Join-Path $scriptDirectory '..'))
 
@@ -267,6 +312,7 @@ elseif (-not [System.IO.Path]::IsPathRooted($OutputRoot)) {
     $OutputRoot = Join-Path $repositoryRoot $OutputRoot
 }
 $OutputRoot = [System.IO.Path]::GetFullPath($OutputRoot)
+$localEnvironment = if ($Environment -eq 'prod') { 'production' } else { 'staging' }
 
 if (-not [string]::IsNullOrWhiteSpace($CosConfigPath)) {
     $CosConfigPath = [System.IO.Path]::GetFullPath($CosConfigPath)
@@ -347,7 +393,8 @@ try {
         'buildx', 'version'
     ) -CaptureOutput
 
-    $releaseDirectory = Join-Path (Join-Path $OutputRoot $Environment) $ReleaseId
+    $environmentOutputDirectory = Reset-EnvironmentOutputDirectory -OutputRoot $OutputRoot -Environment $localEnvironment
+    $releaseDirectory = Join-Path $environmentOutputDirectory $ReleaseId
     if (Test-Path -LiteralPath $releaseDirectory) {
         throw "Release output already exists: $releaseDirectory"
     }

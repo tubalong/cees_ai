@@ -19,10 +19,10 @@ pwsh ./scripts/package-database-bundle.ps1 -Environment production
 2. 文件不存在时回退到 `.env.<environment>.example`；
 3. 可通过 `-EnvironmentFile <path>` 显式覆盖。
 
-输出目录：
+输出目录按环境分开；每次打包前会清空对应环境子目录，只保留本次结果：
 
 ```text
-dist/database-bundles/
+dist/database-bundles/<staging|production>/
 ├── cees-ai-db-<environment>-<timestamp>-<git-sha>.tar.gz
 └── cees-ai-db-<environment>-<timestamp>-<git-sha>.tar.gz.sha256
 ```
@@ -59,8 +59,8 @@ pwsh ./scripts/package-database-bundle.ps1 `
 上传压缩包及校验文件：
 
 ```powershell
-scp ./dist/database-bundles/<压缩包>.tar.gz `
-  ./dist/database-bundles/<压缩包>.tar.gz.sha256 `
+scp ./dist/database-bundles/<staging|production>/<压缩包>.tar.gz `
+  ./dist/database-bundles/<staging|production>/<压缩包>.tar.gz.sha256 `
   root@<database-server>:/tmp/
 ```
 

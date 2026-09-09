@@ -155,8 +155,7 @@ COS_ALIAS="${CEES_RELEASE_COS_ALIAS:-cees-release}"
 COS_CONFIG="${CEES_RELEASE_COS_CONFIG:-$HOME/.cos.yaml}"
 COS_PREFIX="${CEES_RELEASE_COS_PREFIX:-releases}"
 RELEASE_CACHE_DIR="${CEES_RELEASE_CACHE_DIR:-$ROOT_DIR/.release-cache}"
-CHANNEL_CACHE_DIR="$RELEASE_CACHE_DIR/$RELEASE_CHANNEL"
-COS_LOG_DIR="$CHANNEL_CACHE_DIR/coscli-output"
+COS_LOG_DIR="$RELEASE_CACHE_DIR/coscli-output"
 
 require_command coscli
 require_command docker
@@ -180,10 +179,10 @@ if [[ ! -f "$ENV_FILE" ]]; then
   exit 1
 fi
 
-mkdir -p -- "$CHANNEL_CACHE_DIR" "$COS_LOG_DIR"
+mkdir -p -- "$RELEASE_CACHE_DIR" "$COS_LOG_DIR"
 
 if [[ "$RELEASE_REFERENCE" == "latest" ]]; then
-  latest_file="$CHANNEL_CACHE_DIR/latest.json"
+  latest_file="$RELEASE_CACHE_DIR/latest.json"
   cos_download "$COS_PREFIX/$RELEASE_CHANNEL/latest.json" "$latest_file"
   RELEASE_ID="$(json_string_value "$latest_file" releaseId)"
 else
@@ -191,7 +190,7 @@ else
 fi
 validate_release_id "$RELEASE_ID"
 
-RELEASE_DIR="$CHANNEL_CACHE_DIR/$RELEASE_ID"
+RELEASE_DIR="$RELEASE_CACHE_DIR/$RELEASE_ID"
 mkdir -p -- "$RELEASE_DIR"
 COS_LOG_DIR="$RELEASE_DIR/coscli-output"
 mkdir -p -- "$COS_LOG_DIR"
@@ -286,7 +285,7 @@ update_deployment_env "$ENV_FILE" "$api_image" "$ai_service_image" "$image_tag"
 echo "Starting $MANAGE_ENVIRONMENT from preloaded images..."
 bash "$ROOT_DIR/infra/manage-app.sh" "$MANAGE_ENVIRONMENT" up
 
-printf '%s\n' "$RELEASE_ID" > "$CHANNEL_CACHE_DIR/deployed-release"
+printf '%s\n' "$RELEASE_ID" > "$RELEASE_CACHE_DIR/deployed-release"
 
 echo
 echo "CEES AI release deployed successfully."

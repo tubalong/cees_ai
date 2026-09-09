@@ -26,7 +26,7 @@ Pulls any missing database images locally and includes an offline Docker image a
 The default bundle does not invoke Docker and does not contain images.
 
 .PARAMETER OutputDirectory
-Archive output directory. Defaults to dist/database-bundles.
+Archive output root. Defaults to dist/database-bundles. Each run clears and writes only the selected environment subdirectory.
 
 .PARAMETER KeepExpandedDirectory
 Keeps a copy of the generated cees-db directory next to the tar.gz archive.
@@ -195,6 +195,47 @@ function Assert-SafeCleanupPath {
     }
 }
 
+function Reset-EnvironmentOutputDirectory {
+    param(
+        [Parameter(Mandatory)][string]$OutputRoot,
+        [Parameter(Mandatory)][string]$Environment
+    )
+
+    New-Item -ItemType Directory -Path $OutputRoot -Force | Out-Null
+
+    $resolvedRoot = [System.IO.Path]::GetFullPath($OutputRoot).TrimEnd(
+        [System.IO.Path]::DirectorySeparatorChar,
+        [System.IO.Path]::AltDirectorySeparatorChar
+    )
+    $resolvedTarget = [System.IO.Path]::GetFullPath((Join-Path $resolvedRoot $Environment)).TrimEnd(
+        [System.IO.Path]::DirectorySeparatorChar,
+        [System.IO.Path]::AltDirectorySeparatorChar
+    )
+    $expectedPrefix = $resolvedRoot + [System.IO.Path]::DirectorySeparatorChar
+
+    if (-not $resolvedTarget.StartsWith($expectedPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to reset environment output outside output root: $resolvedTarget"
+    }
+    if (-not [System.IO.Path]::GetFileName($resolvedTarget).Equals($Environment, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to reset unexpected environment output directory: $resolvedTarget"
+    }
+
+    if (Test-Path -LiteralPath $resolvedTarget) {
+        $targetItem = Get-Item -LiteralPath $resolvedTarget -Force
+        if (-not $targetItem.PSIsContainer) {
+            throw "Environment output path is not a directory: $resolvedTarget"
+        }
+        if (($targetItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Refusing to reset environment output through a reparse point: $resolvedTarget"
+        }
+        Write-Host "Clearing previous environment output: $resolvedTarget"
+        Remove-Item -LiteralPath $resolvedTarget -Recurse -Force
+    }
+
+    New-Item -ItemType Directory -Path $resolvedTarget -Force | Out-Null
+    return $resolvedTarget
+}
+
 $scriptDirectory = Split-Path -Parent $PSCommandPath
 $repositoryRoot = [System.IO.Path]::GetFullPath((Join-Path $scriptDirectory '..'))
 $databaseSourceDirectory = Join-Path $repositoryRoot 'infra/database'
@@ -248,7 +289,7 @@ $createdAtUtc = $createdAt.UtcDateTime.ToString('o')
 $timeZoneId = [TimeZoneInfo]::Local.Id
 $timestamp = $createdAt.ToString('yyyyMMddTHHmmss')
 
-New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
+$OutputDirectory = Reset-EnvironmentOutputDirectory -OutputRoot $OutputDirectory -Environment $Environment
 $workRoot = Join-Path $OutputDirectory ('.work-' + [Guid]::NewGuid().ToString('N'))
 $bundleRoot = Join-Path $workRoot 'cees-db'
 
