@@ -133,6 +133,118 @@ class StreamCompletedEvent(BaseModel):
     )
 
 
+class ChatMode(StrEnum):
+    standard = 'standard'
+    ultra = 'ultra'
+
+
+class ChatMessageRole(StrEnum):
+    user = 'user'
+    assistant = 'assistant'
+
+
+class ChatMessage(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    id: constr(min_length=1, max_length=128) | None = None
+    role: ChatMessageRole
+    content: constr(min_length=1, max_length=262144)
+
+
+class ChatContextStrategy(StrEnum):
+    full = 'full'
+    summary_plus_recent = 'summary_plus_recent'
+    recent_only = 'recent_only'
+
+
+class ChatContextUsage(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    strategy: ChatContextStrategy
+    received_message_count: conint(ge=1)
+    included_message_count: conint(ge=1)
+    history_truncated: bool
+    estimated_input_tokens: conint(ge=1)
+
+
+class ChatRequest(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    request_id: constr(min_length=1, max_length=128)
+    tenant_id: constr(min_length=1, max_length=128)
+    user_id: constr(min_length=1, max_length=128)
+    conversation_id: constr(min_length=1, max_length=128)
+    mode: ChatMode | None = 'standard'
+    instructions: constr(min_length=1, max_length=32768) | None = Field(
+        None, description='Trusted system instructions supplied by the internal caller.'
+    )
+    conversation_summary: constr(min_length=1, max_length=131072) | None = Field(
+        None, description='Summary of history preceding the supplied recent messages.'
+    )
+    messages: list[ChatMessage] = Field(..., max_length=128, min_length=1)
+    max_output_tokens: conint(ge=1, le=32768) | None = None
+
+
+class ChatAssistantMessage(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    role: Literal['assistant']
+    content: constr(min_length=1)
+
+
+class CompactChatRequest(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    request_id: constr(min_length=1, max_length=128)
+    tenant_id: constr(min_length=1, max_length=128)
+    user_id: constr(min_length=1, max_length=128)
+    conversation_id: constr(min_length=1, max_length=128)
+    previous_summary: constr(min_length=1, max_length=131072) | None = None
+    messages: list[ChatMessage] = Field(..., max_length=128, min_length=1)
+
+
+class ChatStreamStartedEvent(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['started']
+    request_id: str
+    conversation_id: str
+    mode: ChatMode
+    context_usage: ChatContextUsage
+
+
+class ChatStreamPhase(StrEnum):
+    reasoning = 'reasoning'
+    answering = 'answering'
+
+
+class ChatStreamStatusEvent(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['status']
+    phase: ChatStreamPhase
+    execution: StreamExecutionMetadata | None = None
+
+
+class ChatStreamCompletedEvent(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['completed']
+    latency_ms: conint(ge=0)
+    finish_reason: str | None = Field(
+        None,
+        description='Provider completion reason. `length` indicates the output token limit was reached.',
+    )
+
+
 class DocumentSourceMaterial(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
@@ -385,6 +497,7 @@ class ReadinessResponse(BaseModel):
     status: Status
     service: Literal['ai-service']
     configured_roles: list[ModelRole]
+    configured_chat_modes: list[ChatMode]
     errors: list[str]
 
 
@@ -418,6 +531,49 @@ class StreamEvent(
         | ContentDeltaEvent
         | UsageEvent
         | StreamCompletedEvent
+        | StreamErrorEvent
+    ) = Field(..., discriminator='type')
+
+
+class ChatInvokeResponse(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    request_id: str
+    conversation_id: str
+    mode: ChatMode
+    message: ChatAssistantMessage
+    context_usage: ChatContextUsage
+    execution: ExecutionMetadata
+
+
+class CompactChatResponse(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    request_id: str
+    conversation_id: str
+    summary: constr(min_length=1)
+    summarized_through_message_id: str | None = None
+    execution: ExecutionMetadata
+
+
+class ChatStreamEvent(
+    RootModel[
+        ChatStreamStartedEvent
+        | ChatStreamStatusEvent
+        | ContentDeltaEvent
+        | UsageEvent
+        | ChatStreamCompletedEvent
+        | StreamErrorEvent
+    ]
+):
+    root: (
+        ChatStreamStartedEvent
+        | ChatStreamStatusEvent
+        | ContentDeltaEvent
+        | UsageEvent
+        | ChatStreamCompletedEvent
         | StreamErrorEvent
     ) = Field(..., discriminator='type')
 

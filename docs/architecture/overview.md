@@ -22,7 +22,7 @@ cees_ai/
 ## 边界与职责
 
 - NestJS 是 Tenant、User、Permission、业务资源、正式写入和审计数据的唯一事实源。
-- ai-service 当前只提供 health、ready 和受内部 Token 保护的通用 LLM invoke，不定义工作记录、会议、知识库或管理简报等业务能力。
+- ai-service 提供受内部 Token 保护的通用 LLM、无状态上下文对话和领域无关文档生成能力，不定义工作记录、会议、知识库或管理简报等正式业务资源。
 - ai-service 不直接连接业务数据库，不创建或修改正式业务数据。
 - 未来业务 AI 功能必须由 NestJS 建立可信租户/用户上下文，并在契约中定义专用输入输出，不能让客户端直接调用通用 invoke。
 - COS 长期凭据只由 NestJS 持有；客户端和 ai-service 不持有长期 COS 密钥。
@@ -70,6 +70,7 @@ flowchart LR
 ## 专题设计
 
 - [AI Service 通用基础设施](ai-service-foundation.md)
+- [上下文对话](contextual-chat.md)
 - [通用文档生成](document-generation.md)
 - [文件上传与 COS 设计](file-upload.md)
 - [Redis 基础能力](redis-foundation.md)

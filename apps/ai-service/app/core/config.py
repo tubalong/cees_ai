@@ -11,11 +11,7 @@ from pydantic import BaseModel, Field, ValidationError, field_validator, model_v
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 SERVICE_ROOT = Path(__file__).resolve().parents[2]
-REPO_ROOT = (
-    SERVICE_ROOT.parents[1]
-    if SERVICE_ROOT.parent.name == "apps"
-    else SERVICE_ROOT
-)
+REPO_ROOT = SERVICE_ROOT.parents[1] if SERVICE_ROOT.parent.name == "apps" else SERVICE_ROOT
 
 
 class ModelRole(StrEnum):
@@ -28,6 +24,11 @@ class ModelRole(StrEnum):
 class OutputMode(StrEnum):
     text = "text"
     json_schema = "json_schema"
+
+
+class ChatMode(StrEnum):
+    standard = "standard"
+    ultra = "ultra"
 
 
 class ModelProfile(BaseModel):
@@ -55,9 +56,32 @@ class ModelProfile(BaseModel):
         return self
 
 
+class ChatModePolicy(BaseModel):
+    role: ModelRole
+    reasoning_effort: Literal["low", "high", "max"] | None = None
+    default_max_output_tokens: int = Field(default=2048, ge=1, le=32768)
+    max_output_tokens_limit: int = Field(default=8192, ge=1, le=32768)
+    context_budget_tokens: int = Field(default=32768, ge=1024, le=2_000_000)
+    emit_reasoning_status: bool = True
+
+    @model_validator(mode="after")
+    def validate_token_settings(self) -> ChatModePolicy:
+        if self.default_max_output_tokens > self.max_output_tokens_limit:
+            raise ValueError("default_max_output_tokens exceeds max_output_tokens_limit")
+        return self
+
+
+class ChatConfig(BaseModel):
+    modes: dict[ChatMode, ChatModePolicy] = Field(min_length=1)
+    compaction_role: ModelRole = ModelRole.default
+    compaction_max_output_tokens: int = Field(default=2048, ge=256, le=8192)
+    compaction_context_budget_tokens: int = Field(default=65536, ge=1024, le=2_000_000)
+
+
 class ModelCatalog(BaseModel):
     profiles: dict[str, ModelProfile] = Field(min_length=1)
     roles: dict[ModelRole, list[str]] = Field(default_factory=dict)
+    chat: ChatConfig | None = None
 
     @field_validator("profiles")
     @classmethod
@@ -126,6 +150,8 @@ def validate_readiness(settings: Settings, catalog: ModelCatalog) -> list[str]:
             if settings.node_env == "production" and profile.provider == "mock":
                 errors.append(f"role {role.value} uses mock profile {profile_name} in production")
 
+    _validate_chat_readiness(catalog, errors)
+
     for name, profile in catalog.profiles.items():
         if not profile.enabled or profile.provider == "mock":
             continue
@@ -133,8 +159,7 @@ def validate_readiness(settings: Settings, catalog: ModelCatalog) -> list[str]:
         key = os.getenv(profile.api_key_env)
         if not key:
             errors.append(
-                f"enabled profile {name} is missing environment variable "
-                f"{profile.api_key_env}"
+                f"enabled profile {name} is missing environment variable {profile.api_key_env}"
             )
         elif settings.node_env == "production" and key == "change_me":
             errors.append(f"enabled profile {name} uses an example API key in production")
@@ -148,6 +173,56 @@ def validate_readiness(settings: Settings, catalog: ModelCatalog) -> list[str]:
             errors.append(f"enabled profile {name} uses an example base URL in production")
 
     return errors
+
+
+def _validate_chat_readiness(catalog: ModelCatalog, errors: list[str]) -> None:
+    if catalog.chat is None:
+        errors.append("chat configuration is required")
+        return
+
+    for required_mode in ChatMode:
+        if required_mode not in catalog.chat.modes:
+            errors.append(f"chat mode {required_mode.value} must be configured")
+
+    checked_roles = {policy.role for policy in catalog.chat.modes.values()} | {
+        catalog.chat.compaction_role
+    }
+    for role in checked_roles:
+        candidates = catalog.roles.get(role, [])
+        if not candidates:
+            errors.append(f"chat references unconfigured role {role.value}")
+            continue
+        for profile_name in candidates:
+            profile = catalog.profiles.get(profile_name)
+            if profile is None or not profile.enabled:
+                continue
+            if OutputMode.text not in profile.modes:
+                errors.append(
+                    f"chat role {role.value} profile {profile_name} does not support text"
+                )
+
+    for mode, policy in catalog.chat.modes.items():
+        for profile_name in catalog.roles.get(policy.role, []):
+            profile = catalog.profiles.get(profile_name)
+            if profile is None or not profile.enabled:
+                continue
+            if policy.default_max_output_tokens > profile.max_output_tokens_limit:
+                errors.append(
+                    f"chat mode {mode.value} default_max_output_tokens exceeds "
+                    f"profile {profile_name} limit"
+                )
+            if policy.max_output_tokens_limit > profile.max_output_tokens_limit:
+                errors.append(
+                    f"chat mode {mode.value} max_output_tokens_limit exceeds "
+                    f"profile {profile_name} limit"
+                )
+
+    for profile_name in catalog.roles.get(catalog.chat.compaction_role, []):
+        profile = catalog.profiles.get(profile_name)
+        if profile is None or not profile.enabled:
+            continue
+        if catalog.chat.compaction_max_output_tokens > profile.max_output_tokens_limit:
+            errors.append(f"chat compaction_max_output_tokens exceeds profile {profile_name} limit")
 
 
 def load_catalog_safely(settings: Settings) -> tuple[ModelCatalog | None, list[str]]:

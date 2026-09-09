@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, ServerSentEventsResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { ComposeDocumentData, ComposeDocumentErrors, ComposeDocumentResponses, GenerateDocumentDocxData, GenerateDocumentDocxErrors, GenerateDocumentDocxResponses, GetHealthData, GetHealthResponses, GetReadinessData, GetReadinessErrors, GetReadinessResponses, InvokeLlmData, InvokeLlmErrors, InvokeLlmResponses, RenderDocumentDocxData, RenderDocumentDocxErrors, RenderDocumentDocxResponses, StreamLlmData, StreamLlmErrors, StreamLlmResponse, StreamLlmResponses } from './types.gen';
+import type { CompactChatData, CompactChatErrors, CompactChatResponses, ComposeDocumentData, ComposeDocumentErrors, ComposeDocumentResponses, GenerateDocumentDocxData, GenerateDocumentDocxErrors, GenerateDocumentDocxResponses, GetHealthData, GetHealthResponses, GetReadinessData, GetReadinessErrors, GetReadinessResponses, InvokeChatData, InvokeChatErrors, InvokeChatResponses, InvokeLlmData, InvokeLlmErrors, InvokeLlmResponses, RenderDocumentDocxData, RenderDocumentDocxErrors, RenderDocumentDocxResponses, StreamChatData, StreamChatErrors, StreamChatResponse, StreamChatResponses, StreamLlmData, StreamLlmErrors, StreamLlmResponse, StreamLlmResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -53,6 +53,55 @@ export const invokeLlm = <ThrowOnError extends boolean = false>(options: Options
 export const streamLlm = <ThrowOnError extends boolean = false>(options: Options<StreamLlmData, ThrowOnError, StreamLlmResponse>): Promise<ServerSentEventsResult<StreamLlmResponses>> => (options.client ?? client).sse.post<StreamLlmResponses, StreamLlmErrors, ThrowOnError>({
     security: [{ name: 'X-AI-Internal-Token', type: 'apiKey' }],
     url: '/internal/v1/llm/stream',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Generate a contextual chat response
+ *
+ * Generates one assistant response from trusted instructions, an optional prior summary, and ordered recent messages.
+ */
+export const invokeChat = <ThrowOnError extends boolean = false>(options: Options<InvokeChatData, ThrowOnError>): RequestResult<InvokeChatResponses, InvokeChatErrors, ThrowOnError> => (options.client ?? client).post<InvokeChatResponses, InvokeChatErrors, ThrowOnError>({
+    security: [{ name: 'X-AI-Internal-Token', type: 'apiKey' }],
+    url: '/internal/v1/chat/invoke',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Stream a contextual chat response
+ *
+ * Streams `started`, optional `status`, zero or more `content_delta`,
+ * an optional `usage`, and `completed`. An `error` event terminates a
+ * stream after the initial response has started. No provider reasoning
+ * content is exposed.
+ *
+ */
+export const streamChat = <ThrowOnError extends boolean = false>(options: Options<StreamChatData, ThrowOnError, StreamChatResponse>): Promise<ServerSentEventsResult<StreamChatResponses>> => (options.client ?? client).sse.post<StreamChatResponses, StreamChatErrors, ThrowOnError>({
+    security: [{ name: 'X-AI-Internal-Token', type: 'apiKey' }],
+    url: '/internal/v1/chat/stream',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Compact conversation history into a reusable summary
+ *
+ * Produces a summary for the caller to persist and supply with later chat requests. The ai-service does not persist conversation state.
+ */
+export const compactChat = <ThrowOnError extends boolean = false>(options: Options<CompactChatData, ThrowOnError>): RequestResult<CompactChatResponses, CompactChatErrors, ThrowOnError> => (options.client ?? client).post<CompactChatResponses, CompactChatErrors, ThrowOnError>({
+    security: [{ name: 'X-AI-Internal-Token', type: 'apiKey' }],
+    url: '/internal/v1/chat/compact',
     ...options,
     headers: {
         'Content-Type': 'application/json',

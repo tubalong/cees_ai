@@ -178,10 +178,9 @@ class LLMRouter:
         profile_override: str | None,
         temperature: float | None,
         max_output_tokens: int | None,
+        reasoning_effort: ReasoningEffort | None = None,
     ) -> StreamingRoutingResult:
-        candidates = self._resolve_candidates(
-            role, profile_override, OutputMode.text, request_id
-        )
+        candidates = self._resolve_candidates(role, profile_override, OutputMode.text, request_id)
         started_at = time.perf_counter()
         last_transient_error: ProviderTransientError | None = None
 
@@ -194,6 +193,7 @@ class LLMRouter:
                 temperature=temperature,
                 max_output_tokens=max_output_tokens,
                 request_id=request_id,
+                reasoning_effort=reasoning_effort,
             )
             provider = self._get_provider(profile_name, profile)
             chunks = provider.stream(messages, options).__aiter__()

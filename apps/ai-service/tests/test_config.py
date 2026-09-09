@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from app.core.config import (
     SERVICE_ROOT,
+    ChatMode,
     ModelProfile,
     ModelRole,
     Settings,
@@ -39,18 +42,14 @@ def test_enabled_openai_profile_requires_key(monkeypatch) -> None:
     catalog.profiles["primary"].enabled = True
     catalog.roles["default"] = ["primary"]
     monkeypatch.delenv("PRIMARY_LLM_API_KEY", raising=False)
-    errors = validate_readiness(
-        Settings(node_env="test", ai_internal_token="secret"), catalog
-    )
+    errors = validate_readiness(Settings(node_env="test", ai_internal_token="secret"), catalog)
     assert any("PRIMARY_LLM_API_KEY" in error for error in errors)
 
 
 def test_role_rejects_profile_without_required_output_mode() -> None:
     catalog = load_model_catalog(MODEL_FIXTURE)
     catalog.roles[ModelRole.structured] = ["mock"]
-    errors = validate_readiness(
-        Settings(node_env="test", ai_internal_token="secret"), catalog
-    )
+    errors = validate_readiness(Settings(node_env="test", ai_internal_token="secret"), catalog)
     assert any("does not support json_schema" in error for error in errors)
 
 
@@ -84,3 +83,44 @@ def test_production_rejects_example_model_settings(monkeypatch) -> None:
     )
     assert any("example model" in error for error in errors)
     assert any("example base URL" in error for error in errors)
+
+
+def test_chat_modes_are_loaded_from_catalog() -> None:
+    catalog = load_model_catalog(MODEL_FIXTURE)
+    assert catalog.chat is not None
+    assert catalog.chat.modes[ChatMode.standard].role == ModelRole.default
+    assert catalog.chat.modes[ChatMode.ultra].reasoning_effort == "high"
+
+
+def test_readiness_requires_both_chat_modes() -> None:
+    catalog = load_model_catalog(MODEL_FIXTURE)
+    assert catalog.chat is not None
+    del catalog.chat.modes[ChatMode.ultra]
+
+    errors = validate_readiness(Settings(node_env="test", ai_internal_token="secret"), catalog)
+
+    assert "chat mode ultra must be configured" in errors
+
+
+def test_chat_mode_limit_cannot_exceed_profile_limit() -> None:
+    catalog = load_model_catalog(MODEL_FIXTURE)
+    assert catalog.chat is not None
+    catalog.chat.modes[ChatMode.ultra].max_output_tokens_limit = 4097
+
+    errors = validate_readiness(Settings(node_env="test", ai_internal_token="secret"), catalog)
+
+    assert any("chat mode ultra max_output_tokens_limit" in error for error in errors)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        Path("config/models.toml"),
+        Path("config/models.staging.example.toml"),
+        Path("config/models.production.example.toml"),
+    ],
+)
+def test_deployment_model_catalogs_include_chat_modes(path: Path) -> None:
+    catalog = load_model_catalog(path)
+    assert catalog.chat is not None
+    assert set(catalog.chat.modes) == {ChatMode.standard, ChatMode.ultra}

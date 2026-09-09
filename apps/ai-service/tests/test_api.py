@@ -11,7 +11,14 @@ from app.core.runtime import AppRuntime
 from app.llm.router import LLMRouter
 from app.llm.types import ProviderStreamChunk, TokenUsageData
 from app.main import create_app
-from tests.helpers import StubProvider, catalog, profile, ready_runtime, result
+from tests.helpers import (
+    StubProvider,
+    catalog,
+    chat_config,
+    profile,
+    ready_runtime,
+    result,
+)
 
 
 def build_client(
@@ -24,8 +31,17 @@ def build_client(
     model_profile = profile(modes=modes)
     outcome = result({"answer": 42}) if structured else result("hello")
     provider = StubProvider(model_profile, [outcome], stream_outcomes=stream_outcomes)
-    role = ModelRole.structured if structured else ModelRole.default
-    model_catalog = catalog({"primary": model_profile}, {role: ["primary"]})
+    roles = {
+        ModelRole.default: ["primary"],
+        ModelRole.reasoning: ["primary"],
+    }
+    if structured:
+        roles[ModelRole.structured] = ["primary"]
+    model_catalog = catalog(
+        {"primary": model_profile},
+        roles,
+        chat=chat_config(),
+    )
     router = LLMRouter(model_catalog, lambda _name, _profile: provider)
     app = create_app(runtime=ready_runtime(router, model_catalog, settings=settings))
     return TestClient(app), provider
@@ -68,6 +84,7 @@ def test_health_and_readiness_do_not_require_authentication() -> None:
         readiness = client.get("/ready")
     assert readiness.status_code == 200
     assert readiness.json()["status"] == "ready"
+    assert readiness.json()["configured_chat_modes"] == ["standard", "ultra"]
 
 
 def test_invoke_requires_internal_token() -> None:
@@ -209,9 +226,7 @@ def test_docs_are_enabled_for_staging_configuration() -> None:
     assert docs.status_code == 200
     assert redoc.status_code == 200
     assert openapi.status_code == 200
-    assert openapi.json()["servers"] == [
-        {"url": "/", "description": "Current deployment origin"}
-    ]
+    assert openapi.json()["servers"] == [{"url": "/", "description": "Current deployment origin"}]
     assert invocation.status_code == 200
 
 

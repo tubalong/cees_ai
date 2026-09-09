@@ -13,6 +13,8 @@ tags:
     description: Process liveness and configuration readiness checks.
   - name: llm
     description: Internal LLM invocation endpoints available only to trusted CEES services.
+  - name: chat
+    description: Stateless contextual chat generation and conversation compaction.
   - name: documents
     description: Domain-neutral document composition and deterministic DOCX rendering.
 paths:
@@ -49,6 +51,7 @@ paths:
                 status: ready
                 service: ai-service
                 configured_roles: [default, structured, reasoning, rag]
+                configured_chat_modes: [standard, ultra]
                 errors: []
         "503":
           description: Service configuration is not ready
@@ -60,6 +63,7 @@ paths:
                 status: not_ready
                 service: ai-service
                 configured_roles: []
+                configured_chat_modes: []
                 errors:
                   - AI_INTERNAL_TOKEN is required
   /internal/v1/llm/invoke:
@@ -212,6 +216,123 @@ paths:
                     type: content_delta
                     text: The project
 
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "502":
+          $ref: "#/components/responses/InvalidProviderOutput"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /internal/v1/chat/invoke:
+    post:
+      tags: [chat]
+      operationId: invokeChat
+      summary: Generate a contextual chat response
+      description: Generates one assistant response from trusted instructions, an optional prior summary, and ordered recent messages.
+      security:
+        - internalToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatRequest"
+            example:
+              request_id: req-chat-invoke-001
+              tenant_id: tenant-example
+              user_id: user-example
+              conversation_id: conversation-example
+              mode: standard
+              instructions: Answer as a concise enterprise assistant.
+              messages:
+                - role: user
+                  content: Our project is named CEES AI.
+                - role: assistant
+                  content: Understood.
+                - role: user
+                  content: What is the project name?
+      responses:
+        "200":
+          description: Chat response generated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatInvokeResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "502":
+          $ref: "#/components/responses/InvalidProviderOutput"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /internal/v1/chat/stream:
+    post:
+      tags: [chat]
+      operationId: streamChat
+      summary: Stream a contextual chat response
+      description: |
+        Streams `started`, optional `status`, zero or more `content_delta`,
+        an optional `usage`, and `completed`. An `error` event terminates a
+        stream after the initial response has started. No provider reasoning
+        content is exposed.
+      security:
+        - internalToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatRequest"
+      responses:
+        "200":
+          description: Chat response events are streamed
+          content:
+            text/event-stream:
+              schema:
+                $ref: "#/components/schemas/ChatStreamEvent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "502":
+          $ref: "#/components/responses/InvalidProviderOutput"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /internal/v1/chat/compact:
+    post:
+      tags: [chat]
+      operationId: compactChat
+      summary: Compact conversation history into a reusable summary
+      description: Produces a summary for the caller to persist and supply with later chat requests. The ai-service does not persist conversation state.
+      security:
+        - internalToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompactChatRequest"
+      responses:
+        "200":
+          description: Conversation history compacted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompactChatResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -393,7 +514,7 @@ components:
     ReadinessResponse:
       type: object
       additionalProperties: false
-      required: [status, service, configured_roles, errors]
+      required: [status, service, configured_roles, configured_chat_modes, errors]
       properties:
         status:
           type: string
@@ -405,6 +526,10 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ModelRole"
+        configured_chat_modes:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChatMode"
         errors:
           type: array
           items:
@@ -618,6 +743,229 @@ components:
           content_delta: "#/components/schemas/ContentDeltaEvent"
           usage: "#/components/schemas/UsageEvent"
           completed: "#/components/schemas/StreamCompletedEvent"
+          error: "#/components/schemas/StreamErrorEvent"
+    ChatMode:
+      type: string
+      enum: [standard, ultra]
+      default: standard
+    ChatMessageRole:
+      type: string
+      enum: [user, assistant]
+    ChatMessage:
+      type: object
+      additionalProperties: false
+      required: [role, content]
+      properties:
+        id:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 128
+        role:
+          $ref: "#/components/schemas/ChatMessageRole"
+        content:
+          type: string
+          minLength: 1
+          maxLength: 262144
+    ChatContextStrategy:
+      type: string
+      enum: [full, summary_plus_recent, recent_only]
+    ChatContextUsage:
+      type: object
+      additionalProperties: false
+      required: [strategy, received_message_count, included_message_count, history_truncated, estimated_input_tokens]
+      properties:
+        strategy:
+          $ref: "#/components/schemas/ChatContextStrategy"
+        received_message_count:
+          type: integer
+          minimum: 1
+        included_message_count:
+          type: integer
+          minimum: 1
+        history_truncated:
+          type: boolean
+        estimated_input_tokens:
+          type: integer
+          minimum: 1
+    ChatRequest:
+      type: object
+      additionalProperties: false
+      required: [request_id, tenant_id, user_id, conversation_id, messages]
+      properties:
+        request_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        tenant_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        user_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        conversation_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        mode:
+          $ref: "#/components/schemas/ChatMode"
+        instructions:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 32768
+          description: Trusted system instructions supplied by the internal caller.
+        conversation_summary:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 131072
+          description: Summary of history preceding the supplied recent messages.
+        messages:
+          type: array
+          minItems: 1
+          maxItems: 128
+          items:
+            $ref: "#/components/schemas/ChatMessage"
+        max_output_tokens:
+          type: [integer, "null"]
+          minimum: 1
+          maximum: 32768
+    ChatAssistantMessage:
+      type: object
+      additionalProperties: false
+      required: [role, content]
+      properties:
+        role:
+          type: string
+          const: assistant
+        content:
+          type: string
+          minLength: 1
+    ChatInvokeResponse:
+      type: object
+      additionalProperties: false
+      required: [request_id, conversation_id, mode, message, context_usage, execution]
+      properties:
+        request_id:
+          type: string
+        conversation_id:
+          type: string
+        mode:
+          $ref: "#/components/schemas/ChatMode"
+        message:
+          $ref: "#/components/schemas/ChatAssistantMessage"
+        context_usage:
+          $ref: "#/components/schemas/ChatContextUsage"
+        execution:
+          $ref: "#/components/schemas/ExecutionMetadata"
+    CompactChatRequest:
+      type: object
+      additionalProperties: false
+      required: [request_id, tenant_id, user_id, conversation_id, messages]
+      properties:
+        request_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        tenant_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        user_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        conversation_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        previous_summary:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 131072
+        messages:
+          type: array
+          minItems: 1
+          maxItems: 128
+          items:
+            $ref: "#/components/schemas/ChatMessage"
+    CompactChatResponse:
+      type: object
+      additionalProperties: false
+      required: [request_id, conversation_id, summary, execution]
+      properties:
+        request_id:
+          type: string
+        conversation_id:
+          type: string
+        summary:
+          type: string
+          minLength: 1
+        summarized_through_message_id:
+          type: [string, "null"]
+        execution:
+          $ref: "#/components/schemas/ExecutionMetadata"
+    ChatStreamStartedEvent:
+      type: object
+      additionalProperties: false
+      required: [type, request_id, conversation_id, mode, context_usage]
+      properties:
+        type:
+          type: string
+          const: started
+        request_id:
+          type: string
+        conversation_id:
+          type: string
+        mode:
+          $ref: "#/components/schemas/ChatMode"
+        context_usage:
+          $ref: "#/components/schemas/ChatContextUsage"
+    ChatStreamPhase:
+      type: string
+      enum: [reasoning, answering]
+    ChatStreamStatusEvent:
+      type: object
+      additionalProperties: false
+      required: [type, phase]
+      properties:
+        type:
+          type: string
+          const: status
+        phase:
+          $ref: "#/components/schemas/ChatStreamPhase"
+        execution:
+          $ref: "#/components/schemas/StreamExecutionMetadata"
+    ChatStreamCompletedEvent:
+      type: object
+      additionalProperties: false
+      required: [type, latency_ms]
+      properties:
+        type:
+          type: string
+          const: completed
+        latency_ms:
+          type: integer
+          minimum: 0
+        finish_reason:
+          type: [string, "null"]
+          description: Provider completion reason. `length` indicates the output token limit was reached.
+    ChatStreamEvent:
+      oneOf:
+        - $ref: "#/components/schemas/ChatStreamStartedEvent"
+        - $ref: "#/components/schemas/ChatStreamStatusEvent"
+        - $ref: "#/components/schemas/ContentDeltaEvent"
+        - $ref: "#/components/schemas/UsageEvent"
+        - $ref: "#/components/schemas/ChatStreamCompletedEvent"
+        - $ref: "#/components/schemas/StreamErrorEvent"
+      discriminator:
+        propertyName: type
+        mapping:
+          started: "#/components/schemas/ChatStreamStartedEvent"
+          status: "#/components/schemas/ChatStreamStatusEvent"
+          content_delta: "#/components/schemas/ContentDeltaEvent"
+          usage: "#/components/schemas/UsageEvent"
+          completed: "#/components/schemas/ChatStreamCompletedEvent"
           error: "#/components/schemas/StreamErrorEvent"
     DocumentSourceMaterial:
       type: object

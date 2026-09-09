@@ -21,6 +21,11 @@ SCHEMAS_TO_COMPARE = {
     "InvokeResponse",
     "ExecutionMetadata",
     "StreamRequest",
+    "ChatRequest",
+    "ChatInvokeResponse",
+    "CompactChatRequest",
+    "CompactChatResponse",
+    "ChatContextUsage",
     "ComposeDocumentRequest",
     "ComposeDocumentResponse",
     "DocumentPlan",
@@ -81,9 +86,7 @@ def resolve_ref(document: dict[str, Any], value: dict[str, Any]) -> dict[str, An
     return resolved
 
 
-def response_schema_name(
-    document: dict[str, Any], response: dict[str, Any]
-) -> str | None:
+def response_schema_name(document: dict[str, Any], response: dict[str, Any]) -> str | None:
     resolved_response = resolve_ref(document, response)
     content = resolved_response.get("content", {}).get("application/json")
     if content is None:
@@ -151,9 +154,7 @@ def test_runtime_openapi_matches_contract_metadata_and_security() -> None:
     assert runtime["info"] == contract["info"]
     assert runtime.get("servers") == contract.get("servers")
     assert runtime.get("tags") == contract.get("tags")
-    assert runtime["components"]["securitySchemes"] == contract["components"][
-        "securitySchemes"
-    ]
+    assert runtime["components"]["securitySchemes"] == contract["components"]["securitySchemes"]
 
 
 def test_runtime_openapi_models_keep_contract_fields() -> None:
@@ -167,9 +168,10 @@ def test_runtime_openapi_models_keep_contract_fields() -> None:
             "additionalProperties"
         )
         assert set(runtime_schema.get("required", [])) == set(contract_schema.get("required", []))
-        assert runtime_schema.get("properties", {}).keys() == contract_schema.get(
-            "properties", {}
-        ).keys()
+        assert (
+            runtime_schema.get("properties", {}).keys()
+            == contract_schema.get("properties", {}).keys()
+        )
 
 
 def test_document_binary_responses_match_contract_media_types_and_headers() -> None:
@@ -182,9 +184,11 @@ def test_document_binary_responses_match_contract_media_types_and_headers() -> N
     ):
         contract_response = contract["paths"][path]["post"]["responses"]["200"]
         runtime_response = runtime["paths"][path]["post"]["responses"]["200"]
-        assert runtime_response.get("content", {}).keys() == contract_response.get(
-            "content", {}
-        ).keys()
-        assert runtime_response.get("headers", {}).keys() == contract_response.get(
-            "headers", {}
-        ).keys()
+        assert (
+            runtime_response.get("content", {}).keys()
+            == contract_response.get("content", {}).keys()
+        )
+        assert (
+            runtime_response.get("headers", {}).keys()
+            == contract_response.get("headers", {}).keys()
+        )

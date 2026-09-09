@@ -3,7 +3,13 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from app.api.generated.models import HealthResponse, ModelRole, ReadinessResponse, Status
+from app.api.generated.models import (
+    ChatMode,
+    HealthResponse,
+    ModelRole,
+    ReadinessResponse,
+    Status,
+)
 from app.core.runtime import AppRuntime
 
 router = APIRouter(tags=["system"])
@@ -39,6 +45,7 @@ async def ready(request: Request) -> ReadinessResponse | JSONResponse:
         status=Status.ready if runtime.ready else Status.not_ready,
         service="ai-service",
         configured_roles=[ModelRole(role) for role in runtime.configured_roles],
+        configured_chat_modes=[ChatMode(mode) for mode in runtime.configured_chat_modes],
         errors=runtime.readiness_errors,
     )
     if runtime.ready:

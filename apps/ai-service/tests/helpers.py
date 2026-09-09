@@ -2,7 +2,16 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Sequence
 
-from app.core.config import ModelCatalog, ModelProfile, ModelRole, OutputMode, Settings
+from app.core.config import (
+    ChatConfig,
+    ChatMode,
+    ChatModePolicy,
+    ModelCatalog,
+    ModelProfile,
+    ModelRole,
+    OutputMode,
+    Settings,
+)
 from app.core.runtime import AppRuntime
 from app.llm.router import LLMRouter
 from app.llm.types import (
@@ -71,10 +80,38 @@ def profile(
     return ModelProfile.model_validate(values)
 
 
+def chat_config() -> ChatConfig:
+    return ChatConfig(
+        modes={
+            ChatMode.standard: ChatModePolicy(
+                role=ModelRole.default,
+                default_max_output_tokens=256,
+                max_output_tokens_limit=1024,
+                context_budget_tokens=4096,
+                emit_reasoning_status=False,
+            ),
+            ChatMode.ultra: ChatModePolicy(
+                role=ModelRole.reasoning,
+                reasoning_effort="high",
+                default_max_output_tokens=512,
+                max_output_tokens_limit=2048,
+                context_budget_tokens=8192,
+                emit_reasoning_status=True,
+            ),
+        },
+        compaction_role=ModelRole.default,
+        compaction_max_output_tokens=512,
+        compaction_context_budget_tokens=8192,
+    )
+
+
 def catalog(
-    profiles: dict[str, ModelProfile], roles: dict[ModelRole, list[str]]
+    profiles: dict[str, ModelProfile],
+    roles: dict[ModelRole, list[str]],
+    *,
+    chat: ChatConfig | None = None,
 ) -> ModelCatalog:
-    return ModelCatalog(profiles=profiles, roles=roles)
+    return ModelCatalog(profiles=profiles, roles=roles, chat=chat)
 
 
 def ready_runtime(
@@ -92,9 +129,7 @@ def ready_runtime(
     )
 
 
-def result(
-    value: str | dict[str, object], finish_reason: str | None = "stop"
-) -> ProviderResult:
+def result(value: str | dict[str, object], finish_reason: str | None = "stop") -> ProviderResult:
     return ProviderResult(
         output=value,
         token_usage=TokenUsageData(input_tokens=3, output_tokens=2, total_tokens=5),
