@@ -4,6 +4,7 @@ import {
     TaskAssigneeType, TaskStatus,
 } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
+import { lockProjectForUpdate } from '../project/project-transaction-lock';
 import { RequestTenantContext, TenantContext } from '../tenant/tenant-context';
 import {
     AddTaskAttachmentDto, CreateTaskCommentDto, CreateTaskDto, ListTaskEntriesQueryDto,
@@ -101,6 +102,7 @@ type TaskRecord = Prisma.TaskGetPayload<{ select: typeof taskSelect }>;
 type TaskCommentRecord = Prisma.TaskCommentGetPayload<{ select: typeof commentSelect }>;
 type TaskAttachmentRecord = Prisma.TaskAttachmentGetPayload<{ select: typeof attachmentSelect }>;
 type TaskActivityRecord = Prisma.TaskActivityGetPayload<{ select: typeof activitySelect }>;
+type TaskDb = PrismaService | Prisma.TransactionClient;
 
 interface ProjectAccessRecord {
     id: string;
@@ -165,15 +167,20 @@ export class TaskService {
 
     async createTask(projectId: string, input: CreateTaskDto): Promise<TaskResult> {
         const context = this.tenantContext.require();
-        const project = await this.requireProjectAccess(context, projectId);
-        this.assertProjectEditable(project);
         const collaboratorMembershipIds = uniqueMembershipIds(input.collaboratorMembershipIds);
-        await Promise.all([
-            this.validateProjectAssignees(context, projectId, input.ownerMembershipId, collaboratorMembershipIds),
-            this.validateTaskParent(context, projectId, input.parentId ?? null),
-        ]);
         const title = normalizeRequiredText(input.title, 'TASK_TITLE_REQUIRED', '任务标题不能为空');
         const taskId = await this.prisma.$transaction(async (transaction) => {
+            await lockProjectForUpdate(transaction, context.tenantId, projectId);
+            const project = await this.requireProjectAccess(context, projectId, transaction);
+            this.assertProjectEditable(project);
+            await this.validateProjectAssignees(
+                context,
+                projectId,
+                input.ownerMembershipId,
+                collaboratorMembershipIds,
+                transaction,
+            );
+            await this.validateTaskParent(context, projectId, input.parentId ?? null, undefined, transaction);
             const task = await transaction.task.create({
                 data: {
                     tenantId: context.tenantId,
@@ -212,16 +219,6 @@ export class TaskService {
 
     async updateTask(projectId: string, taskId: string, input: UpdateTaskDto): Promise<TaskResult> {
         const context = this.tenantContext.require();
-        const project = await this.requireProjectAccess(context, projectId);
-        const task = await this.requireTask(context, projectId, taskId);
-        this.assertProjectEditable(project);
-        this.assertTaskManager(context, project, task);
-        this.assertTaskEditable(task);
-        if (input.parentId !== undefined) await this.validateTaskParent(context, projectId, input.parentId, taskId);
-        if (!hasTaskChanges(input)) {
-            if (task.version !== input.version) throw this.versionConflict();
-            return toTaskResult(task);
-        }
         const data: Prisma.TaskUncheckedUpdateManyInput = {
             updatedBy: context.userId,
             version: { increment: 1 },
@@ -247,7 +244,20 @@ export class TaskService {
             data.dueDate = toNullableDate(input.dueDate);
             changedFields.push('dueDate');
         }
-        await this.prisma.$transaction(async (transaction) => {
+        const result = await this.prisma.$transaction(async (transaction) => {
+            await lockProjectForUpdate(transaction, context.tenantId, projectId);
+            const project = await this.requireProjectAccess(context, projectId, transaction);
+            const task = await this.requireTask(context, projectId, taskId, transaction);
+            this.assertProjectEditable(project);
+            this.assertTaskManager(context, project, task);
+            this.assertTaskEditable(task);
+            if (input.parentId !== undefined) {
+                await this.validateTaskParent(context, projectId, input.parentId, taskId, transaction);
+            }
+            if (!hasTaskChanges(input)) {
+                if (task.version !== input.version) throw this.versionConflict();
+                return toTaskResult(task);
+            }
             const updated = await transaction.task.updateMany({
                 where: { id: taskId, tenantId: context.tenantId, projectId, version: input.version, deletedAt: null },
                 data,
@@ -259,17 +269,20 @@ export class TaskService {
             await transaction.auditLog.create({
                 data: auditData(context, 'TASK_UPDATED', 'TASK', taskId, { projectId, changedFields }),
             });
+            return null;
         });
+        if (result) return result;
         return this.getTask(projectId, taskId);
     }
 
     async deleteTask(projectId: string, taskId: string, version: number): Promise<void> {
         const context = this.tenantContext.require();
-        const project = await this.requireProjectAccess(context, projectId);
-        const task = await this.requireTask(context, projectId, taskId);
-        this.assertProjectEditable(project);
-        this.assertTaskManager(context, project, task);
         await this.prisma.$transaction(async (transaction) => {
+            await lockProjectForUpdate(transaction, context.tenantId, projectId);
+            const project = await this.requireProjectAccess(context, projectId, transaction);
+            const task = await this.requireTask(context, projectId, taskId, transaction);
+            this.assertProjectEditable(project);
+            this.assertTaskManager(context, project, task);
             const child = await transaction.task.findFirst({
                 where: { tenantId: context.tenantId, projectId, parentId: taskId, deletedAt: null },
                 select: { id: true },
@@ -296,22 +309,23 @@ export class TaskService {
 
     async transitionTask(projectId: string, taskId: string, input: TaskTransitionDto): Promise<TaskResult> {
         const context = this.tenantContext.require();
-        const project = await this.requireProjectAccess(context, projectId);
-        const task = await this.requireTask(context, projectId, taskId);
-        this.assertProjectEditable(project);
-        this.assertTaskExecutorOrManager(context, project, task);
-        if (!ALLOWED_TRANSITIONS[task.status].has(input.status)) {
-            throw new ConflictException({
-                code: 'TASK_STATUS_TRANSITION_INVALID',
-                message: '当前任务状态不允许执行该流转',
-                details: { fromStatus: task.status, toStatus: input.status },
-            });
-        }
         const reason = normalizeOptionalText(input.reason);
         if ((input.status === TaskStatus.BLOCKED || input.status === TaskStatus.CANCELLED) && !reason) {
             throw new BadRequestException({ code: 'TASK_STATUS_REASON_REQUIRED', message: '任务阻塞或取消时必须填写原因' });
         }
         await this.prisma.$transaction(async (transaction) => {
+            await lockProjectForUpdate(transaction, context.tenantId, projectId);
+            const project = await this.requireProjectAccess(context, projectId, transaction);
+            const task = await this.requireTask(context, projectId, taskId, transaction);
+            this.assertProjectEditable(project);
+            this.assertTaskExecutorOrManager(context, project, task);
+            if (!ALLOWED_TRANSITIONS[task.status].has(input.status)) {
+                throw new ConflictException({
+                    code: 'TASK_STATUS_TRANSITION_INVALID',
+                    message: '当前任务状态不允许执行该流转',
+                    details: { fromStatus: task.status, toStatus: input.status },
+                });
+            }
             const updated = await transaction.task.updateMany({
                 where: {
                     id: taskId, tenantId: context.tenantId, projectId,
@@ -333,14 +347,21 @@ export class TaskService {
 
     async replaceAssignees(projectId: string, taskId: string, input: ReplaceTaskAssigneesDto): Promise<TaskResult> {
         const context = this.tenantContext.require();
-        const project = await this.requireProjectAccess(context, projectId);
-        const task = await this.requireTask(context, projectId, taskId);
-        this.assertProjectEditable(project);
-        this.assertTaskManager(context, project, task);
-        this.assertTaskEditable(task);
         const collaboratorMembershipIds = uniqueMembershipIds(input.collaboratorMembershipIds);
-        await this.validateProjectAssignees(context, projectId, input.ownerMembershipId, collaboratorMembershipIds);
         await this.prisma.$transaction(async (transaction) => {
+            await lockProjectForUpdate(transaction, context.tenantId, projectId);
+            const project = await this.requireProjectAccess(context, projectId, transaction);
+            const task = await this.requireTask(context, projectId, taskId, transaction);
+            this.assertProjectEditable(project);
+            this.assertTaskManager(context, project, task);
+            this.assertTaskEditable(task);
+            await this.validateProjectAssignees(
+                context,
+                projectId,
+                input.ownerMembershipId,
+                collaboratorMembershipIds,
+                transaction,
+            );
             const updated = await transaction.task.updateMany({
                 where: { id: taskId, tenantId: context.tenantId, projectId, version: input.version, deletedAt: null },
                 data: { updatedBy: context.userId, version: { increment: 1 } },
@@ -383,11 +404,12 @@ export class TaskService {
 
     async createComment(projectId: string, taskId: string, input: CreateTaskCommentDto): Promise<TaskCommentResult> {
         const context = this.tenantContext.require();
-        const project = await this.requireProjectAccess(context, projectId);
-        await this.requireTask(context, projectId, taskId);
-        this.assertProjectEditable(project);
         const content = normalizeRequiredText(input.content, 'TASK_COMMENT_CONTENT_REQUIRED', '评论内容不能为空');
         const commentId = await this.prisma.$transaction(async (transaction) => {
+            await lockProjectForUpdate(transaction, context.tenantId, projectId);
+            const project = await this.requireProjectAccess(context, projectId, transaction);
+            await this.requireTask(context, projectId, taskId, transaction);
+            this.assertProjectEditable(project);
             const comment = await transaction.taskComment.create({
                 data: {
                     tenantId: context.tenantId,
@@ -417,13 +439,14 @@ export class TaskService {
         input: UpdateTaskCommentDto,
     ): Promise<TaskCommentResult> {
         const context = this.tenantContext.require();
-        const project = await this.requireProjectAccess(context, projectId);
-        const task = await this.requireTask(context, projectId, taskId);
-        const comment = await this.requireCommentRecord(context, taskId, commentId);
-        this.assertProjectEditable(project);
-        this.assertCommentManager(context, project, task, comment.authorMembership.id);
         const content = normalizeRequiredText(input.content, 'TASK_COMMENT_CONTENT_REQUIRED', '评论内容不能为空');
         await this.prisma.$transaction(async (transaction) => {
+            await lockProjectForUpdate(transaction, context.tenantId, projectId);
+            const project = await this.requireProjectAccess(context, projectId, transaction);
+            const task = await this.requireTask(context, projectId, taskId, transaction);
+            const comment = await this.requireCommentRecord(context, taskId, commentId, transaction);
+            this.assertProjectEditable(project);
+            this.assertCommentManager(context, project, task, comment.authorMembership.id);
             const updated = await transaction.taskComment.updateMany({
                 where: { id: commentId, tenantId: context.tenantId, taskId, version: input.version, deletedAt: null },
                 data: { content, updatedBy: context.userId, version: { increment: 1 } },
@@ -441,12 +464,13 @@ export class TaskService {
 
     async deleteComment(projectId: string, taskId: string, commentId: string, version: number): Promise<void> {
         const context = this.tenantContext.require();
-        const project = await this.requireProjectAccess(context, projectId);
-        const task = await this.requireTask(context, projectId, taskId);
-        const comment = await this.requireCommentRecord(context, taskId, commentId);
-        this.assertProjectEditable(project);
-        this.assertCommentManager(context, project, task, comment.authorMembership.id);
         await this.prisma.$transaction(async (transaction) => {
+            await lockProjectForUpdate(transaction, context.tenantId, projectId);
+            const project = await this.requireProjectAccess(context, projectId, transaction);
+            const task = await this.requireTask(context, projectId, taskId, transaction);
+            const comment = await this.requireCommentRecord(context, taskId, commentId, transaction);
+            this.assertProjectEditable(project);
+            this.assertCommentManager(context, project, task, comment.authorMembership.id);
             const deleted = await transaction.taskComment.updateMany({
                 where: { id: commentId, tenantId: context.tenantId, taskId, version, deletedAt: null },
                 data: { deletedAt: new Date(), updatedBy: context.userId, version: { increment: 1 } },
@@ -475,27 +499,28 @@ export class TaskService {
 
     async addAttachment(projectId: string, taskId: string, input: AddTaskAttachmentDto): Promise<TaskAttachmentResult> {
         const context = this.tenantContext.require();
-        const project = await this.requireProjectAccess(context, projectId);
-        await this.requireTask(context, projectId, taskId);
-        this.assertProjectEditable(project);
-        const file = await this.prisma.fileObject.findFirst({
-            where: {
-                id: input.fileObjectId,
-                tenantId: context.tenantId,
-                purpose: FilePurpose.ATTACHMENT,
-                deletedAt: null,
-            },
-            select: { id: true },
-        });
-        if (!file) {
-            throw new BadRequestException({
-                code: 'TASK_ATTACHMENT_FILE_INVALID',
-                message: '文件不存在、未完成上传或不属于当前租户',
-            });
-        }
         let attachmentId: string;
         try {
             attachmentId = await this.prisma.$transaction(async (transaction) => {
+                await lockProjectForUpdate(transaction, context.tenantId, projectId);
+                const project = await this.requireProjectAccess(context, projectId, transaction);
+                await this.requireTask(context, projectId, taskId, transaction);
+                this.assertProjectEditable(project);
+                const file = await transaction.fileObject.findFirst({
+                    where: {
+                        id: input.fileObjectId,
+                        tenantId: context.tenantId,
+                        purpose: FilePurpose.ATTACHMENT,
+                        deletedAt: null,
+                    },
+                    select: { id: true },
+                });
+                if (!file) {
+                    throw new BadRequestException({
+                        code: 'TASK_ATTACHMENT_FILE_INVALID',
+                        message: '文件不存在、未完成上传或不属于当前租户',
+                    });
+                }
                 const attachment = await transaction.taskAttachment.create({
                     data: {
                         tenantId: context.tenantId,
@@ -538,17 +563,18 @@ export class TaskService {
         version: number,
     ): Promise<void> {
         const context = this.tenantContext.require();
-        const project = await this.requireProjectAccess(context, projectId);
-        const task = await this.requireTask(context, projectId, taskId);
-        const attachment = await this.requireAttachmentRecord(context, taskId, attachmentId);
-        this.assertProjectEditable(project);
-        if (attachment.createdByMembershipId !== context.membershipId && !this.isTaskManager(context, project, task)) {
-            throw new ForbiddenException({
-                code: 'TASK_ATTACHMENT_MUTATION_DENIED',
-                message: '只有附件添加者或任务管理者可以移除附件',
-            });
-        }
         await this.prisma.$transaction(async (transaction) => {
+            await lockProjectForUpdate(transaction, context.tenantId, projectId);
+            const project = await this.requireProjectAccess(context, projectId, transaction);
+            const task = await this.requireTask(context, projectId, taskId, transaction);
+            const attachment = await this.requireAttachmentRecord(context, taskId, attachmentId, transaction);
+            this.assertProjectEditable(project);
+            if (attachment.createdByMembershipId !== context.membershipId && !this.isTaskManager(context, project, task)) {
+                throw new ForbiddenException({
+                    code: 'TASK_ATTACHMENT_MUTATION_DENIED',
+                    message: '只有附件添加者或任务管理者可以移除附件',
+                });
+            }
             const removed = await transaction.taskAttachment.updateMany({
                 where: { id: attachmentId, tenantId: context.tenantId, taskId, version, deletedAt: null },
                 data: { deletedAt: new Date(), updatedBy: context.userId, version: { increment: 1 } },
@@ -586,8 +612,12 @@ export class TaskService {
         };
     }
 
-    private async requireProjectAccess(context: RequestTenantContext, projectId: string): Promise<ProjectAccessRecord> {
-        const project = await this.prisma.project.findFirst({
+    private async requireProjectAccess(
+        context: RequestTenantContext,
+        projectId: string,
+        db: TaskDb = this.prisma,
+    ): Promise<ProjectAccessRecord> {
+        const project = await db.project.findFirst({
             where: {
                 id: projectId,
                 tenantId: context.tenantId,
@@ -612,8 +642,13 @@ export class TaskService {
         return project;
     }
 
-    private async requireTask(context: RequestTenantContext, projectId: string, taskId: string): Promise<TaskRecord> {
-        const task = await this.prisma.task.findFirst({
+    private async requireTask(
+        context: RequestTenantContext,
+        projectId: string,
+        taskId: string,
+        db: TaskDb = this.prisma,
+    ): Promise<TaskRecord> {
+        const task = await db.task.findFirst({
             where: { id: taskId, tenantId: context.tenantId, projectId, deletedAt: null },
             select: taskSelect,
         });
@@ -625,16 +660,18 @@ export class TaskService {
         context: RequestTenantContext,
         taskId: string,
         commentId: string,
+        db: TaskDb = this.prisma,
     ): Promise<TaskCommentResult> {
-        return toTaskCommentResult(await this.requireCommentRecord(context, taskId, commentId));
+        return toTaskCommentResult(await this.requireCommentRecord(context, taskId, commentId, db));
     }
 
     private async requireCommentRecord(
         context: RequestTenantContext,
         taskId: string,
         commentId: string,
+        db: TaskDb = this.prisma,
     ): Promise<TaskCommentRecord> {
-        const comment = await this.prisma.taskComment.findFirst({
+        const comment = await db.taskComment.findFirst({
             where: { id: commentId, tenantId: context.tenantId, taskId, deletedAt: null },
             select: commentSelect,
         });
@@ -646,16 +683,18 @@ export class TaskService {
         context: RequestTenantContext,
         taskId: string,
         attachmentId: string,
+        db: TaskDb = this.prisma,
     ): Promise<TaskAttachmentResult> {
-        return toTaskAttachmentResult(await this.requireAttachmentRecord(context, taskId, attachmentId));
+        return toTaskAttachmentResult(await this.requireAttachmentRecord(context, taskId, attachmentId, db));
     }
 
     private async requireAttachmentRecord(
         context: RequestTenantContext,
         taskId: string,
         attachmentId: string,
+        db: TaskDb = this.prisma,
     ): Promise<TaskAttachmentRecord> {
-        const attachment = await this.prisma.taskAttachment.findFirst({
+        const attachment = await db.taskAttachment.findFirst({
             where: { id: attachmentId, tenantId: context.tenantId, taskId, deletedAt: null },
             select: attachmentSelect,
         });
@@ -670,12 +709,13 @@ export class TaskService {
         projectId: string,
         ownerMembershipId: string,
         collaboratorMembershipIds: string[],
+        db: TaskDb = this.prisma,
     ): Promise<void> {
         if (collaboratorMembershipIds.includes(ownerMembershipId)) {
             throw new BadRequestException({ code: 'TASK_ASSIGNEE_DUPLICATED', message: '任务负责人不能同时作为协作人' });
         }
         const membershipIds = [ownerMembershipId, ...collaboratorMembershipIds];
-        const members = await this.prisma.projectMember.findMany({
+        const members = await db.projectMember.findMany({
             where: {
                 tenantId: context.tenantId,
                 projectId,
@@ -703,8 +743,9 @@ export class TaskService {
         projectId: string,
         parentId: string | null,
         taskId?: string,
+        db: TaskDb = this.prisma,
     ): Promise<void> {
-        const tasks = await this.prisma.task.findMany({
+        const tasks = await db.task.findMany({
             where: { tenantId: context.tenantId, projectId, deletedAt: null },
             select: { id: true, parentId: true },
         });

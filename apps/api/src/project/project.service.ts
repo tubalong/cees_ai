@@ -9,6 +9,7 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
 import { RequestTenantContext, TenantContext } from '../tenant/tenant-context';
+import { lockProjectForUpdate } from './project-transaction-lock';
 import {
     AddProjectMemberDto,
     CompleteProjectDto,
@@ -76,6 +77,7 @@ const projectSelect = {
 
 type ProjectRecord = Prisma.ProjectGetPayload<{ select: typeof projectSelect }>;
 type ProjectMemberRecord = Prisma.ProjectMemberGetPayload<{ select: typeof memberSelect }>;
+type ProjectDb = PrismaService | Prisma.TransactionClient;
 
 interface TransitionOptions {
     from: ProjectStatus[];
@@ -204,34 +206,34 @@ export class ProjectService {
 
     async updateProject(projectId: string, input: UpdateProjectDto): Promise<ProjectResult> {
         const context = this.tenantContext.require();
-        const project = await this.requireProject(context, projectId);
-        this.assertManager(context, project);
-        this.assertEditable(project);
         if (!hasProjectChanges(input)) {
             throw new BadRequestException({ code: 'PROJECT_UPDATE_EMPTY', message: '至少提供一个需要修改的字段' });
         }
-        await this.requireDepartment(context.tenantId, input.departmentId);
-        const dates = normalizeAndValidateDates(
-            input.startsAt === undefined ? project.startsAt : input.startsAt,
-            input.endsAt === undefined ? project.endsAt : input.endsAt,
-        );
-        const data: Prisma.ProjectUncheckedUpdateManyInput = {
-            version: { increment: 1 },
-            updatedBy: context.userId,
-        };
-        if (input.code !== undefined) {
-            const code = normalizeCode(input.code);
-            data.code = code;
-            data.normalizedCode = code.toLocaleLowerCase();
-        }
-        if (input.name !== undefined) data.name = normalizeRequiredText(input.name);
-        if (input.description !== undefined) data.description = normalizeOptionalText(input.description);
-        if (input.departmentId !== undefined) data.departmentId = input.departmentId;
-        if (input.startsAt !== undefined) data.startsAt = dates.startsAt;
-        if (input.endsAt !== undefined) data.endsAt = dates.endsAt;
-
         try {
             await this.prisma.$transaction(async (transaction) => {
+                await lockProjectForUpdate(transaction, context.tenantId, projectId);
+                const project = await this.requireProject(context, projectId, transaction);
+                this.assertManager(context, project);
+                this.assertEditable(project);
+                await this.requireDepartment(context.tenantId, input.departmentId, transaction);
+                const dates = normalizeAndValidateDates(
+                    input.startsAt === undefined ? project.startsAt : input.startsAt,
+                    input.endsAt === undefined ? project.endsAt : input.endsAt,
+                );
+                const data: Prisma.ProjectUncheckedUpdateManyInput = {
+                    version: { increment: 1 },
+                    updatedBy: context.userId,
+                };
+                if (input.code !== undefined) {
+                    const code = normalizeCode(input.code);
+                    data.code = code;
+                    data.normalizedCode = code.toLocaleLowerCase();
+                }
+                if (input.name !== undefined) data.name = normalizeRequiredText(input.name);
+                if (input.description !== undefined) data.description = normalizeOptionalText(input.description);
+                if (input.departmentId !== undefined) data.departmentId = input.departmentId;
+                if (input.startsAt !== undefined) data.startsAt = dates.startsAt;
+                if (input.endsAt !== undefined) data.endsAt = dates.endsAt;
                 const updated = await transaction.project.updateMany({
                     where: { id: projectId, tenantId: context.tenantId, version: input.version, deletedAt: null },
                     data,
@@ -253,14 +255,18 @@ export class ProjectService {
 
     async deleteProject(projectId: string, version: number): Promise<void> {
         const context = this.tenantContext.require();
-        const project = await this.requireProject(context, projectId);
-        this.assertOwner(context, project);
-        const taskCount = await this.prisma.task.count({ where: { tenantId: context.tenantId, projectId } });
-        if (taskCount > 0) {
-            throw new ConflictException({ code: 'PROJECT_HAS_BUSINESS_DATA', message: '项目已有任务，不能删除，请完成或归档项目' });
-        }
         const deletedAt = new Date();
         await this.prisma.$transaction(async (transaction) => {
+            await lockProjectForUpdate(transaction, context.tenantId, projectId);
+            const project = await this.requireProject(context, projectId, transaction);
+            this.assertOwner(context, project);
+            const taskCount = await transaction.task.count({ where: { tenantId: context.tenantId, projectId } });
+            if (taskCount > 0) {
+                throw new ConflictException({
+                    code: 'PROJECT_HAS_BUSINESS_DATA',
+                    message: '项目已有任务，不能删除，请完成或归档项目',
+                });
+            }
             const deleted = await transaction.project.updateMany({
                 where: { id: projectId, tenantId: context.tenantId, version, deletedAt: null },
                 data: { deletedAt, updatedBy: context.userId, version: { increment: 1 } },
@@ -285,20 +291,21 @@ export class ProjectService {
     async addMember(projectId: string, input: AddProjectMemberDto): Promise<ProjectMemberResult> {
         const context = this.tenantContext.require();
         assertEditableMemberRole(input.role);
-        const project = await this.requireProject(context, projectId);
-        this.assertManager(context, project);
-        this.assertEditable(project);
-        await this.requireActiveMembership(context.tenantId, input.membershipId);
-        const existing = await this.prisma.projectMember.findFirst({
-            where: { tenantId: context.tenantId, projectId, membershipId: input.membershipId },
-            select: { id: true, deletedAt: true },
-        });
-        if (existing && !existing.deletedAt) {
-            throw new ConflictException({ code: 'PROJECT_MEMBER_EXISTS', message: '该租户成员已经在项目中' });
-        }
         let projectMemberId: string;
         try {
             projectMemberId = await this.prisma.$transaction(async (transaction) => {
+                await lockProjectForUpdate(transaction, context.tenantId, projectId);
+                const project = await this.requireProject(context, projectId, transaction);
+                this.assertManager(context, project);
+                this.assertEditable(project);
+                await this.requireActiveMembership(context.tenantId, input.membershipId, transaction);
+                const existing = await transaction.projectMember.findFirst({
+                    where: { tenantId: context.tenantId, projectId, membershipId: input.membershipId },
+                    select: { id: true, deletedAt: true },
+                });
+                if (existing && !existing.deletedAt) {
+                    throw new ConflictException({ code: 'PROJECT_MEMBER_EXISTS', message: '该租户成员已经在项目中' });
+                }
                 const member = existing
                     ? await transaction.projectMember.update({
                         where: { id: existing.id },
@@ -346,12 +353,13 @@ export class ProjectService {
     ): Promise<ProjectMemberResult> {
         const context = this.tenantContext.require();
         assertEditableMemberRole(input.role);
-        const project = await this.requireProject(context, projectId);
-        this.assertManager(context, project);
-        this.assertEditable(project);
-        const member = this.requireMember(project, membershipId);
-        if (member.role === ProjectMemberRole.OWNER) throw this.ownerMutationConflict();
         await this.prisma.$transaction(async (transaction) => {
+            await lockProjectForUpdate(transaction, context.tenantId, projectId);
+            const project = await this.requireProject(context, projectId, transaction);
+            this.assertManager(context, project);
+            this.assertEditable(project);
+            const member = this.requireMember(project, membershipId);
+            if (member.role === ProjectMemberRole.OWNER) throw this.ownerMutationConflict();
             const updated = await transaction.projectMember.updateMany({
                 where: {
                     id: member.id,
@@ -376,12 +384,13 @@ export class ProjectService {
 
     async removeMember(projectId: string, membershipId: string, version: number): Promise<void> {
         const context = this.tenantContext.require();
-        const project = await this.requireProject(context, projectId);
-        this.assertManager(context, project);
-        this.assertEditable(project);
-        const member = this.requireMember(project, membershipId);
-        if (member.role === ProjectMemberRole.OWNER) throw this.ownerMutationConflict();
         await this.prisma.$transaction(async (transaction) => {
+            await lockProjectForUpdate(transaction, context.tenantId, projectId);
+            const project = await this.requireProject(context, projectId, transaction);
+            this.assertManager(context, project);
+            this.assertEditable(project);
+            const member = this.requireMember(project, membershipId);
+            if (member.role === ProjectMemberRole.OWNER) throw this.ownerMutationConflict();
             const activeAssignment = await transaction.taskAssignee.findFirst({
                 where: {
                     tenantId: context.tenantId,
@@ -414,15 +423,16 @@ export class ProjectService {
 
     async transferOwner(projectId: string, input: TransferProjectOwnerDto): Promise<ProjectResult> {
         const context = this.tenantContext.require();
-        const project = await this.requireProject(context, projectId);
-        this.assertOwner(context, project);
-        this.assertEditable(project);
-        if (project.ownerMembershipId === input.membershipId) {
-            throw new ConflictException({ code: 'PROJECT_OWNER_UNCHANGED', message: '目标成员已经是项目负责人' });
-        }
-        await this.requireActiveMembership(context.tenantId, input.membershipId);
-        const target = this.requireMember(project, input.membershipId);
         await this.prisma.$transaction(async (transaction) => {
+            await lockProjectForUpdate(transaction, context.tenantId, projectId);
+            const project = await this.requireProject(context, projectId, transaction);
+            this.assertOwner(context, project);
+            this.assertEditable(project);
+            if (project.ownerMembershipId === input.membershipId) {
+                throw new ConflictException({ code: 'PROJECT_OWNER_UNCHANGED', message: '目标成员已经是项目负责人' });
+            }
+            await this.requireActiveMembership(context.tenantId, input.membershipId, transaction);
+            const target = this.requireMember(project, input.membershipId);
             const updated = await transaction.project.updateMany({
                 where: { id: projectId, tenantId: context.tenantId, version: input.version, deletedAt: null },
                 data: { ownerMembershipId: input.membershipId, updatedBy: context.userId, version: { increment: 1 } },
@@ -515,16 +525,17 @@ export class ProjectService {
 
     private async transition(projectId: string, version: number, options: TransitionOptions): Promise<ProjectResult> {
         const context = this.tenantContext.require();
-        const project = await this.requireProject(context, projectId);
-        if (options.ownerOnly) this.assertOwner(context, project);
-        else this.assertManager(context, project);
-        if (!options.from.includes(project.status)) {
-            throw new ConflictException({
-                code: 'PROJECT_STATUS_TRANSITION_INVALID',
-                message: `项目不能从 ${project.status} 变更为 ${options.to}`,
-            });
-        }
         await this.prisma.$transaction(async (transaction) => {
+            await lockProjectForUpdate(transaction, context.tenantId, projectId);
+            const project = await this.requireProject(context, projectId, transaction);
+            if (options.ownerOnly) this.assertOwner(context, project);
+            else this.assertManager(context, project);
+            if (!options.from.includes(project.status)) {
+                throw new ConflictException({
+                    code: 'PROJECT_STATUS_TRANSITION_INVALID',
+                    message: `项目不能从 ${project.status} 变更为 ${options.to}`,
+                });
+            }
             if (options.requireFinishedTasks) {
                 const unfinishedTaskCount = await transaction.task.count({
                     where: {
@@ -592,8 +603,12 @@ export class ProjectService {
         return this.getProject(projectId);
     }
 
-    private async requireProject(context: RequestTenantContext, projectId: string): Promise<ProjectRecord> {
-        const project = await this.prisma.project.findFirst({
+    private async requireProject(
+        context: RequestTenantContext,
+        projectId: string,
+        db: ProjectDb = this.prisma,
+    ): Promise<ProjectRecord> {
+        const project = await db.project.findFirst({
             where: { id: projectId, tenantId: context.tenantId, deletedAt: null },
             select: projectSelect,
         });
@@ -629,8 +644,12 @@ export class ProjectService {
         return member;
     }
 
-    private async requireActiveMembership(tenantId: string, membershipId: string): Promise<void> {
-        const membership = await this.prisma.tenantMembership.findFirst({
+    private async requireActiveMembership(
+        tenantId: string,
+        membershipId: string,
+        db: ProjectDb = this.prisma,
+    ): Promise<void> {
+        const membership = await db.tenantMembership.findFirst({
             where: { id: membershipId, tenantId, status: MembershipStatus.ACTIVE, deletedAt: null },
             select: { id: true },
         });
@@ -639,9 +658,13 @@ export class ProjectService {
         }
     }
 
-    private async requireDepartment(tenantId: string, departmentId: string | null | undefined): Promise<void> {
+    private async requireDepartment(
+        tenantId: string,
+        departmentId: string | null | undefined,
+        db: ProjectDb = this.prisma,
+    ): Promise<void> {
         if (departmentId === undefined || departmentId === null) return;
-        const department = await this.prisma.department.findFirst({
+        const department = await db.department.findFirst({
             where: { id: departmentId, tenantId, deletedAt: null },
             select: { id: true },
         });
@@ -650,8 +673,13 @@ export class ProjectService {
         }
     }
 
-    private async requireProjectMember(tenantId: string, projectId: string, membershipId: string): Promise<ProjectMemberResult> {
-        const member = await this.prisma.projectMember.findFirst({
+    private async requireProjectMember(
+        tenantId: string,
+        projectId: string,
+        membershipId: string,
+        db: ProjectDb = this.prisma,
+    ): Promise<ProjectMemberResult> {
+        const member = await db.projectMember.findFirst({
             where: { tenantId, projectId, membershipId, deletedAt: null },
             select: memberSelect,
         });
@@ -659,8 +687,12 @@ export class ProjectService {
         return toProjectMemberResult(member);
     }
 
-    private async requireProjectMemberById(tenantId: string, projectMemberId: string): Promise<ProjectMemberResult> {
-        const member = await this.prisma.projectMember.findFirst({
+    private async requireProjectMemberById(
+        tenantId: string,
+        projectMemberId: string,
+        db: ProjectDb = this.prisma,
+    ): Promise<ProjectMemberResult> {
+        const member = await db.projectMember.findFirst({
             where: { id: projectMemberId, tenantId, deletedAt: null },
             select: memberSelect,
         });
