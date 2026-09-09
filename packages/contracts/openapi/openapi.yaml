@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CEES AI API
-  version: 0.12.0
+  version: 0.13.0
   description: 以本文件为唯一事实源的公开 API 契约。资源与操作按 docs/api 约定补充。
 
 servers:
@@ -2995,6 +2995,314 @@ paths:
         "204":
           description: 邀请已撤销
 
+  /projects/{projectId}/tasks:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: 查询项目任务
+      operationId: taskList
+      tags: [Task]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: keyword, in: query, schema: { type: string, maxLength: 100 } }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/TaskStatus' }
+        - name: priority
+          in: query
+          schema: { $ref: '#/components/schemas/TaskPriority' }
+        - { name: assigneeMembershipId, in: query, schema: { type: string, format: uuid } }
+        - { name: parentId, in: query, schema: { type: string, format: uuid } }
+        - { name: rootOnly, in: query, schema: { type: boolean, default: false } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+        - { name: cursor, in: query, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: 当前项目任务列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TaskListResponseEnvelope' }
+        '401': { description: 登录状态无效, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '403': { description: 缺少 task.read 权限, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '404': { description: 项目不存在或当前成员不是项目成员, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+    post:
+      summary: 创建项目任务
+      operationId: taskCreate
+      tags: [Task]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateTaskRequest' }
+      responses:
+        '201':
+          description: 已创建任务
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TaskResponseEnvelope' }
+        '400': { description: 父任务、负责人、协作人或字段无效, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '403': { description: 缺少 task.create 权限, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '404': { description: 项目不存在或当前成员不是项目成员, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '409': { description: 项目只读或任务层级冲突, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+
+  /projects/{projectId}/tasks/{taskId}:
+    parameters:
+      - { name: projectId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: taskId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      summary: 查询任务详情
+      operationId: taskGet
+      tags: [Task]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: 任务详情
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TaskResponseEnvelope' }
+        '403': { description: 缺少 task.read 权限, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '404': { description: 项目或任务不存在，或者当前成员不是项目成员, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+    patch:
+      summary: 修改任务资料或父任务
+      operationId: taskUpdate
+      tags: [Task]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateTaskRequest' }
+      responses:
+        '200':
+          description: 修改后的任务
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TaskResponseEnvelope' }
+        '400': { description: 字段或父子关系无效, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '403': { description: 需要 task.update 权限及任务负责人或项目 OWNER/MANAGER 身份, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '404': { description: 项目或任务不存在, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '409': { description: 项目只读、任务终态或版本冲突, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+    delete:
+      summary: 删除任务
+      operationId: taskDelete
+      tags: [Task]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: version, in: query, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        '204': { description: 任务已软删除 }
+        '403': { description: 缺少 task.delete 权限或不是任务管理者, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '404': { description: 项目或任务不存在, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '409': { description: 项目只读、任务存在子任务或版本冲突, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+
+  /projects/{projectId}/tasks/{taskId}/transitions:
+    parameters:
+      - { name: projectId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: taskId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      summary: 执行任务状态流转
+      operationId: taskTransition
+      tags: [Task]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TaskTransitionRequest' }
+      responses:
+        '200':
+          description: 状态变更后的任务
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TaskResponseEnvelope' }
+        '400': { description: 状态或原因无效, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '403': { description: 缺少 task.status.update 权限或不是任务执行人/项目管理者, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '404': { description: 项目或任务不存在, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '409': { description: 项目只读、状态流转或版本冲突, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+
+  /projects/{projectId}/tasks/{taskId}/assignees:
+    parameters:
+      - { name: projectId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: taskId, in: path, required: true, schema: { type: string, format: uuid } }
+    put:
+      summary: 整体替换任务负责人和协作人
+      operationId: taskReplaceAssignees
+      tags: [Task]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReplaceTaskAssigneesRequest' }
+      responses:
+        '200':
+          description: 修改执行人后的任务
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TaskResponseEnvelope' }
+        '400': { description: 负责人或协作人不是有效项目成员, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '403': { description: 缺少 task.assignee.manage 权限或不是任务管理者, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '404': { description: 项目或任务不存在, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '409': { description: 项目只读、任务终态或版本冲突, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+
+  /projects/{projectId}/tasks/{taskId}/comments:
+    parameters:
+      - { name: projectId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: taskId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      summary: 查询任务评论
+      operationId: taskCommentList
+      tags: [Task]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+        - { name: cursor, in: query, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: 任务评论列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TaskCommentListResponseEnvelope' }
+        '403': { description: 缺少 task.read 权限, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '404': { description: 项目或任务不存在, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+    post:
+      summary: 新增任务评论
+      operationId: taskCommentCreate
+      tags: [Task]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateTaskCommentRequest' }
+      responses:
+        '201':
+          description: 已创建评论
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TaskCommentResponseEnvelope' }
+        '403': { description: 缺少 task.comment.create 权限, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '404': { description: 项目或任务不存在, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '409': { description: 项目只读, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+
+  /projects/{projectId}/tasks/{taskId}/comments/{commentId}:
+    parameters:
+      - { name: projectId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: taskId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: commentId, in: path, required: true, schema: { type: string, format: uuid } }
+    patch:
+      summary: 修改自己的任务评论
+      operationId: taskCommentUpdate
+      tags: [Task]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateTaskCommentRequest' }
+      responses:
+        '200':
+          description: 修改后的评论
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TaskCommentResponseEnvelope' }
+        '403': { description: 缺少 task.comment.update 权限或不是评论作者/任务管理者, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '404': { description: 项目、任务或评论不存在, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '409': { description: 项目只读或版本冲突, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+    delete:
+      summary: 删除任务评论
+      operationId: taskCommentDelete
+      tags: [Task]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: version, in: query, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        '204': { description: 评论已删除 }
+        '403': { description: 缺少 task.comment.delete 权限或不是评论作者/任务管理者, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '404': { description: 项目、任务或评论不存在, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '409': { description: 项目只读或版本冲突, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+
+  /projects/{projectId}/tasks/{taskId}/attachments:
+    parameters:
+      - { name: projectId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: taskId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      summary: 查询任务附件
+      operationId: taskAttachmentList
+      tags: [Task]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: 任务附件列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TaskAttachmentListResponseEnvelope' }
+        '403': { description: 缺少 task.read 权限, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '404': { description: 项目或任务不存在, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+    post:
+      summary: 关联已上传文件为任务附件
+      operationId: taskAttachmentCreate
+      tags: [Task]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AddTaskAttachmentRequest' }
+      responses:
+        '201':
+          description: 已添加任务附件
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TaskAttachmentResponseEnvelope' }
+        '400': { description: 文件无效或不属于当前租户, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '403': { description: 缺少 task.attachment.manage 权限, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '404': { description: 项目或任务不存在, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '409': { description: 项目只读或附件已关联, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+
+  /projects/{projectId}/tasks/{taskId}/attachments/{attachmentId}:
+    parameters:
+      - { name: projectId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: taskId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: attachmentId, in: path, required: true, schema: { type: string, format: uuid } }
+    delete:
+      summary: 移除任务附件关联
+      operationId: taskAttachmentDelete
+      tags: [Task]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: version, in: query, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        '204': { description: 附件关联已移除，不删除 COS 文件 }
+        '403': { description: 缺少 task.attachment.manage 权限或不是附件创建者/任务管理者, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '404': { description: 项目、任务或附件不存在, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '409': { description: 项目只读或版本冲突, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+
+  /projects/{projectId}/tasks/{taskId}/activities:
+    parameters:
+      - { name: projectId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: taskId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      summary: 查询任务操作动态
+      operationId: taskActivityList
+      tags: [Task]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+        - { name: cursor, in: query, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: 任务操作动态列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TaskActivityListResponseEnvelope' }
+        '403': { description: 缺少 task.read 权限, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '404': { description: 项目或任务不存在, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -3007,6 +3315,291 @@ components:
       bearerFormat: JWT
 
   schemas:
+    TaskStatus:
+      type: string
+      enum: [TODO, IN_PROGRESS, BLOCKED, DONE, CANCELLED]
+
+    TaskPriority:
+      type: string
+      enum: [LOW, MEDIUM, HIGH, URGENT]
+
+    TaskAssigneeType:
+      type: string
+      enum: [OWNER, COLLABORATOR]
+
+    TaskTransitionTarget:
+      type: string
+      enum: [IN_PROGRESS, BLOCKED, DONE, CANCELLED]
+
+    CreateTaskRequest:
+      type: object
+      additionalProperties: false
+      required: [title, ownerMembershipId]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 200 }
+        description: { type: [string, 'null'], maxLength: 10000, default: null }
+        parentId: { type: [string, 'null'], format: uuid, default: null }
+        priority: { $ref: '#/components/schemas/TaskPriority' }
+        dueDate: { type: [string, 'null'], format: date-time, default: null }
+        ownerMembershipId: { type: string, format: uuid }
+        collaboratorMembershipIds:
+          type: array
+          maxItems: 100
+          uniqueItems: true
+          default: []
+          items: { type: string, format: uuid }
+
+    UpdateTaskRequest:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 200 }
+        description: { type: [string, 'null'], maxLength: 10000 }
+        parentId: { type: [string, 'null'], format: uuid }
+        priority: { $ref: '#/components/schemas/TaskPriority' }
+        dueDate: { type: [string, 'null'], format: date-time }
+        version: { type: integer, minimum: 1 }
+
+    TaskTransitionRequest:
+      type: object
+      additionalProperties: false
+      required: [status, version]
+      properties:
+        status: { $ref: '#/components/schemas/TaskTransitionTarget' }
+        reason:
+          type: [string, 'null']
+          maxLength: 500
+          description: BLOCKED 和 CANCELLED 时必填
+        version: { type: integer, minimum: 1 }
+
+    ReplaceTaskAssigneesRequest:
+      type: object
+      additionalProperties: false
+      required: [ownerMembershipId, collaboratorMembershipIds, version]
+      properties:
+        ownerMembershipId: { type: string, format: uuid }
+        collaboratorMembershipIds:
+          type: array
+          maxItems: 100
+          uniqueItems: true
+          items: { type: string, format: uuid }
+        version: { type: integer, minimum: 1 }
+
+    TaskMemberIdentity:
+      type: object
+      required: [membershipId, account, displayName, departmentId]
+      properties:
+        membershipId: { type: string, format: uuid }
+        account: { type: string }
+        displayName: { type: string }
+        departmentId: { type: [string, 'null'], format: uuid }
+
+    TaskAssignee:
+      allOf:
+        - $ref: '#/components/schemas/TaskMemberIdentity'
+        - type: object
+          required: [type]
+          properties:
+            type: { $ref: '#/components/schemas/TaskAssigneeType' }
+
+    TaskSummary:
+      type: object
+      required:
+        - id
+        - projectId
+        - parentId
+        - title
+        - description
+        - status
+        - priority
+        - dueDate
+        - owner
+        - collaborators
+        - subtaskCount
+        - commentCount
+        - attachmentCount
+        - createdAt
+        - updatedAt
+        - version
+      properties:
+        id: { type: string, format: uuid }
+        projectId: { type: string, format: uuid }
+        parentId: { type: [string, 'null'], format: uuid }
+        title: { type: string }
+        description: { type: [string, 'null'] }
+        status: { $ref: '#/components/schemas/TaskStatus' }
+        priority: { $ref: '#/components/schemas/TaskPriority' }
+        dueDate: { type: [string, 'null'], format: date-time }
+        owner:
+          oneOf:
+            - $ref: '#/components/schemas/TaskAssignee'
+            - type: 'null'
+        collaborators:
+          type: array
+          items: { $ref: '#/components/schemas/TaskAssignee' }
+        subtaskCount: { type: integer, minimum: 0 }
+        commentCount: { type: integer, minimum: 0 }
+        attachmentCount: { type: integer, minimum: 0 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        version: { type: integer, minimum: 1 }
+
+    TaskList:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/TaskSummary' }
+        nextCursor: { type: [string, 'null'], format: uuid }
+
+    TaskResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/TaskSummary' }
+        requestId: { type: [string, 'null'] }
+
+    TaskListResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/TaskList' }
+        requestId: { type: [string, 'null'] }
+
+    CreateTaskCommentRequest:
+      type: object
+      additionalProperties: false
+      required: [content]
+      properties:
+        content: { type: string, minLength: 1, maxLength: 5000 }
+
+    UpdateTaskCommentRequest:
+      type: object
+      additionalProperties: false
+      required: [content, version]
+      properties:
+        content: { type: string, minLength: 1, maxLength: 5000 }
+        version: { type: integer, minimum: 1 }
+
+    TaskComment:
+      type: object
+      required: [id, taskId, content, author, createdAt, updatedAt, version]
+      properties:
+        id: { type: string, format: uuid }
+        taskId: { type: string, format: uuid }
+        content: { type: string }
+        author: { $ref: '#/components/schemas/TaskMemberIdentity' }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        version: { type: integer, minimum: 1 }
+
+    TaskCommentList:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/TaskComment' }
+        nextCursor: { type: [string, 'null'], format: uuid }
+
+    TaskCommentResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/TaskComment' }
+        requestId: { type: [string, 'null'] }
+
+    TaskCommentListResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/TaskCommentList' }
+        requestId: { type: [string, 'null'] }
+
+    AddTaskAttachmentRequest:
+      type: object
+      additionalProperties: false
+      required: [fileObjectId]
+      properties:
+        fileObjectId: { type: string, format: uuid }
+
+    TaskAttachment:
+      type: object
+      required: [id, taskId, fileObjectId, fileName, contentType, sizeBytes, createdByMembershipId, createdAt, version]
+      properties:
+        id: { type: string, format: uuid }
+        taskId: { type: string, format: uuid }
+        fileObjectId: { type: string, format: uuid }
+        fileName: { type: string }
+        contentType: { type: string }
+        sizeBytes: { type: integer, format: int64, minimum: 0 }
+        createdByMembershipId: { type: string, format: uuid }
+        createdAt: { type: string, format: date-time }
+        version: { type: integer, minimum: 1 }
+
+    TaskAttachmentList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/TaskAttachment' }
+
+    TaskAttachmentResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/TaskAttachment' }
+        requestId: { type: [string, 'null'] }
+
+    TaskAttachmentListResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/TaskAttachmentList' }
+        requestId: { type: [string, 'null'] }
+
+    TaskActivity:
+      type: object
+      required: [id, taskId, action, actor, metadata, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        taskId: { type: string, format: uuid }
+        action: { type: string }
+        actor:
+          oneOf:
+            - $ref: '#/components/schemas/TaskMemberIdentity'
+            - type: 'null'
+        metadata:
+          type: [object, 'null']
+          additionalProperties: true
+        createdAt: { type: string, format: date-time }
+
+    TaskActivityList:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/TaskActivity' }
+        nextCursor: { type: [string, 'null'], format: uuid }
+
+    TaskActivityListResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/TaskActivityList' }
+        requestId: { type: [string, 'null'] }
+
     ProjectStatus:
       type: string
       enum: [PLANNING, ACTIVE, PAUSED, COMPLETED, CANCELLED, ARCHIVED]

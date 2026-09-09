@@ -97,6 +97,11 @@ enum TaskPriority {
   URGENT
 }
 
+enum TaskAssigneeType {
+  OWNER
+  COLLABORATOR
+}
+
 enum ProjectStatus {
   PLANNING
   ACTIVE
@@ -151,6 +156,11 @@ model Tenant {
   projects             Project[]
   projectMembers       ProjectMember[]
   projectStatusHistory ProjectStatusHistory[]
+  tasks                Task[]
+  taskAssignees        TaskAssignee[]
+  taskComments         TaskComment[]
+  taskAttachments      TaskAttachment[]
+  taskActivities       TaskActivity[]
   createdAt            DateTime               @default(now()) @map("created_at")
   updatedAt            DateTime               @updatedAt @map("updated_at")
   deletedAt            DateTime?              @map("deleted_at")
@@ -208,6 +218,11 @@ model TenantMembership {
   completedProjects    Project[]              @relation("ProjectCompleter")
   projectMemberships   ProjectMember[]        @relation("ProjectMembership")
   projectStatusChanges ProjectStatusHistory[] @relation("ProjectStatusChangedBy")
+  createdTasks         Task[]                 @relation("TaskCreatorMembership")
+  taskAssignments      TaskAssignee[]         @relation("TaskAssignmentMembership")
+  taskComments         TaskComment[]          @relation("TaskCommentAuthorMembership")
+  taskAttachments      TaskAttachment[]       @relation("TaskAttachmentCreatorMembership")
+  taskActivities       TaskActivity[]         @relation("TaskActivityActorMembership")
   createdAt            DateTime               @default(now()) @map("created_at")
   updatedAt            DateTime               @updatedAt @map("updated_at")
   createdBy            String?                @map("created_by") @db.Uuid
@@ -506,6 +521,7 @@ model Project {
   completionSummary       String?                @map("completion_summary") @db.Text
   members                 ProjectMember[]
   statusHistory           ProjectStatusHistory[]
+  tasks                   Task[]
   createdAt               DateTime               @default(now()) @map("created_at")
   updatedAt               DateTime               @updatedAt @map("updated_at")
   createdBy               String?                @map("created_by") @db.Uuid
@@ -562,84 +578,117 @@ model ProjectStatusHistory {
 }
 
 model Task {
-  id           String       @id @default(uuid()) @db.Uuid
-  tenantId     String       @map("tenant_id") @db.Uuid
-  projectId    String?      @map("project_id") @db.Uuid
-  parentId     String?      @map("parent_id") @db.Uuid
-  title        String
-  description  String?
-  status       TaskStatus   @default(TODO)
-  priority     TaskPriority @default(MEDIUM)
-  dueDate      DateTime?    @map("due_date")
-  relationType String?      @map("relation_type")
-  relationId   String?      @map("relation_id") @db.Uuid
-  createdAt    DateTime     @default(now()) @map("created_at")
-  updatedAt    DateTime     @updatedAt @map("updated_at")
-  createdBy    String?      @map("created_by") @db.Uuid
-  updatedBy    String?      @map("updated_by") @db.Uuid
-  deletedAt    DateTime?    @map("deleted_at")
-  version      Int          @default(1)
+  id                    String            @id @default(uuid()) @db.Uuid
+  tenantId              String            @map("tenant_id") @db.Uuid
+  tenant                Tenant            @relation(fields: [tenantId], references: [id])
+  projectId             String?           @map("project_id") @db.Uuid
+  project               Project?          @relation(fields: [projectId], references: [id])
+  parentId              String?           @map("parent_id") @db.Uuid
+  parent                Task?              @relation("TaskHierarchy", fields: [parentId], references: [id])
+  children              Task[]             @relation("TaskHierarchy")
+  title                 String
+  description           String?
+  status                TaskStatus        @default(TODO)
+  priority              TaskPriority      @default(MEDIUM)
+  dueDate               DateTime?         @map("due_date")
+  relationType          String?           @map("relation_type")
+  relationId            String?           @map("relation_id") @db.Uuid
+  createdByMembershipId String?           @map("created_by_membership_id") @db.Uuid
+  createdByMembership   TenantMembership? @relation("TaskCreatorMembership", fields: [createdByMembershipId], references: [id])
+  assignees             TaskAssignee[]
+  comments              TaskComment[]
+  attachments           TaskAttachment[]
+  activities            TaskActivity[]
+  createdAt             DateTime          @default(now()) @map("created_at")
+  updatedAt             DateTime          @updatedAt @map("updated_at")
+  createdBy             String?           @map("created_by") @db.Uuid
+  updatedBy             String?           @map("updated_by") @db.Uuid
+  deletedAt             DateTime?         @map("deleted_at")
+  version               Int               @default(1)
 
   @@index([tenantId, status, dueDate])
   @@index([tenantId, projectId])
+  @@index([tenantId, projectId, parentId])
+  @@index([tenantId, createdByMembershipId])
   @@map("tasks")
 }
 
 model TaskAssignee {
-  id           String   @id @default(uuid()) @db.Uuid
-  tenantId     String   @map("tenant_id") @db.Uuid
-  taskId       String   @map("task_id") @db.Uuid
-  userId       String   @map("user_id") @db.Uuid
-  assigneeType String   @default("OWNER") @map("assignee_type")
-  createdAt    DateTime @default(now()) @map("created_at")
+  id           String           @id @default(uuid()) @db.Uuid
+  tenantId     String           @map("tenant_id") @db.Uuid
+  tenant       Tenant           @relation(fields: [tenantId], references: [id])
+  taskId       String           @map("task_id") @db.Uuid
+  task         Task             @relation(fields: [taskId], references: [id])
+  membershipId String           @map("membership_id") @db.Uuid
+  membership   TenantMembership @relation("TaskAssignmentMembership", fields: [membershipId], references: [id])
+  assigneeType TaskAssigneeType @default(OWNER) @map("assignee_type")
+  createdAt    DateTime         @default(now()) @map("created_at")
 
-  @@unique([tenantId, taskId, userId])
-  @@index([tenantId, userId])
+  @@unique([tenantId, taskId, membershipId])
+  @@index([tenantId, membershipId])
+  @@index([tenantId, taskId, assigneeType])
   @@map("task_assignees")
 }
 
 model TaskComment {
-  id        String    @id @default(uuid()) @db.Uuid
-  tenantId  String    @map("tenant_id") @db.Uuid
-  taskId    String    @map("task_id") @db.Uuid
-  content   String
-  createdAt DateTime  @default(now()) @map("created_at")
-  updatedAt DateTime  @updatedAt @map("updated_at")
-  createdBy String?   @map("created_by") @db.Uuid
-  updatedBy String?   @map("updated_by") @db.Uuid
-  deletedAt DateTime? @map("deleted_at")
-  version   Int       @default(1)
+  id                    String           @id @default(uuid()) @db.Uuid
+  tenantId              String           @map("tenant_id") @db.Uuid
+  tenant                Tenant           @relation(fields: [tenantId], references: [id])
+  taskId                String           @map("task_id") @db.Uuid
+  task                  Task             @relation(fields: [taskId], references: [id])
+  content               String
+  authorMembershipId    String           @map("author_membership_id") @db.Uuid
+  authorMembership      TenantMembership @relation("TaskCommentAuthorMembership", fields: [authorMembershipId], references: [id])
+  createdAt             DateTime         @default(now()) @map("created_at")
+  updatedAt             DateTime         @updatedAt @map("updated_at")
+  createdBy             String?          @map("created_by") @db.Uuid
+  updatedBy             String?          @map("updated_by") @db.Uuid
+  deletedAt             DateTime?        @map("deleted_at")
+  version               Int              @default(1)
 
-  @@index([tenantId, taskId])
+  @@index([tenantId, taskId, createdAt])
+  @@index([tenantId, authorMembershipId])
   @@map("task_comments")
 }
 
 model TaskAttachment {
-  id           String    @id @default(uuid()) @db.Uuid
-  tenantId     String    @map("tenant_id") @db.Uuid
-  taskId       String    @map("task_id") @db.Uuid
-  fileObjectId String    @map("file_object_id") @db.Uuid
-  createdAt    DateTime  @default(now()) @map("created_at")
-  updatedAt    DateTime  @updatedAt @map("updated_at")
-  createdBy    String?   @map("created_by") @db.Uuid
-  updatedBy    String?   @map("updated_by") @db.Uuid
-  deletedAt    DateTime? @map("deleted_at")
-  version      Int       @default(1)
+  id                    String           @id @default(uuid()) @db.Uuid
+  tenantId              String           @map("tenant_id") @db.Uuid
+  tenant                Tenant           @relation(fields: [tenantId], references: [id])
+  taskId                String           @map("task_id") @db.Uuid
+  task                  Task             @relation(fields: [taskId], references: [id])
+  fileObjectId          String           @map("file_object_id") @db.Uuid
+  fileObject            FileObject       @relation(fields: [fileObjectId], references: [id])
+  createdByMembershipId String           @map("created_by_membership_id") @db.Uuid
+  createdByMembership   TenantMembership @relation("TaskAttachmentCreatorMembership", fields: [createdByMembershipId], references: [id])
+  createdAt             DateTime         @default(now()) @map("created_at")
+  updatedAt             DateTime         @updatedAt @map("updated_at")
+  createdBy             String?          @map("created_by") @db.Uuid
+  updatedBy             String?          @map("updated_by") @db.Uuid
+  deletedAt             DateTime?        @map("deleted_at")
+  version               Int              @default(1)
 
   @@index([tenantId, taskId])
+  @@index([tenantId, fileObjectId])
+  @@index([tenantId, createdByMembershipId])
   @@map("task_attachments")
 }
 
 model TaskActivity {
-  id        String   @id @default(uuid()) @db.Uuid
-  tenantId  String   @map("tenant_id") @db.Uuid
-  taskId    String   @map("task_id") @db.Uuid
-  action    String
-  metadata  Json?
-  createdAt DateTime @default(now()) @map("created_at")
-  createdBy String?  @map("created_by") @db.Uuid
+  id                String            @id @default(uuid()) @db.Uuid
+  tenantId          String            @map("tenant_id") @db.Uuid
+  tenant            Tenant            @relation(fields: [tenantId], references: [id])
+  taskId            String            @map("task_id") @db.Uuid
+  task              Task              @relation(fields: [taskId], references: [id])
+  action            String
+  metadata          Json?
+  actorMembershipId String?           @map("actor_membership_id") @db.Uuid
+  actorMembership   TenantMembership? @relation("TaskActivityActorMembership", fields: [actorMembershipId], references: [id])
+  createdAt         DateTime          @default(now()) @map("created_at")
+  createdBy         String?           @map("created_by") @db.Uuid
 
-  @@index([tenantId, taskId])
+  @@index([tenantId, taskId, createdAt])
+  @@index([tenantId, actorMembershipId])
   @@map("task_activities")
 }
 
@@ -656,6 +705,7 @@ model FileObject {
   sizeBytes       BigInt      @map("size_bytes")
   checksum        String?
   etag            String?
+  taskAttachments TaskAttachment[]
   createdAt       DateTime    @default(now()) @map("created_at")
   updatedAt       DateTime    @updatedAt @map("updated_at")
   createdBy       String?     @map("created_by") @db.Uuid

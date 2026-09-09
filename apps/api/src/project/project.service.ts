@@ -138,7 +138,9 @@ export class ProjectService {
     async getProject(projectId: string): Promise<ProjectResult> {
         const context = this.tenantContext.require();
         const project = await this.requireProject(context, projectId);
-        const taskCount = await this.prisma.task.count({ where: { tenantId: context.tenantId, projectId } });
+        const taskCount = await this.prisma.task.count({
+            where: { tenantId: context.tenantId, projectId, deletedAt: null },
+        });
         return toProjectResult(project, context.membershipId, taskCount);
     }
 
@@ -380,6 +382,25 @@ export class ProjectService {
         const member = this.requireMember(project, membershipId);
         if (member.role === ProjectMemberRole.OWNER) throw this.ownerMutationConflict();
         await this.prisma.$transaction(async (transaction) => {
+            const activeAssignment = await transaction.taskAssignee.findFirst({
+                where: {
+                    tenantId: context.tenantId,
+                    membershipId,
+                    task: {
+                        projectId,
+                        deletedAt: null,
+                        status: { notIn: [TaskStatus.DONE, TaskStatus.CANCELLED] },
+                    },
+                },
+                select: { taskId: true },
+            });
+            if (activeAssignment) {
+                throw new ConflictException({
+                    code: 'PROJECT_MEMBER_HAS_ACTIVE_TASKS',
+                    message: '该成员仍负责或协作未完成任务，请先调整任务执行人',
+                    details: { taskId: activeAssignment.taskId },
+                });
+            }
             const removed = await transaction.projectMember.updateMany({
                 where: { id: member.id, tenantId: context.tenantId, projectId, version, deletedAt: null },
                 data: { deletedAt: new Date(), updatedBy: context.userId, version: { increment: 1 } },
@@ -651,7 +672,7 @@ export class ProjectService {
         if (projectIds.length === 0) return new Map();
         const counts = await this.prisma.task.groupBy({
             by: ['projectId'],
-            where: { tenantId, projectId: { in: projectIds } },
+            where: { tenantId, projectId: { in: projectIds }, deletedAt: null },
             _count: { _all: true },
         });
         return new Map(counts.flatMap((item) => item.projectId ? [[item.projectId, item._count._all]] : []));

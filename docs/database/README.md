@@ -3,8 +3,9 @@
 完整表级字段说明和 Navicat 只读查询见 [平台使用、接口与数据库字典](../product/platform-usage-guide.md)。
 部门树模型、约束和成员归属见 [组织部门管理](../product/organization-department-management.md)。
 项目、项目成员和状态历史见 [项目与项目成员管理](../product/project-management.md)。
+任务、执行人、评论、附件和动态见 [项目任务管理](../product/task-management.md)。
 
-> 新环境使用 `prisma migrate deploy` 按 `0001_init` 到 `0005_project_management` 的目录顺序执行迁移；全部迁移完成后与当前 `schema.prisma` 保持一致。
+> 新环境使用 `prisma migrate deploy` 按 `0001_init` 到 `0007_task_database_comments` 的目录顺序执行迁移；全部迁移完成后与当前 `schema.prisma` 保持一致。
 
 - `apps/api/prisma/schema.prisma` 是数据模型唯一事实源，迁移提交 `prisma/migrations`。
 - 新建表和字段必须在同一迁移中使用 `COMMENT ON TABLE`、`COMMENT ON COLUMN` 添加 PostgreSQL 注释；`0003_organization_departments_and_database_comments` 已补齐此前全部业务表和字段注释。
@@ -102,6 +103,25 @@ Project
 - `ownerMembershipId` 保存唯一当前负责人，项目成员角色同步为 `OWNER`；
 - `project_status_history` 保存每次状态变化及操作者 Membership；
 - `0005_project_management` 迁移旧成员关系、项目状态和编码，并为新增结构添加 PostgreSQL 中文注释。
+
+## 任务模型
+
+```text
+Project
+  └── Task
+        ├── parent/children -> Task
+        ├── assignees -> TaskAssignee -> TenantMembership
+        ├── comments -> TaskComment -> TenantMembership
+        ├── attachments -> TaskAttachment -> FileObject
+        └── activities -> TaskActivity -> TenantMembership
+```
+
+- 任务执行人、评论作者、附件添加者和动态操作者都使用租户 Membership，避免跨租户 User 身份混淆；
+- `task_assignees_one_owner_key` 部分唯一索引保证每个有效任务关系集合只有一个负责人；
+- `task_attachments_active_file_key` 保证同一有效任务不能重复关联同一文件；
+- `tasks.parent_id` 自关联支持父子任务，业务层限制最多 10 层并禁止循环；
+- `0006_task_management` 完成旧字段迁移、外键、索引和任务权限初始化；
+- `0007_task_database_comments` 补齐任务相关表和字段的 PostgreSQL 中文注释。
 
 - `apps/api/prisma/schema.prisma` 是数据模型唯一事实源，迁移提交到 `apps/api/prisma/migrations`。
 - `0001_init` 包含 pgvector 扩展和当前 `schema.prisma` 的完整空库结构；共享环境首次执行后，后续结构变化必须新增前向迁移，不再重写该基线。

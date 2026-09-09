@@ -1,6 +1,6 @@
 # 项目管理 API
 
-公开契约版本：`0.11.0`。所有接口使用租户 Access Token，路径基于 `/api/v1`。
+公开契约版本：`0.13.0`。所有接口使用租户 Access Token，路径基于 `/api/v1`。
 
 ## 项目
 
@@ -50,6 +50,7 @@ POST /projects/{projectId}/restore
 | 409 | `PROJECT_READ_ONLY` | 项目状态不允许修改资料或成员 |
 | 409 | `PROJECT_HAS_UNFINISHED_TASKS` | 存在未完成任务，不能完成项目 |
 | 409 | `PROJECT_HAS_BUSINESS_DATA` | 项目已有任务，不能删除 |
+| 409 | `PROJECT_MEMBER_HAS_ACTIVE_TASKS` | 成员仍承担未完成任务，不能移出项目 |
 | 409 | `PROJECT_STATUS_TRANSITION_INVALID` | 状态流转不符合状态机 |
 
 业务边界和状态机详见 [项目与项目成员管理](../product/project-management.md)。
