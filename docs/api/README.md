@@ -238,6 +238,13 @@ GET    /api/v1/projects/{projectId}/tasks/{taskId}/activities
 - 项目完成、取消、归档后任务域只读，承担未完成任务的成员不能直接移出项目；
 - 新增 Prisma 迁移 `0006_task_management` 和 `0007_task_database_comments`，TypeScript 客户端已经重新生成。
 
+## 0.13.1 迁移说明
+
+- 公开契约版本由 `0.13.0` 提升为 `0.13.1`；
+- 任务动态列表的 `limit` 默认值统一为 `20`，与 NestJS DTO 和其他普通分页接口一致；
+- `CreateTaskRequest.priority` 明确声明默认值为 `MEDIUM`；
+- 本次不改变服务端实际行为，不需要新增 Prisma migration，TypeScript 客户端需要重新生成。
+
 ## 契约事实源
 
 - `packages/contracts/openapi/openapi.yaml` 是 NestJS 公开 API 的事实源。
