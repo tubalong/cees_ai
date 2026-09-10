@@ -19,6 +19,8 @@ FastAPI 内部服务，负责受控 LLM 调用与未来 AI 工作流的运行时
 - `POST /internal/v1/chat/invoke`：无状态多轮上下文对话
 - `POST /internal/v1/chat/stream`：Standard/Ultra 上下文对话 SSE
 - `POST /internal/v1/chat/compact`：将历史消息压缩为可复用摘要
+- `POST /internal/v1/chat/tool-turn/stream`：单次工具能力回合 SSE
+- `POST /internal/v1/images/generate`：通过图片 profile 生成 base64 图片
 - `POST /internal/v1/documents/compose`：生成领域无关的结构化文档草稿
 - `POST /internal/v1/documents/render-docx`：不调用模型，将 `DocumentSpec` 渲染为 DOCX
 - `POST /internal/v1/documents/generate-docx`：组合文档生成与 DOCX 渲染
@@ -30,6 +32,10 @@ FastAPI 内部服务，负责受控 LLM 调用与未来 AI 工作流的运行时
 非流式响应的 `execution.finish_reason` 与流式 `completed.finish_reason` 保留 Provider 的结束原因；`length` 表示达到输出 token 上限，调用方应将当前输出视为可能被截断。字段为可选且可空，以兼容未提供结束原因的模型服务。
 
 Chat 接口要求调用方在每轮传入完整可用历史，或 `conversation_summary + recent messages`。ai-service 不保存正式会话；`standard` 和 `ultra` 的角色、reasoning effort、输出预算与上下文预算由 `models.toml` 控制。详细设计见 `docs/architecture/contextual-chat.md`。
+
+Tool Calling 由 NestJS 传入 tools 定义，ai-service 负责一次模型回合并返回 `tool_calls` 或文本增量，不执行任何业务工具。详细设计见 `docs/architecture/ai-tool-calling.md`。
+
+图片生成由独立 `ImageRouter` 处理，配置位于 `[image_profiles.*]`，不复用 Chat Profile，也不写 COS 或正式资源。详细设计见 `docs/architecture/image-generation.md`。
 
 文档接口只接收内部可信服务准备的生成指令与纯文本材料。模型生成版本化 `DocumentSpec`，渲染器只接受受控段落、列表、表格、引用和分页块，不接受任意 OOXML、宏、外部关系或模板路径。详细设计见 `docs/architecture/document-generation.md`。
 
@@ -71,9 +77,10 @@ AI_DOCS_ENABLED=true
 AI_MODEL_CONFIG_PATH=config/models.toml
 PRIMARY_LLM_API_KEY=change_me
 BACKUP_LLM_API_KEY=change_me
+IMAGE_GEN_API_KEY=change_me
 ```
 
-`models.toml` 只保存非敏感 profile、角色映射和 Chat 模式策略。API Key 通过 profile 的 `api_key_env` 从环境变量读取。生产环境不得将任何角色绑定到 Mock profile。
+`models.toml` 只保存非敏感 profile、角色映射、Chat 模式策略和图片生成 profile。API Key 通过 profile 的 `api_key_env` 从环境变量读取。生产环境不得将任何角色绑定到 Mock profile，图片生成 profile 也必须使用真实模型。
 
 升级现有部署时，部署拥有的模型配置必须补充 `[chat]`、`[chat.modes.standard]` 和 `[chat.modes.ultra]`；缺少任一模式时 `/ready` 返回 503。`/ready` 的 `configured_chat_modes` 会列出当前已配置模式。
 
