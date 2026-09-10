@@ -5,7 +5,7 @@
 ## 服务职责
 
 - `apps/api`：认证、租户、权限、正式业务写入和审计。
-- `apps/ai-service`：多模型配置、LangChain 调用、LangGraph/LlamaIndex 集成基础和内部 invoke。
+- `apps/ai-service`：多模型配置、LangChain 调用、无状态上下文 Chat、LangGraph/LlamaIndex 集成基础和内部接口。
 - `apps/desktop`：Electron + React 桌面端。
 - `apps/mobile`：Flutter 移动端。
 - `packages/contracts`：公开 API 与 ai-service 内部 OpenAPI 契约。
@@ -17,7 +17,7 @@
 - pnpm、Python/uv 和 Flutter 三套工具链相互独立。
 - 跨语言只通过 `packages/contracts` 对齐；生成客户端禁止手改。
 - NestJS 是业务数据唯一事实源；ai-service 不直接连接业务数据库或写入正式业务数据。
-- 通用 `/internal/v1/llm/invoke` 只允许 NestJS 使用，不向客户端公开。
+- ai-service 的通用 LLM 与专用 Chat 接口只允许 NestJS 使用；客户端通过 `/api/v1/chat/*` 公开接口访问，不能绕过租户成员上下文。
 - 桌面端和移动端中的部分菜单仍为 UI 原型，不代表后端已有对应能力。
 - Secret 只通过环境变量或平台 Secrets 注入。
 
@@ -56,4 +56,4 @@ COS 权限和 COSCLI 参考见 [infra/tencent-cos/README.md](infra/tencent-cos/R
 
 NestJS Swagger：`http://localhost:3000/api/docs`；FastAPI 文档本地为 `http://localhost:8000/docs`。Staging 在 `AI_SERVICE_PORT`（默认 `8000`）对外提供 `/docs`，Production 不映射 ai-service 宿主机端口。
 
-架构说明见 [docs/architecture/overview.md](docs/architecture/overview.md)，AI 基础设施说明见 [docs/architecture/ai-service-foundation.md](docs/architecture/ai-service-foundation.md)。
+架构说明见 [docs/architecture/overview.md](docs/architecture/overview.md)，AI 基础设施说明见 [docs/architecture/ai-service-foundation.md](docs/architecture/ai-service-foundation.md)，公开对话与 Token 记录见 [docs/architecture/public-chat-api-and-token-metering.md](docs/architecture/public-chat-api-and-token-metering.md)。

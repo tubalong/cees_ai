@@ -2,7 +2,8 @@
 
 ## 使用与验收
 
-- [平台使用、接口与数据库字典](platform-usage-guide.md)：管理员账号、114 个 HTTP 操作、参数含义、平台流转、41 张业务表和 Navicat 查询。
+- [平台使用、接口与数据库字典](platform-usage-guide.md)：管理员账号、117 个 HTTP 操作、参数含义、平台流转、41 张业务表和 Navicat 查询。
+- [公开 AI 对话链路与 Token 计量](../architecture/public-chat-api-and-token-metering.md)：本地对话历史、公开 Chat API 与企业/成员/会话/轮次用量记录。
 - [组织部门管理](organization-department-management.md)：租户内部门树、权限、成员归属、审计和数据库约束。
 - [组织架构与成员批量导入](organization-member-import.md)：前端 Excel 解析、后端校验、事务导入和一次性激活凭证。
 - [项目与项目成员管理](project-management.md)：成员可见范围、项目角色、状态机、完成后只读和归档规则。

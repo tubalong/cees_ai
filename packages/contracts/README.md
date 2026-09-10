@@ -8,7 +8,9 @@ openapi/
 └── ai-service.openapi.yaml      # NestJS -> ai-service 内部 API
 ```
 
-`ai-service.openapi.yaml` 当前只定义 health、ready 和受内部 Token 保护的通用 LLM invoke，不包含具体业务接口。内部 Token 在契约中以请求头 `X-AI-Internal-Token` 的 `apiKey` 安全方案表示。
+`ai-service.openapi.yaml` 定义 health、ready、通用 LLM、无状态上下文 Chat 和领域无关文档生成接口；全部内部能力都通过请求头 `X-AI-Internal-Token` 的 `apiKey` 安全方案保护。客户端只能调用 `openapi.yaml` 中由 NestJS 暴露的公开接口，不能直接访问 ai-service。
+
+内部契约 `0.2.0` 为错误响应兼容增加可选 `execution`，只用于把“模型已执行但结果随后被拒绝”的实际 Token 传回 NestJS；省略时表示没有可记录的执行元数据。
 
 ## 变更流程
 
@@ -20,7 +22,7 @@ openapi/
 
 生成物包括：
 
-- 公开 TypeScript API 客户端：`packages/api-client/src`；
+- 公开 TypeScript API 客户端生成目录：`packages/api-client/src/core`、`models`、`services` 和 `index.ts`；
 - TypeScript：`packages/ai-service-client/src/generated`；
 - Python：`apps/ai-service/app/api/generated/models.py`；
 - ai-service Swagger 契约：`apps/ai-service/app/api/generated/openapi.json`。
@@ -32,4 +34,4 @@ FastAPI `/docs` 直接展示生成的 OpenAPI JSON；测试会另外根据 Pytho
 ```text
 pnpm contracts:gen
 ```
-生成目录禁止手改。契约相关 PR 必须由契约负责人评审。
+生成目录禁止手改。`packages/api-client/src/chat-stream.ts` 是公开 POST SSE 的维护型扩展，不是生成物。契约相关 PR 必须由契约负责人评审。

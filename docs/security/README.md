@@ -19,3 +19,4 @@
 - Staging 与 Production 部署在不同服务器；两个环境不得共享数据库容器、账号、密码或数据卷。
 - 安全组只允许对应环境的应用来源访问 PostgreSQL `5432` 和 Redis `6379`，不得向 `0.0.0.0/0` 开放数据库端口。
 - ai-service 在 Production 不映射宿主机端口；Staging 为调试文档映射 `AI_SERVICE_PORT`（默认 `8000`）。Staging 对外端口必须通过安全组或防火墙限制来源，内部业务接口仍要求 `AI_INTERNAL_TOKEN`。
+- 公开 Chat 接口必须同时通过租户 JWT、有效 Session 和 TenantContext；客户端不能提交 tenant/user/membership、系统指令或模型路由字段，对话正文与摘要不得写入 `ai_invocation_logs`。

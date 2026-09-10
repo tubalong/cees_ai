@@ -10,6 +10,7 @@
 | [architecture](architecture/overview.md) | 总体架构、目录树、边界与数据流 |
 | [ai-service-foundation](architecture/ai-service-foundation.md) | 通用 LLM、多模型路由、LangGraph 与 LlamaIndex 基础设施 |
 | [contextual-chat](architecture/contextual-chat.md) | Standard/Ultra、多轮上下文、SSE 与对话摘要压缩 |
+| [公开 AI 对话链路与 Token 计量](architecture/public-chat-api-and-token-metering.md) | 客户端本地历史、NestJS Chat API、ai-service 调用和企业/成员/会话/轮次用量记录 |
 | [document-generation](architecture/document-generation.md) | 领域无关的文档组合、DocumentSpec 与 DOCX 渲染 |
 | [file-upload](architecture/file-upload.md) | 已落地的 COS 基础直传接口与后续权限、额度、扫描设计 |
 | [redis-foundation](architecture/redis-foundation.md) | NestJS Redis 基础 CRUD、命名空间和使用边界 |

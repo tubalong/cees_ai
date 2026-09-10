@@ -488,6 +488,10 @@ class ErrorResponse(BaseModel):
         extra='forbid',
     )
     error: ErrorDetail
+    execution: ExecutionMetadata | None = Field(
+        None,
+        description='Present only when a model invocation actually completed far enough to report execution and Token metrics before the business result was rejected.',
+    )
 
 
 class ReadinessResponse(BaseModel):

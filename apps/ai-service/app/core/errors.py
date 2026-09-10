@@ -10,6 +10,7 @@ class AIServiceError(Exception):
         status_code: int,
         retryable: bool = False,
         request_id: str | None = None,
+        execution: object | None = None,
     ) -> None:
         super().__init__(message)
         self.code = code
@@ -17,6 +18,7 @@ class AIServiceError(Exception):
         self.status_code = status_code
         self.retryable = retryable
         self.request_id = request_id
+        self.execution = execution
 
 
 class ProviderTransientError(Exception):

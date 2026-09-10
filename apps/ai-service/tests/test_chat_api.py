@@ -175,6 +175,49 @@ def test_chat_compact_returns_reusable_summary() -> None:
     assert response.json()["summarized_through_message_id"] == "message-2"
 
 
+def test_chat_invoke_post_execution_error_returns_usage_metadata() -> None:
+    client, _ = build_chat_client(outcomes=[result("")])
+
+    with client:
+        response = client.post(
+            "/internal/v1/chat/invoke",
+            headers={"X-AI-Internal-Token": "secret"},
+            json=chat_payload(),
+        )
+
+    assert response.status_code == 502
+    body = response.json()
+    assert body["error"]["code"] == "CHAT_OUTPUT_INVALID"
+    assert body["execution"]["model"] == "openai_compatible-model"
+    assert body["execution"]["token_usage"]["total_tokens"] == 5
+
+
+def test_chat_compact_truncation_returns_usage_metadata() -> None:
+    client, _ = build_chat_client(outcomes=[result("partial summary", finish_reason="length")])
+    payload = {
+        "request_id": "req-chat-compact-truncated",
+        "tenant_id": "tenant-1",
+        "user_id": "user-1",
+        "conversation_id": "conversation-1",
+        "messages": [
+            {"id": "message-1", "role": "user", "content": "Project is CEES AI."},
+        ],
+    }
+
+    with client:
+        response = client.post(
+            "/internal/v1/chat/compact",
+            headers={"X-AI-Internal-Token": "secret"},
+            json=payload,
+        )
+
+    assert response.status_code == 502
+    body = response.json()
+    assert body["error"]["code"] == "CHAT_COMPACTION_TRUNCATED"
+    assert body["execution"]["finish_reason"] == "length"
+    assert body["execution"]["token_usage"]["total_tokens"] == 5
+
+
 def test_chat_rejects_assistant_as_final_message() -> None:
     client, _ = build_chat_client(outcomes=[result("unused")])
     payload = chat_payload()
@@ -189,6 +232,7 @@ def test_chat_rejects_assistant_as_final_message() -> None:
 
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "INVALID_CHAT_REQUEST"
+    assert "execution" not in response.json()
 
 
 def test_chat_stream_emits_terminal_error_after_partial_output() -> None:

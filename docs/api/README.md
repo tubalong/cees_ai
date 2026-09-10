@@ -1,7 +1,7 @@
 # API 与契约约定
 
 - `packages/contracts/openapi/openapi.yaml` 是公开 API 的唯一事实源。
-- 客户端代码一律由契约生成（TS：`packages/api-client`；Dart/Python：各端生成目录），禁止手写替代。
+- 客户端请求/响应类型与普通服务一律由契约生成（TS：`packages/api-client`；Dart/Python：各端生成目录），禁止手写平行类型或修改生成物；生成器不支持的协议适配只能复用生成类型并单独维护。
 - 变更规则：兼容新增默认可选项并声明默认值；破坏性变更必须提升契约版本，并在此说明迁移方式。
 - 统一错误格式、鉴权方式与分页约定先在设计草案中确认，再同步到 OpenAPI 契约。
 
@@ -17,6 +17,7 @@
 - [项目任务管理](../product/task-management.md)
 - [会议管理 API](meeting-management-api.md)
 - [会议管理](../product/meeting-management.md)
+- [公开 AI 对话链路与 Token 计量](../architecture/public-chat-api-and-token-metering.md)
 - [用户个人资料管理](../product/user-profile-management.md)
 - [密码修改与凭证安全](../security/password-management.md)
 - [平台使用、接口与数据库字典](../product/platform-usage-guide.md)：按当前 OpenAPI 汇总全部接口、请求参数和验证顺序。
@@ -30,6 +31,10 @@ POST /api/v1/auth/refresh
 POST /api/v1/auth/logout
 GET  /api/v1/auth/me
 POST /api/v1/auth/change-password
+
+POST /api/v1/chat/invoke
+POST /api/v1/chat/stream
+POST /api/v1/chat/compact
 
 GET   /api/v1/users/me/profile
 PATCH /api/v1/users/me/profile
@@ -153,7 +158,7 @@ DELETE /api/v1/projects/{projectId}/tasks/{taskId}/attachments/{attachmentId}?ve
 GET    /api/v1/projects/{projectId}/tasks/{taskId}/activities
 ```
 
-截至 2026-09-08，身份、本人密码修改、用户个人资料、租户、组织部门、项目与项目成员、RBAC、ACL、审计、平台租户管理、租户账号激活和 COS 基础上传接口均已实现。
+截至 2026-09-10，身份、本人密码修改、用户个人资料、租户、组织部门、项目、任务、会议、RBAC、ACL、审计、平台租户管理、租户账号激活、COS 基础上传和公开 AI 对话接口均已实现。
 
 - `refresh` 每次成功后都会轮换 Refresh Token，旧 Token 立即失效；
 - `logout` 撤销当前 Access Token 对应的 Session；
@@ -272,13 +277,24 @@ GET    /api/v1/projects/{projectId}/tasks/{taskId}/activities
 - 会议、参会人和纪要分别使用乐观锁，全部写操作先获取会议行锁并在同一事务写审计；
 - TypeScript 客户端已经重新生成；本版本不包含 COS 会议附件、通知提醒和第三方会议平台集成。
 
+## 0.15.0 迁移说明
+
+- 公开契约版本由 `0.14.0` 提升为 `0.15.0`；
+- 新增 `POST /chat/invoke`、`POST /chat/stream` 和 `POST /chat/compact`；
+- 客户端只提交本地会话 ID、轮次 ID、模式、摘要和消息，租户/用户/成员身份由 API 注入；
+- 非流式响应使用统一 JSON 包络，流式响应为 `text/event-stream`；
+- `packages/api-client` 已重新生成；POST SSE 使用非生成入口 `@cees/api-client/chat-stream` 增量读取，且不会自动重连；
+- 新增 Prisma 迁移 `0009_ai_chat_token_tracking`，只兼容扩展现有 `ai_invocation_logs`，不创建会话或消息表；
+- ai-service 内部契约兼容升级到 `0.2.0`，错误体只在模型已实际执行后可选返回 `execution`，用于避免失败调用漏计 Token；
+- 本版只记录企业、成员、会话、轮次和 Token 指标，不包含额度分配、扣减或超额拦截。
+
 ## 契约事实源
 
 - `packages/contracts/openapi/openapi.yaml` 是 NestJS 公开 API 的事实源。
 - `packages/contracts/openapi/ai-service.openapi.yaml` 是 NestJS 调用 ai-service 的内部契约。
 - 桌面端和移动端不得调用 ai-service 的通用 invoke 或 stream。
 - ai-service Chat 与文档接口同样只供 NestJS 内部调用；客户端不得绕过业务权限直接 chat、compact、compose 或 render。
-- Chat 调用方必须保存正式会话状态，并在每轮传入历史摘要与近期消息；ai-service 不持久化 Conversation 或 Message。
+- Chat 客户端本期在本地保存会话状态，并在每轮传入历史摘要与近期消息；NestJS 与 ai-service 都不持久化 Conversation 或 Message 正文。
 - ai-service 使用 `X-AI-Internal-Token` 请求头作为 OpenAPI `apiKey` 安全方案；该 Token 只授予可信内部服务。
 - ai-service 的 FastAPI 文档由正式契约生成：Development 和 Staging 可查看、可调用，Production 禁用。
 - TypeScript/Python/OpenAPI 生成物禁止手改，契约变更后必须运行 `contracts:lint`、`contracts:gen` 和 `contracts:check`。

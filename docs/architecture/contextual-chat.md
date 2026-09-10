@@ -1,12 +1,12 @@
 # 上下文对话
 
-> 状态：MVP 已实现。最后更新：2026-09-08。
+> 状态：ai-service MVP 与 NestJS 公开适配均已实现。最后更新：2026-09-09。
 
 ## 1. 目标与边界
 
 ai-service 提供无状态、多轮、流式的内部对话生成能力，并支持 `standard` 与 `ultra` 两种执行模式。调用方在每一轮传入可信系统指令、可选的历史摘要和按时间排序的近期消息，ai-service 负责上下文预算、模型路由和最终回答生成。
 
-ai-service 不持久化正式会话、消息或摘要。`conversation_id` 只用于调用关联和日志；调用方仍是会话状态的事实源。桌面端、移动端和第三方客户端不得直接访问这些内部接口。
+ai-service 不持久化正式会话、消息或摘要。`conversation_id` 只用于调用关联和日志；调用方仍是会话状态的事实源。桌面端、移动端和第三方客户端不得直接访问这些内部接口，而是通过 NestJS 公开 Chat API 调用。当前版本由客户端在本地保存会话状态，不做云端同步。
 
 本阶段实现的是 Codex 式多轮对话体验，不实现文件系统、Shell、工具调用、审批、长期任务或完整 Agent 状态机。
 
@@ -99,11 +99,15 @@ completed
 - 流开始后瞬时中断：终止 `CHAT_STREAM_INTERRUPTED` SSE 事件；
 - 流开始后永久失败：终止 `CHAT_STREAM_FAILED` SSE 事件。
 
-## 8. 调用方适配要求
+非流式回答为空、摘要无效或摘要达到输出上限时，Provider 已经产生实际调用成本。此类内部错误响应会携带可选 `execution` 元数据供 NestJS 记录 Token；请求校验、配置未就绪和模型调用前失败不携带该字段，避免把未执行请求误记为模型用量。
 
-调用方需要：
+## 8. NestJS 与客户端适配要求
 
-1. 持久化正式 Conversation、Message 和摘要；
+NestJS 已提供 `POST /api/v1/chat/invoke`、`POST /api/v1/chat/stream` 和 `POST /api/v1/chat/compact`，负责从认证上下文注入租户、用户和成员身份，并记录企业、成员、会话、轮次和 Token 指标。详细边界见 [公开 AI 对话链路与 Token 计量](public-chat-api-and-token-metering.md)。
+
+客户端需要：
+
+1. 在本机持久化 Conversation、Message 和摘要；本期不上传云端；
 2. 每轮传入完整可用历史，或 `conversation_summary + recent messages`；
 3. 保证最后一条消息为当前用户消息；
 4. 将产品展示值映射为小写 `standard` / `ultra`；
@@ -113,3 +117,5 @@ completed
 8. 保存 compact 响应的摘要及 `summarized_through_message_id`；
 9. 在用户取消时断开内部请求；
 10. 将 `finish_reason=length` 视为可能截断的回答。
+
+NestJS 和 ai-service 均不保存消息、回答或摘要正文。当前 Token 记录不等于企业或成员额度体系，也不执行额度扣减或超额拦截。
