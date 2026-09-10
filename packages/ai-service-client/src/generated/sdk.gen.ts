@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, ServerSentEventsResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { CompactChatData, CompactChatErrors, CompactChatResponses, ComposeDocumentData, ComposeDocumentErrors, ComposeDocumentResponses, GenerateDocumentDocxData, GenerateDocumentDocxErrors, GenerateDocumentDocxResponses, GetHealthData, GetHealthResponses, GetReadinessData, GetReadinessErrors, GetReadinessResponses, InvokeChatData, InvokeChatErrors, InvokeChatResponses, InvokeLlmData, InvokeLlmErrors, InvokeLlmResponses, RenderDocumentDocxData, RenderDocumentDocxErrors, RenderDocumentDocxResponses, StreamChatData, StreamChatErrors, StreamChatResponse, StreamChatResponses, StreamLlmData, StreamLlmErrors, StreamLlmResponse, StreamLlmResponses } from './types.gen';
+import type { CompactChatData, CompactChatErrors, CompactChatResponses, ComposeDocumentData, ComposeDocumentErrors, ComposeDocumentResponses, GenerateDocumentDocxData, GenerateDocumentDocxErrors, GenerateDocumentDocxResponses, GenerateImageData, GenerateImageErrors, GenerateImageResponses, GetHealthData, GetHealthResponses, GetReadinessData, GetReadinessErrors, GetReadinessResponses, InvokeChatData, InvokeChatErrors, InvokeChatResponses, InvokeLlmData, InvokeLlmErrors, InvokeLlmResponses, RenderDocumentDocxData, RenderDocumentDocxErrors, RenderDocumentDocxResponses, StreamChatData, StreamChatErrors, StreamChatResponse, StreamChatResponses, StreamChatToolTurnData, StreamChatToolTurnErrors, StreamChatToolTurnResponse, StreamChatToolTurnResponses, StreamLlmData, StreamLlmErrors, StreamLlmResponse, StreamLlmResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -95,6 +95,26 @@ export const streamChat = <ThrowOnError extends boolean = false>(options: Option
 });
 
 /**
+ * Stream a single tool-capable chat turn
+ *
+ * Performs exactly one model turn. The stream emits normal `content_delta`
+ * events when the assistant answers directly, or a `tool_calls` event when
+ * the model requests tool execution. ai-service never executes tools; the
+ * caller must perform the tool and call this endpoint again with the
+ * resulting ToolMessage.
+ *
+ */
+export const streamChatToolTurn = <ThrowOnError extends boolean = false>(options: Options<StreamChatToolTurnData, ThrowOnError, StreamChatToolTurnResponse>): Promise<ServerSentEventsResult<StreamChatToolTurnResponses>> => (options.client ?? client).sse.post<StreamChatToolTurnResponses, StreamChatToolTurnErrors, ThrowOnError>({
+    security: [{ name: 'X-AI-Internal-Token', type: 'apiKey' }],
+    url: '/internal/v1/chat/tool-turn/stream',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
  * Compact conversation history into a reusable summary
  *
  * Produces a summary for the caller to persist and supply with later chat requests. The ai-service does not persist conversation state.
@@ -102,6 +122,24 @@ export const streamChat = <ThrowOnError extends boolean = false>(options: Option
 export const compactChat = <ThrowOnError extends boolean = false>(options: Options<CompactChatData, ThrowOnError>): RequestResult<CompactChatResponses, CompactChatErrors, ThrowOnError> => (options.client ?? client).post<CompactChatResponses, CompactChatErrors, ThrowOnError>({
     security: [{ name: 'X-AI-Internal-Token', type: 'apiKey' }],
     url: '/internal/v1/chat/compact',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Generate an image through a configured image-capable model
+ *
+ * Generates an image for a trusted internal caller. ai-service only
+ * returns image bytes and execution metadata; it does not persist the
+ * image, create a resource, or enforce business quota.
+ *
+ */
+export const generateImage = <ThrowOnError extends boolean = false>(options: Options<GenerateImageData, ThrowOnError>): RequestResult<GenerateImageResponses, GenerateImageErrors, ThrowOnError> => (options.client ?? client).post<GenerateImageResponses, GenerateImageErrors, ThrowOnError>({
+    security: [{ name: 'X-AI-Internal-Token', type: 'apiKey' }],
+    url: '/internal/v1/images/generate',
     ...options,
     headers: {
         'Content-Type': 'application/json',
