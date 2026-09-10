@@ -11,7 +11,7 @@ from typing import Any
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError, ValidationError
 
-from app.core.config import ModelCatalog, ModelProfile, ModelRole, OutputMode
+from app.core.config import ModelCapability, ModelCatalog, ModelProfile, ModelRole, OutputMode
 from app.core.errors import (
     AIServiceError,
     ProviderOutputError,
@@ -26,6 +26,7 @@ from app.llm.types import (
     ProviderResult,
     ProviderStreamChunk,
     ReasoningEffort,
+    ToolCallingResult,
 )
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,15 @@ class RoutingResult:
     profile_name: str
     profile: ModelProfile
     provider_result: ProviderResult
+    fallback_count: int
+    latency_ms: int
+
+
+@dataclass(frozen=True)
+class ToolCallingRoutingResult:
+    profile_name: str
+    profile: ModelProfile
+    tool_result: ToolCallingResult
     fallback_count: int
     latency_ms: int
 
@@ -253,6 +263,200 @@ class LLMRouter:
             request_id=request_id,
         ) from last_transient_error
 
+    async def invoke_with_tools(
+        self,
+        *,
+        request_id: str,
+        tenant_id: str,
+        user_id: str,
+        messages: list[ChatMessage],
+        tools: tuple[dict[str, Any], ...],
+        profile_override: str | None = None,
+        temperature: float | None = None,
+        max_output_tokens: int | None = None,
+    ) -> ToolCallingRoutingResult:
+        if not tools:
+            raise AIServiceError(
+                "INVALID_TOOL_CALLING_REQUEST",
+                "At least one tool definition is required",
+                status_code=422,
+                request_id=request_id,
+            )
+
+        candidates = self._resolve_candidates(
+            ModelRole.orchestrator, profile_override, OutputMode.text, request_id
+        )
+        started = time.perf_counter()
+        last_transient_error: ProviderTransientError | None = None
+
+        for index, profile_name in enumerate(candidates):
+            profile = self.catalog.profiles[profile_name]
+            options = self._build_options(
+                profile_name=profile_name,
+                profile=profile,
+                output_mode=OutputMode.text,
+                temperature=temperature,
+                max_output_tokens=max_output_tokens,
+                request_id=request_id,
+                tools=tools,
+            )
+            provider = self._get_provider(profile_name, profile)
+            try:
+                result = await provider.invoke_with_tools(messages, options)
+                latency_ms = round((time.perf_counter() - started) * 1000)
+                logger.info(
+                    "llm tool invocation completed",
+                    extra={
+                        "request_id": request_id,
+                        "tenant_id": tenant_id,
+                        "user_id": user_id,
+                        "profile": profile_name,
+                        "provider": profile.provider,
+                        "model": profile.model,
+                        "fallback_count": index,
+                        "latency_ms": latency_ms,
+                        "tool_call_count": len(result.tool_calls),
+                        "input_tokens": result.token_usage.input_tokens,
+                        "output_tokens": result.token_usage.output_tokens,
+                        "total_tokens": result.token_usage.total_tokens,
+                    },
+                )
+                return ToolCallingRoutingResult(
+                    profile_name, profile, result, index, latency_ms
+                )
+            except ProviderTransientError as exc:
+                last_transient_error = exc
+                logger.warning(
+                    "llm tool invocation transient failure",
+                    extra={
+                        "request_id": request_id,
+                        "tenant_id": tenant_id,
+                        "user_id": user_id,
+                        "profile": profile_name,
+                        "provider": profile.provider,
+                        "model": profile.model,
+                        "attempt": index + 1,
+                        "error_category": type(exc).__name__,
+                    },
+                )
+                if profile_override is not None:
+                    break
+            except ProviderOutputError as exc:
+                raise AIServiceError(
+                    "LLM_OUTPUT_INVALID",
+                    "The provider returned invalid tool call output",
+                    status_code=502,
+                    request_id=request_id,
+                ) from exc
+            except ProviderPermanentError as exc:
+                raise AIServiceError(
+                    "LLM_UNAVAILABLE",
+                    "The selected provider rejected the tool invocation",
+                    status_code=503,
+                    request_id=request_id,
+                ) from exc
+
+        raise AIServiceError(
+            "LLM_UNAVAILABLE",
+            "No configured LLM profile completed the tool invocation",
+            status_code=503,
+            retryable=True,
+            request_id=request_id,
+        ) from last_transient_error
+
+    async def start_tool_stream(
+        self,
+        *,
+        request_id: str,
+        tenant_id: str,
+        user_id: str,
+        messages: list[ChatMessage],
+        tools: tuple[dict[str, Any], ...],
+        profile_override: str | None = None,
+        temperature: float | None = None,
+        max_output_tokens: int | None = None,
+    ) -> StreamingRoutingResult:
+        if not tools:
+            raise AIServiceError(
+                "INVALID_TOOL_CALLING_REQUEST",
+                "At least one tool definition is required",
+                status_code=422,
+                request_id=request_id,
+            )
+
+        candidates = self._resolve_candidates(
+            ModelRole.orchestrator, profile_override, OutputMode.text, request_id
+        )
+        started_at = time.perf_counter()
+        last_transient_error: ProviderTransientError | None = None
+
+        for index, profile_name in enumerate(candidates):
+            profile = self.catalog.profiles[profile_name]
+            options = self._build_options(
+                profile_name=profile_name,
+                profile=profile,
+                output_mode=OutputMode.text,
+                temperature=temperature,
+                max_output_tokens=max_output_tokens,
+                request_id=request_id,
+                tools=tools,
+            )
+            provider = self._get_provider(profile_name, profile)
+            chunks = provider.stream_with_tools(messages, options).__aiter__()
+            try:
+                first_chunk = await anext(chunks, None)
+                logger.info(
+                    "llm tool stream started",
+                    extra={
+                        "request_id": request_id,
+                        "tenant_id": tenant_id,
+                        "user_id": user_id,
+                        "profile": profile_name,
+                        "provider": profile.provider,
+                        "model": profile.model,
+                        "fallback_count": index,
+                    },
+                )
+                return StreamingRoutingResult(
+                    profile_name=profile_name,
+                    profile=profile,
+                    chunks=_prepend_chunk(first_chunk, chunks),
+                    fallback_count=index,
+                    started_at=started_at,
+                )
+            except ProviderTransientError as exc:
+                last_transient_error = exc
+                logger.warning(
+                    "llm tool stream transient failure",
+                    extra={
+                        "request_id": request_id,
+                        "tenant_id": tenant_id,
+                        "user_id": user_id,
+                        "profile": profile_name,
+                        "provider": profile.provider,
+                        "model": profile.model,
+                        "attempt": index + 1,
+                        "error_category": type(exc).__name__,
+                    },
+                )
+                if profile_override is not None:
+                    break
+            except ProviderPermanentError as exc:
+                raise AIServiceError(
+                    "LLM_UNAVAILABLE",
+                    "The selected provider rejected the tool streaming invocation",
+                    status_code=503,
+                    request_id=request_id,
+                ) from exc
+
+        raise AIServiceError(
+            "LLM_UNAVAILABLE",
+            "No configured LLM profile started the tool invocation stream",
+            status_code=503,
+            retryable=True,
+            request_id=request_id,
+        ) from last_transient_error
+
     def get_langchain_model(self, profile_name: str) -> Any:
         profile = self.catalog.profiles.get(profile_name)
         if profile is None or not profile.enabled:
@@ -306,6 +510,16 @@ class LLMRouter:
                     status_code=400,
                     request_id=request_id,
                 )
+            if (
+                role == ModelRole.orchestrator
+                and ModelCapability.tool_calling not in profile.capabilities
+            ):
+                raise AIServiceError(
+                    "UNSUPPORTED_TOOL_CALLING",
+                    f"Profile {profile_name} does not support tool_calling",
+                    status_code=400,
+                    request_id=request_id,
+                )
         return candidates
 
     def _get_provider(self, profile_name: str, profile: ModelProfile) -> LLMProvider:
@@ -327,6 +541,7 @@ class LLMRouter:
         reasoning_effort: ReasoningEffort | None = None,
         schema_name: str | None = None,
         json_schema: dict[str, Any] | None = None,
+        tools: tuple[dict[str, Any], ...] | None = None,
     ) -> InvocationOptions:
         effective_max_tokens = max_output_tokens or profile.default_max_output_tokens
         if effective_max_tokens > profile.max_output_tokens_limit:
@@ -343,6 +558,7 @@ class LLMRouter:
             schema_name=schema_name,
             json_schema=json_schema,
             reasoning_effort=reasoning_effort,
+            tools=tools,
         )
 
     @staticmethod

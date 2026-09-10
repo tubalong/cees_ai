@@ -2,10 +2,16 @@ from __future__ import annotations
 
 import pytest
 
-from app.core.config import ModelRole, OutputMode
+from app.core.config import ModelCapability, ModelRole, OutputMode
 from app.core.errors import AIServiceError, ProviderPermanentError, ProviderTransientError
 from app.llm.router import LLMRouter
-from app.llm.types import ChatMessage, ProviderStreamChunk, TokenUsageData
+from app.llm.types import (
+    ChatMessage,
+    ProviderStreamChunk,
+    TokenUsageData,
+    ToolCall,
+    ToolCallingResult,
+)
 from tests.helpers import StubProvider, catalog, profile, result
 
 
@@ -324,3 +330,80 @@ async def test_stream_does_not_fall_back_after_first_chunk() -> None:
     with pytest.raises(ProviderTransientError, match="disconnected"):
         await anext(iterator)
     assert not backup.stream_calls
+
+
+@pytest.mark.asyncio
+async def test_invoke_with_tools_routes_to_tool_calling_profile() -> None:
+    tool_profile = profile(capabilities={ModelCapability.chat, ModelCapability.tool_calling})
+    provider = StubProvider(
+        tool_profile,
+        [],
+        tool_outcomes=[
+            ToolCallingResult(
+                content="",
+                tool_calls=(
+                    ToolCall(id="call_1", name="generate_image", arguments={"prompt": "cat"}),
+                ),
+                token_usage=TokenUsageData(input_tokens=3, output_tokens=2, total_tokens=5),
+                finish_reason="tool_calls",
+            )
+        ],
+    )
+    router = LLMRouter(
+        catalog(
+            {"tool": tool_profile},
+            {ModelRole.orchestrator: ["tool"]},
+        ),
+        lambda _name, _profile: provider,
+    )
+
+    routed = await router.invoke_with_tools(
+        request_id="req-tool-1",
+        tenant_id="tenant-1",
+        user_id="user-1",
+        messages=[ChatMessage(role="user", content="draw a cat")],
+        tools=(
+            {
+                "name": "generate_image",
+                "description": "Generate an image",
+                "parameters": {"type": "object"},
+            },
+        ),
+    )
+
+    assert routed.profile_name == "tool"
+    assert routed.tool_result.tool_calls == (
+        ToolCall(id="call_1", name="generate_image", arguments={"prompt": "cat"}),
+    )
+    assert provider.tool_calls[0][1].tools is not None
+
+
+@pytest.mark.asyncio
+async def test_invoke_with_tools_rejects_profile_without_capability() -> None:
+    tool_profile = profile()
+    provider = StubProvider(tool_profile, [])
+    router = LLMRouter(
+        catalog(
+            {"tool": tool_profile},
+            {ModelRole.orchestrator: ["tool"]},
+        ),
+        lambda _name, _profile: provider,
+    )
+
+    with pytest.raises(AIServiceError) as raised:
+        await router.invoke_with_tools(
+            request_id="req-tool-2",
+            tenant_id="tenant-1",
+            user_id="user-1",
+            messages=[ChatMessage(role="user", content="draw a cat")],
+            tools=(
+                {
+                    "name": "generate_image",
+                    "description": "Generate an image",
+                    "parameters": {"type": "object"},
+                },
+            ),
+        )
+
+    assert raised.value.code == "UNSUPPORTED_TOOL_CALLING"
+    assert not provider.tool_calls
