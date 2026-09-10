@@ -15,6 +15,8 @@
 - [项目与项目成员管理](../product/project-management.md)
 - [任务管理 API](task-management-api.md)
 - [项目任务管理](../product/task-management.md)
+- [会议管理 API](meeting-management-api.md)
+- [会议管理](../product/meeting-management.md)
 - [用户个人资料管理](../product/user-profile-management.md)
 - [密码修改与凭证安全](../security/password-management.md)
 - [平台使用、接口与数据库字典](../product/platform-usage-guide.md)：按当前 OpenAPI 汇总全部接口、请求参数和验证顺序。
@@ -69,6 +71,22 @@ DELETE /api/v1/resources/{resourceId}/acl/{aclEntryId}?version={version}
 
 GET /api/v1/audit-events
 GET /api/v1/audit-events/{auditEventId}
+
+GET    /api/v1/meetings
+POST   /api/v1/meetings
+GET    /api/v1/meetings/{meetingId}
+PATCH  /api/v1/meetings/{meetingId}
+DELETE /api/v1/meetings/{meetingId}?version={version}
+POST   /api/v1/meetings/{meetingId}/transitions
+GET    /api/v1/meetings/{meetingId}/participants
+POST   /api/v1/meetings/{meetingId}/participants
+PATCH  /api/v1/meetings/{meetingId}/participants/{membershipId}
+DELETE /api/v1/meetings/{meetingId}/participants/{membershipId}?version={version}
+PATCH  /api/v1/meetings/{meetingId}/participants/me/response
+GET    /api/v1/meetings/{meetingId}/minutes
+PUT    /api/v1/meetings/{meetingId}/minutes
+POST   /api/v1/meetings/{meetingId}/minutes/publish
+POST   /api/v1/meetings/{meetingId}/minutes/reopen
 
 POST /api/v1/upload-sessions
 POST /api/v1/upload-sessions/{uploadSessionId}/complete
@@ -244,6 +262,15 @@ GET    /api/v1/projects/{projectId}/tasks/{taskId}/activities
 - 任务动态列表的 `limit` 默认值统一为 `20`，与 NestJS DTO 和其他普通分页接口一致；
 - `CreateTaskRequest.priority` 明确声明默认值为 `MEDIUM`；
 - 本次不改变服务端实际行为，不需要新增 Prisma migration，TypeScript 客户端需要重新生成。
+
+## 0.14.0 迁移说明
+
+- 公开契约版本由 `0.13.1` 提升为 `0.14.0`；
+- 兼容新增会议 CRUD、状态流转、参会人管理、邀请应答和会议纪要共 15 个接口；
+- 新增 `meeting.*` 权限，普通成员仅能访问自己组织或参与的会议，`meeting.manage_all` 扩展到当前租户全部会议；
+- 新增 Prisma 迁移 `0008_meeting_management`，兼容改造旧会议占位表并补齐 PostgreSQL 中文注释；
+- 会议、参会人和纪要分别使用乐观锁，全部写操作先获取会议行锁并在同一事务写审计；
+- TypeScript 客户端已经重新生成；本版本不包含 COS 会议附件、通知提醒和第三方会议平台集成。
 
 ## 契约事实源
 

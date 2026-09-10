@@ -123,6 +123,24 @@ Project
 - `0006_task_management` 完成旧字段迁移、外键、索引和任务权限初始化；
 - `0007_task_database_comments` 补齐任务相关表和字段的 PostgreSQL 中文注释。
 
+## 会议模型
+
+```text
+Meeting
+  ├── organizerMembership -> TenantMembership
+  ├── project -> Project?
+  ├── department -> Department?
+  ├── participants -> MeetingParticipant[] -> TenantMembership
+  └── minutes -> MeetingMinutes?
+```
+
+- 普通成员只能访问自己组织或参与的会议，部门归属不自动授予访问权；
+- `meeting_participants` 使用租户 Membership，分别保存参会角色、邀请应答和实际出席状态；
+- `meeting_minutes.meeting_id` 唯一，一场会议只有一份纪要，并保存记录人、发布人和发布时间；
+- `0008_meeting_management` 兼容迁移旧会议占位结构，新增枚举、关系、索引、权限和 PostgreSQL 中文注释；
+- 已有会议、参会关系和纪要写入由应用层在会议行锁事务中完成；创建关联项目会议时先锁项目行，避免成员关系与会议写入并发冲突；
+- 详细规则见 `docs/product/meeting-management.md` 和 `docs/api/meeting-management-api.md`。
+
 - `apps/api/prisma/schema.prisma` 是数据模型唯一事实源，迁移提交到 `apps/api/prisma/migrations`。
 - `0001_init` 包含 pgvector 扩展和当前 `schema.prisma` 的完整空库结构；共享环境首次执行后，后续结构变化必须新增前向迁移，不再重写该基线。
 - 本地 PostgreSQL 与 Redis 由 `infra/database/docker-compose.yml` 和本地开发覆盖启动；Staging 与 Production 数据库部署在各自独立服务器或服务器组，Redis 必须启用密码。

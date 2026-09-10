@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CEES AI API
-  version: 0.13.1
+  version: 0.14.0
   description: 以本文件为唯一事实源的公开 API 契约。资源与操作按 docs/api 约定补充。
 
 servers:
@@ -3303,6 +3303,249 @@ paths:
         '403': { description: 缺少 task.read 权限, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
         '404': { description: 项目或任务不存在, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
 
+  /meetings:
+    get:
+      summary: 查询当前成员可见会议
+      operationId: meetingList
+      tags: [Meeting]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: keyword, in: query, schema: { type: string, maxLength: 100 } }
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/MeetingStatus' } }
+        - { name: projectId, in: query, schema: { type: string, format: uuid } }
+        - { name: departmentId, in: query, schema: { type: string, format: uuid } }
+        - { name: startsFrom, in: query, schema: { type: string, format: date-time } }
+        - { name: startsTo, in: query, schema: { type: string, format: date-time } }
+        - { name: includeCancelled, in: query, schema: { type: boolean, default: false } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+        - { name: cursor, in: query, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: 当前成员可见会议, content: { application/json: { schema: { $ref: '#/components/schemas/MeetingListResponseEnvelope' } } } }
+        '403': { description: 缺少 meeting.read 权限, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+    post:
+      summary: 创建会议草稿
+      operationId: meetingCreate
+      tags: [Meeting]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateMeetingRequest' }
+      responses:
+        '201': { description: 会议草稿已创建，当前成员自动成为组织者和主持人, content: { application/json: { schema: { $ref: '#/components/schemas/MeetingResponseEnvelope' } } } }
+        '400': { description: 时间、部门或项目无效, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '403': { description: 缺少 meeting.create 权限或无权关联项目, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+
+  /meetings/{meetingId}:
+    parameters:
+      - { name: meetingId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      summary: 查询会议详情
+      operationId: meetingGet
+      tags: [Meeting]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: 会议详情, content: { application/json: { schema: { $ref: '#/components/schemas/MeetingResponseEnvelope' } } } }
+        '403': { description: 缺少 meeting.read 权限, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '404': { description: 会议不存在或当前成员不是组织者、参会人且无全局管理权限, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+    patch:
+      summary: 修改草稿或已安排会议
+      operationId: meetingUpdate
+      tags: [Meeting]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateMeetingRequest' }
+      responses:
+        '200': { description: 会议资料已修改, content: { application/json: { schema: { $ref: '#/components/schemas/MeetingResponseEnvelope' } } } }
+        '400': { description: 字段、部门或项目无效, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '403': { description: 缺少 meeting.update 权限或不是会议管理者, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '404': { description: 会议不存在, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '409': { description: 会议状态或版本冲突, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+    delete:
+      summary: 删除会议草稿
+      operationId: meetingDelete
+      tags: [Meeting]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: version, in: query, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        '204': { description: 会议草稿已软删除 }
+        '403': { description: 缺少 meeting.delete 权限或不是会议组织者, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '404': { description: 会议不存在, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '409': { description: 会议不是草稿或版本冲突, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+
+  /meetings/{meetingId}/transitions:
+    parameters:
+      - { name: meetingId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      summary: 变更会议状态
+      operationId: meetingTransition
+      tags: [Meeting]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MeetingTransitionRequest' }
+      responses:
+        '200': { description: 会议状态已变更, content: { application/json: { schema: { $ref: '#/components/schemas/MeetingResponseEnvelope' } } } }
+        '400': { description: 取消会议时未填写原因, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '403': { description: 缺少 meeting.status.update 权限或不是会议管理者, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '404': { description: 会议不存在, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '409': { description: 状态流转或版本冲突, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+
+  /meetings/{meetingId}/participants:
+    parameters:
+      - { name: meetingId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      summary: 查询会议参会人
+      operationId: meetingParticipantList
+      tags: [Meeting]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: 会议参会人列表, content: { application/json: { schema: { $ref: '#/components/schemas/MeetingParticipantListResponseEnvelope' } } } }
+        '403': { description: 缺少 meeting.read 权限, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '404': { description: 会议不存在或不可见, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+    post:
+      summary: 添加会议参会人
+      operationId: meetingParticipantAdd
+      tags: [Meeting]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AddMeetingParticipantRequest' }
+      responses:
+        '201': { description: 参会人已添加, content: { application/json: { schema: { $ref: '#/components/schemas/MeetingParticipantResponseEnvelope' } } } }
+        '400': { description: 目标成员不是当前租户有效成员, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '403': { description: 缺少 meeting.participant.manage 权限或不是会议管理者, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '404': { description: 会议不存在, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '409': { description: 会议状态不允许修改参与人或成员已经存在, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+
+  /meetings/{meetingId}/participants/{membershipId}:
+    parameters:
+      - { name: meetingId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: membershipId, in: path, required: true, schema: { type: string, format: uuid } }
+    patch:
+      summary: 修改参会角色或出席状态
+      operationId: meetingParticipantUpdate
+      tags: [Meeting]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateMeetingParticipantRequest' }
+      responses:
+        '200': { description: 参会人已修改, content: { application/json: { schema: { $ref: '#/components/schemas/MeetingParticipantResponseEnvelope' } } } }
+        '400': { description: 修改字段组合无效, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '403': { description: 缺少 meeting.participant.manage 权限或不是会议管理者, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '404': { description: 会议或参会人不存在, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '409': { description: 组织者角色、会议状态或版本冲突, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+    delete:
+      summary: 移除会议参会人
+      operationId: meetingParticipantRemove
+      tags: [Meeting]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: version, in: query, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        '204': { description: 参会人已移除 }
+        '403': { description: 缺少 meeting.participant.manage 权限或不是会议管理者, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '404': { description: 会议或参会人不存在, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '409': { description: 不能移除组织者、会议状态不允许或版本冲突, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+
+  /meetings/{meetingId}/participants/me/response:
+    parameters:
+      - { name: meetingId, in: path, required: true, schema: { type: string, format: uuid } }
+    patch:
+      summary: 当前参会人回应会议邀请
+      operationId: meetingParticipantRespond
+      tags: [Meeting]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RespondMeetingParticipantRequest' }
+      responses:
+        '200': { description: 邀请应答已更新, content: { application/json: { schema: { $ref: '#/components/schemas/MeetingParticipantResponseEnvelope' } } } }
+        '403': { description: 缺少 meeting.read 权限, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '404': { description: 当前成员不是会议参会人, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '409': { description: 会议状态或版本冲突, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+
+  /meetings/{meetingId}/minutes:
+    parameters:
+      - { name: meetingId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      summary: 查询会议纪要
+      operationId: meetingMinutesGet
+      tags: [Meeting]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: 会议纪要；尚未创建时 data 为 null, content: { application/json: { schema: { $ref: '#/components/schemas/NullableMeetingMinutesResponseEnvelope' } } } }
+        '403': { description: 草稿纪要仅组织者、主持人、记录人或全局管理者可见, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '404': { description: 会议不存在或不可见, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+    put:
+      summary: 创建或修改会议纪要草稿
+      operationId: meetingMinutesUpsert
+      tags: [Meeting]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpsertMeetingMinutesRequest' }
+      responses:
+        '200': { description: 会议纪要草稿已保存, content: { application/json: { schema: { $ref: '#/components/schemas/MeetingMinutesResponseEnvelope' } } } }
+        '400': { description: 纪要内容或版本参数无效, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '403': { description: 缺少 meeting.minutes.manage 权限或不是组织者、主持人、记录人, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '404': { description: 会议不存在, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '409': { description: 会议未开始、纪要已发布或版本冲突, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+
+  /meetings/{meetingId}/minutes/publish:
+    parameters:
+      - { name: meetingId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      summary: 发布会议纪要
+      operationId: meetingMinutesPublish
+      tags: [Meeting]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MeetingMinutesVersionRequest' }
+      responses:
+        '200': { description: 会议纪要已发布, content: { application/json: { schema: { $ref: '#/components/schemas/MeetingMinutesResponseEnvelope' } } } }
+        '403': { description: 缺少 meeting.minutes.manage 权限或不是组织者、主持人, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '404': { description: 会议或纪要不存在, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '409': { description: 会议未完成、纪要状态或版本冲突, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+
+  /meetings/{meetingId}/minutes/reopen:
+    parameters:
+      - { name: meetingId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      summary: 将已发布会议纪要重新打开为草稿
+      operationId: meetingMinutesReopen
+      tags: [Meeting]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MeetingMinutesVersionRequest' }
+      responses:
+        '200': { description: 会议纪要已重新打开, content: { application/json: { schema: { $ref: '#/components/schemas/MeetingMinutesResponseEnvelope' } } } }
+        '403': { description: 缺少 meeting.minutes.manage 权限或不是组织者、主持人, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '404': { description: 会议或纪要不存在, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '409': { description: 纪要状态或版本冲突, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -3601,6 +3844,332 @@ components:
       properties:
         success: { type: boolean, const: true }
         data: { $ref: '#/components/schemas/TaskActivityList' }
+        requestId: { type: [string, 'null'] }
+
+    MeetingStatus:
+      type: string
+      enum: [DRAFT, SCHEDULED, IN_PROGRESS, COMPLETED, CANCELLED]
+
+    MeetingTransitionTarget:
+      type: string
+      enum: [SCHEDULED, IN_PROGRESS, COMPLETED, CANCELLED]
+
+    MeetingParticipantRole:
+      type: string
+      enum: [HOST, RECORDER, PARTICIPANT]
+
+    MeetingResponseStatus:
+      type: string
+      enum: [INVITED, ACCEPTED, DECLINED, TENTATIVE]
+
+    MeetingAttendanceStatus:
+      type: string
+      enum: [PENDING, ATTENDED, ABSENT]
+
+    MeetingMinutesStatus:
+      type: string
+      enum: [DRAFT, PUBLISHED]
+
+    MeetingAgendaItem:
+      type: object
+      additionalProperties: false
+      required: [title, sortOrder]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 200 }
+        description: { type: [string, 'null'], maxLength: 2000, default: null }
+        sortOrder: { type: integer, minimum: 0, maximum: 100000 }
+
+    MeetingMinutesActionItem:
+      type: object
+      additionalProperties: false
+      required: [title]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 500 }
+        ownerMembershipId: { type: [string, 'null'], format: uuid, default: null }
+        dueDate: { type: [string, 'null'], format: date-time, default: null }
+
+    MeetingMinutesContent:
+      type: object
+      additionalProperties: false
+      required: [summary, decisions, actionItems]
+      properties:
+        summary: { type: string, maxLength: 20000 }
+        decisions:
+          type: array
+          maxItems: 100
+          items: { type: string, minLength: 1, maxLength: 1000 }
+        actionItems:
+          type: array
+          maxItems: 100
+          items: { $ref: '#/components/schemas/MeetingMinutesActionItem' }
+        notes: { type: [string, 'null'], maxLength: 50000, default: null }
+
+    CreateMeetingRequest:
+      type: object
+      additionalProperties: false
+      required: [title, startsAt, durationMinutes]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 200 }
+        description: { type: [string, 'null'], maxLength: 5000, default: null }
+        projectId: { type: [string, 'null'], format: uuid, default: null }
+        departmentId: { type: [string, 'null'], format: uuid, default: null }
+        startsAt: { type: string, format: date-time }
+        durationMinutes: { type: integer, minimum: 1, maximum: 1440 }
+        location: { type: [string, 'null'], maxLength: 500, default: null }
+        meetingUrl: { type: [string, 'null'], format: uri, maxLength: 2048, default: null }
+        agenda:
+          type: array
+          maxItems: 100
+          default: []
+          items: { $ref: '#/components/schemas/MeetingAgendaItem' }
+
+    UpdateMeetingRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 2
+      required: [version]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 200 }
+        description: { type: [string, 'null'], maxLength: 5000 }
+        projectId: { type: [string, 'null'], format: uuid }
+        departmentId: { type: [string, 'null'], format: uuid }
+        startsAt: { type: string, format: date-time }
+        durationMinutes: { type: integer, minimum: 1, maximum: 1440 }
+        location: { type: [string, 'null'], maxLength: 500 }
+        meetingUrl: { type: [string, 'null'], format: uri, maxLength: 2048 }
+        agenda:
+          type: array
+          maxItems: 100
+          items: { $ref: '#/components/schemas/MeetingAgendaItem' }
+        version: { type: integer, minimum: 1 }
+
+    MeetingTransitionRequest:
+      type: object
+      additionalProperties: false
+      required: [status, version]
+      properties:
+        status: { $ref: '#/components/schemas/MeetingTransitionTarget' }
+        reason:
+          type: [string, 'null']
+          maxLength: 1000
+          description: CANCELLED 时必填
+        version: { type: integer, minimum: 1 }
+
+    AddMeetingParticipantRequest:
+      type: object
+      additionalProperties: false
+      required: [membershipId]
+      properties:
+        membershipId: { type: string, format: uuid }
+        role:
+          allOf:
+            - $ref: '#/components/schemas/MeetingParticipantRole'
+          default: PARTICIPANT
+
+    UpdateMeetingParticipantRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 2
+      required: [version]
+      properties:
+        role: { $ref: '#/components/schemas/MeetingParticipantRole' }
+        attendanceStatus: { $ref: '#/components/schemas/MeetingAttendanceStatus' }
+        version: { type: integer, minimum: 1 }
+
+    RespondMeetingParticipantRequest:
+      type: object
+      additionalProperties: false
+      required: [responseStatus, version]
+      properties:
+        responseStatus:
+          type: string
+          enum: [ACCEPTED, DECLINED, TENTATIVE]
+        version: { type: integer, minimum: 1 }
+
+    UpsertMeetingMinutesRequest:
+      type: object
+      additionalProperties: false
+      required: [content]
+      properties:
+        content: { $ref: '#/components/schemas/MeetingMinutesContent' }
+        version:
+          type: integer
+          minimum: 1
+          description: 首次创建时不传；修改已有草稿时必传
+
+    MeetingMinutesVersionRequest:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        version: { type: integer, minimum: 1 }
+
+    MeetingMemberIdentity:
+      type: object
+      required: [membershipId, account, displayName, departmentId]
+      properties:
+        membershipId: { type: string, format: uuid }
+        account: { type: string }
+        displayName: { type: string }
+        departmentId: { type: [string, 'null'], format: uuid }
+
+    MeetingParticipant:
+      type: object
+      required: [id, meetingId, member, role, responseStatus, attendanceStatus, respondedAt, createdAt, updatedAt, version]
+      properties:
+        id: { type: string, format: uuid }
+        meetingId: { type: string, format: uuid }
+        member: { $ref: '#/components/schemas/MeetingMemberIdentity' }
+        role: { $ref: '#/components/schemas/MeetingParticipantRole' }
+        responseStatus: { $ref: '#/components/schemas/MeetingResponseStatus' }
+        attendanceStatus: { $ref: '#/components/schemas/MeetingAttendanceStatus' }
+        respondedAt: { type: [string, 'null'], format: date-time }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        version: { type: integer, minimum: 1 }
+
+    Meeting:
+      type: object
+      required:
+        - id
+        - title
+        - description
+        - projectId
+        - departmentId
+        - organizer
+        - startsAt
+        - durationMinutes
+        - location
+        - meetingUrl
+        - agenda
+        - status
+        - cancelReason
+        - startedAt
+        - completedAt
+        - participantCount
+        - myRole
+        - myResponseStatus
+        - createdAt
+        - updatedAt
+        - version
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        description: { type: [string, 'null'] }
+        projectId: { type: [string, 'null'], format: uuid }
+        departmentId: { type: [string, 'null'], format: uuid }
+        organizer: { $ref: '#/components/schemas/MeetingMemberIdentity' }
+        startsAt: { type: string, format: date-time }
+        durationMinutes: { type: integer, minimum: 1 }
+        location: { type: [string, 'null'] }
+        meetingUrl: { type: [string, 'null'], format: uri }
+        agenda:
+          type: array
+          items: { $ref: '#/components/schemas/MeetingAgendaItem' }
+        status: { $ref: '#/components/schemas/MeetingStatus' }
+        cancelReason: { type: [string, 'null'] }
+        startedAt: { type: [string, 'null'], format: date-time }
+        completedAt: { type: [string, 'null'], format: date-time }
+        participantCount: { type: integer, minimum: 1 }
+        myRole:
+          oneOf:
+            - $ref: '#/components/schemas/MeetingParticipantRole'
+            - type: 'null'
+        myResponseStatus:
+          oneOf:
+            - $ref: '#/components/schemas/MeetingResponseStatus'
+            - type: 'null'
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        version: { type: integer, minimum: 1 }
+
+    MeetingList:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Meeting' }
+        nextCursor: { type: [string, 'null'], format: uuid }
+
+    MeetingParticipantList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/MeetingParticipant' }
+
+    MeetingMinutes:
+      type: object
+      required: [id, meetingId, content, status, recorder, publishedAt, publishedBy, createdAt, updatedAt, version]
+      properties:
+        id: { type: string, format: uuid }
+        meetingId: { type: string, format: uuid }
+        content: { $ref: '#/components/schemas/MeetingMinutesContent' }
+        status: { $ref: '#/components/schemas/MeetingMinutesStatus' }
+        recorder:
+          oneOf:
+            - $ref: '#/components/schemas/MeetingMemberIdentity'
+            - type: 'null'
+        publishedAt: { type: [string, 'null'], format: date-time }
+        publishedBy:
+          oneOf:
+            - $ref: '#/components/schemas/MeetingMemberIdentity'
+            - type: 'null'
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        version: { type: integer, minimum: 1 }
+
+    MeetingResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/Meeting' }
+        requestId: { type: [string, 'null'] }
+
+    MeetingListResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/MeetingList' }
+        requestId: { type: [string, 'null'] }
+
+    MeetingParticipantResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/MeetingParticipant' }
+        requestId: { type: [string, 'null'] }
+
+    MeetingParticipantListResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/MeetingParticipantList' }
+        requestId: { type: [string, 'null'] }
+
+    MeetingMinutesResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/MeetingMinutes' }
+        requestId: { type: [string, 'null'] }
+
+    NullableMeetingMinutesResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data:
+          oneOf:
+            - $ref: '#/components/schemas/MeetingMinutes'
+            - type: 'null'
         requestId: { type: [string, 'null'] }
 
     ProjectStatus:

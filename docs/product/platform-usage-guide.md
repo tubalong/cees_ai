@@ -2,7 +2,7 @@
 
 > 状态：按当前实现整理  
 > 最后同步：2026-09-09
-> 公开契约版本：`0.13.1`
+> 公开契约版本：`0.14.0`
 > 事实源：`packages/contracts/openapi/openapi.yaml`、`apps/api/prisma/schema.prisma`
 
 ## 1. 文档用途
@@ -10,9 +10,9 @@
 本文面向本地开发、接口联调、产品验收和数据库排查，统一说明：
 
 - 平台超级管理员、租户管理员和普通成员的区别；
-- 当前已经实现的 99 个 HTTP 操作；
+- 当前已经实现的 114 个 HTTP 操作；
 - 路径参数、查询参数和 JSON 请求体字段的含义；
-- PostgreSQL 中 41 张业务表、474 个业务字段及 Prisma 迁移表的用途；
+- PostgreSQL 中 41 张业务表、495 个业务字段及 Prisma 迁移表的用途；
 - 租户创建、成员激活、登录、授权、资源访问、审计、停用和恢复的整体流转；
 - 哪些能力已经有公开 API，哪些目前只有数据库结构或模块占位。
 
@@ -38,7 +38,8 @@
 | 文件上传 | 基础接口已实现 | 通过短时预签名 PUT URL 直传私有 COS，HEAD 校验通过后登记正式文件 |
 | 项目与项目成员 | 已实现 | 项目 CRUD、成员角色、负责人转移、状态机、完成后只读和归档 |
 | 任务、评论、附件和动态 | 已实现 | 任务 CRUD、父子任务、执行人、状态机、评论、COS 附件、动态和审计 |
-| 知识库、会议、通知 | 仅数据库结构/设计基础 | 当前没有对应公开 API |
+| 会议管理 | 已实现 | 会议 CRUD、状态机、参会人、邀请应答、实际出席、纪要和审计 |
+| 知识库、通知 | 仅数据库结构/设计基础 | 当前没有对应公开 API |
 | AI 草稿和调用日志 | 数据结构与内部编排基础 | AI 不能绕过 NestJS 写正式业务数据 |
 
 ## 3. 管理员账号到底存在哪里
@@ -272,6 +273,28 @@ pnpm --filter @cees/api dev
 | `GET /projects/{projectId}/tasks/{taskId}/activities` | 查询任务动态 | `limit/cursor` | 动态列表 | `task.read` + 项目成员 |
 
 任务接口不会被 `project.manage_all` 绕过：即使租户管理员拥有跨项目管理权限，也必须先加入项目才能访问任务。项目 `COMPLETED/CANCELLED/ARCHIVED` 后任务域只读。所有任务写操作在获得项目行锁后重新校验项目、任务、成员和父子关系；`version` 负责单资源乐观锁，项目行锁负责跨表一致性。完整状态机和示例见 [项目任务管理](task-management.md) 与 [任务管理 API](../api/task-management-api.md)。
+
+#### 6.4.2 会议管理
+
+| 方法与路径 | 用途 | 参数/请求体 | 返回 | 权限与范围 |
+| --- | --- | --- | --- | --- |
+| `GET /meetings` | 查询当前成员可见会议 | 关键字、状态、项目、部门、时间和游标 | 会议列表 | `meeting.read` + 组织者/参会人，或 `meeting.manage_all` |
+| `POST /meetings` | 创建会议草稿 | `CreateMeetingRequest` | 新会议 | `meeting.create` |
+| `GET /meetings/{meetingId}` | 查询会议详情 | `meetingId` | 会议详情 | `meeting.read` + 会议范围 |
+| `PATCH /meetings/{meetingId}` | 修改会议资料 | `UpdateMeetingRequest` | 修改后的会议 | `meeting.update` + 组织者/HOST/全局管理 |
+| `DELETE /meetings/{meetingId}` | 删除会议草稿 | 查询参数 `version` | `204` | `meeting.delete` + 组织者/全局管理 |
+| `POST /meetings/{meetingId}/transitions` | 流转会议状态 | `MeetingTransitionRequest` | 会议详情 | `meeting.status.update` + 会议管理者 |
+| `GET /meetings/{meetingId}/participants` | 查询参会人 | `meetingId` | 参会人列表 | `meeting.read` + 会议范围 |
+| `POST /meetings/{meetingId}/participants` | 添加参会人 | `AddMeetingParticipantRequest` | 参会人 | `meeting.participant.manage` + 会议管理者 |
+| `PATCH /meetings/{meetingId}/participants/{membershipId}` | 修改角色或出席状态 | `UpdateMeetingParticipantRequest` | 参会人 | `meeting.participant.manage` + 会议管理者 |
+| `DELETE /meetings/{meetingId}/participants/{membershipId}` | 移除参会人 | 查询参数 `version` | `204` | `meeting.participant.manage` + 会议管理者 |
+| `PATCH /meetings/{meetingId}/participants/me/response` | 回应自己的邀请 | `RespondMeetingParticipantRequest` | 当前参会人 | `meeting.read` + 当前参会关系 |
+| `GET /meetings/{meetingId}/minutes` | 查询会议纪要 | `meetingId` | 纪要或 `null` | `meeting.read`；草稿另校验角色 |
+| `PUT /meetings/{meetingId}/minutes` | 创建或修改纪要草稿 | `UpsertMeetingMinutesRequest` | 纪要 | `meeting.minutes.manage` + 组织者/HOST/RECORDER |
+| `POST /meetings/{meetingId}/minutes/publish` | 发布纪要 | `version` | 已发布纪要 | `meeting.minutes.manage` + 组织者/HOST/全局管理 |
+| `POST /meetings/{meetingId}/minutes/reopen` | 重新打开纪要 | `version` | 草稿纪要 | `meeting.minutes.manage` + 组织者/HOST/全局管理 |
+
+同租户成员不会自动看到全部会议，部门只表示归属。会议、参会人和纪要分别维护 `version`；已有会议写操作会先锁定会议行，创建关联项目会议时会先锁定项目行，再重新校验状态、权限和关系。详细规则见 [会议管理](meeting-management.md) 和 [会议管理 API](../api/meeting-management-api.md)。
 
 ### 6.5 成员邀请
 
@@ -611,6 +634,36 @@ POST /platform/auth/change-password
 
 任务删除、评论删除和附件移除的 `version` 位于查询参数中。附件移除只删除任务关系，不删除 COS 对象和 `file_objects`。
 
+#### 7.5.6 会议请求
+
+| 请求 | 关键字段 | 说明 |
+| --- | --- | --- |
+| `CreateMeetingRequest` | `title/startsAt/durationMinutes`，可选项目、部门、地点、URL 和议程 | 创建 `DRAFT`，当前成员自动成为 `HOST + ACCEPTED` |
+| `UpdateMeetingRequest` | 可修改创建字段，必填 `version` | 仅 `DRAFT/SCHEDULED`，除版本外至少修改一个字段 |
+| `MeetingTransitionRequest` | `status/version`，取消时必填 `reason` | 目标为 `SCHEDULED/IN_PROGRESS/COMPLETED/CANCELLED` |
+| `AddMeetingParticipantRequest` | `membershipId`，可选 `role` | role 默认 `PARTICIPANT`，目标必须是当前租户有效成员 |
+| `UpdateMeetingParticipantRequest` | 可选 `role/attendanceStatus`，必填 `version` | 至少修改一个业务字段；角色和出席状态受会议状态限制 |
+| `RespondMeetingParticipantRequest` | `responseStatus/version` | 只修改当前成员自己的邀请应答 |
+| `UpsertMeetingMinutesRequest` | `content`，修改时必填 `version` | 首次创建不传版本，修改已有草稿必须传版本 |
+| `MeetingMinutesVersionRequest` | `version` | 发布和重新打开纪要使用 |
+
+`agenda` 最多 100 项，每项包含 `title`、可空 `description` 和 `sortOrder`。纪要 `content` 包含 `summary`、最多 100 项的 `decisions`、最多 100 项的 `actionItems` 和可空 `notes`；行动项负责人必须是当前会议有效参会人。
+
+```json
+{
+  "title": "研发周例会",
+  "startsAt": "2026-09-10T01:00:00.000Z",
+  "durationMinutes": 60,
+  "agenda": [
+    {
+      "title": "项目进度",
+      "description": "同步本周里程碑",
+      "sortOrder": 10
+    }
+  ]
+}
+```
+
 ### 7.6 角色请求
 
 #### `CreateRoleRequest`
@@ -794,6 +847,16 @@ POST /platform/auth/change-password
 
 列表响应统一使用 `items`；任务、评论和动态列表同时返回 `nextCursor`，没有下一页时为 `null`。附件列表当前不分页。
 
+### 8.6 会议返回字段
+
+| 资源 | 关键字段 | 说明 |
+| --- | --- | --- |
+| `Meeting` | `organizer/agenda/status/participantCount/myRole/myResponseStatus/version` | `myRole` 和 `myResponseStatus` 在全局管理者未参会时为 `null` |
+| `MeetingParticipant` | `member/role/responseStatus/attendanceStatus/respondedAt/version` | `member.membershipId` 是租户成员 ID |
+| `MeetingMinutes` | `content/status/recorder/publishedAt/publishedBy/version` | 尚未创建纪要时查询接口返回 `data: null` |
+
+会议、参会人和纪要分别维护独立版本，客户端不能混用三个资源的 `version`。公开纪要内容包含总结、决议、行动项和补充记录。
+
 ## 9. 权限与状态枚举
 
 ### 9.1 租户权限目录
@@ -833,6 +896,14 @@ POST /platform/auth/change-password
 | `task.comment.update` | 修改本人评论或由任务管理者修改 |
 | `task.comment.delete` | 删除本人评论或由任务管理者删除 |
 | `task.attachment.manage` | 添加或移除任务附件关系 |
+| `meeting.create` | 创建会议草稿 |
+| `meeting.read` | 查看自己组织或参与的会议 |
+| `meeting.update` | 修改有权管理的草稿或已安排会议 |
+| `meeting.delete` | 删除有权管理的会议草稿 |
+| `meeting.status.update` | 变更会议状态 |
+| `meeting.participant.manage` | 添加、修改和移除会议参会人 |
+| `meeting.minutes.manage` | 创建、修改、发布和重开会议纪要 |
+| `meeting.manage_all` | 管理当前租户全部会议并绕过参会范围 |
 | `role.read` | 查看权限和角色 |
 | `role.create` | 创建角色 |
 | `role.update` | 修改角色及其权限 |
@@ -884,6 +955,11 @@ platform.audit.read
 | `TaskStatus` | `TODO`、`IN_PROGRESS`、`BLOCKED`、`DONE`、`CANCELLED` |
 | `TaskPriority` | `LOW`、`MEDIUM`、`HIGH`、`URGENT` |
 | `TaskAssigneeType` | `OWNER` 唯一任务负责人；`COLLABORATOR` 协作人 |
+| `MeetingStatus` | `DRAFT` 草稿；`SCHEDULED` 已安排；`IN_PROGRESS` 进行中；`COMPLETED` 已完成；`CANCELLED` 已取消 |
+| `MeetingParticipantRole` | `HOST` 主持人；`RECORDER` 记录人；`PARTICIPANT` 普通参会人 |
+| `MeetingResponseStatus` | `INVITED` 未回应；`ACCEPTED` 接受；`DECLINED` 拒绝；`TENTATIVE` 待定 |
+| `MeetingAttendanceStatus` | `PENDING` 未登记；`ATTENDED` 已出席；`ABSENT` 缺席 |
+| `MeetingMinutesStatus` | `DRAFT` 草稿；`PUBLISHED` 已发布 |
 | `DraftStatus` | `DRAFT`、`PENDING_CONFIRMATION`、`CONFIRMED`、`REJECTED`、`EXPIRED`、`EXECUTED`、`FAILED` |
 
 ## 10. 平台整体流转
@@ -977,6 +1053,22 @@ flowchart LR
   Execute --> Audit[写入审计]
 ```
 
+### 10.5.1 会议生命周期
+
+```text
+DRAFT → SCHEDULED → IN_PROGRESS → COMPLETED
+  │         │              │
+  └─────────┴──────────────→ CANCELLED
+```
+
+- 创建者自动成为组织者和 `HOST`；
+- 草稿或已安排阶段维护资料、议程和参会角色；
+- 参会人通过自己的应答接口接受、拒绝或标记待定；
+- 会议开始后登记实际出席并编写纪要；
+- 会议完成后由组织者或主持人发布纪要；
+- 纪要发布后如需修改，先重新打开为草稿；
+- 会议附件、提醒通知、外部访客和第三方会议平台当前暂缓。
+
 ### 10.6 租户停用与恢复
 
 ```text
@@ -1031,7 +1123,7 @@ Prisma 自动维护的迁移历史表，记录迁移名称、校验值、开始/
 - `0003` 已为当前 39 张业务表和 422 个业务字段补齐 PostgreSQL 注释；
 - `0004` 新增上传会话表和正式文件的 COS 定位字段，并为新增表、枚举和字段写入中文注释；
 - `0005` 将项目成员改为关联 TenantMembership，新增项目状态历史、负责人、编码和完成信息；
-- 当前共 41 张业务表和 474 个业务字段；
+- 当前共 41 张业务表和 495 个业务字段；
 - 后续新建表或字段时，必须在同一迁移中添加 `COMMENT ON TABLE` 和 `COMMENT ON COLUMN`；
 - Prisma Schema、迁移 SQL 和本数据字典必须保持一致。
 
@@ -1630,50 +1722,68 @@ Prisma 自动维护的迁移历史表，记录迁移名称、校验值、开始/
 
 ### 17.1 `meetings`
 
-会议主表，目前没有公开 API。
+会议主表。普通成员只访问自己组织或参与的会议，`meeting.manage_all` 可以访问当前租户全部会议。
 
 | 字段 | 含义 |
 | --- | --- |
 | `id` | 会议 UUID |
 | `tenant_id` | 所属租户 |
+| `project_id` | 关联项目 UUID，可空 |
+| `department_id` | 归属部门 UUID，可空；不自动授予部门成员访问权 |
+| `organizer_membership_id` | 会议组织者的租户 Membership UUID |
 | `title` | 会议标题 |
+| `description` | 会议说明，可空 |
 | `starts_at` | 开始时间 |
 | `duration_minutes` | 预计时长，单位分钟 |
-| `department_id` | 所属部门 UUID，可空 |
-| `agenda` | 会议议程 JSON |
+| `location` | 线下地点，可空 |
+| `meeting_url` | 线上会议 URL，可空 |
+| `agenda` | 结构化会议议程 JSON 数组 |
+| `status` | `DRAFT/SCHEDULED/IN_PROGRESS/COMPLETED/CANCELLED` |
+| `cancel_reason` | 取消原因，仅取消会议使用 |
+| `started_at` | 实际开始时间，进入 `IN_PROGRESS` 时记录 |
+| `completed_at` | 实际完成时间，进入 `COMPLETED` 时记录 |
 | `created_at/updated_at` | 创建和更新时间 |
-| `created_by/updated_by` | 创建和修改者 |
+| `created_by/updated_by` | 创建和修改者的 User UUID |
 | `deleted_at` | 软删除时间 |
-| `version` | 会议版本 |
+| `version` | 会议乐观锁版本 |
 
 ### 17.2 `meeting_participants`
 
-会议参会人关系。
+会议参会人关系。同一租户、会议和 Membership 只有一条关系，移除后保留软删除记录。
 
 | 字段 | 含义 |
 | --- | --- |
 | `id` | 关系 UUID |
 | `tenant_id` | 所属租户 |
 | `meeting_id` | 会议 UUID |
-| `user_id` | 参会人 User UUID |
-| `status` | 参会状态字符串，默认 `INVITED` |
-| `created_at` | 邀请或加入时间 |
+| `membership_id` | 参会人的租户 Membership UUID，不是全局 User UUID |
+| `role` | `HOST/RECORDER/PARTICIPANT` |
+| `response_status` | `INVITED/ACCEPTED/DECLINED/TENTATIVE` |
+| `attendance_status` | `PENDING/ATTENDED/ABSENT` |
+| `responded_at` | 最近一次回应邀请的时间，可空 |
+| `created_at/updated_at` | 创建和更新时间 |
+| `created_by/updated_by` | 创建和修改者的 User UUID |
+| `deleted_at` | 移除参会关系的软删除时间 |
+| `version` | 参会关系乐观锁版本 |
 
 ### 17.3 `meeting_minutes`
 
-会议纪要表。
+会议纪要表，`meeting_id` 唯一，因此一场会议只有一份纪要。
 
 | 字段 | 含义 |
 | --- | --- |
 | `id` | 纪要 UUID |
 | `tenant_id` | 所属租户 |
-| `meeting_id` | 会议 UUID |
-| `content` | 结构化纪要 JSON |
-| `status` | 纪要状态字符串，默认 `DRAFT` |
+| `meeting_id` | 唯一会议 UUID |
+| `content` | 总结、决议、行动项和补充记录组成的结构化 JSON |
+| `status` | `DRAFT/PUBLISHED` |
+| `recorder_membership_id` | 最近保存纪要的记录人 Membership UUID，可空 |
+| `published_at` | 发布时间，可空 |
+| `published_by_membership_id` | 发布人 Membership UUID，可空 |
 | `created_at/updated_at` | 创建和更新时间 |
-| `created_by/updated_by` | 创建和修改者 |
+| `created_by/updated_by` | 创建和修改者的 User UUID |
 | `deleted_at` | 软删除时间 |
-| `version` | 纪要版本 |
+| `version` | 纪要乐观锁版本 |
 
 ### 17.4 `notifications`
 
@@ -2549,3 +2659,13 @@ API 只有在 COS HEAD 返回的大小和 Content-Type 与会话一致时才创�
 - `CreateTaskRequest.priority` 在公开契约中明确声明默认值为 `MEDIUM`；
 - 本次只修正公开契约描述，不改变现有服务端运行行为，不需要新增 Prisma migration；
 - 修改契约后需要重新生成 `packages/api-client`，公开契约版本由 `0.13.0` 提升为 `0.13.1`。
+
+## 28. `0.14.0` 会议管理说明
+
+- 新增会议 CRUD、状态流转、参会人、邀请应答和会议纪要共 15 个公开 HTTP 操作；
+- 普通成员仅能访问自己组织或参与的会议，`meeting.manage_all` 扩展到当前租户全部会议；
+- 会议组织者固定为 `HOST + ACCEPTED`，不能被移除或降级；记录人可以编辑纪要草稿，但不能发布；
+- 会议、参会人和纪要分别维护乐观锁版本，全部写操作先获取会议行锁并在同一事务写审计；
+- 数据库迁移为 `0008_meeting_management`，兼容改造旧会议占位表并补齐枚举、关系、索引、权限和中文注释；
+- 修改契约后已经重新生成 `packages/api-client`，公开契约版本由 `0.13.1` 提升为 `0.14.0`；
+- 当前不实现 COS 会议附件、通知提醒、第三方会议平台、录音转写和 AI 自动发布纪要。
