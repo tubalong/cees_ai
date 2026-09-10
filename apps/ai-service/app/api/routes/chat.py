@@ -27,6 +27,7 @@ from app.api.generated.models import (
     StreamErrorEvent,
     StreamExecutionMetadata,
     TokenUsage,
+    ToolTurnRequest,
     UsageEvent,
 )
 from app.chat.compactor import ChatCompactor
@@ -136,6 +137,26 @@ async def stream_chat(payload: ChatRequest, request: Request) -> StreamingRespon
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",
         },
+    )
+
+
+@router.post(
+    "/tool-turn/stream",
+    response_class=StreamingResponse,
+    response_model=None,
+    operation_id="streamChatToolTurn",
+    summary="Stream a single tool-capable chat turn",
+    response_description="Tool-capable turn events are streamed",
+    responses=CHAT_ERROR_RESPONSES,
+)
+async def stream_chat_tool_turn(
+    payload: ToolTurnRequest, request: Request
+) -> StreamingResponse:
+    raise AIServiceError(
+        "NOT_IMPLEMENTED",
+        "Tool turn streaming is not implemented",
+        status_code=501,
+        request_id=payload.request_id,
     )
 
 
