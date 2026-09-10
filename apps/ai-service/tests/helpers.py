@@ -14,6 +14,7 @@ from app.core.config import (
     Settings,
 )
 from app.core.runtime import AppRuntime
+from app.images.router import ImageRouter
 from app.llm.router import LLMRouter
 from app.llm.types import (
     ChatMessage,
@@ -150,12 +151,14 @@ def ready_runtime(
     *,
     token: str = "secret",
     settings: Settings | None = None,
+    image_router: ImageRouter | None = None,
 ) -> AppRuntime:
     return AppRuntime(
         settings=settings or Settings(node_env="test", ai_internal_token=token),
         catalog=model_catalog,
         router=router,
         readiness_errors=[],
+        image_router=image_router,
     )
 
 

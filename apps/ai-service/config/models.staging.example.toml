@@ -48,6 +48,15 @@ max_output_tokens_limit = 8192
 context_budget_tokens = 131072
 emit_reasoning_status = true
 
+[image_profiles.primary]
+enabled = true
+provider = "openai_compatible"
+model = "change_me"
+base_url = "https://change_me/v1"
+api_key_env = "IMAGE_GEN_API_KEY"
+timeout_seconds = 60.0
+max_retries = 2
+
 [roles]
 default = ["primary", "backup"]
 structured = ["primary", "backup"]

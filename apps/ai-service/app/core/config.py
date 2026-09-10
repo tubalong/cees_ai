@@ -35,6 +35,12 @@ class ChatMode(StrEnum):
 class ModelCapability(StrEnum):
     chat = "chat"
     tool_calling = "tool_calling"
+    image_generation = "image_generation"
+
+
+class ImageProviderKind(StrEnum):
+    mock = "mock"
+    openai_compatible = "openai_compatible"
 
 
 class ModelProfile(BaseModel):
@@ -60,6 +66,22 @@ class ModelProfile(BaseModel):
             raise ValueError("default_max_output_tokens exceeds max_output_tokens_limit")
         if self.provider != "mock" and (not self.base_url or not self.api_key_env):
             raise ValueError("non-mock profiles require base_url and api_key_env")
+        return self
+
+
+class ImageProfile(BaseModel):
+    provider: Literal["mock", "openai_compatible"]
+    model: str = Field(min_length=1)
+    base_url: str | None = None
+    api_key_env: str | None = None
+    enabled: bool = True
+    timeout_seconds: float = Field(default=60.0, gt=0.0, le=600.0)
+    max_retries: int = Field(default=2, ge=0, le=10)
+
+    @model_validator(mode="after")
+    def validate_provider_settings(self) -> ImageProfile:
+        if self.provider != "mock" and (not self.base_url or not self.api_key_env):
+            raise ValueError("non-mock image profiles require base_url and api_key_env")
         return self
 
 
@@ -89,6 +111,7 @@ class ModelCatalog(BaseModel):
     profiles: dict[str, ModelProfile] = Field(min_length=1)
     roles: dict[ModelRole, list[str]] = Field(default_factory=dict)
     chat: ChatConfig | None = None
+    image_profiles: dict[str, ImageProfile] = Field(default_factory=dict)
 
     @field_validator("profiles")
     @classmethod
@@ -159,6 +182,7 @@ def validate_readiness(settings: Settings, catalog: ModelCatalog) -> list[str]:
 
     _validate_chat_readiness(catalog, errors)
     _validate_tool_calling_readiness(catalog, errors)
+    _validate_image_readiness(settings, catalog, errors)
 
     for name, profile in catalog.profiles.items():
         if not profile.enabled or profile.provider == "mock":
@@ -181,6 +205,43 @@ def validate_readiness(settings: Settings, catalog: ModelCatalog) -> list[str]:
             errors.append(f"enabled profile {name} uses an example base URL in production")
 
     return errors
+
+
+def _validate_image_readiness(
+    settings: Settings, catalog: ModelCatalog, errors: list[str]
+) -> None:
+    enabled_profiles = [
+        (name, profile)
+        for name, profile in catalog.image_profiles.items()
+        if profile.enabled
+    ]
+    if not enabled_profiles:
+        errors.append("image generation requires at least one enabled image profile")
+        return
+
+    for name, profile in enabled_profiles:
+        if settings.node_env == "production" and profile.provider == "mock":
+            errors.append(f"image profile {name} uses mock provider in production")
+            continue
+        if profile.provider == "mock":
+            continue
+        assert profile.api_key_env is not None
+        key = os.getenv(profile.api_key_env)
+        if not key:
+            errors.append(
+                f"enabled image profile {name} is missing environment variable "
+                f"{profile.api_key_env}"
+            )
+        elif settings.node_env == "production" and key == "change_me":
+            errors.append(f"enabled image profile {name} uses an example API key in production")
+        if settings.node_env == "production" and profile.model == "change_me":
+            errors.append(f"enabled image profile {name} uses an example model in production")
+        if (
+            settings.node_env == "production"
+            and profile.base_url
+            and "change_me" in profile.base_url
+        ):
+            errors.append(f"enabled image profile {name} uses an example base URL in production")
 
 
 def _validate_tool_calling_readiness(catalog: ModelCatalog, errors: list[str]) -> None:

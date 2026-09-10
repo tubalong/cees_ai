@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from app.core.config import ModelCatalog, Settings, get_settings, load_catalog_safely
+from app.images.router import ImageRouter
 from app.llm.router import LLMRouter, ProviderBuilder
 
 
@@ -12,6 +13,7 @@ class AppRuntime:
     catalog: ModelCatalog | None
     router: LLMRouter | None
     readiness_errors: list[str]
+    image_router: ImageRouter | None = None
 
     @property
     def ready(self) -> bool:
@@ -35,4 +37,5 @@ def build_runtime(
     resolved_settings = settings or get_settings()
     catalog, errors = load_catalog_safely(resolved_settings)
     router = LLMRouter(catalog, provider_builder) if catalog is not None else None
-    return AppRuntime(resolved_settings, catalog, router, errors)
+    image_router = ImageRouter(catalog) if catalog is not None else None
+    return AppRuntime(resolved_settings, catalog, router, errors, image_router)

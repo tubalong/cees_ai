@@ -124,3 +124,18 @@ def test_deployment_model_catalogs_include_chat_modes(path: Path) -> None:
     catalog = load_model_catalog(path)
     assert catalog.chat is not None
     assert set(catalog.chat.modes) == {ChatMode.standard, ChatMode.ultra}
+
+
+def test_image_profiles_are_loaded_from_catalog() -> None:
+    catalog = load_model_catalog(MODEL_FIXTURE)
+    assert catalog.image_profiles["mock"].provider == "mock"
+    assert catalog.image_profiles["mock"].model == "mock-image-v1"
+
+
+def test_readiness_requires_enabled_image_profile() -> None:
+    catalog = load_model_catalog(MODEL_FIXTURE)
+    catalog.image_profiles.clear()
+
+    errors = validate_readiness(Settings(node_env="test", ai_internal_token="secret"), catalog)
+
+    assert any("image generation requires" in error for error in errors)

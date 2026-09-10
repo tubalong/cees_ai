@@ -63,6 +63,13 @@ max_output_tokens_limit = 32768
 context_budget_tokens = 131072
 emit_reasoning_status = true
 
+[image_profiles.mock]
+enabled = true
+provider = "mock"
+model = "mock-image-v1"
+timeout_seconds = 30.0
+max_retries = 0
+
 [roles]
 default = ["primary"]
 structured = ["primary"]

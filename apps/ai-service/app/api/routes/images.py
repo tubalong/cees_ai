@@ -1,14 +1,22 @@
 from __future__ import annotations
 
+import base64
+
 from fastapi import APIRouter, Depends, Request
 
 from app.api.generated.models import (
+    ContentType,
     ErrorResponse,
     ImageGenerateRequest,
     ImageGenerateResponse,
+    ImageGenerationMetadata,
+    ImageProvider,
+    TokenUsage,
 )
 from app.core.errors import AIServiceError
+from app.core.runtime import AppRuntime
 from app.core.security import require_internal_token
+from app.images.router import ImageRouter
 
 router = APIRouter(
     prefix="/internal/v1/images",
@@ -55,9 +63,53 @@ IMAGE_ERROR_RESPONSES = {
 async def generate_image(
     payload: ImageGenerateRequest, request: Request
 ) -> ImageGenerateResponse:
-    raise AIServiceError(
-        "NOT_IMPLEMENTED",
-        "Image generation is not implemented",
-        status_code=501,
+    image_router = _require_image_router(request, payload.request_id)
+    routed = await image_router.generate(
         request_id=payload.request_id,
+        prompt=payload.prompt,
+        size=payload.size.value if payload.size is not None else "1024x1024",
+        quality=payload.quality.value if payload.quality is not None else "standard",
+        response_format=(
+            payload.response_format.value
+            if payload.response_format is not None
+            else "png"
+        ),
     )
+    return ImageGenerateResponse(
+        request_id=payload.request_id,
+        content_type=_content_type_enum(routed.content_type),
+        data_base64=base64.b64encode(routed.data).decode("ascii"),
+        execution=ImageGenerationMetadata(
+            profile=routed.profile_name,
+            provider=ImageProvider(routed.profile.provider),
+            model=routed.profile.model,
+            fallback_count=routed.fallback_count,
+            latency_ms=routed.latency_ms,
+            token_usage=TokenUsage(
+                input_tokens=None,
+                output_tokens=None,
+                total_tokens=None,
+            ),
+        ),
+    )
+
+
+def _require_image_router(request: Request, request_id: str) -> ImageRouter:
+    runtime: AppRuntime = request.app.state.runtime
+    if runtime.image_router is None:
+        raise AIServiceError(
+            "AI_SERVICE_NOT_READY",
+            "Image generation configuration is not ready",
+            status_code=503,
+            retryable=True,
+            request_id=request_id,
+        )
+    return runtime.image_router
+
+
+def _content_type_enum(value: str) -> ContentType:
+    if value == "image/jpeg":
+        return ContentType.image_jpeg
+    if value == "image/webp":
+        return ContentType.image_webp
+    return ContentType.image_png
