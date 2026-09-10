@@ -13,6 +13,8 @@ ai-service 只提供：
 - `/internal/v1/chat/invoke`：无状态多轮上下文对话；
 - `/internal/v1/chat/stream`：带阶段状态的上下文对话 SSE；
 - `/internal/v1/chat/compact`：将历史消息压缩为调用方可持久化的摘要；
+- `/internal/v1/chat/tool-turn/stream`：单次工具能力回合的 SSE，返回 `content_delta` 或统一 `tool_calls`；
+- `/internal/v1/images/generate`：通过配置的图片生成 profile 返回 base64 图片与执行元数据；
 - `/internal/v1/documents/*`：领域无关的 `DocumentSpec` 组合与 DOCX 渲染。
 
 工作记录、会议解析、会议总结、知识问答、管理简报和文档向量化不属于当前范围。通用文档生成不查询这些业务数据，也不创建正式文件记录。桌面端、移动端仍保留的相关页面只是 UI 原型。
@@ -24,7 +26,7 @@ ai-service 只提供：
 - LlamaIndex 不使用全局 `Settings`；LangChain LLM 和 embedding 通过薄适配按索引或调用显式传入。当前只验证内存索引和检索。
 - python-docx 将受控 `DocumentSpec` 确定性渲染为 DOCX，不执行模型生成的 XML 或模板路径。
 
-本阶段不接入 pgvector、Qdrant、Milvus、外部 embedding 服务、工具调用或业务 Agent。流式接口只传输最终正文和执行元数据，不传输 Provider 原始推理内容。
+本阶段不接入 pgvector、Qdrant、Milvus、外部 embedding 服务或完整业务 Agent。Tool Calling 只负责“模型选择工具并解析 Tool Call”，业务工具执行、权限、额度和正式资源写入仍由 NestJS 负责；LangGraph 不承载业务 Tool Loop。流式接口只传输最终正文、统一 Tool Call 和执行元数据，不传输 Provider 原始推理内容。
 
 ## 3. 多模型配置
 
@@ -74,6 +76,25 @@ Chat 接口以无状态方式接收可信指令、可选历史摘要和近期消
 - Production：通过 `AI_DOCS_ENABLED=false` 关闭；即使未显式配置，`NODE_ENV=production` 也默认关闭文档；
 - 文档开关不影响 `/health`、`/ready` 和受认证的 invoke、stream 本身，生产环境中的 NestJS 仍可正常调用内部接口；
 - 桌面端、移动端和第三方客户端不得通过该 Swagger 绕过 NestJS 的认证、权限、租户、配额和审计边界。
+
+## 5.1 Tool Calling 与图片生成
+
+Tool Calling 能力只开放给内部可信调用方。NestJS 根据租户能力和权限传入 tools 定义，ai-service 通过 LangChain `bind_tools` 调用模型，并把 `AIMessage.tool_calls` 或流式 `tool_call_chunks` 解析为统一 `ToolCall`。
+
+- `/internal/v1/chat/tool-turn/stream` 一次只执行一个模型回合；
+- 模型要调用工具时返回 `tool_calls`，否则返回 `content_delta*`；
+- `ToolMessage.tool_call_id` 必须精确匹配前置 Assistant `tool_calls` 中的 ID；
+- 业务 Tool Loop 在 NestJS 执行，ai-service 不执行 `generate_image` 等业务工具；
+- `orchestrator` 角色候选必须声明 `tool_calling` capability。
+
+图片生成由独立 `ImageRouter` 处理，不复用 `LLMRouter`：
+
+- `[image_profiles.*]` 与 Chat Profile 分离；
+- 图片 profile 只支持 `mock` 与 `openai_compatible`；
+- `/internal/v1/images/generate` 返回 base64 图片、`content_type` 和 execution 元数据；
+- ai-service 不写 COS、不建正式文件、不校验租户额度。
+
+详细设计见 [AI Tool Calling](ai-tool-calling.md) 与 [Image Generation](image-generation.md)。
 
 ## 7. 后续扩展规则
 

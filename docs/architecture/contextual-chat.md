@@ -73,6 +73,17 @@ completed
 
 客户端断开时生成器关闭上游流。Provider 流开始前的瞬时错误仍可按 `LLMRouter` 规则在同一角色候选中回退；开始输出后不拼接其他模型结果。
 
+## 5.1 Tool Calling 回合
+
+当模型需要调用工具时，调用方使用 `/internal/v1/chat/tool-turn/stream` 执行单个带 tools 的模型回合。该接口与 `/chat/stream` 分离，避免把普通对话的“最后一条必须是 user”约束强加给工具结果消息。
+
+- ai-service 只返回 `tool_calls` 或 `content_delta*`；
+- NestJS 执行工具后，将 `ToolMessage` 与前置 Assistant `tool_calls` 一起传回下一回合；
+- `tool_call_id` 必须精确匹配；
+- 业务工具执行、权限、额度和资源写入均在 NestJS 完成。
+
+详细设计见 [AI Tool Calling](ai-tool-calling.md)。
+
 ## 6. 对话压缩
 
 `/chat/compact` 接收可选 `previous_summary` 和一段消息，使用配置的 `compaction_role` 生成新摘要。摘要应保留：
