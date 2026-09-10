@@ -222,6 +222,102 @@ export type ChatStreamEvent = ({
     type: 'error';
 } & StreamErrorEvent);
 
+export type ChatToolDefinition = {
+    name: string;
+    description: string;
+    /**
+     * JSON Schema for the tool arguments; root must be an object.
+     */
+    parameters: {
+        [key: string]: unknown;
+    };
+};
+
+export type ToolCall = {
+    id: string;
+    name: string;
+    arguments: {
+        [key: string]: unknown;
+    };
+};
+
+/**
+ * A single message in a tool-capable turn. `user` messages have `content`.
+ * `assistant` messages may have `content` and/or `tool_calls`. `tool`
+ * messages must have `tool_call_id` and `content`.
+ *
+ */
+export type ToolTurnMessage = {
+    role: 'user' | 'assistant' | 'tool';
+    content?: string | null;
+    tool_calls?: Array<ToolCall>;
+    tool_call_id?: string | null;
+    name?: string | null;
+};
+
+export type ToolTurnRequest = {
+    request_id: string;
+    tenant_id: string;
+    user_id: string;
+    conversation_id: string;
+    mode?: ChatMode;
+    instructions?: string | null;
+    conversation_summary?: string | null;
+    messages: Array<ToolTurnMessage>;
+    tools: Array<ChatToolDefinition>;
+    max_output_tokens?: number | null;
+};
+
+export type ToolTurnToolCallsEvent = {
+    type: 'tool_calls';
+    tool_calls: Array<ToolCall>;
+};
+
+export type ToolTurnStreamEvent = ({
+    type: 'started';
+} & ChatStreamStartedEvent) | ({
+    type: 'tool_calls';
+} & ToolTurnToolCallsEvent) | ({
+    type: 'content_delta';
+} & ContentDeltaEvent) | ({
+    type: 'usage';
+} & UsageEvent) | ({
+    type: 'completed';
+} & ChatStreamCompletedEvent) | ({
+    type: 'error';
+} & StreamErrorEvent);
+
+export type ImageProvider = 'mock' | 'openai_compatible';
+
+export type ImageGenerateRequest = {
+    request_id: string;
+    tenant_id: string;
+    user_id: string;
+    prompt: string;
+    size?: '1024x1024' | '1536x1024' | '1024x1536' | 'auto';
+    quality?: 'standard' | 'high';
+    response_format?: 'png' | 'jpeg' | 'webp';
+};
+
+export type ImageGenerationMetadata = {
+    profile: string;
+    provider: ImageProvider;
+    model: string;
+    fallback_count: number;
+    latency_ms: number;
+    token_usage: TokenUsage;
+};
+
+export type ImageGenerateResponse = {
+    request_id: string;
+    content_type: 'image/png' | 'image/jpeg' | 'image/webp';
+    /**
+     * Base64-encoded image bytes using the standard alphabet.
+     */
+    data_base64: string;
+    execution: ImageGenerationMetadata;
+};
+
 export type DocumentSourceMaterial = {
     id: string;
     title?: string | null;
@@ -624,6 +720,51 @@ export type StreamChatResponses = {
 
 export type StreamChatResponse = StreamChatResponses[keyof StreamChatResponses];
 
+export type StreamChatToolTurnData = {
+    body: ToolTurnRequest;
+    path?: never;
+    query?: never;
+    url: '/internal/v1/chat/tool-turn/stream';
+};
+
+export type StreamChatToolTurnErrors = {
+    /**
+     * Invalid profile or unsupported output mode
+     */
+    400: ErrorResponse;
+    /**
+     * Internal authentication failed
+     */
+    401: ErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ErrorResponse;
+    /**
+     * Unexpected internal service error
+     */
+    500: ErrorResponse;
+    /**
+     * Provider output did not match the requested schema
+     */
+    502: ErrorResponse;
+    /**
+     * Service or configured providers unavailable
+     */
+    503: ErrorResponse;
+};
+
+export type StreamChatToolTurnError = StreamChatToolTurnErrors[keyof StreamChatToolTurnErrors];
+
+export type StreamChatToolTurnResponses = {
+    /**
+     * Tool-capable turn events are streamed
+     */
+    200: ToolTurnStreamEvent;
+};
+
+export type StreamChatToolTurnResponse = StreamChatToolTurnResponses[keyof StreamChatToolTurnResponses];
+
 export type CompactChatData = {
     body: CompactChatRequest;
     path?: never;
@@ -668,6 +809,51 @@ export type CompactChatResponses = {
 };
 
 export type CompactChatResponse2 = CompactChatResponses[keyof CompactChatResponses];
+
+export type GenerateImageData = {
+    body: ImageGenerateRequest;
+    path?: never;
+    query?: never;
+    url: '/internal/v1/images/generate';
+};
+
+export type GenerateImageErrors = {
+    /**
+     * Invalid profile or unsupported output mode
+     */
+    400: ErrorResponse;
+    /**
+     * Internal authentication failed
+     */
+    401: ErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ErrorResponse;
+    /**
+     * Unexpected internal service error
+     */
+    500: ErrorResponse;
+    /**
+     * Provider output did not match the requested schema
+     */
+    502: ErrorResponse;
+    /**
+     * Service or configured providers unavailable
+     */
+    503: ErrorResponse;
+};
+
+export type GenerateImageError = GenerateImageErrors[keyof GenerateImageErrors];
+
+export type GenerateImageResponses = {
+    /**
+     * Image generated
+     */
+    200: ImageGenerateResponse;
+};
+
+export type GenerateImageResponse = GenerateImageResponses[keyof GenerateImageResponses];
 
 export type ComposeDocumentData = {
     body: ComposeDocumentRequest;

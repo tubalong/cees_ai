@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CEES AI API
-  version: 0.15.0
+  version: 0.16.0
   description: 以本文件为唯一事实源的公开 API 契约。资源与操作按 docs/api 约定补充。
 
 servers:
@@ -3709,6 +3709,48 @@ paths:
         '404': { description: 会议或纪要不存在, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
         '409': { description: 纪要状态或版本冲突, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
 
+  /images/{imageId}:
+    get:
+      summary: 获取 AI 生成图片的访问信息
+      description: 返回当前租户内授权图片的元数据与短期访问 URL。
+      operationId: getImage
+      tags: [Image]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: imageId
+          in: path
+          required: true
+          description: 图片资源 ID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: 图片访问信息
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImageResponseEnvelope'
+        '401':
+          description: 登录状态无效、已过期或缺少有效租户成员身份
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '403':
+          description: 缺少 image.read 权限或图片不在授权范围内
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '404':
+          description: 图片不存在或已被删除
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
 components:
   securitySchemes:
     bearerAuth:
@@ -3980,8 +4022,8 @@ components:
 
     ChatStreamPhase:
       type: string
-      enum: [reasoning, answering]
-      description: 当前只公开推理中或回答中阶段，不公开模型原始推理正文
+      enum: [reasoning, answering, tool_executing]
+      description: 当前只公开推理中、回答中或工具执行中阶段，不公开模型原始推理正文
 
     ChatStreamStatusEvent:
       type: object
@@ -4064,6 +4106,8 @@ components:
         - $ref: '#/components/schemas/ChatStreamStartedEvent'
         - $ref: '#/components/schemas/ChatStreamStatusEvent'
         - $ref: '#/components/schemas/ChatStreamContentDeltaEvent'
+        - $ref: '#/components/schemas/ChatStreamToolCallEvent'
+        - $ref: '#/components/schemas/ChatStreamToolResultEvent'
         - $ref: '#/components/schemas/ChatStreamUsageEvent'
         - $ref: '#/components/schemas/ChatStreamCompletedEvent'
         - $ref: '#/components/schemas/ChatStreamErrorEvent'
@@ -4073,9 +4117,104 @@ components:
           started: '#/components/schemas/ChatStreamStartedEvent'
           status: '#/components/schemas/ChatStreamStatusEvent'
           content_delta: '#/components/schemas/ChatStreamContentDeltaEvent'
+          tool_call: '#/components/schemas/ChatStreamToolCallEvent'
+          tool_result: '#/components/schemas/ChatStreamToolResultEvent'
           usage: '#/components/schemas/ChatStreamUsageEvent'
           completed: '#/components/schemas/ChatStreamCompletedEvent'
           error: '#/components/schemas/ChatStreamErrorEvent'
+
+    ChatStreamToolCallEvent:
+      type: object
+      additionalProperties: false
+      required: [type, toolCallId, name, arguments]
+      properties:
+        type:
+          type: string
+          const: tool_call
+        toolCallId:
+          type: string
+          description: 本次工具调用的稳定标识
+        name:
+          type: string
+          description: 模型请求执行的受控工具名
+        arguments:
+          type: object
+          additionalProperties: true
+          description: 模型生成并经过 API 校验的工具参数
+      description: 模型请求执行一个受控工具；具体是否执行由 API 根据权限、能力和额度决定。
+
+    ChatStreamToolResultEvent:
+      type: object
+      additionalProperties: false
+      required: [type, toolCallId, status]
+      properties:
+        type:
+          type: string
+          const: tool_result
+        toolCallId:
+          type: string
+          description: 对应 ChatStreamToolCallEvent 中的 toolCallId
+        status:
+          type: string
+          enum: [completed, failed, rejected]
+          description: 工具执行结果状态
+        resourceId:
+          type: [string, 'null']
+          description: 工具执行生成的正式资源 ID，例如图片资源 ID
+        resourceUrl:
+          type: [string, 'null']
+          description: 工具执行生成的资源短期访问 URL
+        error:
+          $ref: '#/components/schemas/ChatStreamErrorDetail'
+      description: 工具执行完成、失败或被 API 拒绝时发送的事件。
+
+    ImageResult:
+      type: object
+      additionalProperties: false
+      required: [id, resourceId, mimeType, sizeBytes, url, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: 图片资源 ID
+        resourceId:
+          type: string
+          format: uuid
+          description: 统一资源 ID
+        mimeType:
+          type: string
+          enum: [image/png, image/jpeg, image/webp]
+        sizeBytes:
+          type: integer
+          minimum: 0
+          description: 图片二进制大小
+        url:
+          type: string
+          description: 短期访问 URL
+        prompt:
+          type: [string, 'null']
+          description: 生成该图片的原始提示词
+        model:
+          type: [string, 'null']
+          description: 实际生成图片的模型名
+        createdAt:
+          type: string
+          format: date-time
+          description: 图片资源创建时间
+
+    ImageResponseEnvelope:
+      type: object
+      additionalProperties: false
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: '#/components/schemas/ImageResult'
+        requestId:
+          type: [string, 'null']
+          description: 公开 API 请求追踪 ID
 
     TaskStatus:
       type: string

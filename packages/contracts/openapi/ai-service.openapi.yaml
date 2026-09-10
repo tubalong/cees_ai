@@ -17,6 +17,8 @@ tags:
     description: Stateless contextual chat generation and conversation compaction.
   - name: documents
     description: Domain-neutral document composition and deterministic DOCX rendering.
+  - name: images
+    description: Internal image generation endpoints available only to trusted CEES services.
 paths:
   /health:
     get:
@@ -312,6 +314,45 @@ paths:
           $ref: "#/components/responses/InvalidProviderOutput"
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
+  /internal/v1/chat/tool-turn/stream:
+    post:
+      tags: [chat]
+      operationId: streamChatToolTurn
+      summary: Stream a single tool-capable chat turn
+      description: |
+        Performs exactly one model turn. The stream emits normal `content_delta`
+        events when the assistant answers directly, or a `tool_calls` event when
+        the model requests tool execution. ai-service never executes tools; the
+        caller must perform the tool and call this endpoint again with the
+        resulting ToolMessage.
+      security:
+        - internalToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ToolTurnRequest"
+      responses:
+        "200":
+          description: Tool-capable turn events are streamed
+          content:
+            text/event-stream:
+              schema:
+                $ref: "#/components/schemas/ToolTurnStreamEvent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "502":
+          $ref: "#/components/responses/InvalidProviderOutput"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
   /internal/v1/chat/compact:
     post:
       tags: [chat]
@@ -345,6 +386,43 @@ paths:
           $ref: "#/components/responses/InvalidProviderOutput"
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
+  /internal/v1/images/generate:
+    post:
+      tags: [images]
+      operationId: generateImage
+      summary: Generate an image through a configured image-capable model
+      description: |
+        Generates an image for a trusted internal caller. ai-service only
+        returns image bytes and execution metadata; it does not persist the
+        image, create a resource, or enforce business quota.
+      security:
+        - internalToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ImageGenerateRequest"
+      responses:
+        "200":
+          description: Image generated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImageGenerateResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "502":
+          $ref: "#/components/responses/InvalidProviderOutput"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
   /internal/v1/documents/compose:
     post:
       tags: [documents]
@@ -967,6 +1045,227 @@ components:
           usage: "#/components/schemas/UsageEvent"
           completed: "#/components/schemas/ChatStreamCompletedEvent"
           error: "#/components/schemas/StreamErrorEvent"
+    ChatToolDefinition:
+      type: object
+      additionalProperties: false
+      required: [name, description, parameters]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: "^[A-Za-z][A-Za-z0-9_-]*$"
+        description:
+          type: string
+          minLength: 1
+          maxLength: 2048
+        parameters:
+          type: object
+          additionalProperties: true
+          description: JSON Schema for the tool arguments; root must be an object.
+
+    ToolCall:
+      type: object
+      additionalProperties: false
+      required: [id, name, arguments]
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        name:
+          type: string
+          minLength: 1
+          maxLength: 128
+        arguments:
+          type: object
+          additionalProperties: true
+
+    ToolTurnMessage:
+      type: object
+      additionalProperties: false
+      required: [role]
+      properties:
+        role:
+          type: string
+          enum: [user, assistant, tool]
+        content:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 262144
+        tool_calls:
+          type: array
+          maxItems: 16
+          items:
+            $ref: "#/components/schemas/ToolCall"
+        tool_call_id:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 128
+        name:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 128
+      description: |
+        A single message in a tool-capable turn. `user` messages have `content`.
+        `assistant` messages may have `content` and/or `tool_calls`. `tool`
+        messages must have `tool_call_id` and `content`.
+
+    ToolTurnRequest:
+      type: object
+      additionalProperties: false
+      required: [request_id, tenant_id, user_id, conversation_id, messages, tools]
+      properties:
+        request_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        tenant_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        user_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        conversation_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        mode:
+          $ref: "#/components/schemas/ChatMode"
+        instructions:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 32768
+        conversation_summary:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 131072
+        messages:
+          type: array
+          minItems: 1
+          maxItems: 128
+          items:
+            $ref: "#/components/schemas/ToolTurnMessage"
+        tools:
+          type: array
+          maxItems: 32
+          items:
+            $ref: "#/components/schemas/ChatToolDefinition"
+        max_output_tokens:
+          type: [integer, "null"]
+          minimum: 1
+          maximum: 32768
+
+    ToolTurnToolCallsEvent:
+      type: object
+      additionalProperties: false
+      required: [type, tool_calls]
+      properties:
+        type:
+          type: string
+          const: tool_calls
+        tool_calls:
+          type: array
+          minItems: 1
+          maxItems: 16
+          items:
+            $ref: "#/components/schemas/ToolCall"
+
+    ToolTurnStreamEvent:
+      oneOf:
+        - $ref: "#/components/schemas/ChatStreamStartedEvent"
+        - $ref: "#/components/schemas/ToolTurnToolCallsEvent"
+        - $ref: "#/components/schemas/ContentDeltaEvent"
+        - $ref: "#/components/schemas/UsageEvent"
+        - $ref: "#/components/schemas/ChatStreamCompletedEvent"
+        - $ref: "#/components/schemas/StreamErrorEvent"
+      discriminator:
+        propertyName: type
+        mapping:
+          started: "#/components/schemas/ChatStreamStartedEvent"
+          tool_calls: "#/components/schemas/ToolTurnToolCallsEvent"
+          content_delta: "#/components/schemas/ContentDeltaEvent"
+          usage: "#/components/schemas/UsageEvent"
+          completed: "#/components/schemas/ChatStreamCompletedEvent"
+          error: "#/components/schemas/StreamErrorEvent"
+
+    ImageProvider:
+      type: string
+      enum: [mock, openai_compatible]
+
+    ImageGenerateRequest:
+      type: object
+      additionalProperties: false
+      required: [request_id, tenant_id, user_id, prompt]
+      properties:
+        request_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        tenant_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        user_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        prompt:
+          type: string
+          minLength: 1
+          maxLength: 8000
+        size:
+          type: [string, "null"]
+          enum: ["1024x1024", "1536x1024", "1024x1536", "auto"]
+          default: "1024x1024"
+        quality:
+          type: [string, "null"]
+          enum: [standard, high]
+          default: standard
+        response_format:
+          type: [string, "null"]
+          enum: [png, jpeg, webp]
+          default: png
+
+    ImageGenerationMetadata:
+      type: object
+      additionalProperties: false
+      required: [profile, provider, model, fallback_count, latency_ms, token_usage]
+      properties:
+        profile:
+          type: string
+        provider:
+          $ref: "#/components/schemas/ImageProvider"
+        model:
+          type: string
+        fallback_count:
+          type: integer
+          minimum: 0
+        latency_ms:
+          type: integer
+          minimum: 0
+        token_usage:
+          $ref: "#/components/schemas/TokenUsage"
+
+    ImageGenerateResponse:
+      type: object
+      additionalProperties: false
+      required: [request_id, content_type, data_base64, execution]
+      properties:
+        request_id:
+          type: string
+        content_type:
+          type: string
+          enum: [image/png, image/jpeg, image/webp]
+        data_base64:
+          type: string
+          minLength: 1
+          description: Base64-encoded image bytes using the standard alphabet.
+        execution:
+          $ref: "#/components/schemas/ImageGenerationMetadata"
+
     DocumentSourceMaterial:
       type: object
       additionalProperties: false

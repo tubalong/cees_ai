@@ -288,6 +288,16 @@ GET    /api/v1/projects/{projectId}/tasks/{taskId}/activities
 - ai-service 内部契约兼容升级到 `0.2.0`，错误体只在模型已实际执行后可选返回 `execution`，用于避免失败调用漏计 Token；
 - 本版只记录企业、成员、会话、轮次和 Token 指标，不包含额度分配、扣减或超额拦截。
 
+## 0.16.0 迁移说明
+
+- 公开契约版本由 `0.15.0` 提升为 `0.16.0`；
+- 公开 `/chat/stream` 的 `ChatStreamEvent` 兼容新增 `tool_call` 与 `tool_result` 事件，`ChatStreamPhase` 新增 `tool_executing`；
+- 新增公开接口 `GET /images/{imageId}`，用于获取 AI 生成图片的元数据与短期访问 URL；
+- ai-service 内部契约新增 `POST /internal/v1/chat/tool-turn/stream`，用于单次带工具能力的模型回合，ai-service 只解析 Tool Call，不执行工具；
+- ai-service 内部契约新增 `POST /internal/v1/images/generate`，返回 JSON envelope：Base64 图片字节、`content_type` 以及含 `token_usage` 的执行元数据，不创建正式资源；
+- 既有 `invokeChat`、`streamChat` 和 `compactChat` 请求与事件结构保持不变；
+- 本次只改契约并重新生成客户端，不包含 Prisma 迁移和服务端行为实现。
+
 ## 契约事实源
 
 - `packages/contracts/openapi/openapi.yaml` 是 NestJS 公开 API 的事实源。
