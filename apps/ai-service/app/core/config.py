@@ -19,6 +19,7 @@ class ModelRole(StrEnum):
     structured = "structured"
     reasoning = "reasoning"
     rag = "rag"
+    orchestrator = "orchestrator"
 
 
 class OutputMode(StrEnum):
@@ -31,6 +32,11 @@ class ChatMode(StrEnum):
     ultra = "ultra"
 
 
+class ModelCapability(StrEnum):
+    chat = "chat"
+    tool_calling = "tool_calling"
+
+
 class ModelProfile(BaseModel):
     provider: Literal["mock", "openai_compatible", "deepseek"]
     model: str = Field(min_length=1)
@@ -38,6 +44,7 @@ class ModelProfile(BaseModel):
     api_key_env: str | None = None
     enabled: bool = True
     modes: set[OutputMode] = Field(min_length=1)
+    capabilities: set[ModelCapability] = Field(default_factory=lambda: {ModelCapability.chat})
     temperature: float = Field(default=0.0, ge=0.0, le=2.0)
     default_max_output_tokens: int = Field(default=2048, ge=1, le=32768)
     max_output_tokens_limit: int = Field(default=32768, ge=1, le=32768)
@@ -151,6 +158,7 @@ def validate_readiness(settings: Settings, catalog: ModelCatalog) -> list[str]:
                 errors.append(f"role {role.value} uses mock profile {profile_name} in production")
 
     _validate_chat_readiness(catalog, errors)
+    _validate_tool_calling_readiness(catalog, errors)
 
     for name, profile in catalog.profiles.items():
         if not profile.enabled or profile.provider == "mock":
@@ -173,6 +181,25 @@ def validate_readiness(settings: Settings, catalog: ModelCatalog) -> list[str]:
             errors.append(f"enabled profile {name} uses an example base URL in production")
 
     return errors
+
+
+def _validate_tool_calling_readiness(catalog: ModelCatalog, errors: list[str]) -> None:
+    candidates = catalog.roles.get(ModelRole.orchestrator, [])
+    if not candidates:
+        errors.append("role orchestrator must contain at least one profile")
+        return
+    for profile_name in candidates:
+        profile = catalog.profiles.get(profile_name)
+        if profile is None:
+            errors.append(f"role orchestrator references unknown profile {profile_name}")
+            continue
+        if not profile.enabled:
+            errors.append(f"role orchestrator references disabled profile {profile_name}")
+            continue
+        if ModelCapability.tool_calling not in profile.capabilities:
+            errors.append(
+                f"role orchestrator profile {profile_name} does not support tool_calling"
+            )
 
 
 def _validate_chat_readiness(catalog: ModelCatalog, errors: list[str]) -> None:

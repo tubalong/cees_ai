@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator
 from typing import Any
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_openai import ChatOpenAI
 from openai import APIConnectionError, APIStatusError, APITimeoutError, RateLimitError
 
@@ -16,6 +17,8 @@ from app.llm.types import (
     ProviderResult,
     ProviderStreamChunk,
     TokenUsageData,
+    ToolCall,
+    ToolCallingResult,
 )
 
 
@@ -42,6 +45,17 @@ class MockLLMProvider:
             (message.content for message in reversed(messages) if message.role == "user"), ""
         )
         yield ProviderStreamChunk(text=f"mock:{last_user_message}", finish_reason="stop")
+
+    async def invoke_with_tools(
+        self, messages: list[ChatMessage], options: InvocationOptions
+    ) -> ToolCallingResult:
+        raise ProviderPermanentError("mock profiles do not support tool calling")
+
+    async def stream_with_tools(
+        self, messages: list[ChatMessage], options: InvocationOptions
+    ) -> AsyncIterator[ProviderStreamChunk]:
+        raise ProviderPermanentError("mock profiles do not support tool calling")
+        yield  # pragma: no cover
 
 
 class OpenAICompatibleProvider:
@@ -142,6 +156,95 @@ class OpenAICompatibleProvider:
         except Exception as exc:
             raise ProviderPermanentError(type(exc).__name__) from exc
 
+    async def invoke_with_tools(
+        self, messages: list[ChatMessage], options: InvocationOptions
+    ) -> ToolCallingResult:
+        if not options.tools:
+            raise ProviderPermanentError("tool calling requires at least one tool")
+        langchain_messages = [_to_langchain_message(message) for message in messages]
+        bound_model = self._bind_tools(options.tools)
+        invocation_kwargs = _invocation_kwargs(self.profile, options)
+        try:
+            response = await bound_model.ainvoke(langchain_messages, **invocation_kwargs)
+            tool_calls = _extract_tool_calls(response)
+            return ToolCallingResult(
+                content=_message_text(response),
+                tool_calls=tool_calls,
+                token_usage=_extract_usage(response),
+                finish_reason=_extract_finish_reason(response),
+            )
+        except (APIConnectionError, APITimeoutError, RateLimitError) as exc:
+            raise ProviderTransientError(type(exc).__name__) from exc
+        except APIStatusError as exc:
+            if exc.status_code >= 500:
+                raise ProviderTransientError(f"provider status {exc.status_code}") from exc
+            raise ProviderPermanentError(f"provider status {exc.status_code}") from exc
+        except ProviderOutputError:
+            raise
+        except ProviderPermanentError:
+            raise
+        except Exception as exc:
+            raise ProviderPermanentError(type(exc).__name__) from exc
+
+    async def stream_with_tools(
+        self, messages: list[ChatMessage], options: InvocationOptions
+    ) -> AsyncIterator[ProviderStreamChunk]:
+        if not options.tools:
+            raise ProviderPermanentError("tool calling requires at least one tool")
+        langchain_messages = [_to_langchain_message(message) for message in messages]
+        bound_model = self._bind_tools(options.tools)
+        invocation_kwargs = _invocation_kwargs(self.profile, options)
+        tool_call_chunks: list[Any] = []
+        token_usage: TokenUsageData | None = None
+        finish_reason: str | None = None
+        try:
+            async for response in bound_model.astream(
+                langchain_messages,
+                stream_usage=True,
+                **invocation_kwargs,
+            ):
+                chunk_tool_calls = getattr(response, "tool_call_chunks", None)
+                if chunk_tool_calls:
+                    tool_call_chunks.extend(chunk_tool_calls)
+                else:
+                    text = _message_text(response)
+                    if text:
+                        yield ProviderStreamChunk(text=text)
+
+                current_usage = _extract_usage(response)
+                if _has_token_usage(current_usage):
+                    token_usage = current_usage
+                current_finish_reason = _extract_finish_reason(response)
+                if current_finish_reason is not None:
+                    finish_reason = current_finish_reason
+
+            if tool_call_chunks:
+                yield ProviderStreamChunk(
+                    tool_calls=_coalesce_tool_call_chunks(tool_call_chunks),
+                    token_usage=token_usage,
+                    finish_reason=finish_reason,
+                )
+            else:
+                yield ProviderStreamChunk(
+                    token_usage=token_usage,
+                    finish_reason=finish_reason,
+                )
+        except (APIConnectionError, APITimeoutError, RateLimitError) as exc:
+            raise ProviderTransientError(type(exc).__name__) from exc
+        except APIStatusError as exc:
+            if exc.status_code >= 500:
+                raise ProviderTransientError(f"provider status {exc.status_code}") from exc
+            raise ProviderPermanentError(f"provider status {exc.status_code}") from exc
+        except ProviderOutputError:
+            raise
+        except ProviderPermanentError:
+            raise
+        except Exception as exc:
+            raise ProviderPermanentError(type(exc).__name__) from exc
+
+    def _bind_tools(self, tools: tuple[dict[str, Any], ...]) -> Any:
+        return self.chat_model.bind_tools(list(tools), tool_choice="auto")
+
 
 def create_provider(profile: ModelProfile, api_key: str | None = None) -> LLMProvider:
     if profile.provider == "mock":
@@ -151,12 +254,30 @@ def create_provider(profile: ModelProfile, api_key: str | None = None) -> LLMPro
     return OpenAICompatibleProvider(profile, api_key)
 
 
-def _to_langchain_message(message: ChatMessage) -> SystemMessage | HumanMessage | AIMessage:
+def _to_langchain_message(
+    message: ChatMessage,
+) -> SystemMessage | HumanMessage | AIMessage | ToolMessage:
     if message.role == "system":
         return SystemMessage(content=message.content)
     if message.role == "assistant":
-        return AIMessage(content=message.content)
+        return AIMessage(
+            content=message.content,
+            tool_calls=[tool_call_to_dict(tool_call) for tool_call in message.tool_calls],
+        )
+    if message.role == "tool":
+        return ToolMessage(
+            content=message.content,
+            tool_call_id=message.tool_call_id or "",
+        )
     return HumanMessage(content=message.content)
+
+
+def tool_call_to_dict(tool_call: ToolCall) -> dict[str, Any]:
+    return {
+        "id": tool_call.id,
+        "name": tool_call.name,
+        "args": tool_call.arguments,
+    }
 
 
 def _invocation_kwargs(
@@ -165,7 +286,9 @@ def _invocation_kwargs(
     kwargs: dict[str, Any] = {"temperature": options.temperature}
     if profile.provider == "deepseek":
         extra_body: dict[str, Any] = {"max_tokens": options.max_output_tokens}
-        if options.output_mode == OutputMode.json_schema:
+        if options.tools:
+            extra_body["thinking"] = {"type": "disabled"}
+        elif options.output_mode == OutputMode.json_schema:
             extra_body["thinking"] = {"type": "disabled"}
         elif options.reasoning_effort is not None:
             extra_body["thinking"] = {"type": "enabled"}
@@ -212,6 +335,81 @@ def _extract_finish_reason(message: Any) -> str | None:
         return None
     finish_reason = metadata.get("finish_reason")
     return finish_reason if isinstance(finish_reason, str) else None
+
+
+def _extract_tool_calls(message: Any) -> tuple[ToolCall, ...]:
+    raw_calls = getattr(message, "tool_calls", None) or []
+    calls: list[ToolCall] = []
+    for index, raw in enumerate(raw_calls):
+        calls.append(_normalize_tool_call(raw, index))
+    return tuple(calls)
+
+
+def _coalesce_tool_call_chunks(chunks: list[Any]) -> tuple[ToolCall, ...]:
+    by_index: dict[int, dict[str, Any]] = {}
+    for chunk in chunks:
+        index = _chunk_value(chunk, "index")
+        if index is None:
+            continue
+        entry = by_index.setdefault(index, {"id": None, "name": None, "arguments": ""})
+        chunk_id = _chunk_value(chunk, "id")
+        if chunk_id:
+            entry["id"] = chunk_id
+        chunk_name = _chunk_value(chunk, "name")
+        if chunk_name:
+            entry["name"] = chunk_name
+        args = _chunk_value(chunk, "args", "")
+        if isinstance(args, str):
+            entry["arguments"] += args
+        elif isinstance(args, dict):
+            entry["arguments"] = args
+
+    calls: list[ToolCall] = []
+    for index in sorted(by_index):
+        entry = by_index[index]
+        call_id = entry["id"] or f"call_{index}"
+        name = entry["name"]
+        if not isinstance(name, str) or not name:
+            raise ProviderOutputError("streamed tool call is missing a name")
+        arguments = entry["arguments"]
+        if isinstance(arguments, str):
+            try:
+                arguments = json.loads(arguments or "{}")
+            except json.JSONDecodeError as exc:
+                raise ProviderOutputError(
+                    "streamed tool call arguments are not valid JSON"
+                ) from exc
+        if not isinstance(arguments, dict):
+            raise ProviderOutputError("streamed tool call arguments must be an object")
+        calls.append(ToolCall(id=call_id, name=name, arguments=arguments))
+    return tuple(calls)
+
+
+def _chunk_value(chunk: Any, key: str, default: Any = None) -> Any:
+    if isinstance(chunk, dict):
+        return chunk.get(key, default)
+    return getattr(chunk, key, default)
+
+
+def _normalize_tool_call(raw: Any, index: int) -> ToolCall:
+    if isinstance(raw, dict):
+        name = raw.get("name")
+        call_id = raw.get("id")
+        arguments = raw.get("args", {})
+    else:
+        name = getattr(raw, "name", None)
+        call_id = getattr(raw, "id", None)
+        arguments = getattr(raw, "args", {})
+    if not isinstance(name, str) or not name:
+        raise ProviderOutputError("provider returned a tool call without a name")
+    if isinstance(arguments, str):
+        try:
+            arguments = json.loads(arguments or "{}")
+        except json.JSONDecodeError as exc:
+            raise ProviderOutputError("tool call arguments are not valid JSON") from exc
+    if not isinstance(arguments, dict):
+        raise ProviderOutputError("tool call arguments must be an object")
+    return ToolCall(id=call_id or f"call_{index}", name=name, arguments=arguments)
 
 
 def _has_token_usage(usage: TokenUsageData) -> bool:
