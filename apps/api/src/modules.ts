@@ -9,10 +9,10 @@ import { UserModule } from './user/user.module';
 import { FileModule } from './file/file.module';
 import { ProjectModule } from './project/project.module';
 import { TaskModule } from './task/task.module';
+import { MeetingModule } from './meeting/meeting.module';
 
 @Module({}) export class WorkReportModule { }
 @Module({}) export class KnowledgeModule { }
-@Module({}) export class MeetingModule { }
 @Module({}) export class NotificationModule { }
 @Module({}) export class DashboardModule { }
 @Module({}) export class IntegrationModule { }

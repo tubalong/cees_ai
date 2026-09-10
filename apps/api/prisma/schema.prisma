@@ -117,6 +117,38 @@ enum ProjectMemberRole {
   MEMBER
 }
 
+enum MeetingStatus {
+  DRAFT
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum MeetingParticipantRole {
+  HOST
+  RECORDER
+  PARTICIPANT
+}
+
+enum MeetingResponseStatus {
+  INVITED
+  ACCEPTED
+  DECLINED
+  TENTATIVE
+}
+
+enum MeetingAttendanceStatus {
+  PENDING
+  ATTENDED
+  ABSENT
+}
+
+enum MeetingMinutesStatus {
+  DRAFT
+  PUBLISHED
+}
+
 enum DraftStatus {
   DRAFT
   PENDING_CONFIRMATION
@@ -161,6 +193,9 @@ model Tenant {
   taskComments         TaskComment[]
   taskAttachments      TaskAttachment[]
   taskActivities       TaskActivity[]
+  meetings             Meeting[]
+  meetingParticipants  MeetingParticipant[]
+  meetingMinutes       MeetingMinutes[]
   createdAt            DateTime               @default(now()) @map("created_at")
   updatedAt            DateTime               @updatedAt @map("updated_at")
   deletedAt            DateTime?              @map("deleted_at")
@@ -223,6 +258,10 @@ model TenantMembership {
   taskComments         TaskComment[]          @relation("TaskCommentAuthorMembership")
   taskAttachments      TaskAttachment[]       @relation("TaskAttachmentCreatorMembership")
   taskActivities       TaskActivity[]         @relation("TaskActivityActorMembership")
+  organizedMeetings    Meeting[]              @relation("MeetingOrganizerMembership")
+  meetingParticipations MeetingParticipant[]  @relation("MeetingParticipantMembership")
+  recordedMinutes      MeetingMinutes[]       @relation("MeetingMinutesRecorderMembership")
+  publishedMinutes     MeetingMinutes[]       @relation("MeetingMinutesPublisherMembership")
   createdAt            DateTime               @default(now()) @map("created_at")
   updatedAt            DateTime               @updatedAt @map("updated_at")
   createdBy            String?                @map("created_by") @db.Uuid
@@ -321,6 +360,7 @@ model Department {
   status         DepartmentStatus   @default(ACTIVE)
   memberships    TenantMembership[]
   projects       Project[]
+  meetings       Meeting[]
   createdAt      DateTime           @default(now()) @map("created_at")
   updatedAt      DateTime           @updatedAt @map("updated_at")
   createdBy      String?            @map("created_by") @db.Uuid
@@ -522,6 +562,7 @@ model Project {
   members                 ProjectMember[]
   statusHistory           ProjectStatusHistory[]
   tasks                   Task[]
+  meetings                Meeting[]
   createdAt               DateTime               @default(now()) @map("created_at")
   updatedAt               DateTime               @updatedAt @map("updated_at")
   createdBy               String?                @map("created_by") @db.Uuid
@@ -846,50 +887,90 @@ model KnowledgeQueryLog {
 }
 
 model Meeting {
-  id              String    @id @default(uuid()) @db.Uuid
-  tenantId        String    @map("tenant_id") @db.Uuid
-  title           String
-  startsAt        DateTime  @map("starts_at")
-  durationMinutes Int       @map("duration_minutes")
-  departmentId    String?   @map("department_id") @db.Uuid
-  agenda          Json?
-  createdAt       DateTime  @default(now()) @map("created_at")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
-  createdBy       String?   @map("created_by") @db.Uuid
-  updatedBy       String?   @map("updated_by") @db.Uuid
-  deletedAt       DateTime? @map("deleted_at")
-  version         Int       @default(1)
+  id                      String               @id @default(uuid()) @db.Uuid
+  tenantId                String               @map("tenant_id") @db.Uuid
+  tenant                  Tenant               @relation(fields: [tenantId], references: [id])
+  projectId               String?              @map("project_id") @db.Uuid
+  project                 Project?             @relation(fields: [projectId], references: [id])
+  departmentId            String?              @map("department_id") @db.Uuid
+  department              Department?          @relation(fields: [departmentId], references: [id])
+  organizerMembershipId   String               @map("organizer_membership_id") @db.Uuid
+  organizerMembership     TenantMembership     @relation("MeetingOrganizerMembership", fields: [organizerMembershipId], references: [id])
+  title                   String
+  description             String?              @db.Text
+  startsAt                DateTime             @map("starts_at")
+  durationMinutes         Int                  @map("duration_minutes")
+  location                String?
+  meetingUrl              String?              @map("meeting_url")
+  agenda                   Json
+  status                   MeetingStatus        @default(DRAFT)
+  cancelReason             String?              @map("cancel_reason") @db.Text
+  startedAt                DateTime?            @map("started_at")
+  completedAt              DateTime?            @map("completed_at")
+  participants             MeetingParticipant[]
+  minutes                  MeetingMinutes?
+  createdAt                DateTime             @default(now()) @map("created_at")
+  updatedAt                DateTime             @updatedAt @map("updated_at")
+  createdBy                String?              @map("created_by") @db.Uuid
+  updatedBy                String?              @map("updated_by") @db.Uuid
+  deletedAt                DateTime?            @map("deleted_at")
+  version                  Int                  @default(1)
 
   @@index([tenantId, startsAt])
+  @@index([tenantId, status, startsAt])
+  @@index([tenantId, organizerMembershipId, startsAt])
+  @@index([tenantId, projectId, startsAt])
+  @@index([tenantId, departmentId, startsAt])
   @@map("meetings")
 }
 
 model MeetingParticipant {
-  id        String   @id @default(uuid()) @db.Uuid
-  tenantId  String   @map("tenant_id") @db.Uuid
-  meetingId String   @map("meeting_id") @db.Uuid
-  userId    String   @map("user_id") @db.Uuid
-  status    String   @default("INVITED")
-  createdAt DateTime @default(now()) @map("created_at")
+  id                String                  @id @default(uuid()) @db.Uuid
+  tenantId          String                  @map("tenant_id") @db.Uuid
+  tenant            Tenant                  @relation(fields: [tenantId], references: [id])
+  meetingId         String                  @map("meeting_id") @db.Uuid
+  meeting           Meeting                 @relation(fields: [meetingId], references: [id])
+  membershipId      String                  @map("membership_id") @db.Uuid
+  membership        TenantMembership        @relation("MeetingParticipantMembership", fields: [membershipId], references: [id])
+  role              MeetingParticipantRole  @default(PARTICIPANT)
+  responseStatus    MeetingResponseStatus   @default(INVITED) @map("response_status")
+  attendanceStatus  MeetingAttendanceStatus @default(PENDING) @map("attendance_status")
+  respondedAt       DateTime?               @map("responded_at")
+  createdAt         DateTime                @default(now()) @map("created_at")
+  updatedAt         DateTime                @updatedAt @map("updated_at")
+  createdBy         String?                 @map("created_by") @db.Uuid
+  updatedBy         String?                 @map("updated_by") @db.Uuid
+  deletedAt         DateTime?               @map("deleted_at")
+  version           Int                     @default(1)
 
-  @@unique([tenantId, meetingId, userId])
+  @@unique([tenantId, meetingId, membershipId])
+  @@index([tenantId, membershipId, createdAt])
+  @@index([tenantId, meetingId, role])
   @@map("meeting_participants")
 }
 
 model MeetingMinutes {
-  id        String    @id @default(uuid()) @db.Uuid
-  tenantId  String    @map("tenant_id") @db.Uuid
-  meetingId String    @map("meeting_id") @db.Uuid
-  content   Json
-  status    String    @default("DRAFT")
-  createdAt DateTime  @default(now()) @map("created_at")
-  updatedAt DateTime  @updatedAt @map("updated_at")
-  createdBy String?   @map("created_by") @db.Uuid
-  updatedBy String?   @map("updated_by") @db.Uuid
-  deletedAt DateTime? @map("deleted_at")
-  version   Int       @default(1)
+  id                      String               @id @default(uuid()) @db.Uuid
+  tenantId                String               @map("tenant_id") @db.Uuid
+  tenant                  Tenant               @relation(fields: [tenantId], references: [id])
+  meetingId               String               @unique @map("meeting_id") @db.Uuid
+  meeting                 Meeting              @relation(fields: [meetingId], references: [id])
+  content                 Json
+  status                  MeetingMinutesStatus @default(DRAFT)
+  recorderMembershipId    String?              @map("recorder_membership_id") @db.Uuid
+  recorderMembership      TenantMembership?    @relation("MeetingMinutesRecorderMembership", fields: [recorderMembershipId], references: [id])
+  publishedAt             DateTime?            @map("published_at")
+  publishedByMembershipId String?              @map("published_by_membership_id") @db.Uuid
+  publishedByMembership   TenantMembership?    @relation("MeetingMinutesPublisherMembership", fields: [publishedByMembershipId], references: [id])
+  createdAt               DateTime             @default(now()) @map("created_at")
+  updatedAt               DateTime             @updatedAt @map("updated_at")
+  createdBy               String?              @map("created_by") @db.Uuid
+  updatedBy               String?              @map("updated_by") @db.Uuid
+  deletedAt               DateTime?            @map("deleted_at")
+  version                 Int                  @default(1)
 
   @@index([tenantId, meetingId])
+  @@index([tenantId, status, updatedAt])
   @@map("meeting_minutes")
 }
 
