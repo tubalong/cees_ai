@@ -4,8 +4,9 @@
 部门树模型、约束和成员归属见 [组织部门管理](../product/organization-department-management.md)。
 项目、项目成员和状态历史见 [项目与项目成员管理](../product/project-management.md)。
 任务、执行人、评论、附件和动态见 [项目任务管理](../product/task-management.md)。
+公开 Chat 调用与 Token 指标见 [公开 AI 对话链路与 Token 计量](../architecture/public-chat-api-and-token-metering.md)。
 
-> 新环境使用 `prisma migrate deploy` 按 `0001_init` 到 `0007_task_database_comments` 的目录顺序执行迁移；全部迁移完成后与当前 `schema.prisma` 保持一致。
+> 新环境使用 `prisma migrate deploy` 按 `0001_init` 到 `0009_ai_chat_token_tracking` 的目录顺序执行迁移；全部迁移完成后与当前 `schema.prisma` 保持一致。
 
 - `apps/api/prisma/schema.prisma` 是数据模型唯一事实源，迁移提交 `prisma/migrations`。
 - 新建表和字段必须在同一迁移中使用 `COMMENT ON TABLE`、`COMMENT ON COLUMN` 添加 PostgreSQL 注释；`0003_organization_departments_and_database_comments` 已补齐此前全部业务表和字段注释。
@@ -140,6 +141,23 @@ Meeting
 - `0008_meeting_management` 兼容迁移旧会议占位结构，新增枚举、关系、索引、权限和 PostgreSQL 中文注释；
 - 已有会议、参会关系和纪要写入由应用层在会议行锁事务中完成；创建关联项目会议时先锁项目行，避免成员关系与会议写入并发冲突；
 - 详细规则见 `docs/product/meeting-management.md` 和 `docs/api/meeting-management-api.md`。
+
+## AI 调用计量模型
+
+```text
+Tenant + User + TenantMembership
+  └── AIInvocationLog
+        ├── conversationId（客户端本地会话）
+        ├── turnId（客户端本地轮次）
+        └── input/output/total Token 与模型执行元数据
+```
+
+- 不新建 Conversation 或 Message 表，消息、回答和摘要正文只保存在客户端本地；
+- `0009_ai_chat_token_tracking` 只给现有 `AIInvocationLog` 增加可空的 `membershipId/conversationId/turnId`；
+- 三个字段对旧 `generic.invoke` 和历史数据保持兼容，不要求回填；
+- `membershipId` 是调用发生时的成员身份快照，不设置级联外键，成员移除后历史指标仍保留；
+- 同一轮可能包含 `chat.compact` 与 `chat.invoke/chat.stream` 多条真实调用，轮次总 Token 应求和；
+- 当前模型只有用量记录，不存在企业套餐、坑位额度、成员额度账户或扣减表。
 
 - `apps/api/prisma/schema.prisma` 是数据模型唯一事实源，迁移提交到 `apps/api/prisma/migrations`。
 - `0001_init` 包含 pgvector 扩展和当前 `schema.prisma` 的完整空库结构；共享环境首次执行后，后续结构变化必须新增前向迁移，不再重写该基线。

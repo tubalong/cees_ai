@@ -51,6 +51,7 @@ class ChatCompactor:
                 "Chat compaction reached the output token limit",
                 status_code=502,
                 request_id=request.request_id,
+                execution=routing,
             )
         output = routing.provider_result.output
         if not isinstance(output, str) or not output.strip():
@@ -59,6 +60,7 @@ class ChatCompactor:
                 "The provider did not return a valid conversation summary",
                 status_code=502,
                 request_id=request.request_id,
+                execution=routing,
             )
         return ChatCompaction(
             summary=output.strip(),

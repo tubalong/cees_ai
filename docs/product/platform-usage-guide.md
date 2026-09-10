@@ -1,8 +1,8 @@
 # CEES AI 平台使用、接口与数据库字典
 
 > 状态：按当前实现整理  
-> 最后同步：2026-09-09
-> 公开契约版本：`0.14.0`
+> 最后同步：2026-09-10
+> 公开契约版本：`0.15.0`
 > 事实源：`packages/contracts/openapi/openapi.yaml`、`apps/api/prisma/schema.prisma`
 
 ## 1. 文档用途
@@ -10,9 +10,9 @@
 本文面向本地开发、接口联调、产品验收和数据库排查，统一说明：
 
 - 平台超级管理员、租户管理员和普通成员的区别；
-- 当前已经实现的 114 个 HTTP 操作；
+- 当前已经实现的 117 个 HTTP 操作；
 - 路径参数、查询参数和 JSON 请求体字段的含义；
-- PostgreSQL 中 41 张业务表、495 个业务字段及 Prisma 迁移表的用途；
+- PostgreSQL 中 41 张业务表、498 个业务字段及 Prisma 迁移表的用途；
 - 租户创建、成员激活、登录、授权、资源访问、审计、停用和恢复的整体流转；
 - 哪些能力已经有公开 API，哪些目前只有数据库结构或模块占位。
 
@@ -39,8 +39,9 @@
 | 项目与项目成员 | 已实现 | 项目 CRUD、成员角色、负责人转移、状态机、完成后只读和归档 |
 | 任务、评论、附件和动态 | 已实现 | 任务 CRUD、父子任务、执行人、状态机、评论、COS 附件、动态和审计 |
 | 会议管理 | 已实现 | 会议 CRUD、状态机、参会人、邀请应答、实际出席、纪要和审计 |
+| AI 对话与 Token 记录 | 已实现 | 客户端本地保存历史，API 调用 ai-service 并按企业、成员、会话和轮次记录 Token |
 | 知识库、通知 | 仅数据库结构/设计基础 | 当前没有对应公开 API |
-| AI 草稿和调用日志 | 数据结构与内部编排基础 | AI 不能绕过 NestJS 写正式业务数据 |
+| AI 草稿和额度体系 | 部分基础 | AI 草稿仍为数据结构基础；当前只有实际 Token 指标，没有企业/坑位/成员额度账户或扣减 |
 
 ## 3. 管理员账号到底存在哪里
 
@@ -374,6 +375,16 @@ pnpm --filter @cees/api dev
 | `DELETE /platform/tenants/{tenantId}/administrators/{membershipId}` | 取消成员的租户管理员角色 | 两个路径 ID | `204` | `platform.tenant.admin.remove` |
 | `GET /platform/audit-events` | 查询平台域审计 | `action/outcome/limit/cursor` | 平台审计列表 | `platform.audit.read` |
 | `GET /platform/audit-events/{auditEventId}` | 查询平台审计详情 | `auditEventId` | 平台审计详情 | `platform.audit.read` |
+
+### 6.11 AI 对话
+
+| 方法与路径 | 用途 | 参数/请求体 | 返回 | 鉴权 |
+| --- | --- | --- | --- | --- |
+| `POST /chat/invoke` | 生成一轮完整回答 | `ChatRequest` | `ChatInvokeResult` | 有效租户成员 Bearer |
+| `POST /chat/stream` | 以 SSE 流式生成回答 | `ChatRequest` | `ChatStreamEvent` 事件流 | 有效租户成员 Bearer |
+| `POST /chat/compact` | 把本地历史压缩为摘要 | `ChatCompactRequest` | `ChatCompactResult` | 有效租户成员 Bearer |
+
+API 从 JWT 注入租户、User 和 Membership，客户端不能提交这些内部身份字段，也不能指定系统指令、Provider、模型或 Profile。Conversation、Message 和摘要由客户端保存在本地，API 仅在 `ai_invocation_logs` 保存身份关联和 Token 指标。详细设计见 [公开 AI 对话链路与 Token 计量](../architecture/public-chat-api-and-token-metering.md)。
 
 ## 7. 请求参数字典
 
@@ -748,6 +759,25 @@ POST /platform/auth/change-password
 | `VersionRequest` | `version` | 恢复租户时提交当前版本 |
 | `AssignPlatformTenantAdministratorRequest` | `account`、可选 `displayName` | 将已有账号设为管理员，或为不存在账号创建管理员邀请 |
 
+### 7.9 AI 对话请求
+
+#### `ChatRequest`
+
+| 字段 | 必填 | 规则 | 含义 |
+| --- | --- | --- | --- |
+| `conversationId` | 是 | 1～128 位字母、数字、点、下划线、冒号或连字符 | 客户端本地会话标识 |
+| `turnId` | 是 | 同上 | 客户端本地轮次标识；同一轮压缩和回答使用同一值 |
+| `mode` | 否 | `standard/ultra`，默认 `standard` | 对话执行模式 |
+| `conversationSummary` | 否 | `null` 或 1～131072 字符 | 客户端本地保存的早期历史摘要 |
+| `messages` | 是 | 1～128 条，按时间升序 | 近期消息；最后一条必须是本轮 `user` 消息 |
+| `messages[].id` | 是 | 1～128 位稳定标识 | 客户端本地消息 ID |
+| `messages[].role` | 是 | `user/assistant` | 消息角色 |
+| `messages[].content` | 是 | 1～262144 字符 | 本次传给模型的正文，API 不持久化 |
+
+#### `ChatCompactRequest`
+
+字段 `conversationId`、`turnId` 和 `messages` 与 `ChatRequest` 相同；`previousSummary` 为可选的上一版本地摘要。压缩结果中的 `summary` 和 `summarizedThroughMessageId` 必须由客户端保存到本地。
+
 ## 8. 核心返回字段
 
 | 返回对象 | 主要字段含义 |
@@ -768,6 +798,9 @@ POST /platform/auth/change-password
 | `TaskComment` | 评论正文、作者 Membership、时间和版本 |
 | `TaskAttachment` | 文件对象、文件名、Content-Type、大小、添加者和版本 |
 | `TaskActivity` | 动作编码、操作者 Membership、扩展元数据和发生时间 |
+| `ChatInvokeResult` | 会话/轮次、Assistant 回答、上下文采用情况、Token、耗时和结束原因 |
+| `ChatCompactResult` | 新摘要、压缩截止消息 ID、Token、耗时和结束原因 |
+| `ChatStreamEvent` | `started/status/content_delta/usage/completed/error` SSE 事件联合 |
 | `Role` | 角色编码、名称、描述、数据范围、系统标记、权限、成员数和版本 |
 | `DocumentSummary/Detail` | 文档和资源 ID、标题、正文、可见性、所有者、当前有效权限和版本 |
 | `ResourceAclEntry` | 授权主体、权限编码、过期时间和版本 |
@@ -1082,6 +1115,19 @@ SUSPENDED ---------存在有效管理员---> ACTIVE
 - 没有有效租户管理员时不允许恢复；
 - 平台操作写入 `platform_audit_logs`，租户操作写入 `audit_logs`。
 
+### 10.7 AI 对话与本地历史
+
+```text
+客户端读取本地摘要和消息
+  → POST /chat/invoke 或 /chat/stream
+  → API 注入 tenantId/userId/membershipId
+  → ai-service Chat
+  → API 写 ai_invocation_logs
+  → 客户端把回答写回本地
+```
+
+历史过长时，客户端可先调用 `/chat/compact` 并在同一轮复用 `turnId`。该轮 Token 是压缩调用与回答调用的实际用量之和。服务端不保存消息正文和摘要，也不执行额度扣减。
+
 ## 11. 数据库通用约定
 
 ### 11.1 通用字段
@@ -1116,6 +1162,10 @@ Prisma 自动维护的迁移历史表，记录迁移名称、校验值、开始/
 0003_organization_departments_and_database_comments
 0004_redis_cos_upload_foundation
 0005_project_management
+0006_task_management
+0007_task_database_comments
+0008_meeting_management
+0009_ai_chat_token_tracking
 ```
 
 - 使用 `pnpm --filter @cees/api exec prisma migrate deploy` 执行已提交迁移；
@@ -1123,7 +1173,7 @@ Prisma 自动维护的迁移历史表，记录迁移名称、校验值、开始/
 - `0003` 已为当前 39 张业务表和 422 个业务字段补齐 PostgreSQL 注释；
 - `0004` 新增上传会话表和正式文件的 COS 定位字段，并为新增表、枚举和字段写入中文注释；
 - `0005` 将项目成员改为关联 TenantMembership，新增项目状态历史、负责人、编码和完成信息；
-- 当前共 41 张业务表和 495 个业务字段；
+- 当前共 41 张业务表和 498 个业务字段；
 - 后续新建表或字段时，必须在同一迁移中添加 `COMMENT ON TABLE` 和 `COMMENT ON COLUMN`；
 - Prisma Schema、迁移 SQL 和本数据字典必须保持一致。
 
@@ -1840,13 +1890,16 @@ AI 生成的待确认动作草稿。它不是正式业务数据，只有经过 N
 
 ### 18.2 `ai_invocation_logs`
 
-NestJS 编排 AI 调用时记录的模型调用指标。
+NestJS 编排 AI 调用时记录的模型与 Token 指标。该表不保存消息正文、回答或摘要。
 
 | 字段 | 含义 |
 | --- | --- |
 | `id` | 调用日志 UUID |
 | `tenant_id` | 所属租户 |
 | `user_id` | 发起调用的 User UUID |
+| `membership_id` | 发起调用时的 TenantMembership UUID 快照；旧日志可空 |
+| `conversation_id` | 客户端本地会话标识；非 Chat 调用可空 |
+| `turn_id` | 客户端本地轮次标识；非 Chat 调用可空 |
 | `request_id` | 业务请求追踪 ID |
 | `trace_id` | 跨服务 Trace ID，可空 |
 | `model` | 实际模型名称 |
@@ -1855,6 +1908,8 @@ NestJS 编排 AI 调用时记录的模型调用指标。
 | `operation` | AI 操作类型 |
 | `metadata` | 扩展指标和路由信息 JSON |
 | `created_at` | 调用时间 |
+
+Chat operation 使用 `chat.invoke`、`chat.stream`、`chat.compact`；原通用调用继续使用 `generic.invoke`。同一轮可能存在多条真实模型调用，查询轮次总量时应求和。`metadata.totalTokens` 保存 Provider 报告的总 Token，`metadata.outcome` 标记完成、失败或取消；未报告的 Token 是 `null`，不是 `0`。当前没有企业套餐、坑位额度、成员额度分配或扣减表。
 
 ### 18.3 `audit_logs`
 
@@ -2587,6 +2642,33 @@ POST /api/v1/upload-sessions/{uploadSessionId}/complete
 
 API 只有在 COS HEAD 返回的大小和 Content-Type 与会话一致时才创建 `file_objects`。当前基础范围、支持格式、对象键和暂缓能力统一见 [文件上传与 COS 设计](../architecture/file-upload.md)。
 
+### 20.9 验证 AI 对话链路
+
+使用租户 Access Token 调用非流式接口：
+
+```http
+POST /api/v1/chat/invoke
+Authorization: Bearer <access-token>
+Content-Type: application/json
+```
+
+```json
+{
+  "conversationId": "conversation-001",
+  "turnId": "turn-001",
+  "mode": "standard",
+  "messages": [
+    {
+      "id": "message-001",
+      "role": "user",
+      "content": "请简要介绍 CEES AI。"
+    }
+  ]
+}
+```
+
+成功后响应包含 Assistant 回答和 `tokenUsage`，数据库只应新增一条 `operation=chat.invoke` 的 `ai_invocation_logs`，且 `membership_id/conversation_id/turn_id` 正确；消息正文不得出现在该表。流式接口应使用 `@cees/api-client/chat-stream` 或等价的 fetch SSE 读取方式，不能使用自动重连重复提交 POST。
+
 ## 21. `0.8.0` 迁移说明
 
 - 新增租户组织部门树的 7 个公开接口和 5 个部门权限；
@@ -2669,3 +2751,15 @@ API 只有在 COS HEAD 返回的大小和 Content-Type 与会话一致时才创�
 - 数据库迁移为 `0008_meeting_management`，兼容改造旧会议占位表并补齐枚举、关系、索引、权限和中文注释；
 - 修改契约后已经重新生成 `packages/api-client`，公开契约版本由 `0.13.1` 提升为 `0.14.0`；
 - 当前不实现 COS 会议附件、通知提醒、第三方会议平台、录音转写和 AI 自动发布纪要。
+
+## 29. `0.15.0` AI 对话与 Token 计量说明
+
+- 新增非流式 Chat、SSE Chat 和历史摘要压缩 3 个公开 HTTP 操作；
+- 客户端本地保存会话、消息和摘要，NestJS 与 ai-service 不持久化正文；
+- API 从可信认证上下文注入企业、User 和 Membership，客户端不能覆盖内部模型路由参数；
+- `AiInvocationRecorderService` 统一承接原通用调用和新 Chat 调用的 Token 写入；
+- `ai_invocation_logs` 新增可空 `membership_id/conversation_id/turn_id` 与统计索引；
+- 数据库迁移为 `0009_ai_chat_token_tracking`，新增字段和表语义均包含 PostgreSQL 中文注释；
+- `packages/api-client` 已重新生成，并增加不自动重连的 POST SSE 辅助入口；
+- ai-service 内部契约升级到 `0.2.0`，只在模型已执行后的失败响应中可选返回执行与 Token 元数据，供 API 防漏记；
+- 公开契约版本由 `0.14.0` 提升为 `0.15.0`；本版没有企业或成员额度账户、分配、扣减和超额拦截。

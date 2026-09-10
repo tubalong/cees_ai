@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CEES AI Service Internal API
-  version: 0.1.0
+  version: 0.2.0
   description: |
     Internal infrastructure API used only by trusted CEES services.
     Desktop, mobile, and third-party clients must call the NestJS public API instead.
@@ -1413,6 +1413,14 @@ components:
       properties:
         error:
           $ref: "#/components/schemas/ErrorDetail"
+        execution:
+          anyOf:
+            - $ref: "#/components/schemas/ExecutionMetadata"
+            - type: "null"
+          default: null
+          description: >-
+            Present only when a model invocation actually completed far enough to report
+            execution and Token metrics before the business result was rejected.
   responses:
     BadRequest:
       description: Invalid profile or unsupported output mode

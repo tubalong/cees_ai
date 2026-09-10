@@ -11,7 +11,13 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from app.api.contract import load_openapi_contract
-from app.api.generated.models import ErrorDetail, ErrorResponse
+from app.api.generated.models import (
+    ErrorDetail,
+    ErrorResponse,
+    ExecutionMetadata,
+    Provider,
+    TokenUsage,
+)
 from app.api.routes.chat import router as chat_router
 from app.api.routes.documents import router as documents_router
 from app.api.routes.invoke import router as invoke_router
@@ -21,7 +27,7 @@ from app.core.config import get_settings
 from app.core.errors import AIServiceError
 from app.core.logging import configure_logging
 from app.core.runtime import AppRuntime, build_runtime
-from app.llm.router import ProviderBuilder
+from app.llm.router import ProviderBuilder, RoutingResult
 
 logger = logging.getLogger(__name__)
 
@@ -76,11 +82,12 @@ def create_app(
                 message=exc.message,
                 request_id=request_id,
                 retryable=exc.retryable,
-            )
+            ),
+            execution=_error_execution_metadata(exc.execution),
         )
         return JSONResponse(
             status_code=exc.status_code,
-            content=body.model_dump(mode="json", by_alias=True),
+            content=_error_response_content(body),
         )
 
     @application.exception_handler(RequestValidationError)
@@ -98,7 +105,7 @@ def create_app(
         )
         return JSONResponse(
             status_code=422,
-            content=body.model_dump(mode="json", by_alias=True),
+            content=_error_response_content(body),
         )
 
     @application.exception_handler(Exception)
@@ -114,7 +121,7 @@ def create_app(
         )
         return JSONResponse(
             status_code=500,
-            content=body.model_dump(mode="json", by_alias=True),
+            content=_error_response_content(body),
         )
 
     if docs_enabled:
@@ -127,6 +134,32 @@ def create_app(
         application.openapi_schema = contract_document
 
     return application
+
+
+def _error_execution_metadata(value: object | None) -> ExecutionMetadata | None:
+    if not isinstance(value, RoutingResult):
+        return None
+    usage = value.provider_result.token_usage
+    return ExecutionMetadata(
+        profile=value.profile_name,
+        provider=Provider(value.profile.provider),
+        model=value.profile.model,
+        fallback_count=value.fallback_count,
+        latency_ms=value.latency_ms,
+        finish_reason=value.provider_result.finish_reason,
+        token_usage=TokenUsage(
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+            total_tokens=usage.total_tokens,
+        ),
+    )
+
+
+def _error_response_content(body: ErrorResponse) -> dict[str, Any]:
+    content = body.model_dump(mode="json", by_alias=True)
+    if body.execution is None:
+        content.pop("execution", None)
+    return content
 
 
 app = create_app()

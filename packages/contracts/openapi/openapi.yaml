@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CEES AI API
-  version: 0.14.0
+  version: 0.15.0
   description: 以本文件为唯一事实源的公开 API 契约。资源与操作按 docs/api 约定补充。
 
 servers:
@@ -23,6 +23,169 @@ paths:
                 properties:
                   status:
                     type: string
+
+  /chat/invoke:
+    post:
+      summary: 生成一轮完整的 AI 对话回答
+      description: |
+        当前租户成员提交保存在客户端本地的历史摘要和近期消息，API 注入可信的租户、用户和成员上下文后调用 ai-service。
+        会话正文、消息和摘要不会由 API 持久化；API 只记录本次模型调用的租户、成员、会话、轮次和 Token 指标。
+      operationId: chatInvoke
+      tags: [Chat]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRequest'
+      responses:
+        '200':
+          description: AI 回答生成成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatInvokeResponseEnvelope'
+        '400':
+          description: 请求字段校验失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '401':
+          description: 登录状态无效、已过期或缺少有效租户成员身份
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '422':
+          description: 对话上下文或消息顺序不符合 Chat 规则
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '502':
+          description: AI Provider 返回了无效结果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '503':
+          description: ai-service、Chat 模式或模型暂时不可用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+  /chat/stream:
+    post:
+      summary: 以 SSE 流式生成一轮 AI 对话回答
+      description: |
+        成功建立流后，每个 SSE `data` 字段都是一个 `ChatStreamEvent` JSON 对象，不使用普通 JSON 响应包络。
+        事件依次为 `started`、可选 `status`、零个或多个 `content_delta`、可选 `usage` 和 `completed`；流开始后的失败以 `error` 事件终止。
+        客户端断开连接时 API 会取消对 ai-service 的上游调用。会话正文仍由客户端本地保存。
+      operationId: chatStream
+      tags: [Chat]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRequest'
+      responses:
+        '200':
+          description: AI 对话事件流
+          content:
+            text/event-stream:
+              schema:
+                $ref: '#/components/schemas/ChatStreamEvent'
+        '400':
+          description: 请求字段校验失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '401':
+          description: 登录状态无效、已过期或缺少有效租户成员身份
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '422':
+          description: 对话上下文或消息顺序不符合 Chat 规则
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '502':
+          description: AI Provider 返回了无效结果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '503':
+          description: ai-service、Chat 模式或模型暂时不可用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+  /chat/compact:
+    post:
+      summary: 将本地对话历史压缩为可复用摘要
+      description: |
+        API 调用 ai-service 生成摘要并把结果返回客户端，由客户端保存摘要及压缩截止消息 ID。
+        API 不保存摘要正文，只记录本次压缩调用所属的租户、成员、会话、轮次和 Token 指标。
+      operationId: chatCompact
+      tags: [Chat]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatCompactRequest'
+      responses:
+        '200':
+          description: 对话摘要生成成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatCompactResponseEnvelope'
+        '400':
+          description: 请求字段校验失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '401':
+          description: 登录状态无效、已过期或缺少有效租户成员身份
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '422':
+          description: 压缩上下文不符合 Chat 规则或超过预算
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '502':
+          description: AI Provider 返回了无效或被截断的摘要
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '503':
+          description: ai-service 或摘要模型暂时不可用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
 
   /auth/login:
     post:
@@ -3558,6 +3721,362 @@ components:
       bearerFormat: JWT
 
   schemas:
+    ChatMode:
+      type: string
+      enum: [standard, ultra]
+      default: standard
+      description: 对话执行模式；省略时使用 standard
+
+    ChatMessageRole:
+      type: string
+      enum: [user, assistant]
+      description: 本地对话消息角色
+
+    ChatMessage:
+      type: object
+      additionalProperties: false
+      required: [id, role, content]
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'
+          description: 客户端本地生成并保存的消息稳定标识
+        role:
+          $ref: '#/components/schemas/ChatMessageRole'
+        content:
+          type: string
+          minLength: 1
+          maxLength: 262144
+          description: 仅用于本次模型调用的消息正文，API 不持久化
+
+    ChatRequest:
+      type: object
+      additionalProperties: false
+      required: [conversationId, turnId, messages]
+      properties:
+        conversationId:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'
+          description: 客户端本地会话标识，仅用于调用关联和 Token 统计
+        turnId:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'
+          description: 客户端本地轮次标识；同一轮的压缩和回答调用使用同一值
+        mode:
+          $ref: '#/components/schemas/ChatMode'
+        conversationSummary:
+          type: [string, 'null']
+          minLength: 1
+          maxLength: 131072
+          description: 客户端本地保存的早期历史摘要；省略或 null 表示没有摘要
+        messages:
+          type: array
+          minItems: 1
+          maxItems: 128
+          description: 按时间升序排列的近期消息；最后一条必须是本轮 user 消息
+          items:
+            $ref: '#/components/schemas/ChatMessage'
+
+    ChatCompactRequest:
+      type: object
+      additionalProperties: false
+      required: [conversationId, turnId, messages]
+      properties:
+        conversationId:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'
+          description: 客户端本地会话标识，仅用于调用关联和 Token 统计
+        turnId:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'
+          description: 本次压缩归属的客户端本地轮次标识
+        previousSummary:
+          type: [string, 'null']
+          minLength: 1
+          maxLength: 131072
+          description: 客户端本地保存的上一版摘要；省略或 null 表示首次压缩
+        messages:
+          type: array
+          minItems: 1
+          maxItems: 128
+          description: 要压缩的本地历史消息，按时间升序排列
+          items:
+            $ref: '#/components/schemas/ChatMessage'
+
+    ChatTokenUsage:
+      type: object
+      additionalProperties: false
+      required: [inputTokens, outputTokens, totalTokens]
+      properties:
+        inputTokens:
+          type: [integer, 'null']
+          minimum: 0
+          description: Provider 报告的输入 Token；未报告时为 null
+        outputTokens:
+          type: [integer, 'null']
+          minimum: 0
+          description: Provider 报告的输出 Token；未报告时为 null
+        totalTokens:
+          type: [integer, 'null']
+          minimum: 0
+          description: Provider 报告的总 Token；未报告时为 null
+
+    ChatContextStrategy:
+      type: string
+      enum: [full, summary_plus_recent, recent_only]
+      description: ai-service 实际采用的上下文策略
+
+    ChatContextUsage:
+      type: object
+      additionalProperties: false
+      required: [strategy, receivedMessageCount, includedMessageCount, historyTruncated, estimatedInputTokens]
+      properties:
+        strategy:
+          $ref: '#/components/schemas/ChatContextStrategy'
+        receivedMessageCount:
+          type: integer
+          minimum: 1
+          description: API 向 ai-service 提交的消息条数
+        includedMessageCount:
+          type: integer
+          minimum: 1
+          description: 上下文预算处理后实际纳入的消息条数
+        historyTruncated:
+          type: boolean
+          description: 是否因上下文预算舍弃了较早消息
+        estimatedInputTokens:
+          type: integer
+          minimum: 1
+          description: ai-service 在模型调用前估算的输入 Token
+
+    ChatAssistantMessage:
+      type: object
+      additionalProperties: false
+      required: [role, content]
+      properties:
+        role:
+          type: string
+          const: assistant
+          description: 固定为 assistant
+        content:
+          type: string
+          minLength: 1
+          description: AI 回答正文，由客户端保存到本地会话历史
+
+    ChatInvokeResult:
+      type: object
+      additionalProperties: false
+      required: [conversationId, turnId, mode, message, contextUsage, tokenUsage, latencyMs, finishReason]
+      properties:
+        conversationId:
+          type: string
+          description: 请求中的客户端本地会话标识
+        turnId:
+          type: string
+          description: 请求中的客户端本地轮次标识
+        mode:
+          $ref: '#/components/schemas/ChatMode'
+        message:
+          $ref: '#/components/schemas/ChatAssistantMessage'
+        contextUsage:
+          $ref: '#/components/schemas/ChatContextUsage'
+        tokenUsage:
+          $ref: '#/components/schemas/ChatTokenUsage'
+        latencyMs:
+          type: integer
+          minimum: 0
+          description: ai-service 报告的模型调用耗时，单位毫秒
+        finishReason:
+          type: [string, 'null']
+          description: Provider 结束原因；length 表示回答可能被输出上限截断
+
+    ChatCompactResult:
+      type: object
+      additionalProperties: false
+      required: [conversationId, turnId, summary, summarizedThroughMessageId, tokenUsage, latencyMs, finishReason]
+      properties:
+        conversationId:
+          type: string
+          description: 请求中的客户端本地会话标识
+        turnId:
+          type: string
+          description: 请求中的客户端本地轮次标识
+        summary:
+          type: string
+          minLength: 1
+          description: 新摘要正文，由客户端保存到本地
+        summarizedThroughMessageId:
+          type: [string, 'null']
+          description: 已压缩到的最后一条本地消息 ID
+        tokenUsage:
+          $ref: '#/components/schemas/ChatTokenUsage'
+        latencyMs:
+          type: integer
+          minimum: 0
+          description: ai-service 报告的模型调用耗时，单位毫秒
+        finishReason:
+          type: [string, 'null']
+          description: Provider 结束原因
+
+    ChatInvokeResponseEnvelope:
+      type: object
+      additionalProperties: false
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: '#/components/schemas/ChatInvokeResult'
+        requestId:
+          type: [string, 'null']
+          description: 公开 API 请求追踪 ID
+
+    ChatCompactResponseEnvelope:
+      type: object
+      additionalProperties: false
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: '#/components/schemas/ChatCompactResult'
+        requestId:
+          type: [string, 'null']
+          description: 公开 API 请求追踪 ID
+
+    ChatStreamStartedEvent:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, conversationId, turnId, mode, contextUsage]
+      properties:
+        type:
+          type: string
+          const: started
+        requestId:
+          type: string
+          description: 公开 API 请求追踪 ID
+        conversationId:
+          type: string
+          description: 请求中的客户端本地会话标识
+        turnId:
+          type: string
+          description: 请求中的客户端本地轮次标识
+        mode:
+          $ref: '#/components/schemas/ChatMode'
+        contextUsage:
+          $ref: '#/components/schemas/ChatContextUsage'
+
+    ChatStreamPhase:
+      type: string
+      enum: [reasoning, answering]
+      description: 当前只公开推理中或回答中阶段，不公开模型原始推理正文
+
+    ChatStreamStatusEvent:
+      type: object
+      additionalProperties: false
+      required: [type, phase]
+      properties:
+        type:
+          type: string
+          const: status
+        phase:
+          $ref: '#/components/schemas/ChatStreamPhase'
+
+    ChatStreamContentDeltaEvent:
+      type: object
+      additionalProperties: false
+      required: [type, text]
+      properties:
+        type:
+          type: string
+          const: content_delta
+        text:
+          type: string
+          description: 本次新增的回答正文片段
+
+    ChatStreamUsageEvent:
+      type: object
+      additionalProperties: false
+      required: [type, tokenUsage]
+      properties:
+        type:
+          type: string
+          const: usage
+        tokenUsage:
+          $ref: '#/components/schemas/ChatTokenUsage'
+
+    ChatStreamCompletedEvent:
+      type: object
+      additionalProperties: false
+      required: [type, latencyMs, finishReason]
+      properties:
+        type:
+          type: string
+          const: completed
+        latencyMs:
+          type: integer
+          minimum: 0
+          description: ai-service 报告的模型调用耗时，单位毫秒
+        finishReason:
+          type: [string, 'null']
+          description: Provider 结束原因；length 表示回答可能被输出上限截断
+
+    ChatStreamErrorDetail:
+      type: object
+      additionalProperties: false
+      required: [code, message, retryable]
+      properties:
+        code:
+          type: string
+          description: 稳定错误码
+        message:
+          type: string
+          description: 可安全展示或记录的错误说明
+        retryable:
+          type: boolean
+          description: 是否适合由用户主动重试
+
+    ChatStreamErrorEvent:
+      type: object
+      additionalProperties: false
+      required: [type, error]
+      properties:
+        type:
+          type: string
+          const: error
+        error:
+          $ref: '#/components/schemas/ChatStreamErrorDetail'
+
+    ChatStreamEvent:
+      oneOf:
+        - $ref: '#/components/schemas/ChatStreamStartedEvent'
+        - $ref: '#/components/schemas/ChatStreamStatusEvent'
+        - $ref: '#/components/schemas/ChatStreamContentDeltaEvent'
+        - $ref: '#/components/schemas/ChatStreamUsageEvent'
+        - $ref: '#/components/schemas/ChatStreamCompletedEvent'
+        - $ref: '#/components/schemas/ChatStreamErrorEvent'
+      discriminator:
+        propertyName: type
+        mapping:
+          started: '#/components/schemas/ChatStreamStartedEvent'
+          status: '#/components/schemas/ChatStreamStatusEvent'
+          content_delta: '#/components/schemas/ChatStreamContentDeltaEvent'
+          usage: '#/components/schemas/ChatStreamUsageEvent'
+          completed: '#/components/schemas/ChatStreamCompletedEvent'
+          error: '#/components/schemas/ChatStreamErrorEvent'
+
     TaskStatus:
       type: string
       enum: [TODO, IN_PROGRESS, BLOCKED, DONE, CANCELLED]

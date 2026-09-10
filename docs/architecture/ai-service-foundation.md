@@ -49,7 +49,7 @@ DeepSeek V4 默认启用 thinking，但其 thinking 模式不接受 LangChain `f
 - JSON Schema 最大 32 KiB、根类型必须是 object，禁止远程 `$ref`；
 - 所有调用要求 `X-AI-Internal-Token`；
 - 日志不记录消息正文、Schema、密钥或 base URL；
-- NestJS 根据响应 execution 元数据写入 `AIInvocationLog`。
+- NestJS 通过可复用 `AiInvocationRecorderService` 根据 execution 元数据写入 `AIInvocationLog`；Chat 额外关联成员、本地会话和轮次，但不记录正文。
 
 `stream` 只支持文本输出，事件顺序为 `started`、零个或多个 `content_delta`、可选 `usage`、`completed`。首个事件发送前发生瞬时 Provider 故障时可以切换候选 profile；流开始后发生故障则发送终止 `error` 事件，不再切换模型，避免把多个模型的输出拼接为一条回答。客户端断开连接时取消上游异步流。
 
@@ -57,13 +57,15 @@ DeepSeek V4 默认启用 thinking，但其 thinking 模式不接受 LangChain `f
 
 ## 5. 上下文对话
 
-Chat 接口以无状态方式接收可信指令、可选历史摘要和近期消息。ai-service 不保存正式 Conversation 或 Message；调用方必须在每轮重放完整可用历史，或者传入 `conversation_summary + recent messages`。最后一条消息必须为 `user`。
+Chat 接口以无状态方式接收可信指令、可选历史摘要和近期消息。ai-service 不保存正式 Conversation 或 Message；当前客户端在本地保存历史，并在每轮重放完整可用历史，或者传入 `conversation_summary + recent messages`。最后一条消息必须为 `user`。
 
-`standard` 使用 default 角色；`ultra` 使用 reasoning 角色和配置的 reasoning effort。Chat API 不接受 `llm_profile`、Provider、模型名或 reasoning effort 覆盖。流式事件在模型首个 token 前发送 `started`，随后发送可选 reasoning 状态、携带执行元数据的 answering 状态、正文增量、用量和完成事件。详细设计见 [上下文对话](contextual-chat.md)。
+`standard` 使用 default 角色；`ultra` 使用 reasoning 角色和配置的 reasoning effort。Chat API 不接受 `llm_profile`、Provider、模型名或 reasoning effort 覆盖。流式事件在模型首个 token 前发送 `started`，随后发送可选 reasoning 状态、携带执行元数据的 answering 状态、正文增量、用量和完成事件。内部模型行为见 [上下文对话](contextual-chat.md)，公开 API 链路见 [公开 AI 对话链路与 Token 计量](public-chat-api-and-token-metering.md)。
 
 ## 6. OpenAPI 与内部文档
 
 `packages/contracts/openapi/ai-service.openapi.yaml` 是 ai-service HTTP 行为的唯一事实源。契约生成 Pydantic 模型、NestJS TypeScript 客户端和随 ai-service 发布的 OpenAPI JSON；FastAPI `/docs`、`/redoc` 与 `/openapi.json` 直接展示该生成契约。测试会另外根据实际 Python 路由生成 OpenAPI，并检查路径、方法、operationId、标签、认证、响应状态与主要 Schema 字段是否漂移。
+
+内部契约 `0.2.0` 为 `ErrorResponse` 兼容增加可选 `execution`：仅当模型已经执行、但 Chat 回答或摘要随后被校验拒绝时返回，用于 NestJS 补记真实 Token；模型调用前失败仍省略该字段。该元数据不包含消息正文、回答或摘要。
 
 内部认证继续使用 `X-AI-Internal-Token`，并在 OpenAPI 中声明为 Header `apiKey` 安全方案。该名称属于现有 NestJS 与 ai-service 内部契约，本次不做破坏性重命名。
 

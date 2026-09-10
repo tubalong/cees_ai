@@ -69,6 +69,7 @@ class ChatOrchestrator:
                 "The provider did not return a text chat response",
                 status_code=502,
                 request_id=request.request_id,
+                execution=routing,
             )
         return ChatInvocation(
             mode=prepared.mode,

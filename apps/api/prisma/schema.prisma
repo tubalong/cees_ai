@@ -1026,21 +1026,31 @@ model AIActionDraft {
   @@map("ai_action_drafts")
 }
 
+/// NestJS 发起 AI 调用后写入的模型执行指标；不保存对话正文、消息或摘要。
 model AIInvocationLog {
-  id           String   @id @default(uuid()) @db.Uuid
-  tenantId     String   @map("tenant_id") @db.Uuid
-  userId       String   @map("user_id") @db.Uuid
-  requestId    String   @map("request_id")
-  traceId      String?  @map("trace_id")
-  model        String
-  latencyMs    Int      @map("latency_ms")
-  inputTokens  Int?     @map("input_tokens")
-  outputTokens Int?     @map("output_tokens")
-  operation    String
-  metadata     Json?
-  createdAt    DateTime @default(now()) @map("created_at")
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  userId         String   @map("user_id") @db.Uuid
+  /// 发起调用时的租户成员身份快照；旧调用和非成员调用可为空。
+  membershipId   String?  @map("membership_id") @db.Uuid
+  /// 客户端本地会话标识；仅 Chat 调用填写，不代表服务端会话实体。
+  conversationId String?  @map("conversation_id")
+  /// 客户端本地轮次标识；同一轮的压缩与回答可共享该值。
+  turnId         String?  @map("turn_id")
+  requestId      String   @map("request_id")
+  traceId        String?  @map("trace_id")
+  model          String
+  latencyMs      Int      @map("latency_ms")
+  inputTokens    Int?     @map("input_tokens")
+  outputTokens   Int?     @map("output_tokens")
+  operation      String
+  metadata       Json?
+  createdAt      DateTime @default(now()) @map("created_at")
 
   @@index([tenantId, requestId])
+  @@index([tenantId, createdAt], map: "ai_invocation_logs_tenant_created_at_idx")
+  @@index([tenantId, membershipId, createdAt], map: "ai_invocation_logs_member_created_at_idx")
+  @@index([tenantId, membershipId, conversationId, turnId], map: "ai_invocation_logs_chat_turn_idx")
   @@map("ai_invocation_logs")
 }
 

@@ -397,6 +397,10 @@ export type ErrorDetail = {
 
 export type ErrorResponse = {
     error: ErrorDetail;
+    /**
+     * Present only when a model invocation actually completed far enough to report execution and Token metrics before the business result was rejected.
+     */
+    execution?: ExecutionMetadata | null;
 };
 
 export type GetHealthData = {

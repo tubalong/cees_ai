@@ -10,6 +10,7 @@ import { FileModule } from './file/file.module';
 import { ProjectModule } from './project/project.module';
 import { TaskModule } from './task/task.module';
 import { MeetingModule } from './meeting/meeting.module';
+import { ChatModule } from './chat/chat.module';
 
 @Module({}) export class WorkReportModule { }
 @Module({}) export class KnowledgeModule { }
@@ -20,7 +21,7 @@ import { MeetingModule } from './meeting/meeting.module';
 @Module({}) export class JobsModule { }
 
 export const BusinessModules: Type[] = [
-    OrganizationModule, RbacModule, UserModule, ProjectModule, TaskModule, WorkReportModule,
+    OrganizationModule, RbacModule, UserModule, ProjectModule, TaskModule, ChatModule, WorkReportModule,
     FileModule, KnowledgeModule, ResourceModule, DocumentModule, MeetingModule, NotificationModule, DashboardModule,
     AiOrchestrationModule, IntegrationModule, AuditModule, CommonModule, JobsModule,
 ];
