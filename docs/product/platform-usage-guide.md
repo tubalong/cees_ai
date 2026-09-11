@@ -2728,30 +2728,35 @@ API 只有在 COS HEAD 返回的大小和 Content-Type 与会话一致时才创�
 
 ### 20.9 验证 AI 对话链路
 
-使用租户 Access Token 调用非流式接口：
+使用租户 Access Token 先创建会话：
 
 ```http
-POST /api/v1/chat/invoke
+POST /api/v1/conversations
 Authorization: Bearer <access-token>
 Content-Type: application/json
 ```
 
 ```json
+{ "title": "验证会话" }
+```
+
+再以 SSE 发起一轮对话（`Idempotency-Key` 必填，重复提交返回原轮次事件流）：
+
+```http
+POST /api/v1/conversations/{conversationId}/turns
+Authorization: Bearer <access-token>
+Content-Type: application/json
+Idempotency-Key: verify-turn-001
+```
+
+```json
 {
-  "conversationId": "conversation-001",
-  "turnId": "turn-001",
   "mode": "standard",
-  "messages": [
-    {
-      "id": "message-001",
-      "role": "user",
-      "content": "请简要介绍 CEES AI。"
-    }
-  ]
+  "content": "请简要介绍 CEES AI。"
 }
 ```
 
-成功后响应包含 Assistant 回答和 `tokenUsage`，数据库只应新增一条 `operation=chat.invoke` 的 `ai_invocation_logs`，且 `membership_id/conversation_id/turn_id` 正确；消息正文不得出现在该表。流式接口应使用 `@cees/api-client/chat-stream` 或等价的 fetch SSE 读取方式，不能使用自动重连重复提交 POST。
+响应为 `text/event-stream`（`started/status/content_delta/usage/completed/error`，均带递增 `seq`）。数据库应新增一条 `operation=chat.stream` 的 `ai_invocation_logs`，且 `membership_id/conversation_id/turn_id` 正确；消息正文不得出现在该表。断线后携带最后 `seq` 调用 `GET /conversations/{conversationId}/turns/{turnId}/events?afterSeq=N` 补齐事件，不能自动重连重复提交 POST。
 
 ## 21. `0.8.0` 迁移说明
 

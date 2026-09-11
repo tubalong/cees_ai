@@ -73,6 +73,7 @@ flowchart LR
 - [AI Service 通用基础设施](ai-service-foundation.md)
 - [上下文对话](contextual-chat.md)
 - [公开 AI 对话链路与 Token 计量](public-chat-api-and-token-metering.md)
+- [AI 助手工具循环](assistant-tool-loop.md)
 - [AI Tool Calling](ai-tool-calling.md)
 - [Image Generation](image-generation.md)
 - [通用文档生成](document-generation.md)
