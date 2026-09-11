@@ -40,6 +40,7 @@ describe('AiInvocationRecorderService', () => {
         conversationId: 'conversation-1',
         turnId: 'turn-1',
         requestId: 'request-1',
+        toolCallId: null,
         traceId: null,
         model: 'deepseek-chat',
         latencyMs: 52,

@@ -1,6 +1,8 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { AuditOutcome, Prisma, ResourceType } from '@prisma/client';
+import { AuditOutcome, DocumentVisibility, DraftStatus, Prisma, ResourceType } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
+import type { ComposeDocumentRequest, DocumentSpec } from '@cees/ai-service-client';
+import { AiServiceGateway } from '../ai-orchestration/ai-service-gateway.service';
 import { PrismaService } from '../database/prisma.service';
 import {
     managedDocumentAccessInclude,
@@ -11,12 +13,36 @@ import { TenantContext } from '../tenant/tenant-context';
 import { CreateDocumentDto, ListDocumentsQueryDto, UpdateDocumentDto } from './dto';
 import { DocumentListResult, DocumentResult, DocumentSummaryResult } from './document.types';
 
+/** AIActionDraft.actionType：与权限码保持一致，动作流水与权限语义一一对应。 */
+const ACTION_TYPE = 'ai.document.generate';
+
+export interface GenerateDocumentCommand {
+    tenantId: string;
+    userId: string;
+    membershipId: string;
+    requestId: string;
+    turnId: string;
+    toolCallId: string;
+    instruction: string;
+    title?: string;
+    visibility: DocumentVisibility;
+}
+
+export interface GeneratedDocument {
+    documentId: string;
+    title: string;
+    contentLength: number;
+    provider: string;
+    model: string;
+}
+
 @Injectable()
 export class DocumentService {
     constructor(
         private readonly prisma: PrismaService,
         private readonly tenantContext: TenantContext,
         private readonly resourceAccess: ResourceAccessService,
+        private readonly gateway: AiServiceGateway,
     ) { }
 
     async listDocuments(query: ListDocumentsQueryDto): Promise<DocumentListResult> {
@@ -100,6 +126,138 @@ export class DocumentService {
         });
         const roleIds = await this.resourceAccess.resolveCurrentRoleIds();
         return this.toDetail(await this.requireCurrentDocument(documentId), roleIds);
+    }
+
+    /**
+     * AI 生成文档的正式落库入口：ai-service compose 生成结构化 DocumentSpec →
+     * 序列化为 Markdown 落 ManagedDocument → AIActionDraft(EXECUTED) 动作流水 → 审计。
+     * 以 tool_call_id 幂等：同一工具调用重复执行直接回放已落库文档，不重复生成。
+     * 本方法只被 generate_document 工具执行器调用，不暴露公开 HTTP 接口。
+     */
+    async createGeneratedDocument(command: GenerateDocumentCommand): Promise<GeneratedDocument> {
+        const existing = await this.findExecutedDocument(command.tenantId, command.toolCallId);
+        if (existing) return existing;
+
+        const request: ComposeDocumentRequest = {
+            request_id: command.requestId,
+            tenant_id: command.tenantId,
+            user_id: command.userId,
+            instruction: command.instruction,
+            source_materials: [],
+            document_options: {
+                ...(command.title !== undefined ? { title: command.title } : {}),
+                locale: 'zh-CN',
+                template_id: 'business-standard',
+                include_toc: false,
+                generation_mode: 'fast',
+            },
+        };
+        const upstream = await this.gateway.composeDocument(request, {
+            membershipId: command.membershipId,
+            turnId: command.turnId,
+            toolCallId: command.toolCallId,
+        });
+
+        const documentId = randomUUID();
+        const content = documentSpecToMarkdown(upstream.document);
+        await this.prisma.$transaction(async (transaction) => {
+            await transaction.resource.create({
+                data: {
+                    id: documentId,
+                    tenantId: command.tenantId,
+                    type: ResourceType.DOCUMENT,
+                    ownerMembershipId: command.membershipId,
+                    createdBy: command.userId,
+                    updatedBy: command.userId,
+                },
+            });
+            await transaction.managedDocument.create({
+                data: {
+                    id: documentId,
+                    tenantId: command.tenantId,
+                    title: upstream.document.title,
+                    content,
+                    visibility: command.visibility,
+                    createdBy: command.userId,
+                    updatedBy: command.userId,
+                },
+            });
+            await transaction.aIActionDraft.create({
+                data: {
+                    tenantId: command.tenantId,
+                    userId: command.userId,
+                    actionType: ACTION_TYPE,
+                    payload: {
+                        instruction: command.instruction,
+                        requestedTitle: command.title ?? null,
+                        visibility: command.visibility,
+                        provider: upstream.execution.provider,
+                        model: upstream.execution.model,
+                        contentLength: content.length,
+                        sectionCount: upstream.document.sections.length,
+                    } satisfies Prisma.InputJsonObject,
+                    status: DraftStatus.EXECUTED,
+                    toolCallId: command.toolCallId,
+                    executedResourceType: 'DOCUMENT',
+                    executedResourceId: documentId,
+                    createdBy: command.userId,
+                    updatedBy: command.userId,
+                },
+            });
+            await transaction.auditLog.create({
+                data: {
+                    tenantId: command.tenantId,
+                    actorUserId: command.userId,
+                    actorMembershipId: command.membershipId,
+                    action: 'DOCUMENT_GENERATED',
+                    outcome: AuditOutcome.SUCCESS,
+                    resourceType: 'DOCUMENT',
+                    resourceId: documentId,
+                    requestId: command.requestId,
+                    metadata: {
+                        toolCallId: command.toolCallId,
+                        instruction: command.instruction,
+                        title: upstream.document.title,
+                        visibility: command.visibility,
+                        provider: upstream.execution.provider,
+                        model: upstream.execution.model,
+                        contentLength: content.length,
+                    },
+                },
+            });
+        });
+        return {
+            documentId,
+            title: upstream.document.title,
+            contentLength: content.length,
+            provider: upstream.execution.provider,
+            model: upstream.execution.model,
+        };
+    }
+
+    /** 幂等回放：同一 tool_call_id 已执行成功时返回原文档与执行元数据。 */
+    private async findExecutedDocument(tenantId: string, toolCallId: string): Promise<GeneratedDocument | null> {
+        const draft = await this.prisma.aIActionDraft.findFirst({
+            where: { tenantId, toolCallId, status: DraftStatus.EXECUTED },
+            orderBy: { createdAt: 'desc' },
+            select: { executedResourceId: true, payload: true },
+        });
+        if (!draft?.executedResourceId) return null;
+
+        const document = await this.prisma.managedDocument.findFirst({
+            where: { tenantId, id: draft.executedResourceId, deletedAt: null },
+            select: { id: true, title: true, content: true },
+        });
+        if (!document) return null;
+
+        const payload = draft.payload as { provider?: string; model?: string };
+        return {
+            documentId: document.id,
+            title: document.title,
+            contentLength: document.content.length,
+            provider: payload.provider ?? '',
+            model: payload.model ?? '',
+        };
     }
 
     async getDocument(documentId: string): Promise<DocumentResult> {
@@ -248,4 +406,46 @@ function documentSnapshot(document: ManagedDocumentWithAccess): Prisma.InputJson
         contentLength: document.content.length,
         version: document.version,
     };
+}
+
+/** 把 ai-service 的结构化 DocumentSpec 序列化为 Markdown 文本落库。 */
+function documentSpecToMarkdown(document: DocumentSpec): string {
+    const lines: string[] = [`# ${document.title}`];
+    if (document.subtitle) {
+        lines.push('', `> ${document.subtitle}`);
+    }
+    for (const section of document.sections) {
+        const level = Math.min(Math.max(section.level, 1), 3) + 1;
+        lines.push('', `${'#'.repeat(level)} ${section.heading}`);
+        for (const block of section.blocks) {
+            switch (block.type) {
+                case 'paragraph':
+                    lines.push('', block.text);
+                    break;
+                case 'bullet_list':
+                    lines.push('', ...block.items.map((item) => `- ${item}`));
+                    break;
+                case 'numbered_list':
+                    lines.push('', ...block.items.map((item, index) => `${index + 1}. ${item}`));
+                    break;
+                case 'quote':
+                    lines.push('', `> ${block.text}`);
+                    if (block.attribution) {
+                        lines.push(`> — ${block.attribution}`);
+                    }
+                    break;
+                case 'table':
+                    lines.push('', `| ${block.columns.join(' | ')} |`);
+                    lines.push(`| ${block.columns.map(() => '---').join(' | ')} |`);
+                    for (const row of block.rows) {
+                        lines.push(`| ${row.join(' | ')} |`);
+                    }
+                    break;
+                case 'page_break':
+                    lines.push('', '---');
+                    break;
+            }
+        }
+    }
+    return lines.join('\n');
 }

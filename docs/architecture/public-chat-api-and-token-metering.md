@@ -1,6 +1,6 @@
 # 公开 AI 对话链路与 Token 计量
 
-> 状态：已实现。最后更新：2026-09-10。公开契约版本：`0.15.0`。
+> 状态：已实现，但本文描述的 `/chat/*` 公开接口自契约 0.17.0 起已删除，会话与流式接口由 [AI 助手工具循环](assistant-tool-loop.md) 的 `/conversations/*` 取代；Token 计量组件（`AiInvocationRecorderService`）与 ai-service 内部 Chat 契约仍然有效。本文保留为历史记录。最后更新：2026-09-11。公开契约版本：`0.15.0`。
 
 ## 1. 目标与本期边界
 

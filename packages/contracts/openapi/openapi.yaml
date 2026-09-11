@@ -24,14 +24,13 @@ paths:
                   status:
                     type: string
 
-  /chat/invoke:
+  /conversations:
     post:
-      summary: 生成一轮完整的 AI 对话回答
+      summary: 创建当前成员的私有 AI 会话
       description: |
-        当前租户成员提交保存在客户端本地的历史摘要和近期消息，API 注入可信的租户、用户和成员上下文后调用 ai-service。
-        会话正文、消息和摘要不会由 API 持久化；API 只记录本次模型调用的租户、成员、会话、轮次和 Token 指标。
-      operationId: chatInvoke
-      tags: [Chat]
+        创建属于当前租户成员的私有会话。标题可省略，服务端在首轮完成后根据首条消息自动生成。
+      operationId: createConversation
+      tags: [Conversation]
       security:
         - bearerAuth: []
       requestBody:
@@ -39,14 +38,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ChatRequest'
+              $ref: '#/components/schemas/CreateConversationRequest'
       responses:
         '200':
-          description: AI 回答生成成功
+          description: 会话创建成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ChatInvokeResponseEnvelope'
+                $ref: '#/components/schemas/ConversationResponseEnvelope'
         '400':
           description: 请求字段校验失败
           content:
@@ -59,49 +58,135 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponseEnvelope'
-        '422':
-          description: 对话上下文或消息顺序不符合 Chat 规则
+
+    get:
+      summary: 查询当前成员的会话列表
+      description: 按更新时间倒序返回当前成员的私有会话。
+      operationId: listConversations
+      tags: [Conversation]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: 每页数量，默认 20，最大 100
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: cursor
+          in: query
+          required: false
+          description: 分页游标，上一页返回的 nextCursor
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 会话列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationListResponseEnvelope'
+        '400':
+          description: 请求字段校验失败
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponseEnvelope'
-        '502':
-          description: AI Provider 返回了无效结果
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponseEnvelope'
-        '503':
-          description: ai-service、Chat 模式或模型暂时不可用
+        '401':
+          description: 登录状态无效、已过期或缺少有效租户成员身份
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponseEnvelope'
 
-  /chat/stream:
-    post:
-      summary: 以 SSE 流式生成一轮 AI 对话回答
+  /conversations/{conversationId}:
+    get:
+      summary: 查询会话详情与最近消息
       description: |
-        成功建立流后，每个 SSE `data` 字段都是一个 `ChatStreamEvent` JSON 对象，不使用普通 JSON 响应包络。
-        事件依次为 `started`、可选 `status`、零个或多个 `content_delta`、可选 `usage` 和 `completed`；流开始后的失败以 `error` 事件终止。
-        客户端断开连接时 API 会取消对 ai-service 的上游调用。会话正文仍由客户端本地保存。
-      operationId: chatStream
-      tags: [Chat]
+        返回会话元数据与最近消息（按时间升序，最多 100 条）。只有会话所属成员可以访问。
+      operationId: getConversation
+      tags: [Conversation]
       security:
         - bearerAuth: []
+      parameters:
+        - name: conversationId
+          in: path
+          required: true
+          description: 会话 ID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: 会话详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationDetailResponseEnvelope'
+        '400':
+          description: 请求字段校验失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '401':
+          description: 登录状态无效、已过期或缺少有效租户成员身份
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '404':
+          description: 会话不存在或不属于当前成员
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+  /conversations/{conversationId}/turns:
+    post:
+      summary: 发起一轮对话并以 SSE 流式返回事件
+      description: |
+        客户端只提交本轮 user 消息；历史消息与摘要由服务端加载并组装上下文。
+        成功建立流后，每个 SSE `data` 字段都是一个 `TurnStreamEvent` JSON 对象，所有事件携带递增 `seq`。
+        事件依次为 `started`、可选 `status`、零个或多个 `content_delta`、可选 `usage` 和 `completed`；流开始后的失败以 `error` 事件终止。
+        客户端断开连接只解除订阅，不取消执行；重连后通过事件重放接口继续接收。
+        重复提交同一 `Idempotency-Key` 时返回原 Turn 的事件流，不重新生成。
+      operationId: createTurn
+      tags: [Conversation]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: conversationId
+          in: path
+          required: true
+          description: 会话 ID
+          schema:
+            type: string
+            format: uuid
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: 客户端生成的幂等键；同一键重复提交返回原 Turn
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ChatRequest'
+              $ref: '#/components/schemas/CreateTurnRequest'
       responses:
         '200':
-          description: AI 对话事件流
+          description: 对话事件流
           content:
             text/event-stream:
               schema:
-                $ref: '#/components/schemas/ChatStreamEvent'
+                $ref: '#/components/schemas/TurnStreamEvent'
         '400':
           description: 请求字段校验失败
           content:
@@ -114,8 +199,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '404':
+          description: 会话不存在或不属于当前成员
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '409':
+          description: 同一幂等键对应不同请求内容
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
         '422':
-          description: 对话上下文或消息顺序不符合 Chat 规则
+          description: 对话上下文不符合规则或超过预算
           content:
             application/json:
               schema:
@@ -127,35 +224,52 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponseEnvelope'
         '503':
-          description: ai-service、Chat 模式或模型暂时不可用
+          description: ai-service、对话模式或模型暂时不可用
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponseEnvelope'
 
-  /chat/compact:
-    post:
-      summary: 将本地对话历史压缩为可复用摘要
+  /conversations/{conversationId}/turns/{turnId}/events:
+    get:
+      summary: 以 SSE 重放并继续接收轮次事件
       description: |
-        API 调用 ai-service 生成摘要并把结果返回客户端，由客户端保存摘要及压缩截止消息 ID。
-        API 不保存摘要正文，只记录本次压缩调用所属的租户、成员、会话、轮次和 Token 指标。
-      operationId: chatCompact
-      tags: [Chat]
+        客户端携带已收到的最后事件序号 `afterSeq` 重新订阅；服务端先重放该序号之后的已持久化事件，
+        再继续实时推送后续事件直到轮次终态。轮次已结束时，重放全部剩余事件后正常结束。
+      operationId: replayTurnEvents
+      tags: [Conversation]
       security:
         - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ChatCompactRequest'
+      parameters:
+        - name: conversationId
+          in: path
+          required: true
+          description: 会话 ID
+          schema:
+            type: string
+            format: uuid
+        - name: turnId
+          in: path
+          required: true
+          description: 轮次 ID
+          schema:
+            type: string
+            format: uuid
+        - name: afterSeq
+          in: query
+          required: false
+          description: 已收到的最后事件序号；省略时从首个事件开始重放
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
       responses:
         '200':
-          description: 对话摘要生成成功
+          description: 轮次事件流
           content:
-            application/json:
+            text/event-stream:
               schema:
-                $ref: '#/components/schemas/ChatCompactResponseEnvelope'
+                $ref: '#/components/schemas/TurnStreamEvent'
         '400':
           description: 请求字段校验失败
           content:
@@ -168,20 +282,65 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponseEnvelope'
-        '422':
-          description: 压缩上下文不符合 Chat 规则或超过预算
+        '404':
+          description: 会话或轮次不存在，或不属于当前成员
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponseEnvelope'
-        '502':
-          description: AI Provider 返回了无效或被截断的摘要
+
+  /conversations/{conversationId}/turns/{turnId}/cancel:
+    post:
+      summary: 取消正在执行的轮次
+      description: |
+        取消是显式动作，不是断线副作用。仅 RUNNING 状态的轮次可取消；
+        取消后服务端尽力停止后续模型调用，已写入的正式业务数据不回滚。
+      operationId: cancelTurn
+      tags: [Conversation]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: conversationId
+          in: path
+          required: true
+          description: 会话 ID
+          schema:
+            type: string
+            format: uuid
+        - name: turnId
+          in: path
+          required: true
+          description: 轮次 ID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: 轮次已取消
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TurnResponseEnvelope'
+        '400':
+          description: 请求字段校验失败
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponseEnvelope'
-        '503':
-          description: ai-service 或摘要模型暂时不可用
+        '401':
+          description: 登录状态无效、已过期或缺少有效租户成员身份
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '404':
+          description: 会话或轮次不存在，或不属于当前成员
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '409':
+          description: 轮次已结束，不能取消
           content:
             application/json:
               schema:
@@ -4048,91 +4207,213 @@ components:
       default: standard
       description: 对话执行模式；省略时使用 standard
 
-    ChatMessageRole:
-      type: string
-      enum: [user, assistant]
-      description: 本地对话消息角色
-
-    ChatMessage:
+    CreateConversationRequest:
       type: object
       additionalProperties: false
-      required: [id, role, content]
+      properties:
+        title:
+          type: [string, 'null']
+          minLength: 1
+          maxLength: 128
+          description: 会话标题；省略时服务端在首轮完成后根据首条消息自动生成
+
+    ConversationVisibility:
+      type: string
+      enum: [PRIVATE]
+      default: PRIVATE
+      description: 会话可见性；当前仅支持成员私有
+
+    Conversation:
+      type: object
+      additionalProperties: false
+      required: [id, title, visibility, createdAt, updatedAt]
       properties:
         id:
           type: string
-          minLength: 1
+          format: uuid
+          description: 会话 ID
+        title:
+          type: string
           maxLength: 128
-          pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'
-          description: 客户端本地生成并保存的消息稳定标识
+          description: 会话标题；未自动生成前为空字符串
+        visibility:
+          $ref: '#/components/schemas/ConversationVisibility'
+        createdAt:
+          type: string
+          format: date-time
+          description: 会话创建时间
+        updatedAt:
+          type: string
+          format: date-time
+          description: 会话最近更新时间
+        lastTurnAt:
+          type: [string, 'null']
+          format: date-time
+          description: 最近一轮发起时间；尚未发起过轮次时为 null
+
+    ConversationResponseEnvelope:
+      type: object
+      additionalProperties: false
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: '#/components/schemas/Conversation'
+        requestId:
+          type: [string, 'null']
+          description: 公开 API 请求追踪 ID
+
+    ConversationListResult:
+      type: object
+      additionalProperties: false
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          description: 按更新时间倒序排列的会话
+          items:
+            $ref: '#/components/schemas/Conversation'
+        nextCursor:
+          type: [string, 'null']
+          description: 下一页游标；没有更多数据时为 null
+
+    ConversationListResponseEnvelope:
+      type: object
+      additionalProperties: false
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: '#/components/schemas/ConversationListResult'
+        requestId:
+          type: [string, 'null']
+          description: 公开 API 请求追踪 ID
+
+    ConversationMessageRole:
+      type: string
+      enum: [USER, ASSISTANT, TOOL]
+      description: 服务端持久化的会话消息角色
+
+    ConversationMessage:
+      type: object
+      additionalProperties: false
+      required: [id, role, content, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: 服务端生成的消息 ID
         role:
-          $ref: '#/components/schemas/ChatMessageRole'
+          $ref: '#/components/schemas/ConversationMessageRole'
+        content:
+          type: string
+          maxLength: 262144
+          description: 消息正文
+        createdAt:
+          type: string
+          format: date-time
+          description: 消息写入时间
+        turnId:
+          type: [string, 'null']
+          format: uuid
+          description: 消息归属的轮次；未关联轮次时为 null
+        toolCallId:
+          type: [string, 'null']
+          format: uuid
+          description: TOOL 角色消息对应的工具调用 ID；其他角色为 null
+
+    ConversationDetail:
+      type: object
+      additionalProperties: false
+      required: [conversation, messages]
+      properties:
+        conversation:
+          $ref: '#/components/schemas/Conversation'
+        messages:
+          type: array
+          maxItems: 100
+          description: 按时间升序排列的最近消息，最多 100 条
+          items:
+            $ref: '#/components/schemas/ConversationMessage'
+
+    ConversationDetailResponseEnvelope:
+      type: object
+      additionalProperties: false
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: '#/components/schemas/ConversationDetail'
+        requestId:
+          type: [string, 'null']
+          description: 公开 API 请求追踪 ID
+
+    CreateTurnRequest:
+      type: object
+      additionalProperties: false
+      required: [content]
+      properties:
         content:
           type: string
           minLength: 1
           maxLength: 262144
-          description: 仅用于本次模型调用的消息正文，API 不持久化
-
-    ChatRequest:
-      type: object
-      additionalProperties: false
-      required: [conversationId, turnId, messages]
-      properties:
-        conversationId:
-          type: string
-          minLength: 1
-          maxLength: 128
-          pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'
-          description: 客户端本地会话标识，仅用于调用关联和 Token 统计
-        turnId:
-          type: string
-          minLength: 1
-          maxLength: 128
-          pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'
-          description: 客户端本地轮次标识；同一轮的压缩和回答调用使用同一值
+          description: 本轮 user 消息正文；历史消息与摘要由服务端加载
         mode:
           $ref: '#/components/schemas/ChatMode'
-        conversationSummary:
-          type: [string, 'null']
-          minLength: 1
-          maxLength: 131072
-          description: 客户端本地保存的早期历史摘要；省略或 null 表示没有摘要
-        messages:
-          type: array
-          minItems: 1
-          maxItems: 128
-          description: 按时间升序排列的近期消息；最后一条必须是本轮 user 消息
-          items:
-            $ref: '#/components/schemas/ChatMessage'
 
-    ChatCompactRequest:
+    TurnStatus:
+      type: string
+      enum: [RECEIVED, RUNNING, COMPLETED, FAILED, CANCELLED]
+      description: 轮次状态；RECEIVED 为已接收未开始，RUNNING 为执行中
+
+    Turn:
       type: object
       additionalProperties: false
-      required: [conversationId, turnId, messages]
+      required: [id, conversationId, status, mode, createdAt]
       properties:
+        id:
+          type: string
+          format: uuid
+          description: 轮次 ID
         conversationId:
           type: string
-          minLength: 1
-          maxLength: 128
-          pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'
-          description: 客户端本地会话标识，仅用于调用关联和 Token 统计
-        turnId:
+          format: uuid
+          description: 所属会话 ID
+        status:
+          $ref: '#/components/schemas/TurnStatus'
+        mode:
+          $ref: '#/components/schemas/ChatMode'
+        error:
+          type: [object, 'null']
+          description: 轮次失败时的错误信息；其他状态为 null
+        createdAt:
           type: string
-          minLength: 1
-          maxLength: 128
-          pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'
-          description: 本次压缩归属的客户端本地轮次标识
-        previousSummary:
+          format: date-time
+          description: 轮次创建时间
+        completedAt:
           type: [string, 'null']
-          minLength: 1
-          maxLength: 131072
-          description: 客户端本地保存的上一版摘要；省略或 null 表示首次压缩
-        messages:
-          type: array
-          minItems: 1
-          maxItems: 128
-          description: 要压缩的本地历史消息，按时间升序排列
-          items:
-            $ref: '#/components/schemas/ChatMessage'
+          format: date-time
+          description: 轮次到达终态的时间；未结束时为 null
+
+    TurnResponseEnvelope:
+      type: object
+      additionalProperties: false
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: '#/components/schemas/Turn'
+        requestId:
+          type: [string, 'null']
+          description: 公开 API 请求追踪 ID
 
     ChatTokenUsage:
       type: object
@@ -4180,172 +4461,153 @@ components:
           minimum: 1
           description: ai-service 在模型调用前估算的输入 Token
 
-    ChatAssistantMessage:
+    TurnStreamStartedEvent:
       type: object
       additionalProperties: false
-      required: [role, content]
-      properties:
-        role:
-          type: string
-          const: assistant
-          description: 固定为 assistant
-        content:
-          type: string
-          minLength: 1
-          description: AI 回答正文，由客户端保存到本地会话历史
-
-    ChatInvokeResult:
-      type: object
-      additionalProperties: false
-      required: [conversationId, turnId, mode, message, contextUsage, tokenUsage, latencyMs, finishReason]
-      properties:
-        conversationId:
-          type: string
-          description: 请求中的客户端本地会话标识
-        turnId:
-          type: string
-          description: 请求中的客户端本地轮次标识
-        mode:
-          $ref: '#/components/schemas/ChatMode'
-        message:
-          $ref: '#/components/schemas/ChatAssistantMessage'
-        contextUsage:
-          $ref: '#/components/schemas/ChatContextUsage'
-        tokenUsage:
-          $ref: '#/components/schemas/ChatTokenUsage'
-        latencyMs:
-          type: integer
-          minimum: 0
-          description: ai-service 报告的模型调用耗时，单位毫秒
-        finishReason:
-          type: [string, 'null']
-          description: Provider 结束原因；length 表示回答可能被输出上限截断
-
-    ChatCompactResult:
-      type: object
-      additionalProperties: false
-      required: [conversationId, turnId, summary, summarizedThroughMessageId, tokenUsage, latencyMs, finishReason]
-      properties:
-        conversationId:
-          type: string
-          description: 请求中的客户端本地会话标识
-        turnId:
-          type: string
-          description: 请求中的客户端本地轮次标识
-        summary:
-          type: string
-          minLength: 1
-          description: 新摘要正文，由客户端保存到本地
-        summarizedThroughMessageId:
-          type: [string, 'null']
-          description: 已压缩到的最后一条本地消息 ID
-        tokenUsage:
-          $ref: '#/components/schemas/ChatTokenUsage'
-        latencyMs:
-          type: integer
-          minimum: 0
-          description: ai-service 报告的模型调用耗时，单位毫秒
-        finishReason:
-          type: [string, 'null']
-          description: Provider 结束原因
-
-    ChatInvokeResponseEnvelope:
-      type: object
-      additionalProperties: false
-      required: [success, data]
-      properties:
-        success:
-          type: boolean
-          const: true
-        data:
-          $ref: '#/components/schemas/ChatInvokeResult'
-        requestId:
-          type: [string, 'null']
-          description: 公开 API 请求追踪 ID
-
-    ChatCompactResponseEnvelope:
-      type: object
-      additionalProperties: false
-      required: [success, data]
-      properties:
-        success:
-          type: boolean
-          const: true
-        data:
-          $ref: '#/components/schemas/ChatCompactResult'
-        requestId:
-          type: [string, 'null']
-          description: 公开 API 请求追踪 ID
-
-    ChatStreamStartedEvent:
-      type: object
-      additionalProperties: false
-      required: [type, requestId, conversationId, turnId, mode, contextUsage]
+      required: [type, seq, requestId, conversationId, turnId, mode, contextUsage]
       properties:
         type:
           type: string
           const: started
+        seq:
+          type: integer
+          minimum: 1
+          description: 轮次内递增的事件序号，用于断线重连时定位重放起点
         requestId:
           type: string
           description: 公开 API 请求追踪 ID
         conversationId:
           type: string
-          description: 请求中的客户端本地会话标识
+          format: uuid
+          description: 所属服务端会话 ID
         turnId:
           type: string
-          description: 请求中的客户端本地轮次标识
+          format: uuid
+          description: 本轮轮次 ID
         mode:
           $ref: '#/components/schemas/ChatMode'
         contextUsage:
           $ref: '#/components/schemas/ChatContextUsage'
 
-    ChatStreamPhase:
+    TurnPhase:
       type: string
       enum: [reasoning, answering, tool_executing]
       description: 当前只公开推理中、回答中或工具执行中阶段，不公开模型原始推理正文
 
-    ChatStreamStatusEvent:
+    TurnStreamStatusEvent:
       type: object
       additionalProperties: false
-      required: [type, phase]
+      required: [type, seq, phase]
       properties:
         type:
           type: string
           const: status
+        seq:
+          type: integer
+          minimum: 1
+          description: 轮次内递增的事件序号
         phase:
-          $ref: '#/components/schemas/ChatStreamPhase'
+          $ref: '#/components/schemas/TurnPhase'
 
-    ChatStreamContentDeltaEvent:
+    TurnStreamContentDeltaEvent:
       type: object
       additionalProperties: false
-      required: [type, text]
+      required: [type, seq, text]
       properties:
         type:
           type: string
           const: content_delta
+        seq:
+          type: integer
+          minimum: 1
+          description: 轮次内递增的事件序号
         text:
           type: string
           description: 本次新增的回答正文片段
 
-    ChatStreamUsageEvent:
+    TurnStreamUsageEvent:
       type: object
       additionalProperties: false
-      required: [type, tokenUsage]
+      required: [type, seq, tokenUsage]
       properties:
         type:
           type: string
           const: usage
+        seq:
+          type: integer
+          minimum: 1
+          description: 轮次内递增的事件序号
         tokenUsage:
           $ref: '#/components/schemas/ChatTokenUsage'
 
-    ChatStreamCompletedEvent:
+    TurnStreamToolCallEvent:
       type: object
       additionalProperties: false
-      required: [type, latencyMs, finishReason]
+      required: [type, seq, toolCallId, name, arguments]
+      properties:
+        type:
+          type: string
+          const: tool_call
+        seq:
+          type: integer
+          minimum: 1
+          description: 轮次内递增的事件序号
+        toolCallId:
+          type: string
+          format: uuid
+          description: 本次工具调用的稳定标识
+        name:
+          type: string
+          description: 模型请求执行的受控工具名
+        arguments:
+          type: object
+          additionalProperties: true
+          description: 模型生成并经过 API 校验的工具参数
+      description: 模型请求执行一个受控工具；具体是否执行由 API 根据权限、能力和额度决定。
+
+    TurnStreamToolResultEvent:
+      type: object
+      additionalProperties: false
+      required: [type, seq, toolCallId, status]
+      properties:
+        type:
+          type: string
+          const: tool_result
+        seq:
+          type: integer
+          minimum: 1
+          description: 轮次内递增的事件序号
+        toolCallId:
+          type: string
+          format: uuid
+          description: 对应 TurnStreamToolCallEvent 中的 toolCallId
+        status:
+          type: string
+          enum: [completed, failed, rejected]
+          description: 工具执行结果状态
+        resourceId:
+          type: [string, 'null']
+          description: 工具执行生成的正式资源 ID，例如图片资源 ID
+        resourceUrl:
+          type: [string, 'null']
+          description: 工具执行生成的资源短期访问 URL
+        error:
+          type: [object, 'null']
+          description: 工具失败或被拒绝时的错误信息
+      description: 工具执行完成、失败或被 API 拒绝时发送的事件。
+
+    TurnStreamCompletedEvent:
+      type: object
+      additionalProperties: false
+      required: [type, seq, latencyMs, finishReason]
       properties:
         type:
           type: string
           const: completed
+        seq:
+          type: integer
+          minimum: 1
+          description: 轮次内递增的事件序号
         latencyMs:
           type: integer
           minimum: 0
@@ -4354,7 +4616,7 @@ components:
           type: [string, 'null']
           description: Provider 结束原因；length 表示回答可能被输出上限截断
 
-    ChatStreamErrorDetail:
+    TurnErrorDetail:
       type: object
       additionalProperties: false
       required: [code, message, retryable]
@@ -4369,38 +4631,43 @@ components:
           type: boolean
           description: 是否适合由用户主动重试
 
-    ChatStreamErrorEvent:
+    TurnStreamErrorEvent:
       type: object
       additionalProperties: false
-      required: [type, error]
+      required: [type, seq, error]
       properties:
         type:
           type: string
           const: error
+        seq:
+          type: integer
+          minimum: 1
+          description: 轮次内递增的事件序号
         error:
-          $ref: '#/components/schemas/ChatStreamErrorDetail'
+          type: object
+          description: 终止本轮的错误信息，结构同 TurnErrorDetail
 
-    ChatStreamEvent:
+    TurnStreamEvent:
       oneOf:
-        - $ref: '#/components/schemas/ChatStreamStartedEvent'
-        - $ref: '#/components/schemas/ChatStreamStatusEvent'
-        - $ref: '#/components/schemas/ChatStreamContentDeltaEvent'
-        - $ref: '#/components/schemas/ChatStreamToolCallEvent'
-        - $ref: '#/components/schemas/ChatStreamToolResultEvent'
-        - $ref: '#/components/schemas/ChatStreamUsageEvent'
-        - $ref: '#/components/schemas/ChatStreamCompletedEvent'
-        - $ref: '#/components/schemas/ChatStreamErrorEvent'
+        - $ref: '#/components/schemas/TurnStreamStartedEvent'
+        - $ref: '#/components/schemas/TurnStreamStatusEvent'
+        - $ref: '#/components/schemas/TurnStreamContentDeltaEvent'
+        - $ref: '#/components/schemas/TurnStreamToolCallEvent'
+        - $ref: '#/components/schemas/TurnStreamToolResultEvent'
+        - $ref: '#/components/schemas/TurnStreamUsageEvent'
+        - $ref: '#/components/schemas/TurnStreamCompletedEvent'
+        - $ref: '#/components/schemas/TurnStreamErrorEvent'
       discriminator:
         propertyName: type
         mapping:
-          started: '#/components/schemas/ChatStreamStartedEvent'
-          status: '#/components/schemas/ChatStreamStatusEvent'
-          content_delta: '#/components/schemas/ChatStreamContentDeltaEvent'
-          tool_call: '#/components/schemas/ChatStreamToolCallEvent'
-          tool_result: '#/components/schemas/ChatStreamToolResultEvent'
-          usage: '#/components/schemas/ChatStreamUsageEvent'
-          completed: '#/components/schemas/ChatStreamCompletedEvent'
-          error: '#/components/schemas/ChatStreamErrorEvent'
+          started: '#/components/schemas/TurnStreamStartedEvent'
+          status: '#/components/schemas/TurnStreamStatusEvent'
+          content_delta: '#/components/schemas/TurnStreamContentDeltaEvent'
+          tool_call: '#/components/schemas/TurnStreamToolCallEvent'
+          tool_result: '#/components/schemas/TurnStreamToolResultEvent'
+          usage: '#/components/schemas/TurnStreamUsageEvent'
+          completed: '#/components/schemas/TurnStreamCompletedEvent'
+          error: '#/components/schemas/TurnStreamErrorEvent'
 
     WorkReportType:
       type: string
@@ -4585,50 +4852,6 @@ components:
         success: { type: boolean, const: true }
         data: { $ref: '#/components/schemas/WorkReportStatistics' }
         requestId: { type: [string, 'null'] }
-    ChatStreamToolCallEvent:
-      type: object
-      additionalProperties: false
-      required: [type, toolCallId, name, arguments]
-      properties:
-        type:
-          type: string
-          const: tool_call
-        toolCallId:
-          type: string
-          description: 本次工具调用的稳定标识
-        name:
-          type: string
-          description: 模型请求执行的受控工具名
-        arguments:
-          type: object
-          additionalProperties: true
-          description: 模型生成并经过 API 校验的工具参数
-      description: 模型请求执行一个受控工具；具体是否执行由 API 根据权限、能力和额度决定。
-
-    ChatStreamToolResultEvent:
-      type: object
-      additionalProperties: false
-      required: [type, toolCallId, status]
-      properties:
-        type:
-          type: string
-          const: tool_result
-        toolCallId:
-          type: string
-          description: 对应 ChatStreamToolCallEvent 中的 toolCallId
-        status:
-          type: string
-          enum: [completed, failed, rejected]
-          description: 工具执行结果状态
-        resourceId:
-          type: [string, 'null']
-          description: 工具执行生成的正式资源 ID，例如图片资源 ID
-        resourceUrl:
-          type: [string, 'null']
-          description: 工具执行生成的资源短期访问 URL
-        error:
-          $ref: '#/components/schemas/ChatStreamErrorDetail'
-      description: 工具执行完成、失败或被 API 拒绝时发送的事件。
 
     DashboardProjectMetrics:
       type: object

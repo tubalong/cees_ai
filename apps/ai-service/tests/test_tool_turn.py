@@ -137,15 +137,22 @@ def test_tool_turn_stream_returns_tool_calls_event() -> None:
     events = parse_sse_events(response.text)
     assert [name for name, _data in events] == [
         "started",
+        "status",
         "tool_calls",
         "usage",
         "completed",
     ]
-    assert events[1][1]["tool_calls"] == [
+    assert events[1][1]["execution"] == {
+        "profile": "tool",
+        "provider": "openai_compatible",
+        "model": "openai_compatible-model",
+        "fallback_count": 0,
+    }
+    assert events[2][1]["tool_calls"] == [
         {
             "id": "call_1",
             "name": "generate_image",
             "arguments": {"prompt": "a cat"},
         }
     ]
-    assert events[2][1]["token_usage"]["total_tokens"] == 14
+    assert events[3][1]["token_usage"]["total_tokens"] == 14

@@ -34,4 +34,4 @@ FastAPI `/docs` 直接展示生成的 OpenAPI JSON；测试会另外根据 Pytho
 ```text
 pnpm contracts:gen
 ```
-生成目录禁止手改。`packages/api-client/src/chat-stream.ts` 是公开 POST SSE 的维护型扩展，不是生成物。契约相关 PR 必须由契约负责人评审。
+生成目录禁止手改。契约相关 PR 必须由契约负责人评审。

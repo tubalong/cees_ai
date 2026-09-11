@@ -1,5 +1,7 @@
 import { NotFoundException } from '@nestjs/common';
-import { DocumentVisibility, ResourceType } from '@prisma/client';
+import { AuditOutcome, DocumentVisibility, DraftStatus, ResourceType } from '@prisma/client';
+import type { ComposeDocumentResponse } from '@cees/ai-service-client';
+import { AiServiceGateway } from '../ai-orchestration/ai-service-gateway.service';
 import { PrismaService } from '../database/prisma.service';
 import { ManagedDocumentWithAccess, ResourceAccessService } from '../resource/resource-access.service';
 import { TenantContext } from '../tenant/tenant-context';
@@ -97,6 +99,90 @@ describe('DocumentService', () => {
             data: expect.objectContaining({ action: 'DOCUMENT_DELETED' }),
         });
     });
+
+    it('composes via ai-service and persists Resource, Document, AIActionDraft and audit in one transaction', async () => {
+        const prisma = createPrismaMock();
+        const gateway = { composeDocument: jest.fn().mockResolvedValue(composeResponse()) };
+        const service = createService(prisma, createAccessMock(), gateway);
+
+        const result = await service.createGeneratedDocument({
+            tenantId: TENANT_ID,
+            userId: USER_ID,
+            membershipId: MEMBERSHIP_ID,
+            requestId: 'request-id',
+            turnId: 'turn-id',
+            toolCallId: 'tool-call-id',
+            instruction: '写一份项目周报',
+            visibility: DocumentVisibility.PRIVATE,
+        });
+
+        expect(gateway.composeDocument).toHaveBeenCalledWith(expect.objectContaining({
+            request_id: 'request-id',
+            instruction: '写一份项目周报',
+            source_materials: [],
+            document_options: expect.objectContaining({ generation_mode: 'fast', locale: 'zh-CN' }),
+        }), expect.objectContaining({ toolCallId: 'tool-call-id' }));
+        expect(prisma.resource.create).toHaveBeenCalledWith({
+            data: expect.objectContaining({ type: ResourceType.DOCUMENT, ownerMembershipId: MEMBERSHIP_ID }),
+        });
+        expect(prisma.managedDocument.create).toHaveBeenCalledWith({
+            data: expect.objectContaining({
+                title: '项目周报',
+                content: expect.stringContaining('# 项目周报') as unknown,
+                visibility: DocumentVisibility.PRIVATE,
+            }),
+        });
+        expect(prisma.aIActionDraft.create).toHaveBeenCalledWith({
+            data: expect.objectContaining({
+                actionType: 'ai.document.generate',
+                status: DraftStatus.EXECUTED,
+                toolCallId: 'tool-call-id',
+                executedResourceType: 'DOCUMENT',
+            }),
+        });
+        expect(prisma.auditLog.create).toHaveBeenCalledWith({
+            data: expect.objectContaining({ action: 'DOCUMENT_GENERATED', outcome: AuditOutcome.SUCCESS }),
+        });
+        expect(result).toEqual(expect.objectContaining({
+            title: '项目周报',
+            provider: 'openai_compatible',
+            model: 'doc-model',
+        }));
+    });
+
+    it('replays the persisted document for the same tool_call_id without composing again', async () => {
+        const prisma = createPrismaMock();
+        prisma.aIActionDraft.findFirst.mockResolvedValue({
+            executedResourceId: DOCUMENT_ID,
+            payload: { provider: 'openai_compatible', model: 'doc-model' },
+        });
+        prisma.managedDocument.findFirst.mockResolvedValue({
+            id: DOCUMENT_ID,
+            title: '项目周报',
+            content: '# 项目周报',
+        });
+        const gateway = { composeDocument: jest.fn() };
+        const service = createService(prisma, createAccessMock(), gateway);
+
+        const result = await service.createGeneratedDocument({
+            tenantId: TENANT_ID,
+            userId: USER_ID,
+            membershipId: MEMBERSHIP_ID,
+            requestId: 'request-id',
+            turnId: 'turn-id',
+            toolCallId: 'tool-call-id',
+            instruction: '写一份项目周报',
+            visibility: DocumentVisibility.PRIVATE,
+        });
+
+        expect(gateway.composeDocument).not.toHaveBeenCalled();
+        expect(result).toEqual(expect.objectContaining({
+            documentId: DOCUMENT_ID,
+            title: '项目周报',
+            provider: 'openai_compatible',
+            model: 'doc-model',
+        }));
+    });
 });
 
 const TENANT_ID = '10000000-0000-0000-0000-000000000001';
@@ -107,7 +193,7 @@ const DOCUMENT_ID = '70000000-0000-0000-0000-000000000001';
 const SECOND_DOCUMENT_ID = '70000000-0000-0000-0000-000000000002';
 const NOW = new Date('2026-09-07T00:00:00.000Z');
 
-function createService(prisma: Record<string, any>, access: Record<string, any>): DocumentService {
+function createService(prisma: Record<string, any>, access: Record<string, any>, gateway: Record<string, any> = { composeDocument: jest.fn() }): DocumentService {
     const tenantContext = {
         require: jest.fn().mockReturnValue({
             tenantId: TENANT_ID,
@@ -129,6 +215,7 @@ function createService(prisma: Record<string, any>, access: Record<string, any>)
         prisma as unknown as PrismaService,
         tenantContext,
         access as unknown as ResourceAccessService,
+        gateway as unknown as AiServiceGateway,
     );
 }
 
@@ -149,6 +236,7 @@ function createPrismaMock(): Record<string, any> {
             findMany: jest.fn(),
             updateMany: jest.fn(),
         },
+        aIActionDraft: { create: jest.fn(), findFirst: jest.fn() },
         resourceAcl: { updateMany: jest.fn() },
         auditLog: { create: jest.fn() },
         $transaction: jest.fn(),
@@ -185,4 +273,35 @@ function documentRecord(overrides: Record<string, unknown> = {}): ManagedDocumen
         },
         ...overrides,
     } as ManagedDocumentWithAccess;
+}
+
+function composeResponse(): ComposeDocumentResponse {
+    return {
+        request_id: 'request-id',
+        document: {
+            schema_version: '1.0',
+            title: '项目周报',
+            subtitle: null,
+            sections: [
+                {
+                    heading: '本周进展',
+                    level: 1,
+                    blocks: [
+                        { type: 'paragraph', text: '完成工具循环接入。' },
+                        { type: 'bullet_list', items: ['图片生成', '文档生成'] },
+                    ],
+                },
+            ],
+            source_refs: [],
+        },
+        execution: {
+            profile: 'primary',
+            provider: 'openai_compatible',
+            model: 'doc-model',
+            fallback_count: 0,
+            latency_ms: 120,
+            finish_reason: 'stop',
+            token_usage: { input_tokens: 10, output_tokens: 20, total_tokens: 30 },
+        },
+    };
 }

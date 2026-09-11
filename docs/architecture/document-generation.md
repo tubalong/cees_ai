@@ -1,6 +1,6 @@
 # 通用文档生成
 
-> 状态：MVP 实现设计。本文定义 ai-service 的领域无关文档组合与 DOCX 渲染能力，不定义周报、简报等业务流程。
+> 状态：MVP 已实现。本文定义 ai-service 的领域无关文档组合与 DOCX 渲染能力，不定义周报、简报等业务流程；NestJS 侧的正式资源落地链路（generate_document 工具 → compose 生成 DocumentSpec → Markdown 落库 → ManagedDocument/AIActionDraft/审计）已随 AI 助手工具循环落地（2026-09-11），见 [AI 助手工具循环](assistant-tool-loop.md)。
 
 ## 1. 目标与边界
 
@@ -84,3 +84,12 @@ Schema 禁止额外字段并限制章节、块、表格与文本长度。表格�
 - 生成文件可由 `python-docx` 重新打开，标题、章节、列表和表格内容正确；
 - 不存在的 `source_refs` 和列数不一致的表格被拒绝；
 - 三个接口均验证内部 Token，契约生成物无漂移。
+
+## 8. NestJS 侧落地说明（2026-09-11）
+
+- 公开入口是 `generate_document` 工具执行器（`apps/api/src/assistant/tools/executors/generate-document.tool.ts`），经 ToolRegistry/ToolPolicy 批准后调用 `DocumentService.createGeneratedDocument`，无独立公开 HTTP 接口；
+- `DocumentService`（`apps/api/src/document`）新增 AI 生成链路：网关 `composeDocument` 调用 `POST /internal/v1/documents/compose`（固定 `generation_mode=fast`、`locale=zh-CN`）→ NestJS 把 `DocumentSpec` 序列化为 Markdown 文本 → 同一事务内写 Resource(DOCUMENT)、ManagedDocument、AIActionDraft（`status=EXECUTED`，actionType 与权限码一致的 `ai.document.generate`）、AuditLog（`DOCUMENT_GENERATED`）→ 返回文档 ID 给 ToolResult；
+- 幂等以 `tool_call_id` 为边界：重复执行直接回放已落库文档，不重复生成；
+- AI 生成文档与手工创建文档同构（同一张 `managed_documents` 表、同一 Resource 归属与 ACL 语义），读取/修改/删除沿用既有 `GET/PATCH/DELETE /documents/:documentId` 与 `document.read/update/delete` 权限；
+- 权限码 `ai.document.generate`（调用 AI 生成文档）与既有 RBAC 权限同体系，由管理员经角色授予；
+- 暂未接入：DOCX 渲染导出（render-docx/generate-docx）、`quality` 规划模式、`source_materials` 材料上传（工具执行器固定传空列表）。
