@@ -52,7 +52,7 @@ paths:
               example:
                 status: ready
                 service: ai-service
-                configured_roles: [default, structured, reasoning, rag]
+                configured_roles: [default, structured, reasoning, rag, orchestrator]
                 configured_chat_modes: [standard, ultra]
                 errors: []
         "503":
@@ -423,6 +423,84 @@ paths:
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
 
+  /internal/v1/images/preview:
+    get:
+      tags: [images]
+      operationId: previewImage
+      summary: Preview a generated image as raw bytes
+      description: |
+        Convenience endpoint that returns the generated image bytes directly so
+        the image can be viewed in a browser tab. It does not persist anything
+        and does not return execution metadata.
+      security:
+        - internalToken: []
+      parameters:
+        - name: prompt
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 8000
+        - name: size
+          in: query
+          required: false
+          schema:
+            type: string
+            pattern: "^(auto|[1-9][0-9]*x[1-9][0-9]*)$"
+            default: "1024x1024"
+        - name: quality
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [standard, high]
+            default: standard
+        - name: response_format
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [png, jpeg, webp]
+            default: png
+        - name: token
+          in: query
+          required: false
+          description: >-
+            Internal token for direct browser preview. Prefer the
+            X-AI-Internal-Token header; this query parameter exists only so the
+            image can be opened in a plain browser tab without custom headers.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Generated image bytes
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/webp:
+              schema:
+                type: string
+                format: binary
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "502":
+          $ref: "#/components/responses/InvalidProviderOutput"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
   /internal/v1/documents/compose:
     post:
       tags: [documents]
@@ -614,7 +692,7 @@ components:
             type: string
     ModelRole:
       type: string
-      enum: [default, structured, reasoning, rag]
+      enum: [default, structured, reasoning, rag, orchestrator]
     MessageRole:
       type: string
       enum: [system, user, assistant]
@@ -1218,8 +1296,13 @@ components:
           maxLength: 8000
         size:
           type: [string, "null"]
-          enum: ["1024x1024", "1536x1024", "1024x1536", "auto"]
+          pattern: "^(auto|[1-9][0-9]*x[1-9][0-9]*)$"
           default: "1024x1024"
+          description: >-
+            Requested image size as WIDTHxHEIGHT in pixels, or "auto" to let the
+            model choose. Accepted values depend on the configured model. This is
+            a hint only; the model may return different dimensions, which are
+            reported in execution.width and execution.height when parseable.
         quality:
           type: [string, "null"]
           enum: [standard, high]
@@ -1246,6 +1329,14 @@ components:
         latency_ms:
           type: integer
           minimum: 0
+        width:
+          type: [integer, "null"]
+          minimum: 0
+          description: Actual image width in pixels when the returned bytes could be parsed.
+        height:
+          type: [integer, "null"]
+          minimum: 0
+          description: Actual image height in pixels when the returned bytes could be parsed.
         token_usage:
           $ref: "#/components/schemas/TokenUsage"
 

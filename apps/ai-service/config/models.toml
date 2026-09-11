@@ -16,7 +16,7 @@ structured_output_method = "function_calling"
 [profiles.primary]
 enabled = true
 provider = "deepseek"
-model = "deepseek-v4-flash"
+model = "deepseek-v4-pro"
 base_url = "https://api.deepseek.com"
 api_key_env = "PRIMARY_LLM_API_KEY"
 modes = ["text", "json_schema"]
@@ -29,10 +29,10 @@ max_retries = 2
 structured_output_method = "function_calling"
 
 [profiles.backup]
-enabled = false
-provider = "openai_compatible"
-model = "change_me"
-base_url = "https://change_me/v1"
+enabled = true
+provider = "deepseek"
+model = "deepseek-v4-flash"
+base_url = "https://api.deepseek.com"
 api_key_env = "BACKUP_LLM_API_KEY"
 modes = ["text", "json_schema"]
 capabilities = ["chat", "tool_calling"]
@@ -64,15 +64,24 @@ context_budget_tokens = 131072
 emit_reasoning_status = true
 
 [image_profiles.mock]
-enabled = true
+enabled = false
 provider = "mock"
 model = "mock-image-v1"
 timeout_seconds = 30.0
 max_retries = 0
 
+[image_profiles.primary]
+enabled = true
+provider = "openai_compatible"
+model = "gpt-image-2"
+base_url = "https://www.aikeyhub.top/v1"
+api_key_env = "IMAGE_GEN_API_KEY"
+timeout_seconds = 60.0
+max_retries = 2
+
 [roles]
-default = ["primary"]
-structured = ["primary"]
-reasoning = ["primary"]
-rag = ["primary"]
+default = ["primary", "backup"]
+structured = ["primary", "backup"]
+reasoning = ["primary", "backup"]
+rag = ["primary", "backup"]
 orchestrator = ["primary"]

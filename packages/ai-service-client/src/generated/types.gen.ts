@@ -17,7 +17,7 @@ export type ReadinessResponse = {
     errors: Array<string>;
 };
 
-export type ModelRole = 'default' | 'structured' | 'reasoning' | 'rag';
+export type ModelRole = 'default' | 'structured' | 'reasoning' | 'rag' | 'orchestrator';
 
 export type MessageRole = 'system' | 'user' | 'assistant';
 
@@ -294,7 +294,10 @@ export type ImageGenerateRequest = {
     tenant_id: string;
     user_id: string;
     prompt: string;
-    size?: '1024x1024' | '1536x1024' | '1024x1536' | 'auto';
+    /**
+     * Requested image size as WIDTHxHEIGHT in pixels, or "auto" to let the model choose. Accepted values depend on the configured model. This is a hint only; the model may return different dimensions, which are reported in execution.width and execution.height when parseable.
+     */
+    size?: string | null;
     quality?: 'standard' | 'high';
     response_format?: 'png' | 'jpeg' | 'webp';
 };
@@ -305,6 +308,14 @@ export type ImageGenerationMetadata = {
     model: string;
     fallback_count: number;
     latency_ms: number;
+    /**
+     * Actual image width in pixels when the returned bytes could be parsed.
+     */
+    width?: number | null;
+    /**
+     * Actual image height in pixels when the returned bytes could be parsed.
+     */
+    height?: number | null;
     token_usage: TokenUsage;
 };
 
@@ -854,6 +865,60 @@ export type GenerateImageResponses = {
 };
 
 export type GenerateImageResponse = GenerateImageResponses[keyof GenerateImageResponses];
+
+export type PreviewImageData = {
+    body?: never;
+    path?: never;
+    query: {
+        prompt: string;
+        size?: string;
+        quality?: 'standard' | 'high';
+        response_format?: 'png' | 'jpeg' | 'webp';
+        /**
+         * Internal token for direct browser preview. Prefer the X-AI-Internal-Token header; this query parameter exists only so the image can be opened in a plain browser tab without custom headers.
+         */
+        token?: string;
+    };
+    url: '/internal/v1/images/preview';
+};
+
+export type PreviewImageErrors = {
+    /**
+     * Invalid profile or unsupported output mode
+     */
+    400: ErrorResponse;
+    /**
+     * Internal authentication failed
+     */
+    401: ErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ErrorResponse;
+    /**
+     * Unexpected internal service error
+     */
+    500: ErrorResponse;
+    /**
+     * Provider output did not match the requested schema
+     */
+    502: ErrorResponse;
+    /**
+     * Service or configured providers unavailable
+     */
+    503: ErrorResponse;
+};
+
+export type PreviewImageError = PreviewImageErrors[keyof PreviewImageErrors];
+
+export type PreviewImageResponses = {
+    /**
+     * Generated image bytes
+     */
+    200: Blob | File;
+};
+
+export type PreviewImageResponse = PreviewImageResponses[keyof PreviewImageResponses];
 
 export type ComposeDocumentData = {
     body: ComposeDocumentRequest;

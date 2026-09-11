@@ -65,8 +65,70 @@ def test_image_generate_returns_mock_image_and_metadata() -> None:
     assert body["execution"]["profile"] == "mock"
     assert body["execution"]["provider"] == "mock"
     assert body["execution"]["model"] == "mock-image-v1"
+    assert body["execution"]["width"] is None
+    assert body["execution"]["height"] is None
     assert body["execution"]["token_usage"] == {
         "input_tokens": None,
         "output_tokens": None,
         "total_tokens": None,
     }
+
+
+def test_image_generate_accepts_arbitrary_size() -> None:
+    model_catalog = image_catalog()
+    llm_router = LLMRouter(model_catalog, lambda _name, _profile: object())
+    image_router = ImageRouter(model_catalog)
+    client = TestClient(
+        create_app(runtime=ready_runtime(llm_router, model_catalog, image_router=image_router))
+    )
+
+    payload = image_payload()
+    payload["size"] = "256x256"
+
+    with client:
+        response = client.post(
+            "/internal/v1/images/generate",
+            headers={"X-AI-Internal-Token": "secret"},
+            json=payload,
+        )
+
+    assert response.status_code == 200
+    assert response.json()["request_id"] == "req-image-1"
+
+
+def test_image_preview_returns_raw_bytes_with_header_token() -> None:
+    model_catalog = image_catalog()
+    llm_router = LLMRouter(model_catalog, lambda _name, _profile: object())
+    image_router = ImageRouter(model_catalog)
+    client = TestClient(
+        create_app(runtime=ready_runtime(llm_router, model_catalog, image_router=image_router))
+    )
+
+    with client:
+        response = client.get(
+            "/internal/v1/images/preview",
+            params={"prompt": "A cat", "size": "256x256"},
+            headers={"X-AI-Internal-Token": "secret"},
+        )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+    assert response.content == b"mock-image-bytes"
+
+
+def test_image_preview_accepts_query_token() -> None:
+    model_catalog = image_catalog()
+    llm_router = LLMRouter(model_catalog, lambda _name, _profile: object())
+    image_router = ImageRouter(model_catalog)
+    client = TestClient(
+        create_app(runtime=ready_runtime(llm_router, model_catalog, image_router=image_router))
+    )
+
+    with client:
+        response = client.get(
+            "/internal/v1/images/preview",
+            params={"prompt": "A cat", "token": "secret"},
+        )
+
+    assert response.status_code == 200
+    assert response.content == b"mock-image-bytes"

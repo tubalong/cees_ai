@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import base64
+import uuid
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request, Response
 
 from app.api.generated.models import (
     ContentType,
@@ -15,13 +17,19 @@ from app.api.generated.models import (
 )
 from app.core.errors import AIServiceError
 from app.core.runtime import AppRuntime
-from app.core.security import require_internal_token
+from app.core.security import require_internal_token, require_preview_token
+from app.images.dimensions import image_dimensions
 from app.images.router import ImageRouter
 
 router = APIRouter(
     prefix="/internal/v1/images",
     tags=["images"],
     dependencies=[Depends(require_internal_token)],
+)
+
+preview_router = APIRouter(
+    prefix="/internal/v1/images",
+    tags=["images"],
 )
 
 IMAGE_ERROR_RESPONSES = {
@@ -51,6 +59,15 @@ IMAGE_ERROR_RESPONSES = {
     },
 }
 
+PREVIEW_RESPONSE = {
+    "description": "Generated image bytes",
+    "content": {
+        "image/png": {"schema": {"type": "string", "format": "binary"}},
+        "image/jpeg": {"schema": {"type": "string", "format": "binary"}},
+        "image/webp": {"schema": {"type": "string", "format": "binary"}},
+    },
+}
+
 
 @router.post(
     "/generate",
@@ -67,7 +84,7 @@ async def generate_image(
     routed = await image_router.generate(
         request_id=payload.request_id,
         prompt=payload.prompt,
-        size=payload.size.value if payload.size is not None else "1024x1024",
+        size=payload.size if payload.size is not None else "1024x1024",
         quality=payload.quality.value if payload.quality is not None else "standard",
         response_format=(
             payload.response_format.value
@@ -75,6 +92,8 @@ async def generate_image(
             else "png"
         ),
     )
+    dimensions = image_dimensions(routed.data)
+    width, height = dimensions if dimensions is not None else (None, None)
     return ImageGenerateResponse(
         request_id=payload.request_id,
         content_type=_content_type_enum(routed.content_type),
@@ -85,6 +104,8 @@ async def generate_image(
             model=routed.profile.model,
             fallback_count=routed.fallback_count,
             latency_ms=routed.latency_ms,
+            width=width,
+            height=height,
             token_usage=TokenUsage(
                 input_tokens=None,
                 output_tokens=None,
@@ -92,6 +113,37 @@ async def generate_image(
             ),
         ),
     )
+
+
+@preview_router.get(
+    "/preview",
+    response_class=Response,
+    response_model=None,
+    operation_id="previewImage",
+    summary="Preview a generated image as raw bytes",
+    response_description="Generated image bytes",
+    responses={200: PREVIEW_RESPONSE, **IMAGE_ERROR_RESPONSES},
+)
+async def preview_image(
+    request: Request,
+    prompt: Annotated[str, Query(min_length=1, max_length=8000)],
+    size: Annotated[
+        str, Query(pattern=r"^(auto|[1-9][0-9]*x[1-9][0-9]*)$")
+    ] = "1024x1024",
+    quality: Literal["standard", "high"] = "standard",
+    response_format: Literal["png", "jpeg", "webp"] = "png",
+    _: None = Depends(require_preview_token),
+) -> Response:
+    request_id = f"preview-{uuid.uuid4().hex[:8]}"
+    image_router = _require_image_router(request, request_id)
+    routed = await image_router.generate(
+        request_id=request_id,
+        prompt=prompt,
+        size=size,
+        quality=quality,
+        response_format=response_format,
+    )
+    return Response(content=routed.data, media_type=routed.content_type)
 
 
 def _require_image_router(request: Request, request_id: str) -> ImageRouter:
