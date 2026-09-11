@@ -22,7 +22,14 @@
 - 账号不存在时，服务端创建管理员邀请并返回一次性 `invitationToken`。
 - 一次性令牌只在当前弹窗展示，可复制但不写入本地存储或日志。
 - `DELETE /platform/tenants/{tenantId}/administrators/{membershipId}`：取消管理员角色，但保留普通租户成员身份。
+- `POST /platform/tenants/{tenantId}/administrators/{membershipId}/credential-reset`：重置租户管理员租户凭证并签发一次性激活令牌。
 - 最后一名有效租户管理员等限制由服务端强制校验。
+
+### 管理员凭证恢复
+
+平台超级管理员使用平台 Token 和 `platform.tenant.admin.credential.reset` 权限调用凭证重置接口。服务端只允许目标 Membership 仍属于指定租户且拥有 `tenant_admin` 角色；重置会撤销目标成员全部租户 Session、清空旧密码、清除锁定状态、撤销旧待激活邀请，并将成员置为 `PENDING_ACTIVATION`。
+
+接口返回的新 `invitationToken` 只在本次响应中出现，平台管理员应通过受控渠道交付。目标管理员通过 `POST /auth/activate` 自行设置最终密码，平台管理员不接触明文密码。该应急接口允许处理租户唯一的有效管理员，避免唯一管理员忘记密码后无法恢复。
 
 ## 账号编辑边界
 

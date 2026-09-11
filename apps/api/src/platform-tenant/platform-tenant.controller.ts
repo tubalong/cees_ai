@@ -18,6 +18,7 @@ import type { Request } from 'express';
 import { randomUUID } from 'node:crypto';
 import { PlatformAuthenticatedPrincipal } from '../platform-auth/platform-auth.types';
 import { PlatformJwtAuthGuard } from '../platform-auth/platform-jwt-auth.guard';
+import { TenantInvitationCreatedResult } from '../tenant-invitation/tenant-invitation.types';
 import {
     PlatformPermissionGuard,
     RequirePlatformPermissions,
@@ -126,6 +127,22 @@ export class PlatformTenantController {
         @Req() request: PlatformRequest,
     ): Promise<PlatformTenantAdministratorAssignmentResult> {
         return this.platformTenantService.assignAdministrator(tenantId, input, request.user, getRequestMetadata(request));
+    }
+
+    @Post(':tenantId/administrators/:membershipId/credential-reset')
+    @RequirePlatformPermissions('platform.tenant.admin.credential.reset')
+    @ApiCreatedResponse({ description: '租户管理员凭证已重置；激活令牌只在本次响应返回' })
+    resetAdministratorCredential(
+        @Param('tenantId', new ParseUUIDPipe()) tenantId: string,
+        @Param('membershipId', new ParseUUIDPipe()) membershipId: string,
+        @Req() request: PlatformRequest,
+    ): Promise<TenantInvitationCreatedResult> {
+        return this.platformTenantService.resetAdministratorCredential(
+            tenantId,
+            membershipId,
+            request.user,
+            getRequestMetadata(request),
+        );
     }
 
     @Delete(':tenantId/administrators/:membershipId')

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CEES AI API
-  version: 0.18.0
+  version: 0.19.0
   description: 以本文件为唯一事实源的公开 API 契约。资源与操作按 docs/api 约定补充。
 
 servers:
@@ -2574,6 +2574,40 @@ paths:
           description: 已取消租户管理员角色
         "409":
           description: 不能移除最后一名有效租户管理员
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /platform/tenants/{tenantId}/administrators/{membershipId}/credential-reset:
+    post:
+      summary: 重置租户管理员凭证并签发一次性激活令牌
+      operationId: platformTenantResetAdministratorCredential
+      tags: [Platform Tenant]
+      security:
+        - platformBearerAuth: []
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: path
+          name: membershipId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "201":
+          description: 凭证已重置；激活令牌只在本次响应返回
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantInvitationCreatedResponseEnvelope"
+        "404":
+          description: 租户或租户管理员不存在
           content:
             application/json:
               schema:

@@ -1,4 +1,5 @@
-import { TenantInvitationStatus, TenantStatus } from '@prisma/client';
+import { MembershipStatus, TenantInvitationStatus, TenantStatus, UserStatus } from '@prisma/client';
+import { TENANT_ADMIN_ROLE_CODE } from '../rbac/permission-catalog';
 import { PrismaService } from '../database/prisma.service';
 import { PlatformAuthenticatedPrincipal } from '../platform-auth/platform-auth.types';
 import { PlatformTenantService } from './platform-tenant.service';
@@ -42,6 +43,50 @@ describe('PlatformTenantService', () => {
             data: expect.objectContaining({ action: 'TENANT_CREATED' }),
         });
     });
+
+    it('resets a tenant administrator credential with a new activation invitation', async () => {
+        const prisma = createPrismaMock();
+        prisma.tenant.findFirst.mockResolvedValue(tenantRecord());
+        prisma.tenantMembership.findFirst.mockResolvedValue(administratorMemberRecord());
+        prisma.authSession.updateMany.mockResolvedValue({ count: 1 });
+        prisma.tenantInvitation.updateMany.mockResolvedValue({ count: 1 });
+        prisma.tenantMembership.update.mockResolvedValue({});
+        prisma.tenantInvitation.create.mockResolvedValue(invitationRecord());
+
+        const service = new PlatformTenantService(prisma as unknown as PrismaService);
+        const result = await service.resetAdministratorCredential(
+            TENANT_ID,
+            MEMBERSHIP_ID,
+            principal(),
+            { requestId: 'request-id' },
+        );
+
+        expect(result.invitationToken).toEqual(expect.any(String));
+        expect(prisma.authSession.updateMany).toHaveBeenCalledWith({
+            where: { tenantId: TENANT_ID, membershipId: MEMBERSHIP_ID, revokedAt: null },
+            data: { revokedAt: expect.any(Date) },
+        });
+        expect(prisma.tenantMembership.update).toHaveBeenCalledWith({
+            where: { id: MEMBERSHIP_ID },
+            data: expect.objectContaining({
+                status: MembershipStatus.PENDING_ACTIVATION,
+                passwordHash: null,
+            }),
+        });
+        expect(prisma.tenantInvitation.create).toHaveBeenCalledWith(expect.objectContaining({
+            data: expect.objectContaining({
+                targetMembershipId: MEMBERSHIP_ID,
+                invitedByUserId: principal().id,
+            }),
+        }));
+        expect(prisma.platformAuditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+            data: expect.objectContaining({
+                action: 'TENANT_ADMIN_CREDENTIAL_RESET',
+                resourceType: 'TENANT_MEMBERSHIP',
+                resourceId: MEMBERSHIP_ID,
+            }),
+        }));
+    });
 });
 
 const TENANT_ID = '10000000-0000-0000-0000-000000000001';
@@ -56,14 +101,29 @@ function createPrismaMock(): Record<string, any> {
         permission: { upsert: jest.fn() },
         role: { upsert: jest.fn() },
         rolePermission: { createMany: jest.fn() },
-        tenantMembership: { count: jest.fn() },
-        tenantInvitation: { create: jest.fn(), count: jest.fn() },
+        tenantMembership: { count: jest.fn(), findFirst: jest.fn(), update: jest.fn() },
+        tenantInvitation: { create: jest.fn(), count: jest.fn(), updateMany: jest.fn() },
+        authSession: { updateMany: jest.fn() },
         platformAuditLog: { create: jest.fn() },
         auditLog: { create: jest.fn() },
         $transaction: jest.fn(),
     };
     prisma.$transaction.mockImplementation(async (callback: (transaction: Record<string, any>) => Promise<unknown>) => callback(prisma));
     return prisma;
+}
+
+function administratorMemberRecord(): Record<string, unknown> {
+    return {
+        id: MEMBERSHIP_ID,
+        tenantId: TENANT_ID,
+        account: 'companyadmin',
+        normalizedAccount: 'companyadmin',
+        displayName: 'Company Administrator',
+        passwordHash: 'old-hash',
+        status: MembershipStatus.ACTIVE,
+        user: { id: USER_ID, displayName: 'Company Administrator', status: UserStatus.ACTIVE, deletedAt: null },
+        membershipRoles: [{ roleId: ROLE_ID, role: { code: TENANT_ADMIN_ROLE_CODE, deletedAt: null } }],
+    };
 }
 
 function tenantRecord(): Record<string, unknown> {

@@ -2,7 +2,7 @@
 
 > 状态：按当前实现整理  
 > 最后同步：2026-09-11
-> 公开契约版本：`0.18.0`
+> 公开契约版本：`0.19.0`
 > 事实源：`packages/contracts/openapi/openapi.yaml`、`apps/api/prisma/schema.prisma`
 
 ## 1. 文档用途
@@ -10,7 +10,7 @@
 本文面向本地开发、接口联调、产品验收和数据库排查，统一说明：
 
 - 平台超级管理员、租户管理员和普通成员的区别；
-- 当前已经实现的 135 个 HTTP 操作；
+- 当前已经实现的 136 个 HTTP 操作；
 - 路径参数、查询参数和 JSON 请求体字段的含义；
 - PostgreSQL 中 44 张业务表、528 个业务字段及 Prisma 迁移表的用途；
 - 租户创建、成员激活、登录、授权、资源访问、审计、停用和恢复的整体流转；
@@ -24,7 +24,7 @@
 | --- | --- | --- |
 | 平台管理员认证 | 已实现 | 独立账号、JWT、Refresh Token 和 Session |
 | 本人密码修改 | 已实现 | 租户成员与平台管理员校验当前密码后修改，并撤销其他会话 |
-| 平台租户管理 | 已实现 | 创建、查询、修改、停用、恢复和租户管理员维护 |
+| 平台租户管理 | 已实现 | 创建、查询、修改、停用、恢复、租户管理员维护和管理员凭证重置 |
 | 租户成员认证 | 已实现 | `tenantCode + account + password` 登录、刷新、退出和身份查询 |
 | 用户个人资料 | 已实现 | 查询当前租户资料并由成员自行修改展示名 |
 | 成员邀请与激活 | 已实现 | 一次性激活令牌、账号建议、账号修改和凭证重置 |
@@ -375,6 +375,7 @@ pnpm --filter @cees/api dev
 | `POST /platform/tenants/{tenantId}/restore` | 在存在有效管理员时恢复租户 | 路径 ID + `VersionRequest` | 恢复后的租户 | `platform.tenant.restore` |
 | `GET /platform/tenants/{tenantId}/administrators` | 查询租户管理员成员 | `tenantId` | 管理员列表 | `platform.tenant.admin.read` |
 | `POST /platform/tenants/{tenantId}/administrators` | 将现有成员设为管理员，或创建管理员邀请 | 路径 ID + `AssignPlatformTenantAdministratorRequest` | `ASSIGNED` 或 `INVITED` | `platform.tenant.admin.assign` |
+| `POST /platform/tenants/{tenantId}/administrators/{membershipId}/credential-reset` | 重置租户管理员凭证并签发一次性激活令牌 | 两个路径 ID | `TenantInvitationCreated` | `platform.tenant.admin.credential.reset` |
 | `DELETE /platform/tenants/{tenantId}/administrators/{membershipId}` | 取消成员的租户管理员角色 | 两个路径 ID | `204` | `platform.tenant.admin.remove` |
 | `GET /platform/audit-events` | 查询平台域审计 | `action/outcome/limit/cursor` | 平台审计列表 | `platform.audit.read` |
 | `GET /platform/audit-events/{auditEventId}` | 查询平台审计详情 | `auditEventId` | 平台审计详情 | `platform.audit.read` |
@@ -2873,3 +2874,14 @@ Content-Type: application/json
 - 数据库迁移为 `0012_dashboard_workbench`，只新增权限和角色权限关系，不新增业务表；
 - 公开契约版本由 `0.17.0` 提升为 `0.18.0`，`packages/api-client` 已重新生成；
 - 自定义看板布局、跨租户平台看板、报表导出和历史趋势快照暂不实现。
+
+## 33. `0.19.0` 平台超级管理员重置租户管理员凭证说明
+
+- 新增 `POST /platform/tenants/{tenantId}/administrators/{membershipId}/credential-reset`；
+- 平台超级管理员只能重置指定租户内实际拥有 `tenant_admin` 角色的成员；
+- 重置会撤销目标成员当前租户下全部 Session、清空旧密码、清除锁定状态，并将成员置为 `PENDING_ACTIVATION`；
+- 服务端签发新的独立一次性激活令牌，最终密码由租户管理员本人通过 `POST /auth/activate` 设置，平台超级管理员不会接触明文密码；
+- 旧的待激活令牌会被撤销，新的激活令牌只在本次响应中返回，明文令牌不会进入平台或租户审计日志；
+- 平台重置允许处理租户当前唯一的有效管理员，用于管理员账号恢复；重置操作本身会写入平台审计和目标租户审计；
+- 本次不新增数据库表或字段，也不需要 Prisma migration；平台权限由平台权限白名单控制；
+- 修改契约后已经重新生成 `packages/api-client`，公开契约版本由 `0.18.0` 提升为 `0.19.0`。
