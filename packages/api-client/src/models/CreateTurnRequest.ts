@@ -2,14 +2,12 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
-export type ChatAssistantMessage = {
+import type { ChatMode } from './ChatMode';
+export type CreateTurnRequest = {
     /**
-     * 固定为 assistant
-     */
-    role: string;
-    /**
-     * AI 回答正文，由客户端保存到本地会话历史
+     * 本轮 user 消息正文；历史消息与摘要由服务端加载
      */
     content: string;
+    mode?: ChatMode;
 };
 

@@ -2,7 +2,7 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
-export type ChatStreamErrorDetail = {
+export type TurnErrorDetail = {
     /**
      * 稳定错误码
      */

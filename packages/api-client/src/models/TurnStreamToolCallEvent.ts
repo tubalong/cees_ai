@@ -5,8 +5,12 @@
 /**
  * 模型请求执行一个受控工具；具体是否执行由 API 根据权限、能力和额度决定。
  */
-export type ChatStreamToolCallEvent = {
+export type TurnStreamToolCallEvent = {
     type: 'tool_call';
+    /**
+     * 轮次内递增的事件序号
+     */
+    seq: number;
     /**
      * 本次工具调用的稳定标识
      */

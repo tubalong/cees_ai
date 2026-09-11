@@ -2,10 +2,10 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
-import type { ChatInvokeResult } from './ChatInvokeResult';
-export type ChatInvokeResponseEnvelope = {
+import type { ConversationListResult } from './ConversationListResult';
+export type ConversationListResponseEnvelope = {
     success: boolean;
-    data: ChatInvokeResult;
+    data: ConversationListResult;
     /**
      * 公开 API 请求追踪 ID
      */

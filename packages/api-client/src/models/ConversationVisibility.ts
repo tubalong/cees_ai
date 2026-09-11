@@ -3,9 +3,8 @@
 /* tslint:disable */
 /* eslint-disable */
 /**
- * 本地对话消息角色
+ * 会话可见性；当前仅支持成员私有
  */
-export enum ChatMessageRole {
-    USER = 'user',
-    ASSISTANT = 'assistant',
+export enum ConversationVisibility {
+    PRIVATE = 'PRIVATE',
 }

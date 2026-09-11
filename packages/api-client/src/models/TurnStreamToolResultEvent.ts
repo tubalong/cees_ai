@@ -2,20 +2,23 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
-import type { ChatStreamErrorDetail } from './ChatStreamErrorDetail';
 /**
  * 工具执行完成、失败或被 API 拒绝时发送的事件。
  */
-export type ChatStreamToolResultEvent = {
+export type TurnStreamToolResultEvent = {
     type: 'tool_result';
     /**
-     * 对应 ChatStreamToolCallEvent 中的 toolCallId
+     * 轮次内递增的事件序号
+     */
+    seq: number;
+    /**
+     * 对应 TurnStreamToolCallEvent 中的 toolCallId
      */
     toolCallId: string;
     /**
      * 工具执行结果状态
      */
-    status: ChatStreamToolResultEvent.status;
+    status: TurnStreamToolResultEvent.status;
     /**
      * 工具执行生成的正式资源 ID，例如图片资源 ID
      */
@@ -24,9 +27,12 @@ export type ChatStreamToolResultEvent = {
      * 工具执行生成的资源短期访问 URL
      */
     resourceUrl?: string | null;
-    error?: ChatStreamErrorDetail;
+    /**
+     * 工具失败或被拒绝时的错误信息
+     */
+    error?: any | null;
 };
-export namespace ChatStreamToolResultEvent {
+export namespace TurnStreamToolResultEvent {
     /**
      * 工具执行结果状态
      */

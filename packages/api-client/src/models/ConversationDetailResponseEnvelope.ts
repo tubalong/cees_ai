@@ -2,10 +2,10 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
-import type { ChatCompactResult } from './ChatCompactResult';
-export type ChatCompactResponseEnvelope = {
+import type { ConversationDetail } from './ConversationDetail';
+export type ConversationDetailResponseEnvelope = {
     success: boolean;
-    data: ChatCompactResult;
+    data: ConversationDetail;
     /**
      * 公开 API 请求追踪 ID
      */

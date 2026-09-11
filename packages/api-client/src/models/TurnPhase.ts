@@ -5,7 +5,7 @@
 /**
  * 当前只公开推理中、回答中或工具执行中阶段，不公开模型原始推理正文
  */
-export enum ChatStreamPhase {
+export enum TurnPhase {
     REASONING = 'reasoning',
     ANSWERING = 'answering',
     TOOL_EXECUTING = 'tool_executing',
