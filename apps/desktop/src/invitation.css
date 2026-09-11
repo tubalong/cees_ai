@@ -1,0 +1,58 @@
+.invitation-loading {
+    min-height: 220px;
+    display: grid;
+    place-items: center;
+}
+
+.invitation-list {
+    min-height: 280px;
+}
+
+.invitation-list>.ant-empty {
+    margin: 70px 0;
+}
+
+.invitation-row {
+    min-height: 64px;
+    display: grid;
+    grid-template-columns: minmax(150px, 1fr) minmax(150px, 1fr) 130px 36px;
+    align-items: center;
+    gap: 12px;
+    border-bottom: 1px solid #edf0f4;
+    color: #616979;
+    font-size: 12px;
+}
+
+.invitation-row strong,
+.invitation-row small {
+    display: block;
+}
+
+.invitation-row strong {
+    color: #202432;
+}
+
+.invitation-row small {
+    margin-top: 3px;
+    color: #9299a8;
+    font-size: 10px;
+}
+
+.invitation-form {
+    max-width: 560px;
+    padding-top: 8px;
+}
+
+.account-suggestion-field {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+}
+
+.invitation-submit {
+    margin-top: 18px;
+}
+
+.invitation-tenant-notice {
+    margin-bottom: 12px;
+}

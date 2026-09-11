@@ -1,0 +1,140 @@
+.profile-page-loading {
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+}
+
+.profile-identity-panel {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    padding: 22px;
+    border: 1px solid #e5e8ee;
+    border-radius: 8px;
+    background: #fff;
+}
+
+.profile-identity-panel h2,
+.profile-identity-panel p {
+    margin: 0;
+}
+
+.profile-identity-panel h2 {
+    font-size: 20px;
+}
+
+.profile-identity-panel p {
+    margin: 4px 0 8px;
+    color: #7f8796;
+    font-size: 12px;
+}
+
+.profile-settings-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(320px, .8fr);
+    gap: 16px;
+    margin-top: 16px;
+}
+
+.profile-setting-panel {
+    min-height: 430px;
+    padding: 22px;
+    border: 1px solid #e5e8ee;
+    border-radius: 8px;
+    background: #fff;
+}
+
+.personalization-panel {
+    grid-column: 1 / -1;
+    min-height: auto;
+}
+
+.preference-setting-row {
+    min-height: 72px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    padding: 12px 0;
+    border-top: 1px solid var(--app-border, #e5e8ee);
+}
+
+.preference-setting-row:first-of-type {
+    border-top: 0;
+}
+
+.preference-setting-row strong,
+.preference-setting-row small {
+    display: block;
+}
+
+.preference-setting-row strong {
+    font-size: var(--preference-font-label, 14px);
+}
+
+.preference-setting-row small {
+    margin-top: 4px;
+    color: #8b92a1;
+    font-size: 10px;
+}
+
+.preference-setting-row .ant-segmented {
+    min-width: 310px;
+}
+
+.profile-setting-heading {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 22px;
+}
+
+.profile-setting-heading>i {
+    width: 40px;
+    height: 40px;
+    display: grid;
+    place-items: center;
+    color: #565cf6;
+    border-radius: 7px;
+    background: #eef0ff;
+    font-size: 20px;
+    font-style: normal;
+}
+
+.profile-setting-heading h2,
+.profile-setting-heading p {
+    margin: 0;
+}
+
+.profile-setting-heading h2 {
+    font-size: 15px;
+}
+
+.profile-setting-heading p {
+    margin-top: 3px;
+    color: #8b92a1;
+    font-size: 11px;
+}
+
+.security-panel dl {
+    margin: 18px 0;
+    padding: 12px 14px;
+    border-radius: 7px;
+    background: #f8f9fb;
+}
+
+.security-panel dl div {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 0;
+    font-size: 11px;
+}
+
+.security-panel dt {
+    color: #8b92a1;
+}
+
+.security-panel dd {
+    margin: 0;
+}

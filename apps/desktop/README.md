@@ -16,6 +16,13 @@ Electron 主进程、preload、Vite 渲染入口与 TypeScript 配置已经落�
 开发启动：
 
 ```text
+cd apps/desktop
+npm run dev
+```
+
+也可以从仓库根目录执行：
+
+```text
 pnpm --filter @cees/desktop dev
 ```
 

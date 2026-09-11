@@ -1,0 +1,365 @@
+button,
+input {
+    font: inherit;
+}
+
+.login-page {
+    min-height: 100vh;
+    display: grid;
+    grid-template-columns: minmax(440px, 1.06fr) minmax(520px, .94fr);
+    background: #fff;
+}
+
+.login-intro {
+    position: relative;
+    min-height: 100vh;
+    overflow: hidden;
+    padding: 36px clamp(40px, 5vw, 76px);
+    background:
+        linear-gradient(rgba(255, 255, 255, .72), rgba(255, 255, 255, .72)),
+        repeating-linear-gradient(0deg, transparent 0 31px, rgba(86, 93, 140, .045) 31px 32px),
+        #f2f5fc;
+}
+
+.login-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 18px;
+}
+
+.brand-logo {
+    position: relative;
+    width: 32px;
+    height: 32px;
+    flex: 0 0 32px;
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    border-radius: 7px;
+}
+
+.brand-logo img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    background: #fff;
+}
+
+.brand-logo-fallback {
+    width: 100%;
+    height: 100%;
+    display: grid;
+    place-items: center;
+    color: #fff;
+    background: #565cf6;
+    font-weight: 700;
+}
+
+.intro-copy {
+    position: relative;
+    z-index: 1;
+    margin-top: clamp(90px, 14vh, 150px);
+}
+
+.intro-copy h1.ant-typography {
+    margin: 0;
+    color: #202231;
+    font-size: 64px;
+    line-height: 1.08;
+    font-weight: 700;
+}
+
+.intro-subtitle.ant-typography {
+    margin: 22px 0 46px;
+    color: #535bff;
+    font-size: 19px;
+    font-weight: 600;
+}
+
+.benefit-list {
+    display: grid;
+    gap: 20px;
+    margin: 0;
+    padding: 0;
+    color: #596173;
+    font-size: 15px;
+    list-style: none;
+}
+
+.benefit-list li {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.benefit-list .anticon {
+    color: #5b60f6;
+}
+
+.intro-art {
+    position: absolute;
+    right: 8%;
+    bottom: 8%;
+    width: 310px;
+    height: 220px;
+    opacity: .9;
+}
+
+.art-square,
+.art-ring {
+    position: absolute;
+    display: block;
+}
+
+.art-square-large {
+    left: 18px;
+    top: 28px;
+    width: 104px;
+    height: 104px;
+    border-radius: 15px;
+    background: #bec5ff;
+}
+
+.art-ring {
+    top: 18px;
+    right: 20px;
+    width: 170px;
+    height: 170px;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: #d3d7ff;
+}
+
+.art-ring span {
+    width: 102px;
+    height: 102px;
+    border-radius: 50%;
+    background: #9da6fb;
+}
+
+.art-square-small {
+    left: 52px;
+    bottom: 4px;
+    width: 72px;
+    height: 72px;
+    border-radius: 11px;
+    background: #9da6fb;
+}
+
+.art-dots {
+    position: absolute;
+    left: 30px;
+    bottom: 16px;
+    display: flex;
+    gap: 24px;
+}
+
+.art-dots i {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: #929cff;
+}
+
+.login-panel {
+    position: relative;
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    padding: 88px 40px 64px;
+    background: #fff;
+}
+
+.language-button {
+    position: absolute;
+    top: 38px;
+    right: clamp(36px, 7vw, 88px);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px;
+    color: #5d6473;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+}
+
+.login-card {
+    width: min(100%, 430px);
+    padding: 42px 44px 38px;
+    border: 1px solid #f0f1f5;
+    border-radius: 8px;
+    background: #fff;
+    box-shadow: 0 18px 50px rgba(40, 45, 87, .09);
+}
+
+.login-card-heading {
+    position: relative;
+    margin-bottom: 28px;
+}
+
+.return-tenant-login.ant-btn-link {
+    position: absolute;
+    top: -4px;
+    right: 0;
+    padding: 0;
+    font-size: 12px;
+}
+
+.login-card-heading h2.ant-typography {
+    margin: 0 0 8px;
+    color: #202231;
+    font-size: 25px;
+}
+
+.login-card-heading .ant-typography {
+    color: #9aa0ad;
+}
+
+.login-card .ant-input-affix-wrapper {
+    min-height: 46px;
+    border-color: transparent;
+    background: #f7f8fb;
+    box-shadow: none;
+}
+
+.login-card .ant-input-affix-wrapper-focused {
+    border-color: #5a5ff4;
+    background: #fff;
+}
+
+.login-card .ant-input-prefix {
+    margin-right: 10px;
+    color: #9299a8;
+}
+
+.login-options {
+    min-height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin: -2px 0 16px;
+}
+
+.login-options .ant-btn-link {
+    padding-right: 0;
+}
+
+.login-submit {
+    height: 46px;
+    font-weight: 600;
+    box-shadow: 0 8px 18px rgba(86, 92, 246, .2);
+}
+
+.activation-entry.ant-btn-link {
+    width: 100%;
+    margin-top: 8px;
+    font-size: 12px;
+}
+
+.login-security {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 26px;
+    padding: 15px 16px;
+    color: #5f6676;
+    background: #f8f9fc;
+    font-size: 13px;
+    line-height: 1.45;
+}
+
+.login-security>.anticon {
+    color: #5960f5;
+    font-size: 24px;
+}
+
+.login-security small {
+    color: #9aa0ad;
+}
+
+.login-footer.ant-typography {
+    position: absolute;
+    bottom: 24px;
+    color: #b0b4bf;
+    font-size: 12px;
+}
+
+@media (max-width: 900px) {
+    .login-page {
+        grid-template-columns: 1fr;
+    }
+
+    .login-intro {
+        min-height: 300px;
+        padding: 26px 32px;
+    }
+
+    .intro-copy {
+        margin-top: 54px;
+    }
+
+    .intro-copy h1.ant-typography {
+        font-size: 44px;
+    }
+
+    .intro-subtitle.ant-typography {
+        margin: 12px 0 24px;
+    }
+
+    .benefit-list {
+        gap: 10px;
+        font-size: 13px;
+    }
+
+    .intro-art {
+        right: 1%;
+        bottom: 0;
+        transform: scale(.68);
+        transform-origin: bottom right;
+    }
+
+    .login-panel {
+        min-height: 660px;
+        padding: 80px 24px 64px;
+    }
+
+    .language-button {
+        top: 24px;
+        right: 24px;
+    }
+}
+
+@media (max-width: 520px) {
+    .login-intro {
+        min-height: 240px;
+        padding: 22px 24px;
+    }
+
+    .intro-copy {
+        margin-top: 38px;
+    }
+
+    .intro-copy h1.ant-typography {
+        font-size: 36px;
+    }
+
+    .benefit-list,
+    .intro-art {
+        display: none;
+    }
+
+    .login-panel {
+        min-height: 600px;
+        padding-inline: 18px;
+    }
+
+    .login-card {
+        padding: 32px 24px;
+        box-shadow: none;
+    }
+}

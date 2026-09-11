@@ -1,0 +1,142 @@
+:root {
+    --app-background: #f4f6f9;
+    --app-surface: #ffffff;
+    --app-surface-soft: #f8f9fb;
+    --app-border: #e5e8ee;
+    --app-text: #202432;
+    --app-muted: #858c9b;
+}
+
+:root[data-theme='dark'] {
+    --app-background: #111214;
+    --app-surface: #1a1b1f;
+    --app-surface-soft: #222328;
+    --app-border: #303238;
+    --app-text: #f2f3f5;
+    --app-muted: #a1a5ae;
+    --workspace-bg: #111214;
+    --surface: #1a1b1f;
+    --line: #303238;
+    --text: #f2f3f5;
+    --muted: #a1a5ae;
+    --primary-soft: #292b4d;
+}
+
+:root[data-font-size='small'] {
+    --preference-font-label: 13px;
+}
+
+:root[data-font-size='standard'] {
+    --preference-font-label: 14px;
+}
+
+:root[data-font-size='large'] {
+    --preference-font-label: 16px;
+}
+
+body {
+    color: var(--app-text);
+    background: var(--app-background);
+}
+
+:root[data-theme='dark'] .workspace-shell,
+:root[data-theme='dark'] .workspace-content,
+:root[data-theme='dark'] .workspace-page,
+:root[data-theme='dark'] .platform-workspace,
+:root[data-theme='dark'] .platform-content,
+:root[data-theme='dark'] .chat-panel,
+:root[data-theme='dark'] .login-page {
+    color: var(--app-text);
+    background: var(--app-background);
+}
+
+:root[data-theme='dark'] .side-navigation,
+:root[data-theme='dark'] .surface-panel,
+:root[data-theme='dark'] .metric-panel,
+:root[data-theme='dark'] .shortcut-item,
+:root[data-theme='dark'] .assistant-widget,
+:root[data-theme='dark'] .activity-panel,
+:root[data-theme='dark'] .conversation-list,
+:root[data-theme='dark'] .chat-header,
+:root[data-theme='dark'] .composer-area,
+:root[data-theme='dark'] .application-card,
+:root[data-theme='dark'] .application-detail,
+:root[data-theme='dark'] .role-list-panel,
+:root[data-theme='dark'] .role-detail-panel,
+:root[data-theme='dark'] .profile-identity-panel,
+:root[data-theme='dark'] .profile-setting-panel,
+:root[data-theme='dark'] .platform-topbar,
+:root[data-theme='dark'] .platform-metrics>div,
+:root[data-theme='dark'] .platform-tenant-panel,
+:root[data-theme='dark'] .login-panel,
+:root[data-theme='dark'] .login-card {
+    color: var(--app-text);
+    border-color: var(--app-border);
+    background: var(--app-surface);
+}
+
+:root[data-theme='dark'] .login-intro {
+    background: repeating-linear-gradient(0deg, transparent 0 31px, rgba(255, 255, 255, .025) 31px 32px), #15161a;
+}
+
+:root[data-theme='dark'] .login-card .ant-input-affix-wrapper,
+:root[data-theme='dark'] .login-security,
+:root[data-theme='dark'] .security-panel dl,
+:root[data-theme='dark'] .role-summary-grid>div,
+:root[data-theme='dark'] .application-detail dl,
+:root[data-theme='dark'] .knowledge-detail dl,
+:root[data-theme='dark'] .application-example,
+:root[data-theme='dark'] .member-table-head,
+:root[data-theme='dark'] .knowledge-table-head,
+:root[data-theme='dark'] .platform-table-head {
+    border-color: var(--app-border);
+    background: var(--app-surface-soft);
+}
+
+:root[data-theme='dark'] h1,
+:root[data-theme='dark'] h2,
+:root[data-theme='dark'] h3,
+:root[data-theme='dark'] h4,
+:root[data-theme='dark'] strong,
+:root[data-theme='dark'] .intro-copy h1.ant-typography,
+:root[data-theme='dark'] .login-card-heading h2.ant-typography,
+:root[data-theme='dark'] .application-card,
+:root[data-theme='dark'] .shortcut-item,
+:root[data-theme='dark'] .member-table button,
+:root[data-theme='dark'] .knowledge-row,
+:root[data-theme='dark'] .platform-tenant-row,
+:root[data-theme='dark'] .role-list>button {
+    color: var(--app-text);
+}
+
+:root[data-theme='dark'] p,
+:root[data-theme='dark'] small,
+:root[data-theme='dark'] dt,
+:root[data-theme='dark'] .workspace-page-header p,
+:root[data-theme='dark'] .login-card-heading .ant-typography {
+    color: var(--app-muted);
+}
+
+:root[data-theme='dark'] .chat-message.assistant>div {
+    background: var(--app-surface);
+}
+
+:root[data-theme='dark'] .nav-item:hover,
+:root[data-theme='dark'] .member-table button:hover,
+:root[data-theme='dark'] .member-table button.is-selected,
+:root[data-theme='dark'] .knowledge-row:hover,
+:root[data-theme='dark'] .knowledge-row.is-selected,
+:root[data-theme='dark'] .role-list>button:hover,
+:root[data-theme='dark'] .role-list>button.is-active {
+    background: #252642;
+}
+
+.language-switcher {
+    min-width: 132px;
+}
+
+.language-button .language-switcher .ant-select-selector {
+    border: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+}
