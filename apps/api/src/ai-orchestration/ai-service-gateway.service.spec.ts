@@ -2,10 +2,11 @@ import type {
   ChatInvokeResponse,
   ChatStreamEvent,
   CompactChatResponse,
+  ComposeDocumentResponse,
   InvokeResponse,
 } from '@cees/ai-service-client';
 import type { AiInvocationRecorderService } from './ai-invocation-recorder.service';
-import { AiServiceClientService, AiServiceInvocationError } from './ai-service-client.service';
+import { AiServiceGateway, AiServiceInvocationError } from './ai-service-gateway.service';
 
 const execution = {
   profile: 'primary',
@@ -46,7 +47,19 @@ const compactResponse: CompactChatResponse = {
   execution,
 };
 
-describe('AiServiceClientService', () => {
+const composeResponse: ComposeDocumentResponse = {
+  request_id: 'req-compose-1',
+  document: {
+    schema_version: '1.0',
+    title: '项目周报',
+    subtitle: null,
+    sections: [{ heading: '进展', level: 1, blocks: [{ type: 'paragraph', text: '内容' }] }],
+    source_refs: [],
+  },
+  execution,
+};
+
+describe('AiServiceGateway', () => {
   const originalFetch = global.fetch;
   const record = jest.fn();
   const recorder = { record } as unknown as AiInvocationRecorderService;
@@ -64,7 +77,7 @@ describe('AiServiceClientService', () => {
   it('keeps the generic invoke contract and records it through the shared recorder', async () => {
     const fetchMock = jsonFetch(invocationResponse);
     global.fetch = fetchMock;
-    const service = new AiServiceClientService(recorder);
+    const service = new AiServiceGateway(recorder);
 
     const response = await service.invoke({
       request_id: 'req-1',
@@ -89,7 +102,7 @@ describe('AiServiceClientService', () => {
   it('uses the dedicated Chat invoke endpoint and records member, conversation and turn', async () => {
     const fetchMock = jsonFetch(chatResponse);
     global.fetch = fetchMock;
-    const service = new AiServiceClientService(recorder);
+    const service = new AiServiceGateway(recorder);
 
     const response = await service.invokeChat({
       request_id: 'req-chat-1',
@@ -118,7 +131,7 @@ describe('AiServiceClientService', () => {
   it('uses the dedicated Chat compact endpoint and records its Token usage once', async () => {
     const fetchMock = jsonFetch(compactResponse);
     global.fetch = fetchMock;
-    const service = new AiServiceClientService(recorder);
+    const service = new AiServiceGateway(recorder);
 
     const response = await service.compactChat({
       request_id: 'req-compact-1',
@@ -139,6 +152,35 @@ describe('AiServiceClientService', () => {
       metadata: { outcome: 'completed' },
     }));
     expect(JSON.stringify(record.mock.calls[0])).not.toContain('用户正在测试对话');
+  });
+
+  it('uses the dedicated document compose endpoint and records the tool call', async () => {
+    const fetchMock = jsonFetch(composeResponse);
+    global.fetch = fetchMock;
+    const service = new AiServiceGateway(recorder);
+
+    const response = await service.composeDocument({
+      request_id: 'req-compose-1',
+      tenant_id: 'tenant-1',
+      user_id: 'user-1',
+      instruction: '写一份周报',
+      source_materials: [],
+      document_options: { locale: 'zh-CN', generation_mode: 'fast' },
+    }, { membershipId: 'membership-1', turnId: 'turn-4', toolCallId: 'tool-call-1' });
+
+    expect(response).toEqual(composeResponse);
+    expect(requestUrl(fetchMock)).toBe('http://ai-service:8000/internal/v1/documents/compose');
+    expectInternalToken(fetchMock);
+    expect(record).toHaveBeenCalledTimes(1);
+    expect(record).toHaveBeenCalledWith(expect.objectContaining({
+      membershipId: 'membership-1',
+      turnId: 'turn-4',
+      toolCallId: 'tool-call-1',
+      operation: 'document.compose',
+      execution: expect.objectContaining({ model: 'model-1' }),
+      metadata: { outcome: 'completed', instructionLength: 5 },
+    }));
+    expect(JSON.stringify(record.mock.calls[0])).not.toContain('写一份周报');
   });
 
   it('proxies Chat SSE events and records the completed stream exactly once', async () => {
@@ -172,7 +214,7 @@ describe('AiServiceClientService', () => {
     ];
     const fetchMock = sseFetch(streamEvents);
     global.fetch = fetchMock;
-    const service = new AiServiceClientService(recorder);
+    const service = new AiServiceGateway(recorder);
 
     const stream = await service.streamChat({
       request_id: 'req-stream-1',
@@ -238,7 +280,7 @@ describe('AiServiceClientService', () => {
       },
     ];
     global.fetch = sseFetch(streamEvents);
-    const service = new AiServiceClientService(recorder);
+    const service = new AiServiceGateway(recorder);
 
     const stream = await service.streamChat({
       request_id: 'req-stream-error',
@@ -301,7 +343,7 @@ describe('AiServiceClientService', () => {
       status: 200,
       headers: { 'Content-Type': 'text/event-stream' },
     }));
-    const service = new AiServiceClientService(recorder);
+    const service = new AiServiceGateway(recorder);
 
     const stream = await service.streamChat({
       request_id: 'req-stream-cancel',
@@ -357,7 +399,7 @@ describe('AiServiceClientService', () => {
     ];
     record.mockRejectedValueOnce(new Error('usage database unavailable'));
     global.fetch = sseFetch(streamEvents);
-    const service = new AiServiceClientService(recorder);
+    const service = new AiServiceGateway(recorder);
 
     const stream = await service.streamChat({
       request_id: 'req-stream-record-failure',
@@ -398,7 +440,7 @@ describe('AiServiceClientService', () => {
       },
     ];
     global.fetch = sseFetch(streamEvents);
-    const service = new AiServiceClientService(recorder);
+    const service = new AiServiceGateway(recorder);
 
     const stream = await service.streamChat({
       request_id: 'req-stream-invalid',
@@ -429,7 +471,7 @@ describe('AiServiceClientService', () => {
   it('rejects a non-SSE upstream response without retrying the Token-consuming POST', async () => {
     const fetchMock = jsonFetch({ unexpected: true });
     global.fetch = fetchMock;
-    const service = new AiServiceClientService(recorder);
+    const service = new AiServiceGateway(recorder);
 
     await expect(service.streamChat({
       request_id: 'req-stream-content-type',
@@ -451,7 +493,7 @@ describe('AiServiceClientService', () => {
   it('fails lazily when AI service configuration is missing', async () => {
     delete process.env.AI_SERVICE_URL;
     delete process.env.AI_INTERNAL_TOKEN;
-    const service = new AiServiceClientService(recorder);
+    const service = new AiServiceGateway(recorder);
 
     await expect(service.invoke({
       request_id: 'req-config',
@@ -475,7 +517,7 @@ describe('AiServiceClientService', () => {
         retryable: true,
       },
     }), { status: 503, headers: { 'Content-Type': 'application/json' } }));
-    const service = new AiServiceClientService(recorder);
+    const service = new AiServiceGateway(recorder);
 
     await expect(service.invoke({
       request_id: 'req-2',
@@ -501,7 +543,7 @@ describe('AiServiceClientService', () => {
       },
       execution,
     }), { status: 502, headers: { 'Content-Type': 'application/json' } }));
-    const service = new AiServiceClientService(recorder);
+    const service = new AiServiceGateway(recorder);
 
     await expect(service.compactChat({
       request_id: 'req-compact-error',

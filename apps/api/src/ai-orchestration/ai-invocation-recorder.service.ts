@@ -25,6 +25,10 @@ export interface AiInvocationAttributes {
   includedMessageCount?: number;
   historyTruncated?: boolean;
   estimatedInputTokens?: number;
+  /** 图片生成等工具调用的提示词长度指标。 */
+  promptLength?: number;
+  /** 文档组合等工具调用的指令长度指标。 */
+  instructionLength?: number;
   outcome?: 'completed' | 'error' | 'cancelled';
   errorCode?: string;
 }
@@ -33,7 +37,10 @@ export type AiInvocationOperation =
   | 'generic.invoke'
   | 'chat.invoke'
   | 'chat.stream'
-  | 'chat.compact';
+  | 'chat.compact'
+  | 'chat.tool_turn'
+  | 'image.generate'
+  | 'document.compose';
 
 export interface RecordAiInvocationInput {
   tenantId: string;
@@ -43,6 +50,8 @@ export interface RecordAiInvocationInput {
   turnId?: string | null;
   requestId: string;
   traceId?: string | null;
+  /** 工具执行对应的 ToolCall ID；图片生成等工具调用填写，配合 request_id 做幂等。 */
+  toolCallId?: string | null;
   operation: AiInvocationOperation;
   execution: AiInvocationExecution;
   metadata?: AiInvocationAttributes;
@@ -76,6 +85,7 @@ export class AiInvocationRecorderService {
         turnId: input.turnId ?? null,
         requestId: input.requestId,
         traceId: input.traceId ?? null,
+        toolCallId: input.toolCallId ?? null,
         model: execution.model,
         latencyMs: execution.latencyMs,
         inputTokens: execution.tokenUsage.inputTokens,

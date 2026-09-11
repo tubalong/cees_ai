@@ -1,16 +1,17 @@
 import { HttpException, HttpStatus } from '@nestjs/common';
-import { AiServiceInvocationError } from '../ai-orchestration/ai-service-client.service';
-import { ChatStreamErrorDetail } from './chat.types';
+import { AiServiceInvocationError } from '../ai-orchestration/ai-service-gateway.service';
+import type { PublicTurnErrorDetail } from './assistant.types';
 
-export interface PublicChatError extends ChatStreamErrorDetail {
+export interface PublicAssistantError extends PublicTurnErrorDetail {
   status: number;
 }
 
-export function describeChatError(error: unknown): PublicChatError {
+/** 将网关或上游错误映射为公开错误；SSE 事件与 JSON 响应共用同一套描述。 */
+export function describeAssistantError(error: unknown): PublicAssistantError {
   if (!(error instanceof AiServiceInvocationError)) {
     return {
-      code: 'CHAT_REQUEST_FAILED',
-      message: 'AI 对话请求处理失败',
+      code: 'TURN_REQUEST_FAILED',
+      message: 'AI 助手请求处理失败',
       retryable: true,
       status: HttpStatus.INTERNAL_SERVER_ERROR,
     };
@@ -32,7 +33,7 @@ export function describeChatError(error: unknown): PublicChatError {
   ) {
     return {
       code: error.code,
-      message: 'AI 对话服务暂不可用',
+      message: 'AI 助手服务暂不可用',
       retryable: error.retryable,
       status: HttpStatus.SERVICE_UNAVAILABLE,
     };
@@ -46,9 +47,9 @@ export function describeChatError(error: unknown): PublicChatError {
   };
 }
 
-export function toChatHttpException(error: unknown): HttpException {
+export function toAssistantHttpException(error: unknown): HttpException {
   if (error instanceof HttpException) return error;
-  const described = describeChatError(error);
+  const described = describeAssistantError(error);
   return new HttpException(
     {
       code: described.code,

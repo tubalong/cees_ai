@@ -1,0 +1,35 @@
+import { Module } from '@nestjs/common';
+import { AiOrchestrationModule } from '../ai-orchestration/ai-orchestration.module';
+import { DocumentModule } from '../document/document.module';
+import { ImageModule } from '../image/image.module';
+import { AssistantController } from './api/assistant.controller';
+import { ConversationService } from './conversation/conversation.service';
+import { EventService } from './conversation/event.service';
+import { ContextBuilderService } from './runtime/context-builder.service';
+import { TurnRunnerService } from './runtime/turn-runner.service';
+import { ToolRegistryService } from './tools/tool-registry';
+import { ToolPolicyService } from './tools/tool-policy.service';
+import { GenerateDocumentTool } from './tools/executors/generate-document.tool';
+import { GenerateImageTool } from './tools/executors/generate-image.tool';
+
+/**
+ * 统一 AI 编排核心。会话事实源、事件重放与唯一 Tool Loop 运行器都在本模块内，
+ * 图片、任务、文档等能力以工具执行器接入 TurnRunner，不复制编排逻辑。
+ * 所有 AI 工具必须在这里注册：ToolRegistry/ToolPolicy 提供统一批准闸口，
+ * 执行器在 onModuleInit 自注册，新增工具只需新增 provider。
+ */
+@Module({
+  imports: [AiOrchestrationModule, DocumentModule, ImageModule],
+  controllers: [AssistantController],
+  providers: [
+    ConversationService,
+    EventService,
+    ContextBuilderService,
+    ToolRegistryService,
+    ToolPolicyService,
+    TurnRunnerService,
+    GenerateDocumentTool,
+    GenerateImageTool,
+  ],
+})
+export class AssistantModule {}

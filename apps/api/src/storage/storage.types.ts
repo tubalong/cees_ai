@@ -17,6 +17,12 @@ export interface CreateSignedUploadInput {
     ttlSeconds?: number;
 }
 
+export interface PutObjectInput {
+    objectKey: string;
+    body: Buffer;
+    contentType: string;
+}
+
 export interface SignedUploadInstruction {
     method: 'PUT';
     url: string;
@@ -40,6 +46,9 @@ export interface StorageProvider {
 
     /** 客户端直传后，从存储服务读取可信对象元数据，不能使用客户端上报值替代。 */
     headObject(objectKey: string): Promise<StoredObjectMetadata>;
+
+    /** 服务端直传：把内存字节写入明确对象键并返回可信对象元数据。 */
+    putObject(input: PutObjectInput): Promise<StoredObjectMetadata>;
 
     /** 在上层完成业务授权后，为私有对象签发短时下载 URL。 */
     createDownloadUrl(objectKey: string, ttlSeconds?: number): Promise<string>;
