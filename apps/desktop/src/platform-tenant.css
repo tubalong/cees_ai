@@ -1,0 +1,137 @@
+.platform-tenant-row {
+    width: 100%;
+    border: 0;
+    border-bottom: 1px solid #edf0f4;
+    background: transparent;
+    text-align: left;
+    cursor: pointer;
+}
+
+.platform-tenant-row:hover {
+    background: var(--app-surface-soft, #f8f9fb);
+}
+
+.platform-drawer-loading {
+    min-height: 220px;
+    display: grid;
+    place-items: center;
+}
+
+.tenant-detail-summary,
+.tenant-detail-summary>div,
+.tenant-detail-actions,
+.tenant-admin-heading,
+.tenant-admin-row,
+.tenant-admin-row>span {
+    display: flex;
+    align-items: center;
+}
+
+.tenant-detail-summary {
+    justify-content: space-between;
+    gap: 16px;
+    padding: 16px;
+    border: 1px solid var(--app-border, #e5e8ee);
+    border-radius: 8px;
+    background: var(--app-surface-soft, #f8f9fb);
+}
+
+.tenant-detail-summary>div {
+    gap: 12px;
+}
+
+.tenant-detail-summary i {
+    width: 42px;
+    height: 42px;
+    display: grid;
+    place-items: center;
+    color: #565cf6;
+    border-radius: 8px;
+    background: #eef0ff;
+    font-size: 21px;
+    font-style: normal;
+}
+
+.tenant-detail-summary h2,
+.tenant-detail-summary p,
+.tenant-admin-heading h3,
+.tenant-admin-heading p {
+    margin: 0;
+}
+
+.tenant-detail-summary h2 {
+    font-size: 16px;
+}
+
+.tenant-detail-summary p,
+.tenant-admin-heading p {
+    margin-top: 3px;
+    color: var(--app-muted, #858c9b);
+    font-size: 10px;
+}
+
+.tenant-detail-actions {
+    gap: 8px;
+    margin: 14px 0;
+}
+
+.tenant-detail-meta {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin: 0;
+}
+
+.tenant-detail-meta div {
+    display: flex;
+    justify-content: space-between;
+    padding: 10px 12px;
+    border-radius: 6px;
+    background: var(--app-surface-soft, #f8f9fb);
+    font-size: 11px;
+}
+
+.tenant-detail-meta dt {
+    color: var(--app-muted, #858c9b);
+}
+
+.tenant-detail-meta dd {
+    margin: 0;
+}
+
+.tenant-admin-section {
+    margin-top: 24px;
+}
+
+.tenant-admin-heading {
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.tenant-admin-list {
+    margin-top: 12px;
+}
+
+.tenant-admin-row {
+    min-height: 58px;
+    gap: 10px;
+    padding: 8px 4px;
+    border-bottom: 1px solid var(--app-border, #e5e8ee);
+}
+
+.tenant-admin-row>span {
+    min-width: 0;
+    flex: 1;
+    gap: 8px;
+}
+
+.tenant-admin-row b,
+.tenant-admin-row small {
+    display: block;
+}
+
+.tenant-admin-row small {
+    color: var(--app-muted, #858c9b);
+    font-size: 10px;
+}

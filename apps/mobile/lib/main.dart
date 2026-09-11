@@ -9,5 +9,7 @@ Future<void> main() async {
   await Hive.initFlutter();
   await Hive.openBox<Map<dynamic, dynamic>>('local_drafts');
   await Hive.openBox<Map<dynamic, dynamic>>('upload_queue');
+  await Hive.openBox<String>('auth_session');
+  await Hive.openBox<dynamic>('settings');
   runApp(const ProviderScope(child: CeesMobileApp()));
 }

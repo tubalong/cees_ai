@@ -1,0 +1,113 @@
+.department-tree-panel {
+    padding: 14px 10px;
+}
+
+.department-tree-heading,
+.member-list-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.department-tree-heading {
+    padding: 0 6px 10px;
+}
+
+.department-tree-heading h3 {
+    margin: 0;
+}
+
+.department-root,
+.department-node-row>button {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #596173;
+    border: 0;
+    background: transparent;
+    text-align: left;
+    cursor: pointer;
+}
+
+.department-root {
+    width: 100%;
+    min-height: 46px;
+    padding: 7px 9px;
+    border-radius: 6px;
+}
+
+.department-root.is-active,
+.department-node-row.is-active {
+    color: #565cf6;
+    background: #eef0ff;
+}
+
+.department-root span,
+.department-node-row>button span {
+    min-width: 0;
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.department-root small,
+.department-node-row small {
+    display: block;
+    margin-top: 2px;
+    color: #9299a8;
+    font-size: 9px;
+}
+
+.department-nodes {
+    margin-top: 4px;
+}
+
+.department-node-row {
+    min-height: 44px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    padding: 4px 3px 4px 9px;
+    border-radius: 6px;
+}
+
+.department-node-row>button {
+    padding: 0;
+}
+
+.department-node-actions {
+    display: none;
+    align-items: center;
+}
+
+.department-node-row:hover .department-node-actions,
+.department-node-row.is-active .department-node-actions {
+    display: flex;
+}
+
+.department-children {
+    margin-left: 15px;
+    padding-left: 7px;
+    border-left: 1px solid #e5e8ee;
+}
+
+.member-list-toolbar {
+    margin-bottom: 12px;
+}
+
+.member-list-toolbar .ant-input-affix-wrapper,
+.member-list-toolbar .ant-input {
+    max-width: 320px;
+}
+
+.member-list-toolbar>span {
+    color: #7b8494;
+    font-size: 11px;
+}
+
+.member-detail .ant-select {
+    width: 100%;
+}

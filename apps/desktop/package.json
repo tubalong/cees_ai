@@ -4,7 +4,7 @@
     "private": true,
     "main": "dist-electron/main.js",
     "scripts": {
-        "dev": "concurrently -k \"vite\" \"wait-on http://localhost:5173 && electron .\"",
+        "dev": "tsc -p electron/tsconfig.json && concurrently -k \"vite\" \"wait-on http://localhost:5173 && electron .\"",
         "build": "tsc -b && vite build && tsc -p electron/tsconfig.json"
     },
     "dependencies": {
