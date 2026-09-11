@@ -3709,6 +3709,153 @@ paths:
         '404': { description: 会议或纪要不存在, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
         '409': { description: 纪要状态或版本冲突, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
 
+  /work-reports:
+    get:
+      summary: 查询当前成员可见的日报和周报
+      operationId: workReportList
+      tags: [WorkReport]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: type, in: query, schema: { $ref: '#/components/schemas/WorkReportType' } }
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/WorkReportStatus' } }
+        - { name: authorMembershipId, in: query, schema: { type: string, format: uuid } }
+        - { name: reviewerMembershipId, in: query, schema: { type: string, format: uuid } }
+        - { name: periodFrom, in: query, schema: { type: string, format: date } }
+        - { name: periodTo, in: query, schema: { type: string, format: date } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+        - { name: cursor, in: query, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: 日报和周报列表, content: { application/json: { schema: { $ref: '#/components/schemas/WorkReportListResponseEnvelope' } } } }
+        '403': { description: 缺少 work_report.read 权限, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+
+  /work-reports/daily:
+    post:
+      summary: 创建日报
+      operationId: workReportDailyCreate
+      tags: [WorkReport]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateDailyWorkReportRequest' }
+      responses:
+        '201': { description: 日报已创建, content: { application/json: { schema: { $ref: '#/components/schemas/WorkReportResponseEnvelope' } } } }
+        '400': { description: 报告日期或关联资源无效, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '409': { description: 当前周期已存在有效报告, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+
+  /work-reports/weekly:
+    post:
+      summary: 创建周报
+      operationId: workReportWeeklyCreate
+      tags: [WorkReport]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateWeeklyWorkReportRequest' }
+      responses:
+        '201': { description: 周报已创建, content: { application/json: { schema: { $ref: '#/components/schemas/WorkReportResponseEnvelope' } } } }
+        '400': { description: 周报日期或关联资源无效, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '409': { description: 当前周期已存在有效报告, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+
+  /work-reports/statistics:
+    get:
+      summary: 查询日报和周报状态统计
+      operationId: workReportStatistics
+      tags: [WorkReport]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: type, in: query, schema: { $ref: '#/components/schemas/WorkReportType' } }
+        - { name: periodFrom, in: query, schema: { type: string, format: date } }
+        - { name: periodTo, in: query, schema: { type: string, format: date } }
+      responses:
+        '200': { description: 日报和周报状态统计, content: { application/json: { schema: { $ref: '#/components/schemas/WorkReportStatisticsResponseEnvelope' } } } }
+
+  /work-reports/{workReportId}:
+    parameters:
+      - { name: workReportId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      summary: 查询日报或周报详情
+      operationId: workReportGet
+      tags: [WorkReport]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: 日报或周报详情, content: { application/json: { schema: { $ref: '#/components/schemas/WorkReportResponseEnvelope' } } } }
+        '404': { description: 报告不存在或当前成员不可见, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+    patch:
+      summary: 修改草稿或驳回报告
+      operationId: workReportUpdate
+      tags: [WorkReport]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateWorkReportRequest' }
+      responses:
+        '200': { description: 报告已修改, content: { application/json: { schema: { $ref: '#/components/schemas/WorkReportResponseEnvelope' } } } }
+        '409': { description: 报告状态或版本冲突, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+    delete:
+      summary: 删除草稿或驳回报告
+      operationId: workReportDelete
+      tags: [WorkReport]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: version, in: query, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        '204': { description: 报告已软删除 }
+        '409': { description: 报告状态或版本冲突, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+
+  /work-reports/{workReportId}/submit:
+    post:
+      summary: 提交日报或周报
+      operationId: workReportSubmit
+      tags: [WorkReport]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: workReportId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/WorkReportVersionRequest' }
+      responses:
+        '200': { description: 报告已提交, content: { application/json: { schema: { $ref: '#/components/schemas/WorkReportResponseEnvelope' } } } }
+
+  /work-reports/{workReportId}/withdraw:
+    post:
+      summary: 撤回已提交报告
+      operationId: workReportWithdraw
+      tags: [WorkReport]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: workReportId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/WorkReportVersionRequest' }
+      responses:
+        '200': { description: 报告已撤回, content: { application/json: { schema: { $ref: '#/components/schemas/WorkReportResponseEnvelope' } } } }
+
+  /work-reports/{workReportId}/review:
+    post:
+      summary: 审核日报或周报
+      operationId: workReportReview
+      tags: [WorkReport]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: workReportId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReviewWorkReportRequest' }
+      responses:
+        '200': { description: 报告审核完成, content: { application/json: { schema: { $ref: '#/components/schemas/WorkReportResponseEnvelope' } } } }
+        '403': { description: 当前成员不是指定审核人或租户管理员, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
   /images/{imageId}:
     get:
       summary: 获取 AI 生成图片的访问信息
@@ -4123,6 +4270,189 @@ components:
           completed: '#/components/schemas/ChatStreamCompletedEvent'
           error: '#/components/schemas/ChatStreamErrorEvent'
 
+    WorkReportType:
+      type: string
+      enum: [DAILY, WEEKLY]
+
+    WorkReportStatus:
+      type: string
+      enum: [DRAFT, SUBMITTED, APPROVED, REJECTED]
+
+    WorkReportReviewDecision:
+      type: string
+      enum: [APPROVED, REJECTED]
+
+    WorkReportContent:
+      type: object
+      additionalProperties: false
+      required: [completedItems, plannedItems, blockers, remarks]
+      properties:
+        completedItems:
+          type: array
+          maxItems: 100
+          items: { type: string, minLength: 1, maxLength: 2000 }
+        plannedItems:
+          type: array
+          maxItems: 100
+          items: { type: string, minLength: 1, maxLength: 2000 }
+        blockers:
+          type: array
+          maxItems: 100
+          items: { type: string, minLength: 1, maxLength: 2000 }
+        remarks: { type: [string, 'null'], maxLength: 5000 }
+
+    CreateDailyWorkReportRequest:
+      type: object
+      additionalProperties: false
+      required: [reportDate, reviewerMembershipId, content]
+      properties:
+        reportDate: { type: string, format: date }
+        reviewerMembershipId: { type: string, format: uuid }
+        content: { $ref: '#/components/schemas/WorkReportContent' }
+        projectIds:
+          type: array
+          maxItems: 50
+          uniqueItems: true
+          items: { type: string, format: uuid }
+        taskIds:
+          type: array
+          maxItems: 100
+          uniqueItems: true
+          items: { type: string, format: uuid }
+
+    CreateWeeklyWorkReportRequest:
+      type: object
+      additionalProperties: false
+      required: [weekStartDate, reviewerMembershipId, content]
+      properties:
+        weekStartDate: { type: string, format: date, description: 必须是周一 }
+        reviewerMembershipId: { type: string, format: uuid }
+        content: { $ref: '#/components/schemas/WorkReportContent' }
+        projectIds:
+          type: array
+          maxItems: 50
+          uniqueItems: true
+          items: { type: string, format: uuid }
+        taskIds:
+          type: array
+          maxItems: 100
+          uniqueItems: true
+          items: { type: string, format: uuid }
+
+    UpdateWorkReportRequest:
+      type: object
+      additionalProperties: false
+      required: [version, content, reviewerMembershipId, projectIds, taskIds]
+      properties:
+        version: { type: integer, minimum: 1 }
+        reviewerMembershipId: { type: string, format: uuid }
+        content: { $ref: '#/components/schemas/WorkReportContent' }
+        projectIds:
+          type: array
+          maxItems: 50
+          uniqueItems: true
+          items: { type: string, format: uuid }
+        taskIds:
+          type: array
+          maxItems: 100
+          uniqueItems: true
+          items: { type: string, format: uuid }
+
+    WorkReportVersionRequest:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        version: { type: integer, minimum: 1 }
+
+    ReviewWorkReportRequest:
+      type: object
+      additionalProperties: false
+      required: [decision, version]
+      properties:
+        decision: { $ref: '#/components/schemas/WorkReportReviewDecision' }
+        comment: { type: [string, 'null'], maxLength: 5000 }
+        version: { type: integer, minimum: 1 }
+
+    WorkReportMemberIdentity:
+      type: object
+      required: [membershipId, account, displayName, departmentId]
+      properties:
+        membershipId: { type: string, format: uuid }
+        account: { type: string }
+        displayName: { type: string }
+        departmentId: { type: [string, 'null'], format: uuid }
+
+    WorkReport:
+      type: object
+      required: [id, type, periodStart, periodEnd, content, status, author, reviewer, projectIds, taskIds, submittedAt, reviewedAt, reviewComment, createdAt, updatedAt, version]
+      properties:
+        id: { type: string, format: uuid }
+        type: { $ref: '#/components/schemas/WorkReportType' }
+        periodStart: { type: string, format: date }
+        periodEnd: { type: string, format: date }
+        content: { $ref: '#/components/schemas/WorkReportContent' }
+        status: { $ref: '#/components/schemas/WorkReportStatus' }
+        author: { $ref: '#/components/schemas/WorkReportMemberIdentity' }
+        reviewer:
+          oneOf:
+            - $ref: '#/components/schemas/WorkReportMemberIdentity'
+            - type: 'null'
+        projectIds:
+          type: array
+          items: { type: string, format: uuid }
+        taskIds:
+          type: array
+          items: { type: string, format: uuid }
+        submittedAt: { type: [string, 'null'], format: date-time }
+        reviewedAt: { type: [string, 'null'], format: date-time }
+        reviewComment: { type: [string, 'null'] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        version: { type: integer, minimum: 1 }
+
+    WorkReportList:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/WorkReport' }
+        nextCursor: { type: [string, 'null'], format: uuid }
+
+    WorkReportStatistics:
+      type: object
+      required: [total, draft, submitted, approved, rejected]
+      properties:
+        total: { type: integer, minimum: 0 }
+        draft: { type: integer, minimum: 0 }
+        submitted: { type: integer, minimum: 0 }
+        approved: { type: integer, minimum: 0 }
+        rejected: { type: integer, minimum: 0 }
+
+    WorkReportResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/WorkReport' }
+        requestId: { type: [string, 'null'] }
+
+    WorkReportListResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/WorkReportList' }
+        requestId: { type: [string, 'null'] }
+
+    WorkReportStatisticsResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/WorkReportStatistics' }
+        requestId: { type: [string, 'null'] }
     ChatStreamToolCallEvent:
       type: object
       additionalProperties: false

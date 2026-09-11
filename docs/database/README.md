@@ -6,7 +6,7 @@
 任务、执行人、评论、附件和动态见 [项目任务管理](../product/task-management.md)。
 公开 Chat 调用与 Token 指标见 [公开 AI 对话链路与 Token 计量](../architecture/public-chat-api-and-token-metering.md)。
 
-> 新环境使用 `prisma migrate deploy` 按 `0001_init` 到 `0009_ai_chat_token_tracking` 的目录顺序执行迁移；全部迁移完成后与当前 `schema.prisma` 保持一致。
+> 新环境使用 `prisma migrate deploy` 按 `0001_init` 到 `0010_work_report_management` 的目录顺序执行迁移；全部迁移完成后与当前 `schema.prisma` 保持一致。
 
 - `apps/api/prisma/schema.prisma` 是数据模型唯一事实源，迁移提交 `prisma/migrations`。
 - 新建表和字段必须在同一迁移中使用 `COMMENT ON TABLE`、`COMMENT ON COLUMN` 添加 PostgreSQL 注释；`0003_organization_departments_and_database_comments` 已补齐此前全部业务表和字段注释。
@@ -124,7 +124,21 @@ Project
 - `0006_task_management` 完成旧字段迁移、外键、索引和任务权限初始化；
 - `0007_task_database_comments` 补齐任务相关表和字段的 PostgreSQL 中文注释。
 
-## 会议模型
+## 9. 日报与周报模型
+
+```text
+WorkReport
+  |-- authorMembership/reviewerMembership -> TenantMembership
+  |-- projects -> WorkReportProject -> Project
+  `-- tasks -> WorkReportTask -> Task
+```
+
+- `work_reports` 保存日报/周报周期、结构化内容、审核人、状态、审核意见和乐观锁版本；
+- `work_report_projects` 与 `work_report_tasks` 保存报告的项目和任务关联，并使用租户字段隔离；
+- `0010_work_report_management` 创建三张新表、索引、有效周期唯一索引和 `work_report.*` 权限；
+- 新增表和字段的 PostgreSQL 注释由迁移文件保存。
+
+## 10. 会议模型
 
 ```text
 Meeting

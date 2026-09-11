@@ -17,6 +17,8 @@
 - [项目任务管理](../product/task-management.md)
 - [会议管理 API](meeting-management-api.md)
 - [会议管理](../product/meeting-management.md)
+- [日报与周报 API](work-report-management-api.md)
+- [日报与周报管理](../product/work-report-management.md)
 - [公开 AI 对话链路与 Token 计量](../architecture/public-chat-api-and-token-metering.md)
 - [用户个人资料管理](../product/user-profile-management.md)
 - [密码修改与凭证安全](../security/password-management.md)
@@ -76,6 +78,17 @@ DELETE /api/v1/resources/{resourceId}/acl/{aclEntryId}?version={version}
 
 GET /api/v1/audit-events
 GET /api/v1/audit-events/{auditEventId}
+
+GET    /api/v1/work-reports
+POST   /api/v1/work-reports/daily
+POST   /api/v1/work-reports/weekly
+GET    /api/v1/work-reports/statistics
+GET    /api/v1/work-reports/{workReportId}
+PATCH  /api/v1/work-reports/{workReportId}
+DELETE /api/v1/work-reports/{workReportId}?version={version}
+POST   /api/v1/work-reports/{workReportId}/submit
+POST   /api/v1/work-reports/{workReportId}/withdraw
+POST   /api/v1/work-reports/{workReportId}/review
 
 GET    /api/v1/meetings
 POST   /api/v1/meetings

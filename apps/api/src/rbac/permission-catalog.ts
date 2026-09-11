@@ -52,6 +52,13 @@ export const TENANT_PERMISSION_DEFINITIONS = [
     ['document.share', '管理文档资源级授权'],
     ['document.manage_all', '管理当前租户全部文档'],
     ['audit.read', '查询当前租户审计事件'],
+    ['work_report.create', '\u521b\u5efa\u65e5\u62a5\u5468\u62a5'],
+    ['work_report.read', '\u67e5\u770b\u53ef\u89c1\u65e5\u62a5\u5468\u62a5'],
+    ['work_report.update', '\u4fee\u6539\u8349\u7a3f\u6216\u9a73\u56de\u62a5\u544a'],
+    ['work_report.delete', '\u5220\u9664\u8349\u7a3f\u6216\u9a73\u56de\u62a5\u544a'],
+    ['work_report.submit', '\u63d0\u4ea4\u65e5\u62a5\u5468\u62a5'],
+    ['work_report.review', '\u5ba1\u6838\u65e5\u62a5\u5468\u62a5'],
+    ['work_report.manage_all', '\u7ba1\u7406\u5f53\u524d\u79df\u6237\u5168\u90e8\u65e5\u62a5\u5468\u62a5'],
 ] as const;
 
 export const TENANT_ADMIN_ROLE_CODE = 'tenant_admin';
