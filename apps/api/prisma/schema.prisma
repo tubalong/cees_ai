@@ -149,6 +149,18 @@ enum MeetingMinutesStatus {
   PUBLISHED
 }
 
+enum WorkReportType {
+  DAILY
+  WEEKLY
+}
+
+enum WorkReportStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+}
+
 enum DraftStatus {
   DRAFT
   PENDING_CONFIRMATION
@@ -196,6 +208,9 @@ model Tenant {
   meetings             Meeting[]
   meetingParticipants  MeetingParticipant[]
   meetingMinutes       MeetingMinutes[]
+  workReports          WorkReport[]
+  workReportProjects   WorkReportProject[]
+  workReportTasks      WorkReportTask[]
   createdAt            DateTime               @default(now()) @map("created_at")
   updatedAt            DateTime               @updatedAt @map("updated_at")
   deletedAt            DateTime?              @map("deleted_at")
@@ -262,6 +277,8 @@ model TenantMembership {
   meetingParticipations MeetingParticipant[]  @relation("MeetingParticipantMembership")
   recordedMinutes      MeetingMinutes[]       @relation("MeetingMinutesRecorderMembership")
   publishedMinutes     MeetingMinutes[]       @relation("MeetingMinutesPublisherMembership")
+  authoredWorkReports  WorkReport[]           @relation("WorkReportAuthorMembership")
+  reviewedWorkReports  WorkReport[]           @relation("WorkReportReviewerMembership")
   createdAt            DateTime               @default(now()) @map("created_at")
   updatedAt            DateTime               @updatedAt @map("updated_at")
   createdBy            String?                @map("created_by") @db.Uuid
@@ -563,6 +580,7 @@ model Project {
   statusHistory           ProjectStatusHistory[]
   tasks                   Task[]
   meetings                Meeting[]
+  workReportLinks         WorkReportProject[]
   createdAt               DateTime               @default(now()) @map("created_at")
   updatedAt               DateTime               @updatedAt @map("updated_at")
   createdBy               String?                @map("created_by") @db.Uuid
@@ -640,6 +658,7 @@ model Task {
   comments              TaskComment[]
   attachments           TaskAttachment[]
   activities            TaskActivity[]
+  workReportLinks       WorkReportTask[]
   createdAt             DateTime          @default(now()) @map("created_at")
   updatedAt             DateTime          @updatedAt @map("updated_at")
   createdBy             String?           @map("created_by") @db.Uuid
@@ -972,6 +991,69 @@ model MeetingMinutes {
   @@index([tenantId, meetingId])
   @@index([tenantId, status, updatedAt])
   @@map("meeting_minutes")
+}
+
+model WorkReport {
+  id                   String           @id @default(uuid()) @db.Uuid
+  tenantId             String           @map("tenant_id") @db.Uuid
+  tenant               Tenant           @relation(fields: [tenantId], references: [id])
+  authorMembershipId   String           @map("author_membership_id") @db.Uuid
+  authorMembership     TenantMembership @relation("WorkReportAuthorMembership", fields: [authorMembershipId], references: [id])
+  reviewerMembershipId String?          @map("reviewer_membership_id") @db.Uuid
+  reviewerMembership   TenantMembership? @relation("WorkReportReviewerMembership", fields: [reviewerMembershipId], references: [id])
+  type                 WorkReportType
+  periodStart          DateTime         @map("period_start") @db.Date
+  periodEnd            DateTime         @map("period_end") @db.Date
+  content              Json
+  status               WorkReportStatus @default(DRAFT)
+  submittedAt          DateTime?        @map("submitted_at")
+  reviewedAt           DateTime?        @map("reviewed_at")
+  reviewComment        String?          @map("review_comment") @db.Text
+  projects             WorkReportProject[]
+  tasks                WorkReportTask[]
+  createdAt            DateTime         @default(now()) @map("created_at")
+  updatedAt            DateTime         @updatedAt @map("updated_at")
+  createdBy            String?          @map("created_by") @db.Uuid
+  updatedBy            String?          @map("updated_by") @db.Uuid
+  deletedAt            DateTime?        @map("deleted_at")
+  version              Int              @default(1)
+
+  @@index([tenantId, authorMembershipId, periodStart])
+  @@index([tenantId, reviewerMembershipId, status, submittedAt])
+  @@index([tenantId, type, periodStart])
+  @@map("work_reports")
+}
+
+model WorkReportProject {
+  id           String     @id @default(uuid()) @db.Uuid
+  tenantId     String     @map("tenant_id") @db.Uuid
+  tenant       Tenant     @relation(fields: [tenantId], references: [id])
+  workReportId String     @map("work_report_id") @db.Uuid
+  workReport   WorkReport @relation(fields: [workReportId], references: [id])
+  projectId    String     @map("project_id") @db.Uuid
+  project      Project    @relation(fields: [projectId], references: [id])
+  createdAt    DateTime   @default(now()) @map("created_at")
+  createdBy    String?    @map("created_by") @db.Uuid
+
+  @@unique([tenantId, workReportId, projectId])
+  @@index([tenantId, projectId, createdAt])
+  @@map("work_report_projects")
+}
+
+model WorkReportTask {
+  id           String     @id @default(uuid()) @db.Uuid
+  tenantId     String     @map("tenant_id") @db.Uuid
+  tenant       Tenant     @relation(fields: [tenantId], references: [id])
+  workReportId String     @map("work_report_id") @db.Uuid
+  workReport   WorkReport @relation(fields: [workReportId], references: [id])
+  taskId       String     @map("task_id") @db.Uuid
+  task         Task       @relation(fields: [taskId], references: [id])
+  createdAt    DateTime   @default(now()) @map("created_at")
+  createdBy    String?    @map("created_by") @db.Uuid
+
+  @@unique([tenantId, workReportId, taskId])
+  @@index([tenantId, taskId, createdAt])
+  @@map("work_report_tasks")
 }
 
 model Notification {

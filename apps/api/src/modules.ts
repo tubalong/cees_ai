@@ -11,8 +11,8 @@ import { ProjectModule } from './project/project.module';
 import { TaskModule } from './task/task.module';
 import { MeetingModule } from './meeting/meeting.module';
 import { ChatModule } from './chat/chat.module';
+import { WorkReportModule } from './work-report/work-report.module';
 
-@Module({}) export class WorkReportModule { }
 @Module({}) export class KnowledgeModule { }
 @Module({}) export class NotificationModule { }
 @Module({}) export class DashboardModule { }
