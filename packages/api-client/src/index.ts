@@ -294,8 +294,8 @@ export type { WorkReportVersionRequest } from './models/WorkReportVersionRequest
 export { AclService } from './services/AclService';
 export { AuditService } from './services/AuditService';
 export { AuthService } from './services/AuthService';
-export { DashboardService } from './services/DashboardService';
 export { ConversationService } from './services/ConversationService';
+export { DashboardService } from './services/DashboardService';
 export { DefaultService } from './services/DefaultService';
 export { DocumentService } from './services/DocumentService';
 export { FileService } from './services/FileService';
