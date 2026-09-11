@@ -21,6 +21,8 @@
 - [日报与周报管理](../product/work-report-management.md)
 - [通知中心 API](notification-center-api.md)
 - [通知中心与后台任务](../product/notification-center.md)
+- [工作台与数据看板 API](dashboard-api.md)
+- [工作台与数据看板](../product/dashboard-workbench.md)
 - [公开 AI 对话链路与 Token 计量](../architecture/public-chat-api-and-token-metering.md)
 - [用户个人资料管理](../product/user-profile-management.md)
 - [密码修改与凭证安全](../security/password-management.md)
@@ -113,6 +115,11 @@ GET    /api/v1/notifications/unread-count
 POST   /api/v1/notifications/read-all
 POST   /api/v1/notifications/{notificationId}/read
 
+GET    /api/v1/dashboard/overview
+GET    /api/v1/dashboard/task-statistics
+GET    /api/v1/dashboard/todos
+GET    /api/v1/dashboard/upcoming-meetings
+
 POST /api/v1/upload-sessions
 POST /api/v1/upload-sessions/{uploadSessionId}/complete
 
@@ -178,7 +185,7 @@ DELETE /api/v1/projects/{projectId}/tasks/{taskId}/attachments/{attachmentId}?ve
 GET    /api/v1/projects/{projectId}/tasks/{taskId}/activities
 ```
 
-截至 2026-09-10，身份、本人密码修改、用户个人资料、租户、组织部门、项目、任务、会议、RBAC、ACL、审计、平台租户管理、租户账号激活、COS 基础上传和公开 AI 对话接口均已实现。
+截至 2026-09-11，身份、本人密码修改、用户个人资料、租户、组织部门、项目、任务、会议、日报周报、通知中心、工作台、RBAC、ACL、审计、平台租户管理、租户账号激活、COS 基础上传和公开 AI 对话接口均已实现。
 
 - `refresh` 每次成功后都会轮换 Refresh Token，旧 Token 立即失效；
 - `logout` 撤销当前 Access Token 对应的 Session；

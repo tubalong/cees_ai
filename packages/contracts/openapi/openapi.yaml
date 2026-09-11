@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CEES AI API
-  version: 0.17.0
+  version: 0.18.0
   description: 以本文件为唯一事实源的公开 API 契约。资源与操作按 docs/api 约定补充。
 
 servers:
@@ -3870,6 +3870,57 @@ paths:
         '200': { description: 当前成员的通知列表, content: { application/json: { schema: { $ref: '#/components/schemas/NotificationListResponseEnvelope' } } } }
         '403': { description: 缺少 notification.read 权限, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
 
+  /dashboard/overview:
+    get:
+      summary: 查询当前成员工作台概览
+      operationId: dashboardOverview
+      tags: [Dashboard]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: 工作台概览, content: { application/json: { schema: { $ref: '#/components/schemas/DashboardOverviewResponseEnvelope' } } } }
+        '403': { description: 缺少 dashboard.read 权限, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+
+  /dashboard/task-statistics:
+    get:
+      summary: 查询当前成员可见任务统计
+      operationId: dashboardTaskStatistics
+      tags: [Dashboard]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: projectId, in: query, schema: { type: string, format: uuid } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+      responses:
+        '200': { description: 任务统计, content: { application/json: { schema: { $ref: '#/components/schemas/DashboardTaskStatisticsResponseEnvelope' } } } }
+        '400': { description: 时间范围无效, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '403': { description: 缺少 dashboard.read 权限, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+
+  /dashboard/todos:
+    get:
+      summary: 查询当前成员工作台待办
+      operationId: dashboardTodos
+      tags: [Dashboard]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: taskLimit, in: query, schema: { type: integer, minimum: 1, maximum: 20, default: 5 } }
+        - { name: reportLimit, in: query, schema: { type: integer, minimum: 1, maximum: 20, default: 5 } }
+        - { name: meetingLimit, in: query, schema: { type: integer, minimum: 1, maximum: 20, default: 5 } }
+      responses:
+        '200': { description: 工作台待办, content: { application/json: { schema: { $ref: '#/components/schemas/DashboardTodoListResponseEnvelope' } } } }
+        '403': { description: 缺少 dashboard.read 权限, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+
+  /dashboard/upcoming-meetings:
+    get:
+      summary: 查询当前成员近期会议
+      operationId: dashboardUpcomingMeetings
+      tags: [Dashboard]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        '200': { description: 近期会议列表, content: { application/json: { schema: { $ref: '#/components/schemas/DashboardUpcomingMeetingListResponseEnvelope' } } } }
+        '403': { description: 缺少 dashboard.read 权限, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+
   /notifications/unread-count:
     get:
       summary: 查询当前成员的未读通知数
@@ -4544,6 +4595,184 @@ components:
         error:
           $ref: '#/components/schemas/ChatStreamErrorDetail'
       description: 工具执行完成、失败或被 API 拒绝时发送的事件。
+
+    DashboardProjectMetrics:
+      type: object
+      additionalProperties: false
+      required: [total, planning, active, paused, completed, cancelled, archived]
+      properties:
+        total: { type: integer, minimum: 0 }
+        planning: { type: integer, minimum: 0 }
+        active: { type: integer, minimum: 0 }
+        paused: { type: integer, minimum: 0 }
+        completed: { type: integer, minimum: 0 }
+        cancelled: { type: integer, minimum: 0 }
+        archived: { type: integer, minimum: 0 }
+
+    DashboardTaskMetrics:
+      type: object
+      additionalProperties: false
+      required: [total, todo, inProgress, blocked, done, cancelled, overdue, completionRate]
+      properties:
+        total: { type: integer, minimum: 0 }
+        todo: { type: integer, minimum: 0 }
+        inProgress: { type: integer, minimum: 0 }
+        blocked: { type: integer, minimum: 0 }
+        done: { type: integer, minimum: 0 }
+        cancelled: { type: integer, minimum: 0 }
+        overdue: { type: integer, minimum: 0 }
+        completionRate: { type: number, minimum: 0, maximum: 1 }
+
+    DashboardReportMetrics:
+      type: object
+      additionalProperties: false
+      required: [total, draft, submitted, approved, rejected, pendingReview, dailyReportPending]
+      properties:
+        total: { type: integer, minimum: 0 }
+        draft: { type: integer, minimum: 0 }
+        submitted: { type: integer, minimum: 0 }
+        approved: { type: integer, minimum: 0 }
+        rejected: { type: integer, minimum: 0 }
+        pendingReview: { type: integer, minimum: 0 }
+        dailyReportPending: { type: boolean }
+
+    DashboardMeetingMetrics:
+      type: object
+      additionalProperties: false
+      required: [upcoming, today, pendingResponse]
+      properties:
+        upcoming: { type: integer, minimum: 0 }
+        today: { type: integer, minimum: 0 }
+        pendingResponse: { type: integer, minimum: 0 }
+
+    DashboardNotificationMetrics:
+      type: object
+      additionalProperties: false
+      required: [unreadCount]
+      properties:
+        unreadCount: { type: integer, minimum: 0 }
+
+    DashboardOverview:
+      type: object
+      additionalProperties: false
+      required: [project, task, report, meeting, notification, generatedAt]
+      properties:
+        project: { $ref: '#/components/schemas/DashboardProjectMetrics' }
+        task: { $ref: '#/components/schemas/DashboardTaskMetrics' }
+        report: { $ref: '#/components/schemas/DashboardReportMetrics' }
+        meeting: { $ref: '#/components/schemas/DashboardMeetingMetrics' }
+        notification: { $ref: '#/components/schemas/DashboardNotificationMetrics' }
+        generatedAt: { type: string, format: date-time }
+
+    DashboardTaskStatistics:
+      $ref: '#/components/schemas/DashboardTaskMetrics'
+
+    DashboardTaskTodo:
+      type: object
+      additionalProperties: false
+      required: [id, projectId, title, status, priority, dueDate]
+      properties:
+        id: { type: string, format: uuid }
+        projectId: { type: string, format: uuid }
+        title: { type: string }
+        status: { $ref: '#/components/schemas/TaskStatus' }
+        priority: { $ref: '#/components/schemas/TaskPriority' }
+        dueDate: { type: [string, 'null'], format: date-time }
+
+    DashboardReportTodo:
+      type: object
+      additionalProperties: false
+      required: [id, type, periodStart, status]
+      properties:
+        id: { type: string, format: uuid }
+        type: { $ref: '#/components/schemas/WorkReportType' }
+        periodStart: { type: string, format: date }
+        status: { $ref: '#/components/schemas/WorkReportStatus' }
+
+    DashboardMeetingTodo:
+      type: object
+      additionalProperties: false
+      required: [id, title, startsAt, status, responseStatus]
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        startsAt: { type: string, format: date-time }
+        status: { $ref: '#/components/schemas/MeetingStatus' }
+        responseStatus: { type: [string, 'null'] }
+
+    DashboardTodoList:
+      type: object
+      additionalProperties: false
+      required: [tasks, reports, meetings, unreadNotificationCount]
+      properties:
+        tasks:
+          type: array
+          items: { $ref: '#/components/schemas/DashboardTaskTodo' }
+        reports:
+          type: array
+          items: { $ref: '#/components/schemas/DashboardReportTodo' }
+        meetings:
+          type: array
+          items: { $ref: '#/components/schemas/DashboardMeetingTodo' }
+        unreadNotificationCount: { type: integer, minimum: 0 }
+
+    DashboardUpcomingMeeting:
+      type: object
+      additionalProperties: false
+      required: [id, title, startsAt, durationMinutes, status, responseStatus]
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        startsAt: { type: string, format: date-time }
+        durationMinutes: { type: integer, minimum: 1 }
+        status: { $ref: '#/components/schemas/MeetingStatus' }
+        projectId: { type: [string, 'null'], format: uuid }
+        responseStatus: { type: [string, 'null'] }
+
+    DashboardUpcomingMeetingList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/DashboardUpcomingMeeting' }
+
+    DashboardOverviewResponseEnvelope:
+      type: object
+      additionalProperties: false
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/DashboardOverview' }
+        requestId: { type: [string, 'null'] }
+
+    DashboardTaskStatisticsResponseEnvelope:
+      type: object
+      additionalProperties: false
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/DashboardTaskStatistics' }
+        requestId: { type: [string, 'null'] }
+
+    DashboardTodoListResponseEnvelope:
+      type: object
+      additionalProperties: false
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/DashboardTodoList' }
+        requestId: { type: [string, 'null'] }
+
+    DashboardUpcomingMeetingListResponseEnvelope:
+      type: object
+      additionalProperties: false
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/DashboardUpcomingMeetingList' }
+        requestId: { type: [string, 'null'] }
 
     NotificationResult:
       type: object

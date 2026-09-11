@@ -60,6 +60,7 @@ export const TENANT_PERMISSION_DEFINITIONS = [
     ['work_report.review', '\u5ba1\u6838\u65e5\u62a5\u5468\u62a5'],
     ['work_report.manage_all', '\u7ba1\u7406\u5f53\u524d\u79df\u6237\u5168\u90e8\u65e5\u62a5\u5468\u62a5'],
     ['notification.read', '\u67e5\u770b\u901a\u77e5\u4e2d\u5fc3'],
+    ['dashboard.read', '\u67e5\u770b\u5de5\u4f5c\u53f0\u548c\u6570\u636e\u770b\u677f'],
 ] as const;
 
 export const TENANT_ADMIN_ROLE_CODE = 'tenant_admin';

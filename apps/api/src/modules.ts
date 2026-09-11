@@ -14,9 +14,9 @@ import { ChatModule } from './chat/chat.module';
 import { WorkReportModule } from './work-report/work-report.module';
 import { NotificationModule } from './notification/notification.module';
 import { JobsModule } from './jobs/jobs.module';
+import { DashboardModule } from './dashboard/dashboard.module';
 
 @Module({}) export class KnowledgeModule { }
-@Module({}) export class DashboardModule { }
 @Module({}) export class IntegrationModule { }
 @Module({}) export class CommonModule { }
 
