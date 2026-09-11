@@ -9,6 +9,7 @@ export const PLATFORM_PERMISSIONS = [
     'platform.tenant.admin.read',
     'platform.tenant.admin.assign',
     'platform.tenant.admin.remove',
+    'platform.tenant.admin.credential.reset',
     'platform.audit.read',
 ] as const;
 

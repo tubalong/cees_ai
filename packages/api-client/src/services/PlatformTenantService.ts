@@ -10,6 +10,7 @@ import type { PlatformTenantListResponseEnvelope } from '../models/PlatformTenan
 import type { PlatformTenantProvisioningResponseEnvelope } from '../models/PlatformTenantProvisioningResponseEnvelope';
 import type { PlatformTenantResponseEnvelope } from '../models/PlatformTenantResponseEnvelope';
 import type { SuspendPlatformTenantRequest } from '../models/SuspendPlatformTenantRequest';
+import type { TenantInvitationCreatedResponseEnvelope } from '../models/TenantInvitationCreatedResponseEnvelope';
 import type { TenantStatus } from '../models/TenantStatus';
 import type { UpdatePlatformTenantRequest } from '../models/UpdatePlatformTenantRequest';
 import type { VersionRequest } from '../models/VersionRequest';
@@ -221,6 +222,30 @@ export class PlatformTenantService {
             },
             errors: {
                 409: `不能移除最后一名有效租户管理员`,
+            },
+        });
+    }
+    /**
+     * 重置租户管理员凭证并签发一次性激活令牌
+     * @returns TenantInvitationCreatedResponseEnvelope 凭证已重置；激活令牌只在本次响应返回
+     * @throws ApiError
+     */
+    public static platformTenantResetAdministratorCredential({
+        tenantId,
+        membershipId,
+    }: {
+        tenantId: string,
+        membershipId: string,
+    }): CancelablePromise<TenantInvitationCreatedResponseEnvelope> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/platform/tenants/{tenantId}/administrators/{membershipId}/credential-reset',
+            path: {
+                'tenantId': tenantId,
+                'membershipId': membershipId,
+            },
+            errors: {
+                404: `租户或租户管理员不存在`,
             },
         });
     }

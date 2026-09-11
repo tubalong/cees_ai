@@ -20,7 +20,10 @@ import { PrismaService } from '../database/prisma.service';
 import { PlatformAuthenticatedPrincipal } from '../platform-auth/platform-auth.types';
 import { PlatformRequestMetadata } from '../platform-auth/platform-auth.service';
 import { TENANT_ADMIN_ROLE_CODE, TENANT_PERMISSION_DEFINITIONS } from '../rbac/permission-catalog';
-import { TenantInvitationResult } from '../tenant-invitation/tenant-invitation.types';
+import {
+    TenantInvitationCreatedResult,
+    TenantInvitationResult,
+} from '../tenant-invitation/tenant-invitation.types';
 import {
     AssignPlatformTenantAdministratorDto,
     CreatePlatformTenantDto,
@@ -42,6 +45,10 @@ import {
 
 const administratorMemberInclude = {
     user: true,
+    membershipRoles: {
+        where: { role: { deletedAt: null } },
+        include: { role: true },
+    },
 } satisfies Prisma.TenantMembershipInclude;
 
 type AdministratorMember = Prisma.TenantMembershipGetPayload<{ include: typeof administratorMemberInclude }>;
@@ -348,6 +355,76 @@ export class PlatformTenantService {
         }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     }
 
+    async resetAdministratorCredential(
+        tenantId: string,
+        membershipId: string,
+        principal: PlatformAuthenticatedPrincipal,
+        metadata: PlatformRequestMetadata,
+    ): Promise<TenantInvitationCreatedResult> {
+        await this.requireTenant(tenantId);
+
+        return this.prisma.$transaction(async (transaction) => {
+            const member = await transaction.tenantMembership.findFirst({
+                where: { id: membershipId, tenantId, deletedAt: null },
+                include: administratorMemberInclude,
+            });
+            if (!member || member.user.deletedAt || member.user.status === UserStatus.DISABLED) {
+                throw this.administratorNotFound();
+            }
+            if (!member.membershipRoles.some((assignment) => assignment.role.code === TENANT_ADMIN_ROLE_CODE)) {
+                throw this.administratorNotFound();
+            }
+
+            const now = new Date();
+            const roleIds = member.membershipRoles.map((assignment) => assignment.roleId);
+            await transaction.authSession.updateMany({
+                where: { tenantId, membershipId, revokedAt: null },
+                data: { revokedAt: now },
+            });
+            await transaction.tenantInvitation.updateMany({
+                where: { tenantId, normalizedAccount: member.normalizedAccount, status: TenantInvitationStatus.PENDING },
+                data: { status: TenantInvitationStatus.REVOKED, revokedAt: now },
+            });
+            await transaction.tenantMembership.update({
+                where: { id: membershipId },
+                data: {
+                    status: MembershipStatus.PENDING_ACTIVATION,
+                    passwordHash: null,
+                    failedLoginCount: 0,
+                    lockedUntil: null,
+                    updatedBy: principal.id,
+                    version: { increment: 1 },
+                },
+            });
+
+            const invitation = await this.createInvitation(
+                transaction,
+                tenantId,
+                member.account,
+                member.displayName ?? member.user.displayName,
+                roleIds,
+                principal.id,
+                false,
+                membershipId,
+            );
+            await this.writeTenantMutationAudit(
+                transaction,
+                principal,
+                metadata,
+                tenantId,
+                'TENANT_ADMIN_CREDENTIAL_RESET',
+                {
+                    membershipId,
+                    account: member.account,
+                    activationExpiresAt: invitation.record.expiresAt.toISOString(),
+                },
+                'TENANT_MEMBERSHIP',
+                membershipId,
+            );
+            return { invitation: toInvitationResult(invitation.record), invitationToken: invitation.token };
+        }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    }
+
     async removeAdministrator(
         tenantId: string,
         membershipId: string,
@@ -467,6 +544,7 @@ export class PlatformTenantService {
         roleIds: string[],
         invitedByUserId: string,
         isInitialAdministrator: boolean,
+        targetMembershipId?: string,
     ): Promise<{ record: InvitationWithRoles; token: string }> {
         const token = randomBytes(48).toString('base64url');
         const expiresIn = parseDurationSeconds(process.env.TENANT_INVITATION_TTL, 24 * 60 * 60);
@@ -476,6 +554,7 @@ export class PlatformTenantService {
                 account,
                 normalizedAccount: account,
                 displayName,
+                targetMembershipId,
                 tokenHash: hashToken(token),
                 isInitialAdministrator,
                 expiresAt: new Date(Date.now() + expiresIn * 1000),
@@ -494,6 +573,8 @@ export class PlatformTenantService {
         tenantId: string,
         action: string,
         details: Record<string, unknown>,
+        resourceType = 'TENANT',
+        resourceId = tenantId,
     ): Promise<void> {
         await transaction.platformAuditLog.create({
             data: {
@@ -501,8 +582,8 @@ export class PlatformTenantService {
                 actorPlatformAdministratorId: principal.platformAdministratorId,
                 action,
                 outcome: AuditOutcome.SUCCESS,
-                resourceType: 'TENANT',
-                resourceId: tenantId,
+                resourceType,
+                resourceId,
                 requestId: metadata.requestId,
                 ipAddress: metadata.ipAddress,
                 userAgent: metadata.userAgent,
@@ -515,8 +596,8 @@ export class PlatformTenantService {
                 actorUserId: principal.id,
                 action: `${action}_BY_PLATFORM`,
                 outcome: AuditOutcome.SUCCESS,
-                resourceType: 'TENANT',
-                resourceId: tenantId,
+                resourceType,
+                resourceId,
                 requestId: metadata.requestId,
                 ipAddress: metadata.ipAddress,
                 userAgent: metadata.userAgent,

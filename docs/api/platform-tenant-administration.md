@@ -1,12 +1,12 @@
 # 平台租户管理与租户账号激活
 
 > 状态：已实现
-> 最后同步：2026-09-07
-> 契约版本：`0.7.0`
+> 最后同步：2026-09-11
+> 契约版本：`0.19.0`
 
 ## 1. 目标与边界
 
-平台超级管理员负责租户生命周期、首位租户管理员和平台审计。租户管理员负责当前租户的成员账号、角色和凭证重置。普通用户不能通过注册创建租户，租户只能由平台超级管理员创建。
+平台超级管理员负责租户生命周期、首位租户管理员、租户管理员凭证恢复和平台审计。租户管理员负责当前租户的成员账号、角色和成员凭证重置。普通用户不能通过注册创建租户，租户只能由平台超级管理员创建。
 
 平台管理员和租户成员使用独立认证域：
 
@@ -113,6 +113,25 @@ POST /tenants/current/members/{membershipId}/credential-reset
 
 由于当前不绑定邮箱和手机号，用户忘记密码时必须联系租户管理员执行此流程。
 
+### 6.5 平台超级管理员应急重置租户管理员
+
+```text
+POST /platform/tenants/{tenantId}/administrators/{membershipId}/credential-reset
+```
+
+该接口使用平台管理员 Bearer Token，并要求 `platform.tenant.admin.credential.reset` 权限。服务端只接受目标租户内实际拥有 `tenant_admin` 角色的成员，不能将该接口用于普通成员或其他租户。
+
+成功后服务端会在一个事务中完成以下操作：
+
+1. 撤销目标成员当前租户下全部未撤销 Session；
+2. 撤销该账号已有的待激活邀请；
+3. 清空旧密码、登录失败次数和锁定时间；
+4. 将成员状态改为 `PENDING_ACTIVATION` 并递增版本；
+5. 创建绑定原 Membership 的一次性激活邀请；
+6. 写入平台审计和目标租户审计。
+
+接口返回的 `invitationToken` 只出现一次，平台管理员应通过受控渠道交付给目标管理员。目标管理员随后使用 `POST /auth/activate` 设置新密码；平台管理员不会读取或设置最终密码。该接口允许重置租户唯一的有效管理员，专门用于管理员无法登录时的恢复场景。
+
 ## 7. 接口
 
 ### 平台认证
@@ -135,6 +154,7 @@ POST   /platform/tenants/{tenantId}/suspend
 POST   /platform/tenants/{tenantId}/restore
 GET    /platform/tenants/{tenantId}/administrators
 POST   /platform/tenants/{tenantId}/administrators
+POST   /platform/tenants/{tenantId}/administrators/{membershipId}/credential-reset
 DELETE /platform/tenants/{tenantId}/administrators/{membershipId}
 ```
 
