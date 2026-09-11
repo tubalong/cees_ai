@@ -12,13 +12,13 @@ import { TaskModule } from './task/task.module';
 import { MeetingModule } from './meeting/meeting.module';
 import { ChatModule } from './chat/chat.module';
 import { WorkReportModule } from './work-report/work-report.module';
+import { NotificationModule } from './notification/notification.module';
+import { JobsModule } from './jobs/jobs.module';
 
 @Module({}) export class KnowledgeModule { }
-@Module({}) export class NotificationModule { }
 @Module({}) export class DashboardModule { }
 @Module({}) export class IntegrationModule { }
 @Module({}) export class CommonModule { }
-@Module({}) export class JobsModule { }
 
 export const BusinessModules: Type[] = [
     OrganizationModule, RbacModule, UserModule, ProjectModule, TaskModule, ChatModule, WorkReportModule,

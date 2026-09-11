@@ -19,6 +19,8 @@
 - [会议管理](../product/meeting-management.md)
 - [日报与周报 API](work-report-management-api.md)
 - [日报与周报管理](../product/work-report-management.md)
+- [通知中心 API](notification-center-api.md)
+- [通知中心与后台任务](../product/notification-center.md)
 - [公开 AI 对话链路与 Token 计量](../architecture/public-chat-api-and-token-metering.md)
 - [用户个人资料管理](../product/user-profile-management.md)
 - [密码修改与凭证安全](../security/password-management.md)
@@ -105,6 +107,11 @@ GET    /api/v1/meetings/{meetingId}/minutes
 PUT    /api/v1/meetings/{meetingId}/minutes
 POST   /api/v1/meetings/{meetingId}/minutes/publish
 POST   /api/v1/meetings/{meetingId}/minutes/reopen
+
+GET    /api/v1/notifications
+GET    /api/v1/notifications/unread-count
+POST   /api/v1/notifications/read-all
+POST   /api/v1/notifications/{notificationId}/read
 
 POST /api/v1/upload-sessions
 POST /api/v1/upload-sessions/{uploadSessionId}/complete

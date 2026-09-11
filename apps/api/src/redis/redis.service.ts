@@ -6,6 +6,8 @@ export interface RedisSetOptions {
     ttlSeconds?: number;
 }
 
+const LOCK_RELEASE_SCRIPT = `if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end`;
+
 export class RedisJsonParseError extends Error {
     constructor(logicalKey: string, options?: ErrorOptions) {
         super(`Redis value for "${logicalKey}" is not valid JSON`, options);
@@ -95,6 +97,17 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
             'NX',
         );
         return result === 'OK';
+    }
+
+    async deleteIfValue(logicalKey: string, expectedValue: string): Promise<boolean> {
+        if (!expectedValue) throw new TypeError('Redis expected value must not be empty');
+        const result = await this.client.eval(
+            LOCK_RELEASE_SCRIPT,
+            1,
+            this.qualify(logicalKey),
+            expectedValue,
+        );
+        return result === 1;
     }
 
     async ping(): Promise<boolean> {

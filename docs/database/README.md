@@ -5,8 +5,9 @@
 项目、项目成员和状态历史见 [项目与项目成员管理](../product/project-management.md)。
 任务、执行人、评论、附件和动态见 [项目任务管理](../product/task-management.md)。
 公开 Chat 调用与 Token 指标见 [公开 AI 对话链路与 Token 计量](../architecture/public-chat-api-and-token-metering.md)。
+通知中心与后台任务见 [通知中心与后台任务](../product/notification-center.md)。
 
-> 新环境使用 `prisma migrate deploy` 按 `0001_init` 到 `0010_work_report_management` 的目录顺序执行迁移；全部迁移完成后与当前 `schema.prisma` 保持一致。
+> 新环境使用 `prisma migrate deploy` 按 `0001_init` 到 `0011_notification_center_and_jobs` 的目录顺序执行迁移；全部迁移完成后与当前 `schema.prisma` 保持一致。
 
 - `apps/api/prisma/schema.prisma` 是数据模型唯一事实源，迁移提交 `prisma/migrations`。
 - 新建表和字段必须在同一迁移中使用 `COMMENT ON TABLE`、`COMMENT ON COLUMN` 添加 PostgreSQL 注释；`0003_organization_departments_and_database_comments` 已补齐此前全部业务表和字段注释。
@@ -14,6 +15,21 @@
 - 向量检索使用 pgvector；扩展由 `0001_init` 在创建向量字段前启用，不使用环境专属初始化 SQL。
 - AI 服务对业务库只读；正式写入统一经 NestJS。
 - 业务模型落地前，先在此文档维护实体与关系草图。
+
+## 通知中心模型
+
+```text
+Tenant
+  └── Notification
+        └── NotificationRecipient ── User
+```
+
+- `notifications` 保存通知正文、渠道、关联资源、租户和可选的租户内 `dedup_key`；
+- `notification_recipients` 保存通知接收人、租户和独立的 `read_at` 阅读时间；
+- `notifications(tenant_id, dedup_key)` 为唯一约束，空去重键不参与有效去重；
+- `notification_recipients(tenant_id, notification_id, user_id)` 保证同一通知不会重复投递给同一用户；
+- `0011_notification_center_and_jobs` 增加通知关系外键、未读查询索引、通知读取权限和 PostgreSQL 中文表/字段注释；
+- 后台任务不新增任务表，使用 Redis 锁协调多 API 实例，并通过通知模型发送日报提醒。
 
 ## 身份与租户关系
 
