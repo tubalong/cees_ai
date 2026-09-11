@@ -20,6 +20,7 @@ from app.api.generated.models import (
 )
 from app.api.routes.chat import router as chat_router
 from app.api.routes.documents import router as documents_router
+from app.api.routes.images import router as images_router
 from app.api.routes.invoke import router as invoke_router
 from app.api.routes.stream import router as stream_router
 from app.api.routes.system import router as system_router
@@ -70,6 +71,7 @@ def create_app(
     application.include_router(system_router)
     application.include_router(invoke_router)
     application.include_router(stream_router)
+    application.include_router(images_router)
     application.include_router(chat_router)
     application.include_router(documents_router)
 

@@ -6,6 +6,7 @@ from app.core.config import (
     ChatConfig,
     ChatMode,
     ChatModePolicy,
+    ModelCapability,
     ModelCatalog,
     ModelProfile,
     ModelRole,
@@ -13,6 +14,7 @@ from app.core.config import (
     Settings,
 )
 from app.core.runtime import AppRuntime
+from app.images.router import ImageRouter
 from app.llm.router import LLMRouter
 from app.llm.types import (
     ChatMessage,
@@ -20,6 +22,7 @@ from app.llm.types import (
     ProviderResult,
     ProviderStreamChunk,
     TokenUsageData,
+    ToolCallingResult,
 )
 
 
@@ -30,12 +33,18 @@ class StubProvider:
         outcomes: Sequence[object],
         *,
         stream_outcomes: Sequence[Sequence[object]] = (),
+        tool_outcomes: Sequence[object] = (),
+        tool_stream_outcomes: Sequence[Sequence[object]] = (),
     ) -> None:
         self.profile = profile
         self.outcomes = list(outcomes)
         self.calls: list[tuple[list[ChatMessage], InvocationOptions]] = []
         self.stream_outcomes = [list(items) for items in stream_outcomes]
         self.stream_calls: list[tuple[list[ChatMessage], InvocationOptions]] = []
+        self.tool_outcomes = list(tool_outcomes)
+        self.tool_calls: list[tuple[list[ChatMessage], InvocationOptions]] = []
+        self.tool_stream_outcomes = [list(items) for items in tool_stream_outcomes]
+        self.tool_stream_calls: list[tuple[list[ChatMessage], InvocationOptions]] = []
 
     async def invoke(
         self, messages: list[ChatMessage], options: InvocationOptions
@@ -57,6 +66,26 @@ class StubProvider:
             assert isinstance(outcome, ProviderStreamChunk)
             yield outcome
 
+    async def invoke_with_tools(
+        self, messages: list[ChatMessage], options: InvocationOptions
+    ) -> ToolCallingResult:
+        self.tool_calls.append((messages, options))
+        outcome = self.tool_outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        assert isinstance(outcome, ToolCallingResult)
+        return outcome
+
+    async def stream_with_tools(
+        self, messages: list[ChatMessage], options: InvocationOptions
+    ) -> AsyncIterator[ProviderStreamChunk]:
+        self.tool_stream_calls.append((messages, options))
+        for outcome in self.tool_stream_outcomes.pop(0):
+            if isinstance(outcome, Exception):
+                raise outcome
+            assert isinstance(outcome, ProviderStreamChunk)
+            yield outcome
+
 
 def profile(
     *,
@@ -64,12 +93,14 @@ def profile(
     modes: set[OutputMode] | None = None,
     enabled: bool = True,
     token_limit: int = 4096,
+    capabilities: set[ModelCapability] | None = None,
 ) -> ModelProfile:
     values = {
         "provider": provider,
         "model": f"{provider}-model",
         "enabled": enabled,
         "modes": modes or {OutputMode.text},
+        "capabilities": capabilities or {ModelCapability.chat},
         "default_max_output_tokens": min(256, token_limit),
         "max_output_tokens_limit": token_limit,
         "timeout_seconds": 10,
@@ -120,12 +151,14 @@ def ready_runtime(
     *,
     token: str = "secret",
     settings: Settings | None = None,
+    image_router: ImageRouter | None = None,
 ) -> AppRuntime:
     return AppRuntime(
         settings=settings or Settings(node_env="test", ai_internal_token=token),
         catalog=model_catalog,
         router=router,
         readiness_errors=[],
+        image_router=image_router,
     )
 
 

@@ -5,6 +5,7 @@ model = "deepseek-v4-flash"
 base_url = "https://api.deepseek.com"
 api_key_env = "PRIMARY_LLM_API_KEY"
 modes = ["text", "json_schema"]
+capabilities = ["chat", "tool_calling"]
 temperature = 0.0
 default_max_output_tokens = 2048
 max_output_tokens_limit = 8192
@@ -19,6 +20,7 @@ model = "change_me"
 base_url = "https://change_me/v1"
 api_key_env = "BACKUP_LLM_API_KEY"
 modes = ["text", "json_schema"]
+capabilities = ["chat", "tool_calling"]
 temperature = 0.0
 default_max_output_tokens = 2048
 max_output_tokens_limit = 8192
@@ -46,8 +48,18 @@ max_output_tokens_limit = 8192
 context_budget_tokens = 131072
 emit_reasoning_status = true
 
+[image_profiles.primary]
+enabled = true
+provider = "openai_compatible"
+model = "change_me"
+base_url = "https://change_me/v1"
+api_key_env = "IMAGE_GEN_API_KEY"
+timeout_seconds = 60.0
+max_retries = 2
+
 [roles]
 default = ["primary", "backup"]
 structured = ["primary", "backup"]
 reasoning = ["primary", "backup"]
 rag = ["primary", "backup"]
+orchestrator = ["primary"]

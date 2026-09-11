@@ -10,6 +10,8 @@ from pydantic import BaseModel
 
 from app.api.generated.models import (
     ChatAssistantMessage,
+    ChatContextStrategy,
+    ChatContextUsage,
     ChatInvokeResponse,
     ChatMode,
     ChatRequest,
@@ -27,10 +29,16 @@ from app.api.generated.models import (
     StreamErrorEvent,
     StreamExecutionMetadata,
     TokenUsage,
+    ToolTurnRequest,
+    ToolTurnToolCallsEvent,
     UsageEvent,
+)
+from app.api.generated.models import (
+    ToolCall as ApiToolCall,
 )
 from app.chat.compactor import ChatCompactor
 from app.chat.orchestrator import ChatOrchestrator, PreparedChat
+from app.chat.tool_turn import PreparedToolTurn, ToolTurnOrchestrator
 from app.core.config import ModelProfile
 from app.core.errors import AIServiceError, ProviderPermanentError, ProviderTransientError
 from app.core.runtime import AppRuntime
@@ -135,6 +143,178 @@ async def stream_chat(payload: ChatRequest, request: Request) -> StreamingRespon
         headers={
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.post(
+    "/tool-turn/stream",
+    response_class=StreamingResponse,
+    response_model=None,
+    operation_id="streamChatToolTurn",
+    summary="Stream a single tool-capable chat turn",
+    response_description="Tool-capable turn events are streamed",
+    responses=CHAT_ERROR_RESPONSES,
+)
+async def stream_chat_tool_turn(
+    payload: ToolTurnRequest, request: Request
+) -> StreamingResponse:
+    llm_router = _require_router(request, payload.request_id)
+    prepared = ToolTurnOrchestrator().prepare(payload)
+    return StreamingResponse(
+        _tool_turn_stream_events(payload, prepared, llm_router),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+async def _tool_turn_stream_events(
+    payload: ToolTurnRequest,
+    prepared: PreparedToolTurn,
+    llm_router: LLMRouter,
+) -> AsyncIterator[str]:
+    yield _encode_sse(
+        ChatStreamStartedEvent(
+            type="started",
+            request_id=payload.request_id,
+            conversation_id=payload.conversation_id,
+            mode=ChatMode(prepared.mode.value),
+            context_usage=ChatContextUsage(
+                strategy=ChatContextStrategy.full,
+                received_message_count=prepared.received_message_count,
+                included_message_count=prepared.included_message_count,
+                history_truncated=False,
+                estimated_input_tokens=prepared.estimated_input_tokens,
+            ),
+        )
+    )
+
+    try:
+        routed = await llm_router.start_tool_stream(
+            request_id=payload.request_id,
+            tenant_id=payload.tenant_id,
+            user_id=payload.user_id,
+            messages=prepared.messages,
+            tools=prepared.tools,
+            profile_override=None,
+            temperature=None,
+            max_output_tokens=prepared.max_output_tokens,
+        )
+    except AIServiceError as exc:
+        yield _encode_stream_error(
+            request_id=payload.request_id,
+            code=exc.code,
+            message=exc.message,
+            retryable=exc.retryable,
+        )
+        return
+    except Exception as exc:
+        logger.exception(
+            "unexpected tool turn stream startup failure",
+            exc_info=exc,
+            extra={"request_id": payload.request_id},
+        )
+        yield _encode_stream_error(
+            request_id=payload.request_id,
+            code="INTERNAL_ERROR",
+            message="An unexpected internal error occurred",
+            retryable=False,
+        )
+        return
+
+    token_usage: TokenUsageData | None = None
+    finish_reason: str | None = None
+    try:
+        async for chunk in routed.chunks:
+            if chunk.text:
+                yield _encode_sse(ContentDeltaEvent(type="content_delta", text=chunk.text))
+            if chunk.tool_calls:
+                yield _encode_sse(
+                    ToolTurnToolCallsEvent(
+                        type="tool_calls",
+                        tool_calls=[
+                            ApiToolCall(
+                                id=tool_call.id,
+                                name=tool_call.name,
+                                arguments=tool_call.arguments,
+                            )
+                            for tool_call in chunk.tool_calls
+                        ],
+                    )
+                )
+            if chunk.token_usage is not None:
+                token_usage = chunk.token_usage
+            if chunk.finish_reason is not None:
+                finish_reason = chunk.finish_reason
+    except ProviderTransientError:
+        yield _encode_stream_error(
+            request_id=payload.request_id,
+            code="CHAT_STREAM_INTERRUPTED",
+            message="The provider tool turn stream was interrupted",
+            retryable=True,
+        )
+        return
+    except ProviderPermanentError:
+        yield _encode_stream_error(
+            request_id=payload.request_id,
+            code="CHAT_STREAM_FAILED",
+            message="The provider terminated the tool turn stream",
+            retryable=False,
+        )
+        return
+    except Exception as exc:
+        logger.exception(
+            "unexpected tool turn stream failure",
+            exc_info=exc,
+            extra={"request_id": payload.request_id, "profile": routed.profile_name},
+        )
+        yield _encode_stream_error(
+            request_id=payload.request_id,
+            code="INTERNAL_ERROR",
+            message="An unexpected internal error occurred",
+            retryable=False,
+        )
+        return
+
+    if token_usage is not None:
+        yield _encode_sse(
+            UsageEvent(
+                type="usage",
+                token_usage=TokenUsage(
+                    input_tokens=token_usage.input_tokens,
+                    output_tokens=token_usage.output_tokens,
+                    total_tokens=token_usage.total_tokens,
+                ),
+            )
+        )
+    latency_ms = round((time.perf_counter() - routed.started_at) * 1000)
+    yield _encode_sse(
+        ChatStreamCompletedEvent(
+            type="completed",
+            latency_ms=latency_ms,
+            finish_reason=finish_reason,
+        )
+    )
+    logger.info(
+        "tool turn stream completed",
+        extra={
+            "request_id": payload.request_id,
+            "tenant_id": payload.tenant_id,
+            "user_id": payload.user_id,
+            "conversation_id": payload.conversation_id,
+            "chat_mode": prepared.mode.value,
+            "profile": routed.profile_name,
+            "provider": routed.profile.provider,
+            "model": routed.profile.model,
+            "fallback_count": routed.fallback_count,
+            "latency_ms": latency_ms,
+            "finish_reason": finish_reason,
+            "input_tokens": token_usage.input_tokens if token_usage else None,
+            "output_tokens": token_usage.output_tokens if token_usage else None,
+            "total_tokens": token_usage.total_tokens if token_usage else None,
         },
     )
 
