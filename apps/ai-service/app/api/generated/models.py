@@ -25,6 +25,7 @@ class ModelRole(StrEnum):
     structured = 'structured'
     reasoning = 'reasoning'
     rag = 'rag'
+    orchestrator = 'orchestrator'
 
 
 class MessageRole(StrEnum):
@@ -311,13 +312,6 @@ class ImageProvider(StrEnum):
     openai_compatible = 'openai_compatible'
 
 
-class Size(Enum):
-    field_1024x1024 = '1024x1024'
-    field_1536x1024 = '1536x1024'
-    field_1024x1536 = '1024x1536'
-    auto = 'auto'
-
-
 class Quality(Enum):
     standard = 'standard'
     high = 'high'
@@ -337,7 +331,10 @@ class ImageGenerateRequest(BaseModel):
     tenant_id: constr(min_length=1, max_length=128)
     user_id: constr(min_length=1, max_length=128)
     prompt: constr(min_length=1, max_length=8000)
-    size: Size | None = '1024x1024'
+    size: constr(pattern=r'^(auto|[1-9][0-9]*x[1-9][0-9]*)$') | None = Field(
+        '1024x1024',
+        description='Requested image size as WIDTHxHEIGHT in pixels, or "auto" to let the model choose. Accepted values depend on the configured model. This is a hint only; the model may return different dimensions, which are reported in execution.width and execution.height when parseable.',
+    )
     quality: Quality | None = 'standard'
     response_format: ResponseFormat | None = 'png'
 
@@ -714,6 +711,14 @@ class ImageGenerationMetadata(BaseModel):
     model: str
     fallback_count: conint(ge=0)
     latency_ms: conint(ge=0)
+    width: conint(ge=0) | None = Field(
+        None,
+        description='Actual image width in pixels when the returned bytes could be parsed.',
+    )
+    height: conint(ge=0) | None = Field(
+        None,
+        description='Actual image height in pixels when the returned bytes could be parsed.',
+    )
     token_usage: TokenUsage
 
 

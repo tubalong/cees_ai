@@ -16,16 +16,24 @@ ai-service 负责选择支持图片生成的模型并返回图片字节与执行
 - `tenant_id`
 - `user_id`
 - `prompt`
-- `size`
+- `size`：`WIDTHxHEIGHT`（如 `256x256`、`1024x1024`）或 `auto`；可选，默认 `1024x1024`
 - `quality`
 - `response_format`
+
+`size` 仅作为对模型的提示，不保证输出尺寸。模型是否支持某个尺寸由其自身能力决定；不支持的尺寸会在 Provider 层以 `503` 返回，而非请求校验失败。
 
 响应：
 
 - `request_id`
 - `content_type`
 - `data_base64`
-- `execution`
+- `execution`（含 `profile`、`provider`、`model`、`fallback_count`、`latency_ms`、`width`、`height`、`token_usage`）
+
+调试辅助接口：
+
+`GET /internal/v1/images/preview?prompt=...&size=...&token=...`
+
+直接返回图片字节（`image/png` / `image/jpeg` / `image/webp`），便于在浏览器标签页中预览，不返回执行元数据、不持久化。鉴权优先使用 `X-AI-Internal-Token` 请求头；`token` 查询参数仅用于普通浏览器地址栏直接打开（会出现在 URL 中，仅限调试）。该接口与 `/generate` 共用 `ImageRouter` 与 `image_profiles` 配置。
 
 ## 3. ImageRouter
 
@@ -67,6 +75,7 @@ IMAGE_GEN_API_KEY=change_me
 - `mock` 返回固定测试字节，仅用于本地联调。
 - `openai_compatible` 使用 OpenAI Images API 的 `b64_json` 输出。
 - `content_type` 由请求的 `response_format` 映射为 `image/png`、`image/jpeg` 或 `image/webp`。
+- 返回的 `execution.width` / `execution.height` 由 ai-service 从图片字节解析得到（PNG/JPEG/WebP）；当无法解析时两者为 `null`。
 
 ## 6. 边界
 
