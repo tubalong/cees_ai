@@ -211,6 +211,8 @@ model Tenant {
   workReports          WorkReport[]
   workReportProjects   WorkReportProject[]
   workReportTasks      WorkReportTask[]
+  notifications         Notification[]
+  notificationRecipients NotificationRecipient[]
   createdAt            DateTime               @default(now()) @map("created_at")
   updatedAt            DateTime               @updatedAt @map("updated_at")
   deletedAt            DateTime?              @map("deleted_at")
@@ -234,6 +236,7 @@ model User {
   platformAdministrator     PlatformAdministrator?
   platformAuthSessions      PlatformAuthSession[]
   acceptedTenantInvitations TenantInvitation[]     @relation("AcceptedTenantInvitations")
+  notificationRecipients    NotificationRecipient[]
   createdAt                 DateTime               @default(now()) @map("created_at")
   updatedAt                 DateTime               @updatedAt @map("updated_at")
   createdBy                 String?                @map("created_by") @db.Uuid
@@ -1059,11 +1062,14 @@ model WorkReportTask {
 model Notification {
   id           String    @id @default(uuid()) @db.Uuid
   tenantId     String    @map("tenant_id") @db.Uuid
+  tenant       Tenant    @relation(fields: [tenantId], references: [id])
   title        String
   content      String
   channel      String    @default("IN_APP")
   relationType String?   @map("relation_type")
   relationId   String?   @map("relation_id") @db.Uuid
+  dedupKey     String?   @map("dedup_key")
+  recipients   NotificationRecipient[]
   createdAt    DateTime  @default(now()) @map("created_at")
   updatedAt    DateTime  @updatedAt @map("updated_at")
   createdBy    String?   @map("created_by") @db.Uuid
@@ -1071,19 +1077,25 @@ model Notification {
   deletedAt    DateTime? @map("deleted_at")
   version      Int       @default(1)
 
+  @@unique([tenantId, dedupKey], map: "notifications_tenant_id_dedup_key_key")
   @@index([tenantId, createdAt])
   @@map("notifications")
 }
 
 model NotificationRecipient {
-  id             String    @id @default(uuid()) @db.Uuid
-  tenantId       String    @map("tenant_id") @db.Uuid
-  notificationId String    @map("notification_id") @db.Uuid
-  userId         String    @map("user_id") @db.Uuid
-  readAt         DateTime? @map("read_at")
-  createdAt      DateTime  @default(now()) @map("created_at")
+  id             String       @id @default(uuid()) @db.Uuid
+  tenantId       String       @map("tenant_id") @db.Uuid
+  tenant         Tenant       @relation(fields: [tenantId], references: [id])
+  notificationId String       @map("notification_id") @db.Uuid
+  notification   Notification @relation(fields: [notificationId], references: [id])
+  userId         String       @map("user_id") @db.Uuid
+  user           User         @relation(fields: [userId], references: [id])
+  readAt         DateTime?    @map("read_at")
+  createdAt      DateTime     @default(now()) @map("created_at")
 
   @@unique([tenantId, notificationId, userId])
+  @@index([tenantId, userId, readAt, createdAt])
+  @@index([tenantId, notificationId])
   @@map("notification_recipients")
 }
 

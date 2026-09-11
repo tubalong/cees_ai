@@ -27,6 +27,7 @@ describe('RedisService', () => {
             exists: jest.fn().mockResolvedValue(1),
             incrby: jest.fn().mockResolvedValue(3),
             set: jest.fn().mockResolvedValue('OK'),
+            eval: jest.fn().mockResolvedValue(1),
         });
         const service = new RedisService(client, 'cees:local:');
 
@@ -34,9 +35,16 @@ describe('RedisService', () => {
         await expect(service.exists('a')).resolves.toBe(true);
         await expect(service.increment('counter', 2)).resolves.toBe(3);
         await expect(service.setIfAbsent('lock:1', 'owner', 10)).resolves.toBe(true);
+        await expect(service.deleteIfValue('lock:1', 'owner')).resolves.toBe(true);
 
         expect(client.del).toHaveBeenCalledWith('cees:local:a', 'cees:local:b');
         expect(client.set).toHaveBeenCalledWith('cees:local:lock:1', 'owner', 'EX', 10, 'NX');
+        expect(client.eval).toHaveBeenCalledWith(
+            `if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end`,
+            1,
+            'cees:local:lock:1',
+            'owner',
+        );
     });
 
     it('rejects invalid keys and malformed JSON values', async () => {
@@ -63,6 +71,7 @@ function createClient(overrides: Record<string, jest.Mock>): Redis {
         expire: jest.fn(),
         ttl: jest.fn(),
         incrby: jest.fn(),
+        eval: jest.fn(),
         ...overrides,
     } as unknown as Redis;
 }

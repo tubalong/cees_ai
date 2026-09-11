@@ -2,7 +2,7 @@
 
 > 状态：按当前实现整理  
 > 最后同步：2026-09-11
-> 公开契约版本：`0.16.0`
+> 公开契约版本：`0.17.0`
 > 事实源：`packages/contracts/openapi/openapi.yaml`、`apps/api/prisma/schema.prisma`
 
 ## 1. 文档用途
@@ -10,7 +10,7 @@
 本文面向本地开发、接口联调、产品验收和数据库排查，统一说明：
 
 - 平台超级管理员、租户管理员和普通成员的区别；
-- 当前已经实现的 127 个 HTTP 操作；
+- 当前已经实现的 131 个 HTTP 操作；
 - 路径参数、查询参数和 JSON 请求体字段的含义；
 - PostgreSQL 中 44 张业务表、528 个业务字段及 Prisma 迁移表的用途；
 - 租户创建、成员激活、登录、授权、资源访问、审计、停用和恢复的整体流转；
@@ -41,7 +41,8 @@
 | 会议管理 | 已实现 | 会议 CRUD、状态机、参会人、邀请应答、实际出席、纪要和审计 |
 | 日报与周报 | 已实现 | 创建、查询、修改、删除、提交、撤回、审核、项目任务关联和审计 |
 | AI 对话与 Token 记录 | 已实现 | 客户端本地保存历史，API 调用 ai-service 并按企业、成员、会话和轮次记录 Token |
-| 知识库、通知 | 仅数据库结构/设计基础 | 当前没有对应公开 API |
+| 通知中心 | 已实现 | 通知列表、未读统计、已读操作、租户隔离和后台提醒 |
+| 知识库 | 仅数据库结构/设计基础 | 当前没有对应公开 API |
 | AI 草稿和额度体系 | 部分基础 | AI 草稿仍为数据结构基础；当前只有实际 Token 指标，没有企业/坑位/成员额度账户或扣减 |
 
 ## 3. 管理员账号到底存在哪里
@@ -386,6 +387,17 @@ pnpm --filter @cees/api dev
 | `POST /chat/compact` | 把本地历史压缩为摘要 | `ChatCompactRequest` | `ChatCompactResult` | 有效租户成员 Bearer |
 
 API 从 JWT 注入租户、User 和 Membership，客户端不能提交这些内部身份字段，也不能指定系统指令、Provider、模型或 Profile。Conversation、Message 和摘要由客户端保存在本地，API 仅在 `ai_invocation_logs` 保存身份关联和 Token 指标。详细设计见 [公开 AI 对话链路与 Token 计量](../architecture/public-chat-api-and-token-metering.md)。
+
+### 6.12 通知中心
+
+| 方法与路径 | 用途 | 参数/请求体 | 返回 | 权限 |
+| --- | --- | --- | --- | --- |
+| `GET /notifications` | 查询当前成员可见通知 | `unreadOnly/limit/cursor` | 通知列表和未读总数 | `notification.read` |
+| `GET /notifications/unread-count` | 查询当前成员未读数量 | 无 | `unreadCount` | `notification.read` |
+| `POST /notifications/read-all` | 批量标记当前成员通知为已读 | 无 | `updatedCount` | `notification.read` |
+| `POST /notifications/{notificationId}/read` | 标记当前成员的一条通知为已读 | 路径 `notificationId` | 通知详情 | `notification.read` |
+
+通知只能由业务服务和后台任务内部投递，客户端不能直接创建通知。查询始终按当前 `tenantId + userId` 的接收关系过滤，同租户其他成员的通知不可见。详细说明见 [通知中心与后台任务](notification-center.md) 和 [通知中心 API](../api/notification-center-api.md)。
 
 ## 7. 请求参数字典
 
@@ -779,6 +791,16 @@ POST /platform/auth/change-password
 
 字段 `conversationId`、`turnId` 和 `messages` 与 `ChatRequest` 相同；`previousSummary` 为可选的上一版本地摘要。压缩结果中的 `summary` 和 `summarizedThroughMessageId` 必须由客户端保存到本地。
 
+### 7.10 通知中心查询参数
+
+| 参数 | 类型 | 默认值 | 含义 |
+| --- | --- | --- | --- |
+| `unreadOnly` | boolean | `false` | 只查询当前用户仍未读的通知 |
+| `limit` | integer | `20` | 每页数量，范围 `1` 到 `100` |
+| `cursor` | UUID | 无 | 上一页返回的 `nextCursor`，首次请求不传 |
+
+通知接口不接收 `tenantId` 和 `userId` 查询参数，这两个值由认证上下文决定。客户端应原样回传 `nextCursor`，不要自行解析或拼装游标。
+
 ## 8. 核心返回字段
 
 | 返回对象 | 主要字段含义 |
@@ -808,6 +830,8 @@ POST /platform/auth/change-password
 | `AuditEvent` | 动作、结果、操作者、资源、请求 ID、客户端信息、元数据和时间 |
 | `PlatformTenantDetail` | 租户状态、有效管理员数、待处理邀请数、版本和时间 |
 | `TenantInvitationCreated` | 邀请详情及只返回一次的 `invitationToken` |
+| `NotificationResult` | 通知标题、正文、渠道、关联资源、当前用户阅读时间和投递时间 |
+| `NotificationList` | 通知数组、下一页游标和当前用户未读总数 |
 
 ### 8.1 `TaskSummary` 字段
 
@@ -938,6 +962,7 @@ POST /platform/auth/change-password
 | `meeting.participant.manage` | 添加、修改和移除会议参会人 |
 | `meeting.minutes.manage` | 创建、修改、发布和重开会议纪要 |
 | `meeting.manage_all` | 管理当前租户全部会议并绕过参会范围 |
+| `notification.read` | 查看当前成员收到的通知中心内容 |
 | `role.read` | 查看权限和角色 |
 | `role.create` | 创建角色 |
 | `role.update` | 修改角色及其权限 |
@@ -1128,6 +1153,21 @@ SUSPENDED ---------存在有效管理员---> ACTIVE
 ```
 
 历史过长时，客户端可先调用 `/chat/compact` 并在同一轮复用 `turnId`。该轮 Token 是压缩调用与回答调用的实际用量之和。服务端不保存消息正文和摘要，也不执行额度扣减。
+
+### 10.8 通知和后台任务
+
+```text
+业务事件或定时任务
+  → NotificationService.createForUsers
+  → 写入 notifications 与 notification_recipients
+  → 成员查询通知中心
+  → 成员单条或批量标记已读
+  → 写入租户审计
+```
+
+后台任务由 API 进程定时触发，每次执行先尝试获得 Redis 锁 `jobs:notification-center-runner`。成功获得锁的实例依次处理过期上传会话、过期 AI 动作草稿和前一天未提交日报提醒。日报提醒使用租户内 `dedupKey`，重复轮询不会重复创建通知。
+
+可通过 `BACKGROUND_JOBS_ENABLED=false` 关闭任务，通过 `BACKGROUND_JOBS_INTERVAL_SECONDS` 调整轮询间隔。关闭任务不影响通知查询和已读接口。
 
 ## 11. 数据库通用约定
 
@@ -1849,6 +1889,7 @@ Prisma 自动维护的迁移历史表，记录迁移名称、校验值、开始/
 | `channel` | 通知渠道字符串，默认 `IN_APP` |
 | `relation_type` | 关联业务类型 |
 | `relation_id` | 关联业务资源 UUID |
+| `dedup_key` | 租户内通知幂等去重键，可空 |
 | `created_at/updated_at` | 创建和更新时间 |
 | `created_by/updated_by` | 创建和修改者 |
 | `deleted_at` | 软删除时间 |
@@ -1866,6 +1907,8 @@ Prisma 自动维护的迁移历史表，记录迁移名称、校验值、开始/
 | `user_id` | 接收人 User UUID |
 | `read_at` | 阅读时间；为空表示未读 |
 | `created_at` | 投递时间 |
+
+`notifications(tenant_id, dedup_key)` 用于后台任务幂等；`notification_recipients(tenant_id, notification_id, user_id)` 防止同一通知重复投递给同一用户。通知阅读状态由 `read_at` 独立记录，查询按当前租户和用户过滤。
 
 ## 18. AI 与审计表
 
@@ -2772,3 +2815,13 @@ Content-Type: application/json
 - 周报开始日期必须是周一，服务端自动计算该周周日为结束日期；
 - `DRAFT/REJECTED` 可以修改和删除，`SUBMITTED` 可以撤回或审核，`APPROVED` 进入只读状态；
 - 数据库迁移为 `0010_work_report_management`，契约版本从 `0.15.0` 升级为 `0.16.0`。
+
+## 31. `0.17.0` 通知中心与后台任务说明
+
+- 新增 `GET /notifications`、`GET /notifications/unread-count`、`POST /notifications/read-all` 和 `POST /notifications/{notificationId}/read` 4 个公开 HTTP 操作；
+- 通知通过 `tenantId + userId` 接收关系隔离，每个接收人独立维护已读时间；
+- 新增 `notification.read` 权限，已有租户角色通过迁移自动获得；
+- 数据库迁移为 `0011_notification_center_and_jobs`，增加通知关系外键、租户内 `dedupKey` 唯一约束、查询索引和 PostgreSQL 中文注释；
+- 应用内后台任务使用 Redis 分布式锁，处理过期上传会话、过期 AI 动作草稿和前一天日报提交提醒；
+- 公开契约版本由 `0.16.0` 提升为 `0.17.0`，`packages/api-client` 已重新生成；
+- 邮件、短信、WebSocket、消息队列和 COS 附件通知暂不实现。

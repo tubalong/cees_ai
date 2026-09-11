@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CEES AI API
-  version: 0.16.0
+  version: 0.17.0
   description: 以本文件为唯一事实源的公开 API 契约。资源与操作按 docs/api 约定补充。
 
 servers:
@@ -3856,6 +3856,53 @@ paths:
       responses:
         '200': { description: 报告审核完成, content: { application/json: { schema: { $ref: '#/components/schemas/WorkReportResponseEnvelope' } } } }
         '403': { description: 当前成员不是指定审核人或租户管理员, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+  /notifications:
+    get:
+      summary: 查询当前成员的通知
+      operationId: notificationList
+      tags: [Notification]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: unreadOnly, in: query, schema: { type: boolean, default: false } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+        - { name: cursor, in: query, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: 当前成员的通知列表, content: { application/json: { schema: { $ref: '#/components/schemas/NotificationListResponseEnvelope' } } } }
+        '403': { description: 缺少 notification.read 权限, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+
+  /notifications/unread-count:
+    get:
+      summary: 查询当前成员的未读通知数
+      operationId: notificationUnreadCount
+      tags: [Notification]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: 当前成员的未读通知数, content: { application/json: { schema: { $ref: '#/components/schemas/NotificationUnreadCountResponseEnvelope' } } } }
+        '403': { description: 缺少 notification.read 权限, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+
+  /notifications/read-all:
+    post:
+      summary: 批量标记当前成员通知为已读
+      operationId: notificationMarkAllRead
+      tags: [Notification]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: 批量标记成功, content: { application/json: { schema: { $ref: '#/components/schemas/NotificationMarkAllReadResponseEnvelope' } } } }
+        '403': { description: 缺少 notification.read 权限, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+
+  /notifications/{notificationId}/read:
+    post:
+      summary: 标记单条通知为已读
+      operationId: notificationMarkRead
+      tags: [Notification]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: notificationId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: 通知已读, content: { application/json: { schema: { $ref: '#/components/schemas/NotificationResponseEnvelope' } } } }
+        '403': { description: 缺少 notification.read 权限, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '404': { description: 通知不存在或当前成员不可见, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+
   /images/{imageId}:
     get:
       summary: 获取 AI 生成图片的访问信息
@@ -4497,6 +4544,81 @@ components:
         error:
           $ref: '#/components/schemas/ChatStreamErrorDetail'
       description: 工具执行完成、失败或被 API 拒绝时发送的事件。
+
+    NotificationResult:
+      type: object
+      additionalProperties: false
+      required: [id, title, content, channel, relationType, relationId, readAt, createdAt]
+      properties:
+        id: { type: string, format: uuid, description: 通知 UUID }
+        title: { type: string, description: 通知标题 }
+        content: { type: string, description: 通知正文 }
+        channel: { type: string, description: 通知渠道，当前为 IN_APP }
+        relationType: { type: [string, 'null'], description: 关联业务资源类型 }
+        relationId: { type: [string, 'null'], format: uuid, description: 关联业务资源 UUID }
+        readAt: { type: [string, 'null'], format: date-time, description: 当前成员阅读时间 }
+        createdAt: { type: string, format: date-time, description: 通知投递时间 }
+
+    NotificationList:
+      type: object
+      additionalProperties: false
+      required: [items, nextCursor, unreadCount]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/NotificationResult' }
+        nextCursor: { type: [string, 'null'], format: uuid }
+        unreadCount: { type: integer, minimum: 0, description: 当前成员未读通知总数 }
+
+    NotificationUnreadCount:
+      type: object
+      additionalProperties: false
+      required: [unreadCount]
+      properties:
+        unreadCount: { type: integer, minimum: 0 }
+
+    NotificationMarkAllRead:
+      type: object
+      additionalProperties: false
+      required: [updatedCount]
+      properties:
+        updatedCount: { type: integer, minimum: 0, description: 本次标记为已读的通知数 }
+
+    NotificationResponseEnvelope:
+      type: object
+      additionalProperties: false
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/NotificationResult' }
+        requestId: { type: [string, 'null'] }
+
+    NotificationListResponseEnvelope:
+      type: object
+      additionalProperties: false
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/NotificationList' }
+        requestId: { type: [string, 'null'] }
+
+    NotificationUnreadCountResponseEnvelope:
+      type: object
+      additionalProperties: false
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/NotificationUnreadCount' }
+        requestId: { type: [string, 'null'] }
+
+    NotificationMarkAllReadResponseEnvelope:
+      type: object
+      additionalProperties: false
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/NotificationMarkAllRead' }
+        requestId: { type: [string, 'null'] }
 
     ImageResult:
       type: object
