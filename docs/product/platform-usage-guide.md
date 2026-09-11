@@ -2,7 +2,7 @@
 
 > 状态：按当前实现整理  
 > 最后同步：2026-09-11
-> 公开契约版本：`0.17.0`
+> 公开契约版本：`0.18.0`
 > 事实源：`packages/contracts/openapi/openapi.yaml`、`apps/api/prisma/schema.prisma`
 
 ## 1. 文档用途
@@ -10,7 +10,7 @@
 本文面向本地开发、接口联调、产品验收和数据库排查，统一说明：
 
 - 平台超级管理员、租户管理员和普通成员的区别；
-- 当前已经实现的 131 个 HTTP 操作；
+- 当前已经实现的 135 个 HTTP 操作；
 - 路径参数、查询参数和 JSON 请求体字段的含义；
 - PostgreSQL 中 44 张业务表、528 个业务字段及 Prisma 迁移表的用途；
 - 租户创建、成员激活、登录、授权、资源访问、审计、停用和恢复的整体流转；
@@ -42,6 +42,7 @@
 | 日报与周报 | 已实现 | 创建、查询、修改、删除、提交、撤回、审核、项目任务关联和审计 |
 | AI 对话与 Token 记录 | 已实现 | 客户端本地保存历史，API 调用 ai-service 并按企业、成员、会话和轮次记录 Token |
 | 通知中心 | 已实现 | 通知列表、未读统计、已读操作、租户隔离和后台提醒 |
+| 工作台与数据看板 | 已实现 | 概览、任务统计、待办聚合和近期会议 |
 | 知识库 | 仅数据库结构/设计基础 | 当前没有对应公开 API |
 | AI 草稿和额度体系 | 部分基础 | AI 草稿仍为数据结构基础；当前只有实际 Token 指标，没有企业/坑位/成员额度账户或扣减 |
 
@@ -398,6 +399,17 @@ API 从 JWT 注入租户、User 和 Membership，客户端不能提交这些内�
 | `POST /notifications/{notificationId}/read` | 标记当前成员的一条通知为已读 | 路径 `notificationId` | 通知详情 | `notification.read` |
 
 通知只能由业务服务和后台任务内部投递，客户端不能直接创建通知。查询始终按当前 `tenantId + userId` 的接收关系过滤，同租户其他成员的通知不可见。详细说明见 [通知中心与后台任务](notification-center.md) 和 [通知中心 API](../api/notification-center-api.md)。
+
+### 6.13 工作台与数据看板
+
+| 方法与路径 | 用途 | 参数/请求体 | 返回 | 权限 |
+| --- | --- | --- | --- | --- |
+| `GET /dashboard/overview` | 查询项目、任务、报告、会议和通知概览 | 无 | 工作台概览 | `dashboard.read` |
+| `GET /dashboard/task-statistics` | 查询当前成员可见任务统计 | `projectId/from/to` | 任务统计 | `dashboard.read` |
+| `GET /dashboard/todos` | 查询任务、报告和会议待办 | `taskLimit/reportLimit/meetingLimit` | 待办列表 | `dashboard.read` |
+| `GET /dashboard/upcoming-meetings` | 查询近期会议 | `limit` | 近期会议列表 | `dashboard.read` |
+
+工作台仅聚合当前成员有权读取的数据。`dashboard.read` 不会绕过 `project.read`、`task.read`、`work_report.read`、`meeting.read` 或 `notification.read`。
 
 ## 7. 请求参数字典
 
@@ -801,6 +813,17 @@ POST /platform/auth/change-password
 
 通知接口不接收 `tenantId` 和 `userId` 查询参数，这两个值由认证上下文决定。客户端应原样回传 `nextCursor`，不要自行解析或拼装游标。
 
+### 7.11 工作台查询参数
+
+| 参数 | 类型 | 默认值 | 含义 |
+| --- | --- | --- | --- |
+| `projectId` | UUID | 无 | 任务统计限定为指定可见项目 |
+| `from/to` | ISO 8601 时间 | 无 | 按任务创建时间筛选，`from` 不能晚于 `to` |
+| `taskLimit` | 整数 | `5` | 待办任务数量，范围 `1` 到 `20` |
+| `reportLimit` | 整数 | `5` | 待审核报告数量，范围 `1` 到 `20` |
+| `meetingLimit` | 整数 | `5` | 待办会议数量，范围 `1` 到 `20` |
+| `limit` | 整数 | `20` | 近期会议数量，范围 `1` 到 `100` |
+
 ## 8. 核心返回字段
 
 | 返回对象 | 主要字段含义 |
@@ -832,6 +855,10 @@ POST /platform/auth/change-password
 | `TenantInvitationCreated` | 邀请详情及只返回一次的 `invitationToken` |
 | `NotificationResult` | 通知标题、正文、渠道、关联资源、当前用户阅读时间和投递时间 |
 | `NotificationList` | 通知数组、下一页游标和当前用户未读总数 |
+| `DashboardOverview` | 项目、任务、报告、会议、通知五组实时统计及生成时间 |
+| `DashboardTaskStatistics` | 任务状态、逾期数量和完成率 |
+| `DashboardTodoList` | 任务、待审核报告、近期会议和未读通知数 |
+| `DashboardUpcomingMeetingList` | 当前成员可见的近期会议列表 |
 
 ### 8.1 `TaskSummary` 字段
 
@@ -1168,6 +1195,18 @@ SUSPENDED ---------存在有效管理员---> ACTIVE
 后台任务由 API 进程定时触发，每次执行先尝试获得 Redis 锁 `jobs:notification-center-runner`。成功获得锁的实例依次处理过期上传会话、过期 AI 动作草稿和前一天未提交日报提醒。日报提醒使用租户内 `dedupKey`，重复轮询不会重复创建通知。
 
 可通过 `BACKGROUND_JOBS_ENABLED=false` 关闭任务，通过 `BACKGROUND_JOBS_INTERVAL_SECONDS` 调整轮询间隔。关闭任务不影响通知查询和已读接口。
+
+### 10.9 工作台与数据看板
+
+```text
+客户端请求 /dashboard/overview
+  → 校验 JWT、租户上下文和 dashboard.read
+  → 按业务域读取权限构造可见范围
+  → 聚合项目、任务、日报周报、会议和通知
+  → 返回实时工作台数据
+```
+
+工作台不复制业务状态机、不保存统计快照，也不因为读取首页产生业务审计事件。任务统计、报告状态和会议数量始终从当前数据库事实源实时计算。
 
 ## 11. 数据库通用约定
 
@@ -2825,3 +2864,12 @@ Content-Type: application/json
 - 应用内后台任务使用 Redis 分布式锁，处理过期上传会话、过期 AI 动作草稿和前一天日报提交提醒；
 - 公开契约版本由 `0.16.0` 提升为 `0.17.0`，`packages/api-client` 已重新生成；
 - 邮件、短信、WebSocket、消息队列和 COS 附件通知暂不实现。
+
+## 32. `0.18.0` 工作台与数据看板说明
+
+- 新增 `GET /dashboard/overview`、`GET /dashboard/task-statistics`、`GET /dashboard/todos` 和 `GET /dashboard/upcoming-meetings` 4 个公开 HTTP 操作；
+- 工作台实时聚合当前成员可见的项目、任务、日报周报、会议和通知数据，不创建统计快照表；
+- 新增 `dashboard.read` 权限，已有租户角色通过迁移自动获得；
+- 数据库迁移为 `0012_dashboard_workbench`，只新增权限和角色权限关系，不新增业务表；
+- 公开契约版本由 `0.17.0` 提升为 `0.18.0`，`packages/api-client` 已重新生成；
+- 自定义看板布局、跨租户平台看板、报表导出和历史趋势快照暂不实现。

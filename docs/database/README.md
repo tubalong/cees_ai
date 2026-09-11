@@ -6,8 +6,9 @@
 任务、执行人、评论、附件和动态见 [项目任务管理](../product/task-management.md)。
 公开 Chat 调用与 Token 指标见 [公开 AI 对话链路与 Token 计量](../architecture/public-chat-api-and-token-metering.md)。
 通知中心与后台任务见 [通知中心与后台任务](../product/notification-center.md)。
+工作台与数据看板见 [工作台与数据看板](../product/dashboard-workbench.md)。
 
-> 新环境使用 `prisma migrate deploy` 按 `0001_init` 到 `0011_notification_center_and_jobs` 的目录顺序执行迁移；全部迁移完成后与当前 `schema.prisma` 保持一致。
+> 新环境使用 `prisma migrate deploy` 按 `0001_init` 到 `0012_dashboard_workbench` 的目录顺序执行迁移；全部迁移完成后与当前 `schema.prisma` 保持一致。
 
 - `apps/api/prisma/schema.prisma` 是数据模型唯一事实源，迁移提交 `prisma/migrations`。
 - 新建表和字段必须在同一迁移中使用 `COMMENT ON TABLE`、`COMMENT ON COLUMN` 添加 PostgreSQL 注释；`0003_organization_departments_and_database_comments` 已补齐此前全部业务表和字段注释。
@@ -30,6 +31,15 @@ Tenant
 - `notification_recipients(tenant_id, notification_id, user_id)` 保证同一通知不会重复投递给同一用户；
 - `0011_notification_center_and_jobs` 增加通知关系外键、未读查询索引、通知读取权限和 PostgreSQL 中文表/字段注释；
 - 后台任务不新增任务表，使用 Redis 锁协调多 API 实例，并通过通知模型发送日报提醒。
+
+## 工作台模型
+
+工作台不新增业务表，实时聚合 `projects`、`tasks`、`work_reports`、`meetings`、`meeting_participants`、`notifications` 和 `notification_recipients`。数据范围由当前租户成员上下文以及各业务域的读取权限共同决定。
+
+- `0012_dashboard_workbench` 只新增 `dashboard.read` 权限，并为已有租户角色授予该权限；
+- 统计不写入快照表，避免和业务事实源产生不一致；
+- 任务统计按任务创建时间筛选，会议和日报的日界线使用 UTC；
+- 工作台查询不创建业务审计事件。
 
 ## 身份与租户关系
 
