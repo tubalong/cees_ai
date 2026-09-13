@@ -339,6 +339,35 @@ class ImageGenerateRequest(BaseModel):
     response_format: ResponseFormat | None = 'png'
 
 
+class InputFidelity(Enum):
+    high = 'high'
+    low = 'low'
+
+
+class ImageEditRequest(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    request_id: constr(min_length=1, max_length=128)
+    tenant_id: constr(min_length=1, max_length=128)
+    user_id: constr(min_length=1, max_length=128)
+    prompt: constr(min_length=1, max_length=8000)
+    source_image_base64: constr(min_length=1, max_length=20971520) = Field(
+        ...,
+        description='Base64-encoded source image bytes using the standard alphabet. The decoded size must not exceed 10 MiB.',
+    )
+    size: constr(pattern=r'^(auto|[1-9][0-9]*x[1-9][0-9]*)$') | None = Field(
+        '1024x1024',
+        description='Requested edited image size as WIDTHxHEIGHT in pixels, or "auto" to let the model choose. This is a hint only; the model may return different dimensions, which are reported in execution.width and execution.height when parseable.',
+    )
+    quality: Quality | None = 'standard'
+    response_format: ResponseFormat | None = 'png'
+    input_fidelity: InputFidelity | None = Field(
+        'high',
+        description='How strongly the edit should preserve the source image. Use "high" for subtle changes such as tone, lighting, or color adjustments.',
+    )
+
+
 class ContentType(StrEnum):
     image_png = 'image/png'
     image_jpeg = 'image/jpeg'

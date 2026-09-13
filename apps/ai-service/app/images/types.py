@@ -33,3 +33,14 @@ class ImageProvider(Protocol):
         quality: str,
         response_format: str,
     ) -> GeneratedImage: ...
+
+    async def edit(
+        self,
+        *,
+        prompt: str,
+        source_image: bytes,
+        size: str,
+        quality: str,
+        response_format: str,
+        input_fidelity: str,
+    ) -> GeneratedImage: ...

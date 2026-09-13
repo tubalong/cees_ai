@@ -654,6 +654,61 @@
         }
       }
     },
+    "/internal/v1/images/edit": {
+      "post": {
+        "tags": [
+          "images"
+        ],
+        "operationId": "editImage",
+        "summary": "Edit an image while preserving the source image",
+        "description": "Edits an existing source image using a configured image-capable model.\nThe source image is supplied as base64 in the JSON request body. ai-service\nonly returns the edited image bytes and execution metadata; it does not\npersist the image or create a resource.\n",
+        "security": [
+          {
+            "internalToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImageEditRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Image edited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageGenerateResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "502": {
+            "$ref": "#/components/responses/InvalidProviderOutput"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
     "/internal/v1/images/preview": {
       "get": {
         "tags": [
@@ -2146,6 +2201,89 @@
               "webp"
             ],
             "default": "png"
+          }
+        }
+      },
+      "ImageEditRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "request_id",
+          "tenant_id",
+          "user_id",
+          "prompt",
+          "source_image_base64"
+        ],
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "tenant_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "user_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "prompt": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 8000
+          },
+          "source_image_base64": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 20971520,
+            "description": "Base64-encoded source image bytes using the standard alphabet. The decoded size must not exceed 10 MiB."
+          },
+          "size": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^(auto|[1-9][0-9]*x[1-9][0-9]*)$",
+            "default": "1024x1024",
+            "description": "Requested edited image size as WIDTHxHEIGHT in pixels, or \"auto\" to let the model choose. This is a hint only; the model may return different dimensions, which are reported in execution.width and execution.height when parseable."
+          },
+          "quality": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "standard",
+              "high"
+            ],
+            "default": "standard"
+          },
+          "response_format": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "png",
+              "jpeg",
+              "webp"
+            ],
+            "default": "png"
+          },
+          "input_fidelity": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "high",
+              "low"
+            ],
+            "default": "high",
+            "description": "How strongly the edit should preserve the source image. Use \"high\" for subtle changes such as tone, lighting, or color adjustments."
           }
         }
       },

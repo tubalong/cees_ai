@@ -8,6 +8,8 @@ ai-service 负责选择支持图片生成的模型并返回图片字节与执行
 
 ## 2. 内部接口
 
+### 2.1 图片生成
+
 `POST /internal/v1/images/generate`
 
 请求：
@@ -16,29 +18,42 @@ ai-service 负责选择支持图片生成的模型并返回图片字节与执行
 - `tenant_id`
 - `user_id`
 - `prompt`
-- `size`：`WIDTHxHEIGHT`（如 `256x256`、`1024x1024`）或 `auto`；可选，默认 `1024x1024`
+- `size`
 - `quality`
 - `response_format`
-
-`size` 仅作为对模型的提示，不保证输出尺寸。模型是否支持某个尺寸由其自身能力决定；不支持的尺寸会在 Provider 层以 `503` 返回，而非请求校验失败。
 
 响应：
 
 - `request_id`
 - `content_type`
 - `data_base64`
-- `execution`（含 `profile`、`provider`、`model`、`fallback_count`、`latency_ms`、`width`、`height`、`token_usage`）
+- `execution`
 
-调试辅助接口：
+### 2.2 图片编辑
 
-`GET /internal/v1/images/preview?prompt=...&size=...&token=...`
+`POST /internal/v1/images/edit`
 
-直接返回图片字节（`image/png` / `image/jpeg` / `image/webp`），便于在浏览器标签页中预览，不返回执行元数据、不持久化。鉴权优先使用 `X-AI-Internal-Token` 请求头；`token` 查询参数仅用于普通浏览器地址栏直接打开（会出现在 URL 中，仅限调试）。该接口与 `/generate` 共用 `ImageRouter` 与 `image_profiles` 配置。
+请求：
+
+- `request_id`
+- `tenant_id`
+- `user_id`
+- `prompt`
+- `source_image_base64`
+- `size`
+- `quality`
+- `response_format`
+- `input_fidelity`
+
+`input_fidelity=high` 用于色调、光线、色彩等需要尽量保留原图内容的微调；`low` 允许模型更自由地改变构图和内容。`source_image_base64` 解码后不得超过 10 MiB。
+
+响应复用 `ImageGenerateResponse`：返回编辑后的 `content_type`、`data_base64` 和 `execution`。
 
 ## 3. ImageRouter
 
 - 独立于 `LLMRouter`。
 - 从 `[image_profiles.*]` 选择第一个启用 profile。
+- 生成与编辑分别调用 Provider 的 `generate` 与 `edit` 方法。
 - 图片 profile 支持 `mock` 与 `openai_compatible`。
 - 瞬时失败可回退到下一候选；永久失败不跨模型重试。
 
@@ -72,10 +87,10 @@ IMAGE_GEN_API_KEY=change_me
 
 ## 5. Provider 行为
 
-- `mock` 返回固定测试字节，仅用于本地联调。
-- `openai_compatible` 使用 OpenAI Images API 的 `b64_json` 输出。
+- `mock` 返回固定测试字节，仅用于本地联调；编辑返回不同的固定测试字节。
+- `openai_compatible` 生成使用 OpenAI Images API 的 `b64_json` 输出。
+- `openai_compatible` 编辑使用 OpenAI Images API 的 `images.edit`，输入为 base64 解码后的源图片字节。
 - `content_type` 由请求的 `response_format` 映射为 `image/png`、`image/jpeg` 或 `image/webp`。
-- 返回的 `execution.width` / `execution.height` 由 ai-service 从图片字节解析得到（PNG/JPEG/WebP）；当无法解析时两者为 `null`。
 
 ## 6. 边界
 
@@ -83,6 +98,7 @@ IMAGE_GEN_API_KEY=change_me
 - ai-service 不创建 FileObject 或正式资源。
 - ai-service 不校验租户额度。
 - ai-service 不持久化图片。
+- 编辑接口只处理 base64 源图，不接收 URL 或 multipart 文件上传。
 
 ## 7. NestJS 侧落地说明（2026-09-11）
 

@@ -21,6 +21,7 @@ FastAPI 内部服务，负责受控 LLM 调用与未来 AI 工作流的运行时
 - `POST /internal/v1/chat/compact`：将历史消息压缩为可复用摘要
 - `POST /internal/v1/chat/tool-turn/stream`：单次工具能力回合 SSE
 - `POST /internal/v1/images/generate`：通过图片 profile 生成 base64 图片
+- `POST /internal/v1/images/edit`：基于 base64 源图进行保真编辑并返回 base64 图片
 - `POST /internal/v1/documents/compose`：生成领域无关的结构化文档草稿
 - `POST /internal/v1/documents/render-docx`：不调用模型，将 `DocumentSpec` 渲染为 DOCX
 - `POST /internal/v1/documents/generate-docx`：组合文档生成与 DOCX 渲染
@@ -35,7 +36,7 @@ Chat 接口要求调用方在每轮传入完整可用历史，或 `conversation_
 
 Tool Calling 由 NestJS 传入 tools 定义，ai-service 负责一次模型回合并返回 `tool_calls` 或文本增量，不执行任何业务工具。详细设计见 `docs/architecture/ai-tool-calling.md`。
 
-图片生成由独立 `ImageRouter` 处理，配置位于 `[image_profiles.*]`，不复用 Chat Profile，也不写 COS 或正式资源。详细设计见 `docs/architecture/image-generation.md`。
+图片生成与编辑由独立 `ImageRouter` 处理，配置位于 `[image_profiles.*]`，不复用 Chat Profile，也不写 COS 或正式资源。详细设计见 `docs/architecture/image-generation.md`。
 
 文档接口只接收内部可信服务准备的生成指令与纯文本材料。模型生成版本化 `DocumentSpec`，渲染器只接受受控段落、列表、表格、引用和分页块，不接受任意 OOXML、宏、外部关系或模板路径。详细设计见 `docs/architecture/document-generation.md`。
 

@@ -33,6 +33,21 @@ class MockImageProvider:
             data=b"mock-image-bytes",
         )
 
+    async def edit(
+        self,
+        *,
+        prompt: str,
+        source_image: bytes,
+        size: str,
+        quality: str,
+        response_format: str,
+        input_fidelity: str,
+    ) -> GeneratedImage:
+        return GeneratedImage(
+            content_type=_content_type(response_format),
+            data=b"mock-edited-image-bytes",
+        )
+
 
 class OpenAICompatibleImageProvider:
     def __init__(self, profile: ImageProfile, api_key: str) -> None:
@@ -63,6 +78,44 @@ class OpenAICompatibleImageProvider:
             encoded = _first_image_base64(result)
             if not encoded:
                 raise ProviderPermanentError("image provider returned no image data")
+            return GeneratedImage(
+                content_type=_content_type(response_format),
+                data=base64.b64decode(encoded),
+            )
+        except (APIConnectionError, APITimeoutError, RateLimitError) as exc:
+            raise ProviderTransientError(type(exc).__name__) from exc
+        except APIStatusError as exc:
+            if exc.status_code >= 500:
+                raise ProviderTransientError(f"provider status {exc.status_code}") from exc
+            raise ProviderPermanentError(f"provider status {exc.status_code}") from exc
+        except ProviderPermanentError:
+            raise
+        except Exception as exc:
+            raise ProviderPermanentError(type(exc).__name__) from exc
+
+    async def edit(
+        self,
+        *,
+        prompt: str,
+        source_image: bytes,
+        size: str,
+        quality: str,
+        response_format: str,
+        input_fidelity: str,
+    ) -> GeneratedImage:
+        try:
+            result = await self.client.images.edit(
+                model=self.profile.model,
+                image=source_image,
+                prompt=prompt,
+                size=size,
+                quality=quality,
+                response_format="b64_json",
+                input_fidelity=input_fidelity,
+            )
+            encoded = _first_image_base64(result)
+            if not encoded:
+                raise ProviderPermanentError("image provider returned no edited image data")
             return GeneratedImage(
                 content_type=_content_type(response_format),
                 data=base64.b64decode(encoded),

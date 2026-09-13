@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, Query, Request, Response
 from app.api.generated.models import (
     ContentType,
     ErrorResponse,
+    ImageEditRequest,
     ImageGenerateRequest,
     ImageGenerateResponse,
     ImageGenerationMetadata,
@@ -20,6 +21,7 @@ from app.core.runtime import AppRuntime
 from app.core.security import require_internal_token, require_preview_token
 from app.images.dimensions import image_dimensions
 from app.images.router import ImageRouter
+from app.images.types import ImageRoutingResult
 
 router = APIRouter(
     prefix="/internal/v1/images",
@@ -68,6 +70,8 @@ PREVIEW_RESPONSE = {
     },
 }
 
+MAX_SOURCE_IMAGE_BYTES = 10 * 1024 * 1024
+
 
 @router.post(
     "/generate",
@@ -92,27 +96,40 @@ async def generate_image(
             else "png"
         ),
     )
-    dimensions = image_dimensions(routed.data)
-    width, height = dimensions if dimensions is not None else (None, None)
-    return ImageGenerateResponse(
+    return _image_response(payload.request_id, routed)
+
+
+@router.post(
+    "/edit",
+    response_model=ImageGenerateResponse,
+    operation_id="editImage",
+    summary="Edit an image while preserving the source image",
+    response_description="Image edited",
+    responses=IMAGE_ERROR_RESPONSES,
+)
+async def edit_image(
+    payload: ImageEditRequest, request: Request
+) -> ImageGenerateResponse:
+    image_router = _require_image_router(request, payload.request_id)
+    source_image = _decode_source_image(payload)
+    routed = await image_router.edit(
         request_id=payload.request_id,
-        content_type=_content_type_enum(routed.content_type),
-        data_base64=base64.b64encode(routed.data).decode("ascii"),
-        execution=ImageGenerationMetadata(
-            profile=routed.profile_name,
-            provider=ImageProvider(routed.profile.provider),
-            model=routed.profile.model,
-            fallback_count=routed.fallback_count,
-            latency_ms=routed.latency_ms,
-            width=width,
-            height=height,
-            token_usage=TokenUsage(
-                input_tokens=None,
-                output_tokens=None,
-                total_tokens=None,
-            ),
+        prompt=payload.prompt,
+        source_image=source_image,
+        size=payload.size if payload.size is not None else "1024x1024",
+        quality=payload.quality.value if payload.quality is not None else "standard",
+        response_format=(
+            payload.response_format.value
+            if payload.response_format is not None
+            else "png"
+        ),
+        input_fidelity=(
+            payload.input_fidelity.value
+            if payload.input_fidelity is not None
+            else "high"
         ),
     )
+    return _image_response(payload.request_id, routed)
 
 
 @preview_router.get(
@@ -144,6 +161,61 @@ async def preview_image(
         response_format=response_format,
     )
     return Response(content=routed.data, media_type=routed.content_type)
+
+
+def _decode_source_image(payload: ImageEditRequest) -> bytes:
+    normalized = "".join(payload.source_image_base64.split())
+    try:
+        source_image = base64.b64decode(normalized, validate=True)
+    except Exception as exc:
+        raise AIServiceError(
+            "INVALID_IMAGE_EDIT_REQUEST",
+            "source_image_base64 is not valid base64",
+            status_code=422,
+            request_id=payload.request_id,
+        ) from exc
+
+    if not source_image:
+        raise AIServiceError(
+            "INVALID_IMAGE_EDIT_REQUEST",
+            "source_image_base64 decoded to an empty image",
+            status_code=422,
+            request_id=payload.request_id,
+        )
+
+    if len(source_image) > MAX_SOURCE_IMAGE_BYTES:
+        raise AIServiceError(
+            "IMAGE_EDIT_INPUT_TOO_LARGE",
+            "Source image exceeds the 10 MiB limit",
+            status_code=422,
+            request_id=payload.request_id,
+        )
+
+    return source_image
+
+
+def _image_response(request_id: str, routed: ImageRoutingResult) -> ImageGenerateResponse:
+    dimensions = image_dimensions(routed.data)
+    width, height = dimensions if dimensions is not None else (None, None)
+    return ImageGenerateResponse(
+        request_id=request_id,
+        content_type=_content_type_enum(routed.content_type),
+        data_base64=base64.b64encode(routed.data).decode("ascii"),
+        execution=ImageGenerationMetadata(
+            profile=routed.profile_name,
+            provider=ImageProvider(routed.profile.provider),
+            model=routed.profile.model,
+            fallback_count=routed.fallback_count,
+            latency_ms=routed.latency_ms,
+            width=width,
+            height=height,
+            token_usage=TokenUsage(
+                input_tokens=None,
+                output_tokens=None,
+                total_tokens=None,
+            ),
+        ),
+    )
 
 
 def _require_image_router(request: Request, request_id: str) -> ImageRouter:

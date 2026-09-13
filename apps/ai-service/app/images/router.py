@@ -33,6 +33,51 @@ class ImageRouter:
         quality: str,
         response_format: str,
     ) -> ImageRoutingResult:
+        return await self._route(
+            request_id=request_id,
+            prompt=prompt,
+            size=size,
+            quality=quality,
+            response_format=response_format,
+            operation="generate",
+            source_image=None,
+            input_fidelity=None,
+        )
+
+    async def edit(
+        self,
+        *,
+        request_id: str,
+        prompt: str,
+        source_image: bytes,
+        size: str,
+        quality: str,
+        response_format: str,
+        input_fidelity: str,
+    ) -> ImageRoutingResult:
+        return await self._route(
+            request_id=request_id,
+            prompt=prompt,
+            size=size,
+            quality=quality,
+            response_format=response_format,
+            operation="edit",
+            source_image=source_image,
+            input_fidelity=input_fidelity,
+        )
+
+    async def _route(
+        self,
+        *,
+        request_id: str,
+        prompt: str,
+        size: str,
+        quality: str,
+        response_format: str,
+        operation: str,
+        source_image: bytes | None,
+        input_fidelity: str | None,
+    ) -> ImageRoutingResult:
         candidates = [
             name
             for name, profile in self.catalog.image_profiles.items()
@@ -53,15 +98,28 @@ class ImageRouter:
             profile = self.catalog.image_profiles[profile_name]
             provider = self._get_provider(profile_name, profile)
             try:
-                image = await provider.generate(
-                    prompt=prompt,
-                    size=size,
-                    quality=quality,
-                    response_format=response_format,
-                )
+                if operation == "edit":
+                    assert source_image is not None
+                    assert input_fidelity is not None
+                    image = await provider.edit(
+                        prompt=prompt,
+                        source_image=source_image,
+                        size=size,
+                        quality=quality,
+                        response_format=response_format,
+                        input_fidelity=input_fidelity,
+                    )
+                else:
+                    image = await provider.generate(
+                        prompt=prompt,
+                        size=size,
+                        quality=quality,
+                        response_format=response_format,
+                    )
                 latency_ms = round((time.perf_counter() - started) * 1000)
                 logger.info(
-                    "image generation completed",
+                    "image %s completed",
+                    operation,
                     extra={
                         "request_id": request_id,
                         "profile": profile_name,
@@ -85,6 +143,7 @@ class ImageRouter:
                     "image provider transient failure",
                     extra={
                         "request_id": request_id,
+                        "operation": operation,
                         "profile": profile_name,
                         "provider": profile.provider,
                         "model": profile.model,
@@ -93,16 +152,26 @@ class ImageRouter:
                     },
                 )
             except ProviderPermanentError as exc:
+                code = (
+                    "IMAGE_EDIT_UNAVAILABLE"
+                    if operation == "edit"
+                    else "IMAGE_GENERATION_UNAVAILABLE"
+                )
                 raise AIServiceError(
-                    "IMAGE_GENERATION_UNAVAILABLE",
+                    code,
                     "The selected image provider rejected the request",
                     status_code=503,
                     request_id=request_id,
                 ) from exc
 
+        code = (
+            "IMAGE_EDIT_UNAVAILABLE"
+            if operation == "edit"
+            else "IMAGE_GENERATION_UNAVAILABLE"
+        )
         raise AIServiceError(
-            "IMAGE_GENERATION_UNAVAILABLE",
-            "No configured image profile completed the generation",
+            code,
+            "No configured image profile completed the operation",
             status_code=503,
             retryable=True,
             request_id=request_id,
