@@ -302,6 +302,27 @@ export type ImageGenerateRequest = {
     response_format?: 'png' | 'jpeg' | 'webp';
 };
 
+export type ImageEditRequest = {
+    request_id: string;
+    tenant_id: string;
+    user_id: string;
+    prompt: string;
+    /**
+     * Base64-encoded source image bytes using the standard alphabet. The decoded size must not exceed 10 MiB.
+     */
+    source_image_base64: string;
+    /**
+     * Requested edited image size as WIDTHxHEIGHT in pixels, or "auto" to let the model choose. This is a hint only; the model may return different dimensions, which are reported in execution.width and execution.height when parseable.
+     */
+    size?: string | null;
+    quality?: 'standard' | 'high';
+    response_format?: 'png' | 'jpeg' | 'webp';
+    /**
+     * How strongly the edit should preserve the source image. Use "high" for subtle changes such as tone, lighting, or color adjustments.
+     */
+    input_fidelity?: 'high' | 'low';
+};
+
 export type ImageGenerationMetadata = {
     profile: string;
     provider: ImageProvider;
@@ -865,6 +886,51 @@ export type GenerateImageResponses = {
 };
 
 export type GenerateImageResponse = GenerateImageResponses[keyof GenerateImageResponses];
+
+export type EditImageData = {
+    body: ImageEditRequest;
+    path?: never;
+    query?: never;
+    url: '/internal/v1/images/edit';
+};
+
+export type EditImageErrors = {
+    /**
+     * Invalid profile or unsupported output mode
+     */
+    400: ErrorResponse;
+    /**
+     * Internal authentication failed
+     */
+    401: ErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ErrorResponse;
+    /**
+     * Unexpected internal service error
+     */
+    500: ErrorResponse;
+    /**
+     * Provider output did not match the requested schema
+     */
+    502: ErrorResponse;
+    /**
+     * Service or configured providers unavailable
+     */
+    503: ErrorResponse;
+};
+
+export type EditImageError = EditImageErrors[keyof EditImageErrors];
+
+export type EditImageResponses = {
+    /**
+     * Image edited
+     */
+    200: ImageGenerateResponse;
+};
+
+export type EditImageResponse = EditImageResponses[keyof EditImageResponses];
 
 export type PreviewImageData = {
     body?: never;
