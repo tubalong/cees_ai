@@ -4,8 +4,7 @@
     "private": true,
     "type": "module",
     "exports": {
-        ".": "./src/index.ts",
-        "./chat-stream": "./src/chat-stream.ts"
+        ".": "./src/index.ts"
     },
     "scripts": {
         "typecheck": "tsc --noEmit -p tsconfig.json"

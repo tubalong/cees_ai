@@ -5,6 +5,10 @@
 - 变更规则：兼容新增默认可选项并声明默认值；破坏性变更必须提升契约版本，并在此说明迁移方式。
 - 统一错误格式、鉴权方式与分页约定先在设计草案中确认，再同步到 OpenAPI 契约。
 
+### 契约版本与迁移
+
+- **0.19.0**：删除 `/api/v1/chat/*` 旧对话接口（invoke / stream / compact），以 `/api/v1/conversations/*` 会话、轮次、事件重放资源重建，并新增工具循环（generate_image / generate_document）与公开图片访问 `GET /api/v1/images/{imageId}`。旧客户端迁移到 `createConversation` / `createTurn` / `replayTurnEvents`；`chat` 相关生成模型与客户端已移除。
+
 ## 设计草案
 
 - [IAM、租户、RBAC、ACL 与审计 API 设计草案](iam-authorization-api.md)
@@ -38,9 +42,13 @@ POST /api/v1/auth/logout
 GET  /api/v1/auth/me
 POST /api/v1/auth/change-password
 
-POST /api/v1/chat/invoke
-POST /api/v1/chat/stream
-POST /api/v1/chat/compact
+POST /api/v1/conversations
+GET  /api/v1/conversations
+GET  /api/v1/conversations/{conversationId}
+POST /api/v1/conversations/{conversationId}/turns
+GET  /api/v1/conversations/{conversationId}/turns/{turnId}/events
+POST /api/v1/conversations/{conversationId}/turns/{turnId}/cancel
+GET  /api/v1/images/{imageId}
 
 GET   /api/v1/users/me/profile
 PATCH /api/v1/users/me/profile
@@ -325,13 +333,33 @@ GET    /api/v1/projects/{projectId}/tasks/{taskId}/activities
 - 既有 `invokeChat`、`streamChat` 和 `compactChat` 请求与事件结构保持不变；
 - 本次只改契约并重新生成客户端，不包含 Prisma 迁移和服务端行为实现。
 
+## 0.17.0 迁移说明（历史草稿，未发布；实际发布版本见顶部“契约版本与迁移” 0.19.0）
+
+- 本节为开发期间的会话重建草稿，内容已合并进 0.19.0 正式说明，保留仅作过程记录；
+- 公开契约版本由 `0.16.0` 提升为 `0.17.0`（草稿版本号，最终发布为 `0.19.0`），删除 `POST /chat/invoke`、`POST /chat/stream` 和 `POST /chat/compact`；开发阶段无兼容客户端，不保留旧路径；
+- 会话改为服务端权威：新增 `POST/GET /conversations`、`GET /conversations/{id}`，Conversation/Message/摘要存入 PostgreSQL，客户端本地仅保留渲染缓存；
+- 新增 `POST /conversations/{id}/turns`（`Idempotency-Key` 必填，SSE 事件流，客户端只提交本轮消息）与 `GET /conversations/{id}/turns/{turnId}/events?afterSeq=N` 事件重放；
+- 新增 `POST /conversations/{id}/turns/{turnId}/cancel` 显式取消；断线只解除订阅不取消执行；
+- 所有 SSE 事件更名为 `TurnStreamEvent` 联合并携带递增 `seq`；0.16.0 定义的 `tool_call`/`tool_result` 事件结构与 `tool_executing` 阶段照搬保留，待工具阶段启用；
+- 历史压缩改为 Turn 编排内自动触发，不再暴露独立公开接口；
+- Prisma 新增 `0011_assistant_conversations` 迁移：`conversations`、`conversation_messages`、`conversation_summaries`、`assistant_turns`、`assistant_events`；
+- 后端实现见 [AI 助手工具循环](../architecture/assistant-tool-loop.md)。
+
+## 工具阶段启用说明（2026-09-11）
+
+- 公开契约版本不变（0.16.0 已定义的 `tool_call`/`tool_result` 事件结构沿用，`tool_executing` 阶段未启用）；
+- 会话 SSE 事件 `tool_call`（toolCallId/name/arguments）与 `tool_result`（toolCallId/status: completed|failed|rejected/resourceId/resourceUrl/error）正式启用；`generate_image` 与 `generate_document` 工具执行的产物落在 `resourceId/resourceUrl`（图片为短期签名 URL，文档为文档 ID，resourceUrl 为 null）；
+- 权限目录新增 `ai.image.generate`（调用 AI 生成图片）与 `ai.document.generate`（调用 AI 生成文档），与既有 RBAC 权限同体系，由管理员经角色授予；
+- Prisma 新增 `0012_ai_tool_loop_image` 迁移：`tool_calls`（含 upstreamCallId 上游调用 ID 映射、ToolCallStatus 状态机）、`managed_images`，`ResourceType` 新增 `IMAGE`，`FilePurpose` 新增 `GENERATED_IMAGE`，`conversation_messages`/`ai_action_drafts` 增加 `tool_call_id`；文档生成复用既有 `Resource(DOCUMENT)`/`ManagedDocument`，无新增迁移；
+- 公开事件无破坏性变更，客户端无需重新生成；工具轮次行为详见 [AI 助手工具循环](../architecture/assistant-tool-loop.md)，文档生成落地详见 [通用文档生成](../architecture/document-generation.md)。
+
 ## 契约事实源
 
 - `packages/contracts/openapi/openapi.yaml` 是 NestJS 公开 API 的事实源。
 - `packages/contracts/openapi/ai-service.openapi.yaml` 是 NestJS 调用 ai-service 的内部契约。
 - 桌面端和移动端不得调用 ai-service 的通用 invoke 或 stream。
 - ai-service Chat 与文档接口同样只供 NestJS 内部调用；客户端不得绕过业务权限直接 chat、compact、compose 或 render。
-- Chat 客户端本期在本地保存会话状态，并在每轮传入历史摘要与近期消息；NestJS 与 ai-service 都不持久化 Conversation 或 Message 正文。
+- Chat 客户端自会话/轮次模型（0.19.0）起只提交本轮消息，历史与摘要由服务端加载；旧版“客户端本地保存会话”模式已随 `/chat/*` 一并移除。
 - ai-service 使用 `X-AI-Internal-Token` 请求头作为 OpenAPI `apiKey` 安全方案；该 Token 只授予可信内部服务。
 - ai-service 的 FastAPI 文档由正式契约生成：Development 和 Staging 可查看、可调用，Production 禁用。
 - TypeScript/Python/OpenAPI 生成物禁止手改，契约变更后必须运行 `contracts:lint`、`contracts:gen` 和 `contracts:check`。

@@ -3,6 +3,7 @@ import type COS = require('cos-nodejs-sdk-v5');
 import { STORAGE_SETTINGS, TENCENT_COS_CLIENT } from './storage.tokens';
 import {
     CreateSignedUploadInput,
+    PutObjectInput,
     SignedUploadInstruction,
     StorageObjectNotFoundError,
     StorageProvider,
@@ -52,6 +53,34 @@ export class TencentCosStorageProvider implements StorageProvider {
             };
         } catch (error) {
             throw new StorageProviderError('Unable to create Tencent COS upload URL', { cause: error });
+        }
+    }
+
+    /**
+     * 直接把内存字节写入一个精确对象键。只服务服务端可信字节（如 AI 生成结果），
+     * 不提供通配路径；成功后返回可信对象元数据。
+     */
+    async putObject(input: PutObjectInput): Promise<StoredObjectMetadata> {
+        this.assertSourceObjectKey(input.objectKey);
+        const contentType = normalizeContentType(input.contentType);
+        if (!contentType || /[\u0000-\u001f\u007f\s]/u.test(contentType)) {
+            throw new TypeError('COS upload Content-Type must be a normalized MIME type');
+        }
+        try {
+            const result = await this.cos.putObject({
+                Bucket: this.config.bucket,
+                Region: this.config.region,
+                Key: input.objectKey,
+                Body: input.body,
+                ContentType: contentType,
+            });
+            return {
+                sizeBytes: input.body.byteLength,
+                contentType,
+                etag: result.ETag ?? header(result.headers, 'etag'),
+            };
+        } catch (error) {
+            throw new StorageProviderError('Unable to write Tencent COS object', { cause: error });
         }
     }
 

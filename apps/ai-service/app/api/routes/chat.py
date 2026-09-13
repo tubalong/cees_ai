@@ -225,6 +225,16 @@ async def _tool_turn_stream_events(
         )
         return
 
+    yield _encode_sse(
+        ChatStreamStatusEvent(
+            type="status",
+            phase=ChatStreamPhase.answering,
+            execution=_stream_execution_metadata(
+                routed.profile_name, routed.profile, routed.fallback_count
+            ),
+        )
+    )
+
     token_usage: TokenUsageData | None = None
     finish_reason: str | None = None
     try:

@@ -276,6 +276,8 @@ export type ToolTurnToolCallsEvent = {
 export type ToolTurnStreamEvent = ({
     type: 'started';
 } & ChatStreamStartedEvent) | ({
+    type: 'status';
+} & ChatStreamStatusEvent) | ({
     type: 'tool_calls';
 } & ToolTurnToolCallsEvent) | ({
     type: 'content_delta';

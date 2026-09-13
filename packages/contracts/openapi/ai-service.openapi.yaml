@@ -1291,6 +1291,7 @@ components:
     ToolTurnStreamEvent:
       oneOf:
         - $ref: "#/components/schemas/ChatStreamStartedEvent"
+        - $ref: "#/components/schemas/ChatStreamStatusEvent"
         - $ref: "#/components/schemas/ToolTurnToolCallsEvent"
         - $ref: "#/components/schemas/ContentDeltaEvent"
         - $ref: "#/components/schemas/UsageEvent"
@@ -1300,6 +1301,7 @@ components:
         propertyName: type
         mapping:
           started: "#/components/schemas/ChatStreamStartedEvent"
+          status: "#/components/schemas/ChatStreamStatusEvent"
           tool_calls: "#/components/schemas/ToolTurnToolCallsEvent"
           content_delta: "#/components/schemas/ContentDeltaEvent"
           usage: "#/components/schemas/UsageEvent"

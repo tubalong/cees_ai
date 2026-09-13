@@ -714,6 +714,7 @@ class ChatStreamEvent(
 class ToolTurnStreamEvent(
     RootModel[
         ChatStreamStartedEvent
+        | ChatStreamStatusEvent
         | ToolTurnToolCallsEvent
         | ContentDeltaEvent
         | UsageEvent
@@ -723,6 +724,7 @@ class ToolTurnStreamEvent(
 ):
     root: (
         ChatStreamStartedEvent
+        | ChatStreamStatusEvent
         | ToolTurnToolCallsEvent
         | ContentDeltaEvent
         | UsageEvent
