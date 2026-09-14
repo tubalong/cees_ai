@@ -7,6 +7,7 @@ import pytest
 from app.core.config import (
     SERVICE_ROOT,
     ChatMode,
+    ExtractionConfig,
     ModelProfile,
     ModelRole,
     Settings,
@@ -139,3 +140,15 @@ def test_readiness_requires_enabled_image_profile() -> None:
     errors = validate_readiness(Settings(node_env="test", ai_internal_token="secret"), catalog)
 
     assert any("image generation requires" in error for error in errors)
+
+def test_extraction_config_defaults() -> None:
+    config = ExtractionConfig()
+    assert config.max_bytes == 10 * 1024 * 1024
+    assert config.max_part_text_chars == 200_000
+
+
+def test_extraction_config_loads_from_catalog() -> None:
+    catalog = load_model_catalog(MODEL_FIXTURE)
+    assert catalog.extraction is not None
+    assert catalog.extraction.max_bytes == 1234
+    assert catalog.extraction.max_part_text_chars == 100
