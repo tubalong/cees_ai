@@ -16,6 +16,7 @@ import { JobsModule } from './jobs/jobs.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { AssistantModule } from './assistant/assistant.module';
 import { KnowledgeModule } from './knowledge/knowledge.module';
+import { DingTalkModule } from './dingtalk/dingtalk.module';
 
 @Module({}) export class IntegrationModule { }
 @Module({}) export class CommonModule { }
@@ -23,5 +24,5 @@ import { KnowledgeModule } from './knowledge/knowledge.module';
 export const BusinessModules: Type[] = [
     OrganizationModule, RbacModule, UserModule, ProjectModule, TaskModule, AssistantModule, WorkReportModule,
     FileModule, KnowledgeModule, ResourceModule, DocumentModule, MeetingModule, NotificationModule, DashboardModule,
-    AiOrchestrationModule, IntegrationModule, AuditModule, CommonModule, JobsModule,
+    AiOrchestrationModule, IntegrationModule, AuditModule, CommonModule, JobsModule, DingTalkModule,
 ];
