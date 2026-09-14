@@ -43,6 +43,21 @@ read_env_value() {
   printf '%s' "$line"
 }
 
+report_unhealthy_containers() {
+  local container_id
+  local health_status
+  local container_name
+
+  while read -r container_id; do
+    [[ -n "$container_id" ]] || continue
+    health_status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$container_id" 2>/dev/null || true)"
+    [[ "$health_status" == "unhealthy" ]] || continue
+    container_name="$(docker inspect --format '{{.Name}}' "$container_id" 2>/dev/null || true)"
+    echo "--- last healthcheck output for ${container_name#/} ---" >&2
+    docker inspect --format '{{if .State.Health}}{{range .State.Health.Log}}{{.Output}}{{end}}{{end}}' "$container_id" 2>/dev/null | tail -n 3 >&2
+  done < <("${COMPOSE[@]}" ps -aq)
+}
+
 validate_deployment_inputs() {
   if grep -q "change_me" "$ENV_FILE"; then
     echo "Error: $ENV_FILE still contains change_me placeholders." >&2
@@ -203,7 +218,12 @@ case "$ACTION" in
 
     validate_local_images
     echo "Starting $ENVIRONMENT services from preloaded images..."
-    "${COMPOSE[@]}" up -d --no-build --pull never --remove-orphans
+    if ! "${COMPOSE[@]}" up -d --no-build --pull never --remove-orphans; then
+      echo "Error: failed to start $ENVIRONMENT services." >&2
+      report_unhealthy_containers
+      echo "Inspect the full startup logs with: bash infra/manage-app.sh $ENVIRONMENT logs" >&2
+      exit 1
+    fi
 
     echo
     "${COMPOSE[@]}" ps

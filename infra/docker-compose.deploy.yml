@@ -34,8 +34,13 @@ services:
       AI_INTERNAL_TOKEN: ${AI_INTERNAL_TOKEN}
       AI_DOCS_ENABLED: ${AI_DOCS_ENABLED:-false}
       AI_MODEL_CONFIG_PATH: /run/config/ai-models.toml
+      # 模型配置通过 profile 的 api_key_env 按名称读取这些变量；缺少任一已启用
+      # profile 对应的变量都会让 /ready 返回 503，容器被判定为 unhealthy。
       PRIMARY_LLM_API_KEY: ${PRIMARY_LLM_API_KEY}
       BACKUP_LLM_API_KEY: ${BACKUP_LLM_API_KEY:-}
+      VISION_LLM_API_KEY: ${VISION_LLM_API_KEY:-}
+      IMAGE_GEN_API_KEY: ${IMAGE_GEN_API_KEY:-}
+      IMAGE_GEN_BACKUP_API_KEY: ${IMAGE_GEN_BACKUP_API_KEY:-}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     volumes:
       - type: bind
