@@ -34,12 +34,39 @@ class MessageRole(StrEnum):
     assistant = 'assistant'
 
 
+class TextContentPart(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['text']
+    text: constr(min_length=1, max_length=262144)
+
+
+class ImageUrl(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    url: constr(min_length=1, max_length=20971520) = Field(
+        ..., description='Image URL or data URL containing the encoded image.'
+    )
+
+
+class ImageContentPart(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['image_url']
+    image_url: ImageUrl
+
+
 class InvokeMessage(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
     role: MessageRole
-    content: constr(min_length=1, max_length=262144)
+    content: list[
+        Annotated[TextContentPart | ImageContentPart, Field(discriminator='type')]
+    ] = Field(..., max_length=32, min_length=1)
 
 
 class TextResponseFormat(BaseModel):
@@ -150,7 +177,9 @@ class ChatMessage(BaseModel):
     )
     id: constr(min_length=1, max_length=128) | None = None
     role: ChatMessageRole
-    content: constr(min_length=1, max_length=262144)
+    content: list[
+        Annotated[TextContentPart | ImageContentPart, Field(discriminator='type')]
+    ] = Field(..., max_length=32, min_length=1)
 
 
 class ChatContextStrategy(StrEnum):
@@ -277,7 +306,10 @@ class ToolTurnMessage(BaseModel):
         extra='forbid',
     )
     role: Role
-    content: constr(min_length=1, max_length=262144) | None = None
+    content: (
+        list[Annotated[TextContentPart | ImageContentPart, Field(discriminator='type')]]
+        | None
+    ) = Field(None, max_length=32, min_length=1)
     tool_calls: list[ToolCall] | None = Field(None, max_length=16)
     tool_call_id: constr(min_length=1, max_length=128) | None = None
     name: constr(min_length=1, max_length=128) | None = None

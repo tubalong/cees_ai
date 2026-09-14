@@ -18,6 +18,7 @@ from tests.helpers import (
     profile,
     ready_runtime,
     result,
+    text_parts,
 )
 
 
@@ -52,7 +53,7 @@ def text_payload() -> dict[str, object]:
         "request_id": "req-api-1",
         "tenant_id": "tenant-1",
         "user_id": "user-1",
-        "messages": [{"role": "user", "content": "hello"}],
+        "messages": [{"role": "user", "content": text_parts("hello")}],
         "response_format": {"type": "text"},
     }
 
@@ -155,8 +156,8 @@ def test_message_total_size_is_limited() -> None:
     client, _ = build_client()
     payload = text_payload()
     payload["messages"] = [
-        {"role": "user", "content": "a" * 140_000},
-        {"role": "assistant", "content": "b" * 140_000},
+        {"role": "user", "content": text_parts("a" * 140_000)},
+        {"role": "assistant", "content": text_parts("b" * 140_000)},
     ]
     with client:
         response = client.post(

@@ -20,13 +20,14 @@ from app.api.generated.models import (
     TokenUsage,
     UsageEvent,
 )
+from app.api.message_content import api_message_to_chat_message
 from app.api.request_validation import validate_message_content_size
 from app.core.config import ModelRole
 from app.core.errors import AIServiceError, ProviderPermanentError, ProviderTransientError
 from app.core.runtime import AppRuntime
 from app.core.security import require_internal_token
 from app.llm.router import StreamingRoutingResult
-from app.llm.types import ChatMessage, TokenUsageData
+from app.llm.types import TokenUsageData
 
 logger = logging.getLogger(__name__)
 StreamEvent = (
@@ -95,10 +96,7 @@ async def stream_llm(payload: StreamRequest, request: Request) -> StreamingRespo
         request_id=payload.request_id,
         tenant_id=payload.tenant_id,
         user_id=payload.user_id,
-        messages=[
-            ChatMessage(role=message.role.value, content=message.content)
-            for message in payload.messages
-        ],
+        messages=[api_message_to_chat_message(message) for message in payload.messages],
         role=role,
         profile_override=payload.llm_profile,
         temperature=payload.temperature,

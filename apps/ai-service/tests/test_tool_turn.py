@@ -12,7 +12,7 @@ from app.core.errors import AIServiceError
 from app.llm.router import LLMRouter
 from app.llm.types import ProviderStreamChunk, TokenUsageData, ToolCall
 from app.main import create_app
-from tests.helpers import StubProvider, catalog, profile, ready_runtime
+from tests.helpers import StubProvider, catalog, profile, ready_runtime, text_parts
 
 
 def tool_turn_payload(*, tools: list[dict[str, object]] | None = None) -> dict[str, object]:
@@ -24,7 +24,7 @@ def tool_turn_payload(*, tools: list[dict[str, object]] | None = None) -> dict[s
         "mode": "standard",
         "instructions": "Use tools when appropriate.",
         "messages": [
-            {"role": "user", "content": "Generate a cat image."},
+            {"role": "user", "content": text_parts("Generate a cat image.")},
         ],
         "tools": tools
         if tools is not None
@@ -59,7 +59,7 @@ def test_tool_turn_prepare_builds_system_context_and_tools() -> None:
 
     assert prepared.messages[0].role == "system"
     assert prepared.messages[0].content.startswith("You are a helpful")
-    assert prepared.messages[-1].content == "Generate a cat image."
+    assert prepared.messages[-1].content == text_parts("Generate a cat image.")
     assert prepared.tools == (
         {
             "name": "generate_image",
@@ -83,7 +83,7 @@ def test_tool_turn_prepare_rejects_unknown_tool_message_reference() -> None:
     )
     request.messages = [
         ToolTurnMessage.model_validate(
-            {"role": "tool", "content": "done", "tool_call_id": "missing"}
+            {"role": "tool", "content": text_parts("done"), "tool_call_id": "missing"}
         )
     ]
 

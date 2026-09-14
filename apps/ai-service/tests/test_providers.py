@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 import pytest
-from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
 
 from app.core.config import OutputMode
 from app.core.errors import ProviderOutputError
@@ -389,3 +389,27 @@ def test_coalesce_tool_call_chunks_rejects_non_object_arguments() -> None:
                 {"name": "generate_image", "args": '"not-an-object"', "id": "call_1", "index": 0}
             ]
         )
+
+
+def test_to_langchain_message_preserves_multimodal_content() -> None:
+    message = ChatMessage(
+        role="user",
+        content=[
+            {"type": "text", "text": "What is in this image?"},
+            {
+                "type": "image_url",
+                "image_url": {"url": "data:image/png;base64,abc"},
+            },
+        ],
+    )
+
+    converted = _to_langchain_message(message)
+
+    assert isinstance(converted, HumanMessage)
+    assert converted.content == [
+        {"type": "text", "text": "What is in this image?"},
+        {
+            "type": "image_url",
+            "image_url": {"url": "data:image/png;base64,abc"},
+        },
+    ]

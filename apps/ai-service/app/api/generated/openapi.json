@@ -146,7 +146,12 @@
                     "messages": [
                       {
                         "role": "user",
-                        "content": "Summarize the current project status."
+                        "content": [
+                          {
+                            "type": "text",
+                            "text": "Summarize the current project status."
+                          }
+                        ]
                       }
                     ],
                     "role": "default",
@@ -166,7 +171,12 @@
                     "messages": [
                       {
                         "role": "user",
-                        "content": "Extract the project name and current status."
+                        "content": [
+                          {
+                            "type": "text",
+                            "text": "Extract the project name and current status."
+                          }
+                        ]
                       }
                     ],
                     "role": "structured",
@@ -306,7 +316,12 @@
                 "messages": [
                   {
                     "role": "user",
-                    "content": "Draft a concise project update."
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "Draft a concise project update."
+                      }
+                    ]
                   }
                 ],
                 "role": "default",
@@ -387,15 +402,30 @@
                 "messages": [
                   {
                     "role": "user",
-                    "content": "Our project is named CEES AI."
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "Our project is named CEES AI."
+                      }
+                    ]
                   },
                   {
                     "role": "assistant",
-                    "content": "Understood."
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "Understood."
+                      }
+                    ]
                   },
                   {
                     "role": "user",
-                    "content": "What is the project name?"
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "What is the project name?"
+                      }
+                    ]
                   }
                 ]
               }
@@ -1149,6 +1179,74 @@
           "assistant"
         ]
       },
+      "TextContentPart": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "text"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "text"
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 262144
+          }
+        }
+      },
+      "ImageUrl": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "url"
+        ],
+        "properties": {
+          "url": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 20971520,
+            "description": "Image URL or data URL containing the encoded image."
+          }
+        }
+      },
+      "ImageContentPart": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "image_url"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "image_url"
+          },
+          "image_url": {
+            "$ref": "#/components/schemas/ImageUrl"
+          }
+        }
+      },
+      "MessageContentPart": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/TextContentPart"
+          },
+          {
+            "$ref": "#/components/schemas/ImageContentPart"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "type",
+          "mapping": {
+            "text": "#/components/schemas/TextContentPart",
+            "image_url": "#/components/schemas/ImageContentPart"
+          }
+        }
+      },
       "InvokeMessage": {
         "type": "object",
         "additionalProperties": false,
@@ -1161,9 +1259,12 @@
             "$ref": "#/components/schemas/MessageRole"
           },
           "content": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 262144
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 32,
+            "items": {
+              "$ref": "#/components/schemas/MessageContentPart"
+            }
           }
         }
       },
@@ -1538,9 +1639,12 @@
             "$ref": "#/components/schemas/ChatMessageRole"
           },
           "content": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 262144
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 32,
+            "items": {
+              "$ref": "#/components/schemas/MessageContentPart"
+            }
           }
         }
       },
@@ -1966,11 +2070,14 @@
           },
           "content": {
             "type": [
-              "string",
+              "array",
               "null"
             ],
-            "minLength": 1,
-            "maxLength": 262144
+            "minItems": 1,
+            "maxItems": 32,
+            "items": {
+              "$ref": "#/components/schemas/MessageContentPart"
+            }
           },
           "tool_calls": {
             "type": "array",

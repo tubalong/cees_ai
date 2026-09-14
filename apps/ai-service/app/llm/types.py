@@ -7,6 +7,7 @@ from typing import Any, Literal, Protocol
 from app.core.config import ModelProfile, OutputMode
 
 ReasoningEffort = Literal["low", "high", "max"]
+MessageContent = str | list[dict[str, Any]]
 
 
 @dataclass(frozen=True)
@@ -19,7 +20,7 @@ class ToolCall:
 @dataclass(frozen=True)
 class ChatMessage:
     role: Literal["system", "user", "assistant", "tool"]
-    content: str
+    content: MessageContent
     tool_calls: tuple[ToolCall, ...] = ()
     tool_call_id: str | None = None
     name: str | None = None
@@ -65,6 +66,40 @@ class ToolCallingResult:
     tool_calls: tuple[ToolCall, ...]
     token_usage: TokenUsageData = TokenUsageData()
     finish_reason: str | None = None
+
+
+def content_to_text(content: MessageContent) -> str:
+    if isinstance(content, str):
+        return content
+    return "".join(
+        part.get("text", "")
+        for part in content
+        if isinstance(part, dict) and part.get("type") == "text"
+    )
+
+
+def content_has_image(content: MessageContent) -> bool:
+    if isinstance(content, str):
+        return False
+    return any(
+        isinstance(part, dict) and part.get("type") == "image_url" for part in content
+    )
+
+
+def content_size_bytes(content: MessageContent) -> int:
+    if isinstance(content, str):
+        return len(content.encode("utf-8"))
+    total = 0
+    for part in content:
+        if not isinstance(part, dict):
+            continue
+        if part.get("type") == "text":
+            total += len(str(part.get("text", "")).encode("utf-8"))
+        elif part.get("type") == "image_url":
+            image_url = part.get("image_url")
+            if isinstance(image_url, dict):
+                total += len(str(image_url.get("url", "")).encode("utf-8"))
+    return total
 
 
 class LLMProvider(Protocol):

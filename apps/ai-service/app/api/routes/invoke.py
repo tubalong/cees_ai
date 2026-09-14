@@ -13,12 +13,12 @@ from app.api.generated.models import (
     TextOutput,
     TokenUsage,
 )
+from app.api.message_content import api_message_to_chat_message
 from app.api.request_validation import validate_message_content_size
 from app.core.config import ModelRole, OutputMode
 from app.core.errors import AIServiceError
 from app.core.runtime import AppRuntime
 from app.core.security import require_internal_token
-from app.llm.types import ChatMessage
 
 router = APIRouter(
     prefix="/internal/v1/llm",
@@ -84,10 +84,7 @@ async def invoke_llm(payload: InvokeRequest, request: Request) -> InvokeResponse
         request_id=payload.request_id,
         tenant_id=payload.tenant_id,
         user_id=payload.user_id,
-        messages=[
-            ChatMessage(role=message.role.value, content=message.content)
-            for message in payload.messages
-        ],
+        messages=[api_message_to_chat_message(message) for message in payload.messages],
         output_mode=output_mode,
         role=role,
         profile_override=payload.llm_profile,

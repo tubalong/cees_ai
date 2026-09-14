@@ -8,7 +8,7 @@ from app.chat.orchestrator import ChatOrchestrator
 from app.core.config import ModelRole
 from app.core.errors import AIServiceError
 from app.llm.router import LLMRouter
-from tests.helpers import StubProvider, catalog, chat_config, profile, result
+from tests.helpers import StubProvider, catalog, chat_config, profile, result, text_parts
 
 
 def chat_request(*, mode: str = "standard", max_output_tokens: int | None = None) -> ChatRequest:
@@ -19,7 +19,7 @@ def chat_request(*, mode: str = "standard", max_output_tokens: int | None = None
             "user_id": "user-1",
             "conversation_id": "conversation-1",
             "mode": mode,
-            "messages": [{"role": "user", "content": "hello"}],
+            "messages": [{"role": "user", "content": text_parts("hello")}],
             "max_output_tokens": max_output_tokens,
         }
     )
@@ -107,8 +107,8 @@ async def test_compactor_returns_trimmed_summary_and_last_message_id() -> None:
             "user_id": "user-1",
             "conversation_id": "conversation-1",
             "messages": [
-                {"id": "message-1", "role": "user", "content": "Question"},
-                {"id": "message-2", "role": "assistant", "content": "Answer"},
+                {"id": "message-1", "role": "user", "content": text_parts("Question")},
+                {"id": "message-2", "role": "assistant", "content": text_parts("Answer")},
             ],
         }
     )
@@ -137,7 +137,7 @@ def test_chat_defaults_to_standard_mode_when_omitted() -> None:
             "tenant_id": "tenant-1",
             "user_id": "user-1",
             "conversation_id": "conversation-1",
-            "messages": [{"role": "user", "content": "hello"}],
+            "messages": [{"role": "user", "content": text_parts("hello")}],
         }
     )
 
