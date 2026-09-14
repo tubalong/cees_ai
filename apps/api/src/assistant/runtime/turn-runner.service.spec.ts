@@ -166,6 +166,7 @@ describe('TurnRunnerService', () => {
             type: 'tool_result',
             status: 'completed',
             resource: { type: 'IMAGE', id: 'image-1' },
+            resourceUrl: 'https://cos.example/signed-image-url',
             error: null,
         });
         expect(toolCallEvent && toolResultEvent && toolCallEvent.toolCallId).toBe(
@@ -187,7 +188,8 @@ describe('TurnRunnerService', () => {
                 name: 'generate_image',
             },
         ]);
-        expect(JSON.stringify(events)).not.toContain('signed');
+        // 公开 tool_result 事件携带生成时签发的可下载 URL；资源 ID 仍作为稳定引用保留。
+        expect(JSON.stringify(events)).toContain('signed-image-url');
     });
 
     it('does not execute tool calls beyond the hard step limit', async () => {
@@ -485,21 +487,28 @@ function createHarness(options: {
                 toolCallId: input.toolCallId,
                 status: 'rejected',
                 resource: null,
+                resourceUrl: null,
                 error: { code: input.code, message: input.summary },
             });
             return true;
         }),
-        completeToolCall: jest.fn(async (input: { toolCallId: string; summary: string; resourceType: 'IMAGE' | 'DOCUMENT'; resourceId: string }) => {
+        completeToolCall: jest.fn(async (input: { toolCallId: string; summary: string; resourceType: 'IMAGE' | 'DOCUMENT'; resourceId: string; resourceUrl: string | null }) => {
             const record = records.get(input.toolCallId);
             if (record) {
                 record.status = ToolCallStatus.COMPLETED;
-                record.result = { summary: input.summary, resourceType: input.resourceType, resourceId: input.resourceId };
+                record.result = {
+                    summary: input.summary,
+                    resourceType: input.resourceType,
+                    resourceId: input.resourceId,
+                    resourceUrl: input.resourceUrl,
+                };
             }
             appendEvent({
                 type: 'tool_result',
                 toolCallId: input.toolCallId,
                 status: 'completed',
                 resource: { type: input.resourceType, id: input.resourceId },
+                resourceUrl: input.resourceUrl,
                 error: null,
             });
             return true;
@@ -516,6 +525,7 @@ function createHarness(options: {
                 toolCallId: input.toolCallId,
                 status: 'failed',
                 resource: null,
+                resourceUrl: null,
                 error: { code: input.code, message: input.summary },
             });
             return true;
@@ -568,6 +578,7 @@ function chatTool(name: string): { name: string; description: string; parameters
 const EXECUTED_IMAGE_RESULT = {
     resourceType: 'IMAGE' as const,
     resourceId: 'image-1',
+    resourceUrl: 'https://cos.example/signed-image-url',
     summary: '图片已生成',
 };
 

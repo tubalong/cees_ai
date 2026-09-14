@@ -239,7 +239,7 @@ ai-service /internal/v1/chat/tool-turn/stream 第二轮
 NestJS 通过 SSE 流式返回给用户
 ```
 
-注意：ai-service 返回的 Base64 字节不能直接成为正式业务文件；正式文件必须由 NestJS 上传 COS 并登记 `FileObject`。生成完成时签发短期签名 URL 随工具结果摘要返回给模型与用户（2026-09-14 起，不再只返回资源 ID）；公开事件与消息快照仍只保存资源 ID，URL 过期后通过 `GET /images/{imageId}` 重新获取。
+注意：ai-service 返回的 Base64 字节不能直接成为正式业务文件；正式文件必须由 NestJS 上传 COS 并登记 `FileObject`。生成完成时签发短期签名 URL，随公开 `tool_result` 事件的新增兼容可选字段 `resourceUrl` 返回，客户端可直接下载/展示图片（2026-09-14 起）；回喂模型的工具结果摘要同样携带 URL，`resource {type,id}` 稳定引用保留，URL 过期后通过 `GET /images/{imageId}` 重新获取。
 
 ## 9. 断线重连
 

@@ -103,6 +103,8 @@ export type PublicTurnStreamEvent =
       toolCallId: string;
       status: PublicToolResultStatus;
       resource: { type: 'IMAGE' | 'DOCUMENT'; id: string } | null;
+      /** 图片资源生成时签发的短期可下载 URL；其他资源或失败/拒绝事件为 null。 */
+      resourceUrl: string | null;
       error: { code: string; message: string } | null;
     }
   | { type: 'completed'; seq: number; latencyMs: number; finishReason: string | null }

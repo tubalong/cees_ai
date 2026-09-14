@@ -638,6 +638,7 @@ export class TurnRunnerService implements OnModuleDestroy {
         summary: result.summary,
         resourceType: result.resourceType,
         resourceId: result.resourceId,
+        resourceUrl: result.resourceUrl,
       });
       if (!settled) {
         return { limitExceeded: false, ownershipLost: true };

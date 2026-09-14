@@ -24,6 +24,8 @@ export interface ToolExecutionResult {
   /** Read-only or side-effect tools may not produce a formal Resource. */
   resourceType: 'IMAGE' | 'DOCUMENT' | null;
   resourceId: string | null;
+  /** 生成时签发的短期可下载 URL（当前仅图片工具提供），随公开 tool_result 事件返回；有失效性，过期后经资源接口重新获取。 */
+  resourceUrl: string | null;
   /** 回喂模型的工具结果摘要。 */
   summary: string;
 }

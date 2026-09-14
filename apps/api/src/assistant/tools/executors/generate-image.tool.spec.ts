@@ -75,6 +75,7 @@ describe('GenerateImageTool', () => {
         expect(result).toEqual({
             resourceType: 'IMAGE',
             resourceId: 'image-1',
+            resourceUrl: 'https://cos.example/signed-image-url',
             summary: expect.stringContaining('https://cos.example/signed-image-url') as unknown,
         });
         expect(result.summary).toContain('图片已生成');

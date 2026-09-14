@@ -72,6 +72,7 @@ export class GenerateImageTool implements OnModuleInit {
     return {
       resourceType: 'IMAGE',
       resourceId: image.imageId,
+      resourceUrl: image.url,
       summary: `图片已生成（${image.contentType}，${image.sizeBytes} 字节，模型 ${image.model}），临时访问地址（约 ${Math.max(1, Math.round(image.urlTtlSeconds / 60))} 分钟内有效）：${image.url}`,
     };
   }

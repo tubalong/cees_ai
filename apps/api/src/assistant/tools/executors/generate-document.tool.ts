@@ -69,6 +69,7 @@ export class GenerateDocumentTool implements OnModuleInit {
     return {
       resourceType: 'DOCUMENT',
       resourceId: document.documentId,
+      resourceUrl: null,
       summary: `文档已生成：${document.title}（${document.contentLength} 字符，模型 ${document.model}），文档 ID ${document.documentId}`,
     };
   }

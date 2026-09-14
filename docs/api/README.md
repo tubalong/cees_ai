@@ -363,9 +363,10 @@ GET    /api/v1/projects/{projectId}/tasks/{taskId}/activities
 
 ## 图片工具结果返回 URL 说明（2026-09-14）
 
-- `generate_image` 工具结果摘要改为直接携带生成时签发的短期签名 URL（TTL 与 `TENCENT_COS_SIGNED_URL_TTL_SECONDS` 一致），模型可直接把 URL 展示给用户，无需再通过 `GET /images/{imageId}` 查询；
-- 公开 `tool_result` 事件与消息快照仍只保存稳定资源引用 `resource {type,id}`，URL 过期后经图片资源接口重新获取；
-- 公开契约无变更，客户端无需重新生成。
+- 公开 `tool_result` 事件新增兼容可选字段 `resourceUrl`：`generate_image` 执行成功时携带生成时签发的短期可下载 URL（TTL 与 `TENCENT_COS_SIGNED_URL_TTL_SECONDS` 一致），客户端可直接下载/展示图片，无需再经 `GET /images/{imageId}` 查询；
+- 回喂模型的工具结果摘要同样携带该 URL（含有效时长提示），模型可直接把地址展示给用户；
+- 稳定资源引用 `resource {type,id}` 保留；`resourceUrl` 有时效性，过期后经 `GET /images/{imageId}` 重新获取；非图片资源或失败/拒绝事件该字段为 `null`；
+- 字段为兼容新增（可选），老客户端无需改造即可继续使用既有 `resource` 字段。
 
 ## 契约事实源
 
