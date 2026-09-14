@@ -52,10 +52,10 @@ ai-service 负责选择支持图片生成的模型并返回图片字节与执行
 ## 3. ImageRouter
 
 - 独立于 `LLMRouter`。
-- 从 `[image_profiles.*]` 选择第一个启用 profile。
+- 按 `models.toml` 中 `[image_profiles.*]` 的声明顺序收集启用的 profile；第一个 profile 是主模型，后续 profile 是备用候选。
 - 生成与编辑分别调用 Provider 的 `generate` 与 `edit` 方法。
 - 图片 profile 支持 `mock` 与 `openai_compatible`。
-- 瞬时失败可回退到下一候选；永久失败不跨模型重试。
+- 瞬时失败可回退到下一候选；永久失败不跨模型重试。成功响应中的 `execution.fallback_count` 表示实际跳过的候选数量。
 
 ## 4. 配置
 
@@ -77,13 +77,27 @@ provider = "openai_compatible"
 model = "change_me"
 base_url = "https://change_me/v1"
 api_key_env = "IMAGE_GEN_API_KEY"
+timeout_seconds = 60.0
+max_retries = 2
+
+[image_profiles.backup]
+enabled = true
+provider = "openai_compatible"
+model = "change_me"
+base_url = "https://change_me/v1"
+api_key_env = "IMAGE_GEN_BACKUP_API_KEY"
+timeout_seconds = 60.0
+max_retries = 1
 ```
 
 环境变量：
 
 ```text
 IMAGE_GEN_API_KEY=change_me
+IMAGE_GEN_BACKUP_API_KEY=change_me
 ```
+
+`backup` 不是固定的保留字段，名称可以按部署需要调整；重要的是备用 profile 必须写在主 profile 之后且 `enabled = true`。如果主模型因连接超时、上游 5xx、限流等瞬时错误失败，ImageRouter 会继续尝试后续启用的 profile。4xx、请求参数不被模型支持或响应无法解析等永久失败会直接返回错误，不会切换模型。
 
 ## 5. Provider 行为
 

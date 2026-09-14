@@ -97,6 +97,17 @@ api_key_env = "IMAGE_GEN_API_KEY"
 timeout_seconds = 60.0
 max_retries = 2
 
+# The image router tries enabled profiles in declaration order. Keep this
+# profile after primary so transient primary failures can use the backup model.
+[image_profiles.backup]
+enabled = true
+provider = "openai_compatible"
+model = "gpt-image-1"
+base_url = "https://www.aikeyhub.top/v1"
+api_key_env = "IMAGE_GEN_BACKUP_API_KEY"
+timeout_seconds = 60.0
+max_retries = 1
+
 [roles]
 default = ["primary", "backup", "vision-primary"]
 structured = ["primary", "backup"]

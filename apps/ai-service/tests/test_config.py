@@ -127,6 +127,25 @@ def test_deployment_model_catalogs_include_chat_modes(path: Path) -> None:
     assert set(catalog.chat.modes) == {ChatMode.standard, ChatMode.ultra}
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        Path("config/models.toml"),
+        Path("config/models.staging.example.toml"),
+        Path("config/models.production.example.toml"),
+    ],
+)
+def test_deployment_model_catalogs_include_ordered_image_fallback(path: Path) -> None:
+    catalog = load_model_catalog(path)
+
+    enabled_profiles = [
+        name for name, profile in catalog.image_profiles.items() if profile.enabled
+    ]
+    assert enabled_profiles[:2] == ["primary", "backup"]
+    assert catalog.image_profiles["primary"].enabled is True
+    assert catalog.image_profiles["backup"].enabled is True
+
+
 def test_image_profiles_are_loaded_from_catalog() -> None:
     catalog = load_model_catalog(MODEL_FIXTURE)
     assert catalog.image_profiles["mock"].provider == "mock"
