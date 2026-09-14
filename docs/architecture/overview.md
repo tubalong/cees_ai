@@ -22,7 +22,9 @@ cees_ai/
 ## 边界与职责
 
 - NestJS 是 Tenant、User、Permission、业务资源、正式写入和审计数据的唯一事实源。
-- 公开 Chat API 由 NestJS 注入可信租户成员上下文并记录 Token；Conversation、Message 和摘要本期只保存在客户端本地。
+- Assistant 公开 API 由 NestJS 注入可信租户成员上下文；Conversation、Message、摘要、轮次、ToolCall 和事件由 PostgreSQL 持久化，客户端只保存渲染缓存与重连游标。
+- Assistant 的 `TurnRunnerService + TurnStateService + ToolRegistry` 是 NestJS 内的自定义持久化状态机和 Tool Loop；当前不引入 LangGraph，复杂长任务/并行分支/人工审批出现后再单独评估。
+- Assistant 的可观测事实来自 `AIInvocationLog`、`AuditLog`、AssistantTurn/Event/ToolCall 及资源状态；SSE 只是提交后事实的传输层，不是事实源。
 - ai-service 提供受内部 Token 保护的通用 LLM、无状态上下文对话和领域无关文档生成能力，不定义工作记录、会议、知识库或管理简报等正式业务资源。
 - ai-service 不直接连接业务数据库，不创建或修改正式业务数据。
 - 未来业务 AI 功能必须由 NestJS 建立可信租户/用户上下文，并在契约中定义专用输入输出，不能让客户端直接调用通用 invoke。
@@ -72,6 +74,7 @@ flowchart LR
 
 - [AI Service 通用基础设施](ai-service-foundation.md)
 - [上下文对话](contextual-chat.md)
+- [Assistant / Conversation API](../api/assistant-api.md)
 - [公开 AI 对话链路与 Token 计量](public-chat-api-and-token-metering.md)
 - [AI 助手工具循环](assistant-tool-loop.md)
 - [AI Tool Calling](ai-tool-calling.md)

@@ -9,6 +9,7 @@ import type { CreateConversationRequest } from '../models/CreateConversationRequ
 import type { CreateTurnRequest } from '../models/CreateTurnRequest';
 import type { TurnResponseEnvelope } from '../models/TurnResponseEnvelope';
 import type { TurnStreamEvent } from '../models/TurnStreamEvent';
+import type { UpdateConversationRequest } from '../models/UpdateConversationRequest';
 import type { CancelablePromise } from '../core/CancelablePromise';
 import { OpenAPI } from '../core/OpenAPI';
 import { request as __request } from '../core/request';
@@ -93,6 +94,74 @@ export class ConversationService {
                 400: `请求字段校验失败`,
                 401: `登录状态无效、已过期或缺少有效租户成员身份`,
                 404: `会话不存在或不属于当前成员`,
+            },
+        });
+    }
+    /**
+     * 修改当前成员私有会话的标题
+     * 使用会话版本进行乐观并发控制；版本不匹配时返回 409。
+     * @returns ConversationResponseEnvelope 返回修改后的会话
+     * @throws ApiError
+     */
+    public static updateConversation({
+        conversationId,
+        requestBody,
+    }: {
+        /**
+         * 会话 ID
+         */
+        conversationId: string,
+        requestBody: UpdateConversationRequest,
+    }): CancelablePromise<ConversationResponseEnvelope> {
+        return __request(OpenAPI, {
+            method: 'PATCH',
+            url: '/conversations/{conversationId}',
+            path: {
+                'conversationId': conversationId,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                400: `请求字段校验失败`,
+                401: `登录状态或租户成员身份无效`,
+                404: `会话不存在或不属于当前成员`,
+                409: `会话版本冲突`,
+            },
+        });
+    }
+    /**
+     * 软删除当前成员的私有会话
+     * 删除只隐藏会话；消息、工具调用、事件和审计事实保留。存在运行中轮次时返回 409。
+     * @returns void
+     * @throws ApiError
+     */
+    public static deleteConversation({
+        conversationId,
+        version,
+    }: {
+        /**
+         * 会话 ID
+         */
+        conversationId: string,
+        /**
+         * 当前会话版本
+         */
+        version: number,
+    }): CancelablePromise<void> {
+        return __request(OpenAPI, {
+            method: 'DELETE',
+            url: '/conversations/{conversationId}',
+            path: {
+                'conversationId': conversationId,
+            },
+            query: {
+                'version': version,
+            },
+            errors: {
+                400: `请求字段校验失败`,
+                401: `登录状态或租户成员身份无效`,
+                404: `会话不存在或不属于当前成员`,
+                409: `会话版本冲突或仍有执行中的轮次`,
             },
         });
     }

@@ -14,6 +14,10 @@ export type ConversationMessage = {
      */
     content: string;
     /**
+     * Stable image FileObject IDs; signed URLs are resolved only at model invocation time
+     */
+    imageFileIds: Array<string>;
+    /**
      * 消息写入时间
      */
     createdAt: string;

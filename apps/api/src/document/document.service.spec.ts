@@ -110,8 +110,11 @@ describe('DocumentService', () => {
             userId: USER_ID,
             membershipId: MEMBERSHIP_ID,
             requestId: 'request-id',
+            conversationId: '60000000-0000-0000-0000-000000000001',
             turnId: 'turn-id',
             toolCallId: 'tool-call-id',
+            executionOwner: 'api:test',
+            executionToken: 'execution-token-1',
             instruction: '写一份项目周报',
             visibility: DocumentVisibility.PRIVATE,
         });
@@ -132,11 +135,10 @@ describe('DocumentService', () => {
                 visibility: DocumentVisibility.PRIVATE,
             }),
         });
-        expect(prisma.aIActionDraft.create).toHaveBeenCalledWith({
+        expect(prisma.aIActionDraft.update).toHaveBeenCalledWith({
+            where: { toolCallId: 'tool-call-id' },
             data: expect.objectContaining({
-                actionType: 'ai.document.generate',
                 status: DraftStatus.EXECUTED,
-                toolCallId: 'tool-call-id',
                 executedResourceType: 'DOCUMENT',
             }),
         });
@@ -152,14 +154,16 @@ describe('DocumentService', () => {
 
     it('replays the persisted document for the same tool_call_id without composing again', async () => {
         const prisma = createPrismaMock();
-        prisma.aIActionDraft.findFirst.mockResolvedValue({
-            executedResourceId: DOCUMENT_ID,
-            payload: { provider: 'openai_compatible', model: 'doc-model' },
-        });
         prisma.managedDocument.findFirst.mockResolvedValue({
             id: DOCUMENT_ID,
+            tenantId: TENANT_ID,
             title: '项目周报',
             content: '# 项目周报',
+        });
+        prisma.aIActionDraft.findUnique.mockResolvedValue({
+            tenantId: TENANT_ID,
+            status: DraftStatus.EXECUTED,
+            payload: { provider: 'openai_compatible', model: 'doc-model' },
         });
         const gateway = { composeDocument: jest.fn() };
         const service = createService(prisma, createAccessMock(), gateway);
@@ -169,8 +173,11 @@ describe('DocumentService', () => {
             userId: USER_ID,
             membershipId: MEMBERSHIP_ID,
             requestId: 'request-id',
+            conversationId: '60000000-0000-0000-0000-000000000001',
             turnId: 'turn-id',
             toolCallId: 'tool-call-id',
+            executionOwner: 'api:test',
+            executionToken: 'execution-token-1',
             instruction: '写一份项目周报',
             visibility: DocumentVisibility.PRIVATE,
         });
@@ -182,6 +189,32 @@ describe('DocumentService', () => {
             provider: 'openai_compatible',
             model: 'doc-model',
         }));
+    });
+
+    it('does not write a failure audit after a concurrent successful finalization', async () => {
+        const prisma = createPrismaMock();
+        prisma.aIActionDraft.updateMany.mockResolvedValue({ count: 0 });
+        const service = createService(prisma, createAccessMock());
+        const command = {
+            tenantId: TENANT_ID,
+            userId: USER_ID,
+            membershipId: MEMBERSHIP_ID,
+            requestId: 'request-id',
+            conversationId: '60000000-0000-0000-0000-000000000001',
+            turnId: 'turn-id',
+            toolCallId: 'tool-call-id',
+            executionOwner: 'api:test',
+            executionToken: 'execution-token-1',
+            instruction: '写一份项目周报',
+            visibility: DocumentVisibility.PRIVATE,
+        };
+
+        await expect((service as any).recordGenerationFailure(
+            command,
+            new Error('late failure'),
+        )).resolves.toBeUndefined();
+
+        expect(prisma.auditLog.create).not.toHaveBeenCalled();
     });
 });
 
@@ -232,11 +265,19 @@ function createPrismaMock(): Record<string, any> {
         resource: { create: jest.fn(), updateMany: jest.fn() },
         managedDocument: {
             create: jest.fn(),
+            findUnique: jest.fn().mockResolvedValue(null),
             findFirst: jest.fn(),
             findMany: jest.fn(),
             updateMany: jest.fn(),
         },
-        aIActionDraft: { create: jest.fn(), findFirst: jest.fn() },
+        aIActionDraft: {
+            create: jest.fn(),
+            update: jest.fn(),
+            updateMany: jest.fn(),
+            findFirst: jest.fn(),
+            findUnique: jest.fn().mockResolvedValue(null),
+        },
+        toolCall: { findFirst: jest.fn().mockResolvedValue({ id: 'tool-call-id' }) },
         resourceAcl: { updateMany: jest.fn() },
         auditLog: { create: jest.fn() },
         $transaction: jest.fn(),
@@ -258,6 +299,7 @@ function documentRecord(overrides: Record<string, unknown> = {}): ManagedDocumen
         updatedBy: USER_ID,
         deletedAt: null,
         version: 1,
+        generatedByToolCallId: null,
         resource: {
             id: DOCUMENT_ID,
             tenantId: TENANT_ID,

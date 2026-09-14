@@ -49,7 +49,6 @@ describe('GenerateImageTool', () => {
             sizeBytes: 1024,
             provider: 'openai_compatible',
             model: 'image-model',
-            url: 'https://cos.example/signed',
         });
         const result = await definition!.execute({
             tenantId: 't-1',
@@ -59,6 +58,8 @@ describe('GenerateImageTool', () => {
             conversationId: 'c-1',
             turnId: 'turn-1',
             toolCallId: 'tc-1',
+            executionOwner: 'api:test',
+            executionToken: 'execution-token-1',
             permissions: ['ai.image.generate'],
         }, { prompt: '一只猫', size: 'auto' });
 
@@ -72,8 +73,7 @@ describe('GenerateImageTool', () => {
         expect(result).toEqual({
             resourceType: 'IMAGE',
             resourceId: 'image-1',
-            resourceUrl: 'https://cos.example/signed',
-            summary: expect.stringContaining('https://cos.example/signed') as unknown,
+            summary: expect.stringContaining('image-1') as unknown,
         });
         expect(result.summary).toContain('图片已生成');
     });

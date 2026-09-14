@@ -61,6 +61,8 @@ describe('GenerateDocumentTool', () => {
             conversationId: 'c-1',
             turnId: 'turn-1',
             toolCallId: 'tc-1',
+            executionOwner: 'api:test',
+            executionToken: 'execution-token-1',
             permissions: ['ai.document.generate'],
         }, { instruction: '写一份周报', visibility: 'PRIVATE' });
 
@@ -74,7 +76,6 @@ describe('GenerateDocumentTool', () => {
         expect(result).toEqual({
             resourceType: 'DOCUMENT',
             resourceId: 'doc-1',
-            resourceUrl: null,
             summary: expect.stringContaining('项目周报') as unknown,
         });
         expect(result.summary).toContain('文档已生成');

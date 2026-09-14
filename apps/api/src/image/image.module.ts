@@ -4,6 +4,7 @@ import { AuthModule } from '../auth/auth.module';
 import { ResourceModule } from '../resource/resource.module';
 import { StorageModule } from '../storage/storage.module';
 import { ImageController } from './image.controller';
+import { ImageMaintenanceService } from './image-maintenance.service';
 import { ImageService } from './image.service';
 
 /**
@@ -14,7 +15,7 @@ import { ImageService } from './image.service';
 @Module({
     imports: [AiOrchestrationModule, AuthModule, ResourceModule, StorageModule],
     controllers: [ImageController],
-    providers: [ImageService],
+    providers: [ImageService, ImageMaintenanceService],
     exports: [ImageService],
 })
 export class ImageModule { }

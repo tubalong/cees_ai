@@ -57,8 +57,11 @@ export class GenerateDocumentTool implements OnModuleInit {
       userId: context.userId,
       membershipId: context.membershipId,
       requestId: context.requestId,
+      conversationId: context.conversationId,
       turnId: context.turnId,
       toolCallId: context.toolCallId,
+      executionOwner: context.executionOwner,
+      executionToken: context.executionToken,
       instruction: input.instruction as string,
       title: input.title as string | undefined,
       visibility: input.visibility as (typeof VISIBILITY_VALUES)[number],
@@ -66,7 +69,6 @@ export class GenerateDocumentTool implements OnModuleInit {
     return {
       resourceType: 'DOCUMENT',
       resourceId: document.documentId,
-      resourceUrl: null,
       summary: `文档已生成：${document.title}（${document.contentLength} 字符，模型 ${document.model}），文档 ID ${document.documentId}`,
     };
   }

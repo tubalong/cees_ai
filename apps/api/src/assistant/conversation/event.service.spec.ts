@@ -17,23 +17,31 @@ describe('EventService', () => {
         expect(prisma.$transaction).toHaveBeenCalledTimes(1);
     });
 
-    it('retries once when the seq allocation hits a unique conflict', async () => {
+    it('uses the turn counter and writes the event in the same transaction', async () => {
         const prisma = createPrismaMock();
         const service = new EventService(prisma as unknown as PrismaService);
-        prisma.$transaction
-            .mockRejectedValueOnce(new Prisma.PrismaClientKnownRequestError('conflict', {
-                code: 'P2002',
-                clientVersion: 'test',
-            }))
-            .mockResolvedValueOnce(4);
+        const tx = {
+            assistantTurn: {
+                update: jest.fn().mockResolvedValue({ nextEventSeq: 4 }),
+            },
+            assistantEvent: { create: jest.fn().mockResolvedValue({ seq: 3 }) },
+        };
+        prisma.$transaction.mockImplementation((callback: (transaction: unknown) => unknown) => callback(tx));
 
         const seq = await service.append(TURN_ID, TENANT_ID, AssistantEventType.ERROR, {
             type: 'error',
             error: { code: 'X', message: 'y', retryable: false },
         });
 
-        expect(seq).toBe(4);
-        expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+        expect(seq).toBe(3);
+        expect(tx.assistantTurn.update).toHaveBeenCalledWith({
+            where: { id: TURN_ID },
+            data: { nextEventSeq: { increment: 1 } },
+            select: { nextEventSeq: true },
+        });
+        expect(tx.assistantEvent.create).toHaveBeenCalledWith(expect.objectContaining({
+            data: expect.objectContaining({ turnId: TURN_ID, tenantId: TENANT_ID, seq: 3 }),
+        }));
     });
 
     it('yields persisted events above afterSeq in order', async () => {
@@ -112,8 +120,10 @@ function createPrismaMock(): Record<string, any> {
 
 function mockAppendTransaction(prisma: Record<string, any>, maxSeq: number): void {
     const tx = {
+        assistantTurn: {
+            update: jest.fn().mockResolvedValue({ nextEventSeq: maxSeq + 1 }),
+        },
         assistantEvent: {
-            aggregate: jest.fn().mockResolvedValue({ _max: { seq: maxSeq - 1 } }),
             create: jest.fn(),
         },
     };

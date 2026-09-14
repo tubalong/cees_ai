@@ -57,6 +57,9 @@ paths:
                 configured_roles: [default, structured, reasoning, rag, orchestrator]
                 configured_chat_modes: [standard, ultra]
                 errors: []
+                chat_context_budgets:
+                  standard: 65536
+                  ultra: 131072
         "503":
           description: Service configuration is not ready
           content:
@@ -779,6 +782,20 @@ components:
           type: array
           items:
             type: string
+        chat_context_budgets:
+          type: object
+          additionalProperties: false
+          description: >-
+            各聊天模式的输入 Token 预算（config/models.toml 的
+            chat.modes.*.context_budget_tokens）。调用方在组装上下文前据此决定
+            是否触发历史压缩，避免与 ai-service 的模型调用前裁剪上限漂移。
+          properties:
+            standard:
+              type: integer
+              minimum: 1
+            ultra:
+              type: integer
+              minimum: 1
     ModelRole:
       type: string
       enum: [default, structured, reasoning, rag, orchestrator]

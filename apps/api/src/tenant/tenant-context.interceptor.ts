@@ -1,5 +1,6 @@
 import { CallHandler, ExecutionContext, Injectable, NestInterceptor, UnauthorizedException } from '@nestjs/common';
 import { Observable } from 'rxjs';
+import { randomUUID } from 'node:crypto';
 import { AuthenticatedPrincipal } from '../auth/auth.types';
 import { TenantContext } from './tenant-context';
 
@@ -21,14 +22,15 @@ export class TenantContextInterceptor implements NestInterceptor {
             });
         }
         const requestIdHeader = request.headers['x-request-id'];
-        const requestId = Array.isArray(requestIdHeader) ? requestIdHeader[0] : requestIdHeader;
+        const providedRequestId = Array.isArray(requestIdHeader) ? requestIdHeader[0] : requestIdHeader;
+        const requestId = providedRequestId?.trim() || randomUUID();
         return new Observable((subscriber) => {
             this.tenantContext.run(
                 {
                     tenantId: request.user!.tenantId,
                     userId: request.user!.id,
                     membershipId: request.user!.membershipId,
-                    requestId: requestId ?? '',
+                    requestId,
                     roles: request.user!.roles,
                     permissions: request.user!.permissions,
                 },

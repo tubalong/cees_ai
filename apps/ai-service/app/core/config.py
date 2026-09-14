@@ -54,7 +54,7 @@ class ModelProfile(BaseModel):
     capabilities: set[ModelCapability] = Field(default_factory=lambda: {ModelCapability.chat})
     temperature: float = Field(default=0.0, ge=0.0, le=2.0)
     default_max_output_tokens: int = Field(default=2048, ge=1, le=32768)
-    max_output_tokens_limit: int = Field(default=32768, ge=1, le=32768)
+    max_output_tokens_limit: int = Field(default=32768, ge=1, le=524288)
     timeout_seconds: float = Field(default=60.0, gt=0.0, le=600.0)
     max_retries: int = Field(default=2, ge=0, le=10)
     structured_output_method: Literal["function_calling", "json_mode", "json_schema"] = (
@@ -90,7 +90,7 @@ class ChatModePolicy(BaseModel):
     role: ModelRole
     reasoning_effort: Literal["low", "high", "max"] | None = None
     default_max_output_tokens: int = Field(default=2048, ge=1, le=32768)
-    max_output_tokens_limit: int = Field(default=8192, ge=1, le=32768)
+    max_output_tokens_limit: int = Field(default=8192, ge=1, le=524288)
     context_budget_tokens: int = Field(default=32768, ge=1024, le=2_000_000)
     emit_reasoning_status: bool = True
 

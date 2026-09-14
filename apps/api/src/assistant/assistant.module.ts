@@ -2,11 +2,15 @@ import { Module } from '@nestjs/common';
 import { AiOrchestrationModule } from '../ai-orchestration/ai-orchestration.module';
 import { DocumentModule } from '../document/document.module';
 import { ImageModule } from '../image/image.module';
+import { StorageModule } from '../storage/storage.module';
 import { AssistantController } from './api/assistant.controller';
 import { ConversationService } from './conversation/conversation.service';
 import { EventService } from './conversation/event.service';
 import { ContextBuilderService } from './runtime/context-builder.service';
 import { TurnRunnerService } from './runtime/turn-runner.service';
+import { TurnRecoveryService } from './runtime/turn-recovery.service';
+import { TurnStateService } from './runtime/turn-state.service';
+import { AssistantMessageContentService } from './runtime/message-content.service';
 import { ToolRegistryService } from './tools/tool-registry';
 import { ToolPolicyService } from './tools/tool-policy.service';
 import { GenerateDocumentTool } from './tools/executors/generate-document.tool';
@@ -19,7 +23,7 @@ import { GenerateImageTool } from './tools/executors/generate-image.tool';
  * 执行器在 onModuleInit 自注册，新增工具只需新增 provider。
  */
 @Module({
-  imports: [AiOrchestrationModule, DocumentModule, ImageModule],
+  imports: [AiOrchestrationModule, DocumentModule, ImageModule, StorageModule],
   controllers: [AssistantController],
   providers: [
     ConversationService,
@@ -27,7 +31,10 @@ import { GenerateImageTool } from './tools/executors/generate-image.tool';
     ContextBuilderService,
     ToolRegistryService,
     ToolPolicyService,
+    TurnStateService,
+    AssistantMessageContentService,
     TurnRunnerService,
+    TurnRecoveryService,
     GenerateDocumentTool,
     GenerateImageTool,
   ],

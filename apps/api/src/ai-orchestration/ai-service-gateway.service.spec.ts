@@ -83,7 +83,7 @@ describe('AiServiceGateway', () => {
       request_id: 'req-1',
       tenant_id: 'tenant-1',
       user_id: 'user-1',
-      messages: [{ role: 'user', content: 'hello' }],
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'hello' }] }],
       response_format: { type: 'text' },
     });
 
@@ -110,7 +110,7 @@ describe('AiServiceGateway', () => {
       user_id: 'user-1',
       conversation_id: 'conversation-1',
       mode: 'standard',
-      messages: [{ id: 'message-1', role: 'user', content: '你好' }],
+      messages: [{ id: 'message-1', role: 'user', content: [{ type: 'text', text: '你好' }] }],
     }, { membershipId: 'membership-1', turnId: 'turn-1' });
 
     expect(response).toEqual(chatResponse);
@@ -138,7 +138,7 @@ describe('AiServiceGateway', () => {
       tenant_id: 'tenant-1',
       user_id: 'user-1',
       conversation_id: 'conversation-1',
-      messages: [{ id: 'message-2', role: 'assistant', content: '回答' }],
+      messages: [{ id: 'message-2', role: 'assistant', content: [{ type: 'text', text: '回答' }] }],
     }, { membershipId: 'membership-1', turnId: 'turn-2' });
 
     expect(response).toEqual(compactResponse);
@@ -152,6 +152,53 @@ describe('AiServiceGateway', () => {
       metadata: { outcome: 'completed' },
     }));
     expect(JSON.stringify(record.mock.calls[0])).not.toContain('用户正在测试对话');
+  });
+
+  it('fetches chat context budgets from /ready and caches them briefly', async () => {
+    const fetchMock = jsonFetch({
+      status: 'ready',
+      service: 'ai-service',
+      configured_roles: [],
+      configured_chat_modes: ['standard', 'ultra'],
+      errors: [],
+      chat_context_budgets: { standard: 65536, ultra: 131072 },
+    });
+    global.fetch = fetchMock;
+    const service = new AiServiceGateway(recorder);
+
+    await expect(service.fetchChatContextBudgets()).resolves.toEqual({
+      standard: 65536,
+      ultra: 131072,
+    });
+    expect(requestUrl(fetchMock)).toBe('http://ai-service:8000/ready');
+    expectInternalToken(fetchMock);
+
+    // TTL 内重复调用命中缓存，不再请求 /ready。
+    await expect(service.fetchChatContextBudgets()).resolves.toEqual({
+      standard: 65536,
+      ultra: 131072,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns null when /ready omits chat_context_budgets', async () => {
+    global.fetch = jsonFetch({
+      status: 'ready',
+      service: 'ai-service',
+      configured_roles: [],
+      configured_chat_modes: ['standard'],
+      errors: [],
+    });
+    const service = new AiServiceGateway(recorder);
+
+    await expect(service.fetchChatContextBudgets()).resolves.toBeNull();
+  });
+
+  it('returns null and stays silent when the readiness call fails', async () => {
+    global.fetch = jest.fn().mockRejectedValue(new Error('connection refused'));
+    const service = new AiServiceGateway(recorder);
+
+    await expect(service.fetchChatContextBudgets()).resolves.toBeNull();
   });
 
   it('uses the dedicated document compose endpoint and records the tool call', async () => {
@@ -222,7 +269,7 @@ describe('AiServiceGateway', () => {
       user_id: 'user-1',
       conversation_id: 'conversation-1',
       mode: 'ultra',
-      messages: [{ id: 'message-3', role: 'user', content: '你好' }],
+      messages: [{ id: 'message-3', role: 'user', content: [{ type: 'text', text: '你好' }] }],
     }, { membershipId: 'membership-1', turnId: 'turn-3' });
     const received: ChatStreamEvent[] = [];
     for await (const event of stream) received.push(event);
@@ -287,7 +334,7 @@ describe('AiServiceGateway', () => {
       tenant_id: 'tenant-1',
       user_id: 'user-1',
       conversation_id: 'conversation-1',
-      messages: [{ id: 'message-error', role: 'user', content: '你好' }],
+      messages: [{ id: 'message-error', role: 'user', content: [{ type: 'text', text: '你好' }] }],
     }, { membershipId: 'membership-1', turnId: 'turn-error' });
     const received = await collectEvents(stream);
 
@@ -350,7 +397,7 @@ describe('AiServiceGateway', () => {
       tenant_id: 'tenant-1',
       user_id: 'user-1',
       conversation_id: 'conversation-1',
-      messages: [{ id: 'message-cancel', role: 'user', content: '你好' }],
+      messages: [{ id: 'message-cancel', role: 'user', content: [{ type: 'text', text: '你好' }] }],
     }, { membershipId: 'membership-1', turnId: 'turn-cancel' }, abortController.signal);
     const iterator = stream[Symbol.asyncIterator]();
 
@@ -406,7 +453,7 @@ describe('AiServiceGateway', () => {
       tenant_id: 'tenant-1',
       user_id: 'user-1',
       conversation_id: 'conversation-1',
-      messages: [{ id: 'message-record-failure', role: 'user', content: '浣犲ソ' }],
+      messages: [{ id: 'message-record-failure', role: 'user', content: [{ type: 'text', text: '浣犲ソ' }] }],
     }, { membershipId: 'membership-1', turnId: 'turn-record-failure' });
 
     await expect(collectEvents(stream)).rejects.toThrow('usage database unavailable');
@@ -447,7 +494,7 @@ describe('AiServiceGateway', () => {
       tenant_id: 'tenant-1',
       user_id: 'user-1',
       conversation_id: 'conversation-1',
-      messages: [{ id: 'message-invalid', role: 'user', content: '你好' }],
+      messages: [{ id: 'message-invalid', role: 'user', content: [{ type: 'text', text: '你好' }] }],
     }, { membershipId: 'membership-1', turnId: 'turn-invalid' });
 
     await expect(collectEvents(stream)).rejects.toEqual(
@@ -478,7 +525,7 @@ describe('AiServiceGateway', () => {
       tenant_id: 'tenant-1',
       user_id: 'user-1',
       conversation_id: 'conversation-1',
-      messages: [{ id: 'message-content-type', role: 'user', content: '你好' }],
+      messages: [{ id: 'message-content-type', role: 'user', content: [{ type: 'text', text: '你好' }] }],
     }, { membershipId: 'membership-1', turnId: 'turn-content-type' })).rejects.toEqual(
       expect.objectContaining<Partial<AiServiceInvocationError>>({
         code: 'AI_SERVICE_INVALID_RESPONSE',
@@ -499,7 +546,7 @@ describe('AiServiceGateway', () => {
       request_id: 'req-config',
       tenant_id: 'tenant-1',
       user_id: 'user-1',
-      messages: [{ role: 'user', content: 'hello' }],
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'hello' }] }],
       response_format: { type: 'text' },
     })).rejects.toEqual(expect.objectContaining<Partial<AiServiceInvocationError>>({
       code: 'AI_SERVICE_NOT_CONFIGURED',
@@ -523,7 +570,7 @@ describe('AiServiceGateway', () => {
       request_id: 'req-2',
       tenant_id: 'tenant-1',
       user_id: 'user-1',
-      messages: [{ role: 'user', content: 'hello' }],
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'hello' }] }],
       response_format: { type: 'text' },
     })).rejects.toEqual(expect.objectContaining<Partial<AiServiceInvocationError>>({
       code: 'LLM_UNAVAILABLE',
@@ -550,7 +597,7 @@ describe('AiServiceGateway', () => {
       tenant_id: 'tenant-1',
       user_id: 'user-1',
       conversation_id: 'conversation-1',
-      messages: [{ id: 'message-compact-error', role: 'assistant', content: '回答' }],
+      messages: [{ id: 'message-compact-error', role: 'assistant', content: [{ type: 'text', text: '回答' }] }],
     }, { membershipId: 'membership-1', turnId: 'turn-compact-error' })).rejects.toEqual(
       expect.objectContaining<Partial<AiServiceInvocationError>>({
         code: 'CHAT_COMPACTION_TRUNCATED',

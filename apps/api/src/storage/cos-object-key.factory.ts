@@ -22,6 +22,16 @@ export class CosObjectKeyFactory {
         const month = String(now.getUTCMonth() + 1).padStart(2, '0');
         return `${this.config.objectPrefix}/tenants/${input.tenantId}/files/${year}/${month}/${input.fileId}/source`;
     }
+
+    /**
+     * AI 生成图片使用与工具调用绑定的确定性对象键。相同 toolCallId 的恢复或重试
+     * 始终覆盖同一精确对象，不会因月份或随机 fileId 变化产生无限孤儿对象。
+     */
+    buildGeneratedImageKey(input: { tenantId: string; toolCallId: string }): string {
+        assertUuid(input.tenantId, 'tenantId');
+        assertUuid(input.toolCallId, 'toolCallId');
+        return `${this.config.objectPrefix}/tenants/${input.tenantId}/generated-images/${input.toolCallId}/source`;
+    }
 }
 
 function assertUuid(value: string, name: string): void {
