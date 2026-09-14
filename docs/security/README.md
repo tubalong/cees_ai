@@ -14,7 +14,7 @@
 - 腾讯云 COS Bucket 默认私有；长期凭据只注入 NestJS，并使用限定 Bucket 和操作范围的 CAM 子账号或角色。
 - 客户端与 AI 服务访问 COS 时使用短时签名 URL 或 STS 临时凭证，不得获得长期 SecretId/SecretKey。
 - COS 基础上传接口必须经过 JWT 和 TenantContext，只签名单一服务端对象键，并在完成时通过 COS HEAD 校验；当前尚未启用 `file.*` 细粒度权限和租户额度，不应在补齐这些策略前扩大正式生产使用范围。
-- 本地、Staging 和 Production 使用独立数据库与 Redis 命名空间；COS 在同一 Bucket 中以 `cees/local`、`cees/staging`、`cees/prod` 前缀隔离，并使用权限互斥的三套 CAM 凭据。
+- 本地、Staging 和 Production 使用独立数据库与 Redis 命名空间；COS 在同一 Bucket 中以 `cees/local`、`cees/staging`、`cees/production` 前缀隔离，并使用权限互斥的三套 CAM 凭据。
 - 应用与数据库通过各自环境的私网通信；数据库连接串不得使用数据库主机公网 IP。
 - Staging 与 Production 部署在不同服务器；两个环境不得共享数据库容器、账号、密码或数据卷。
 - 安全组只允许对应环境的应用来源访问 PostgreSQL `5432` 和 Redis `6379`，不得向 `0.0.0.0/0` 开放数据库端口。

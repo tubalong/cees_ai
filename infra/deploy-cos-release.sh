@@ -136,8 +136,8 @@ case "$ENVIRONMENT" in
     MANAGE_ENVIRONMENT="staging"
     ENV_FILE="$ROOT_DIR/.env.staging"
     ;;
-  production | prod)
-    RELEASE_CHANNEL="prod"
+  production)
+    RELEASE_CHANNEL="production"
     MANAGE_ENVIRONMENT="production"
     ENV_FILE="$ROOT_DIR/.env.production"
     ;;

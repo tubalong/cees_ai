@@ -74,9 +74,9 @@ describe('TencentCosStorageProvider', () => {
         });
         const provider = new TencentCosStorageProvider(config(), cos);
 
-        await expect(provider.headObject(sourceKey.replace('cees/staging', 'cees/prod')))
+        await expect(provider.headObject(sourceKey.replace('cees/staging', 'cees/production')))
             .rejects.toBeInstanceOf(TypeError);
-        await expect(provider.deleteObject('cees/staging/../prod/secret'))
+        await expect(provider.deleteObject('cees/staging/../production/secret'))
             .rejects.toBeInstanceOf(TypeError);
         expect(cos.headObject).not.toHaveBeenCalled();
         expect(cos.deleteObject).not.toHaveBeenCalled();

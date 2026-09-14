@@ -7,17 +7,17 @@ The script builds the API and AI service images for a target Linux platform, exp
 images into one Docker archive, compresses the archive with gzip by default, writes release
 metadata and a SHA-256 checksum, and uploads the immutable release files to:
 
-  releases/<staging|prod>/<release-id>/
+    releases/<staging|production>/<release-id>/
 
 After all immutable files are uploaded, it updates:
 
-  releases/<staging|prod>/latest.json
+    releases/<staging|production>/latest.json
 
 COS credentials are read by COSCLI from its configuration file. Secrets are never accepted as
 script parameters and are not written into release artifacts.
 
 .PARAMETER Environment
-The COS release channel. Allowed values are staging and prod.
+The COS release channel. Allowed values are staging and production.
 
 .PARAMETER CosAlias
 The COSCLI bucket alias configured for cees-ai-1403013862. Defaults to cees-release.
@@ -50,7 +50,7 @@ Optional immutable release identifier and Docker image tag. By default, the scri
 
 .PARAMETER OutputRoot
 Local release output root. Defaults to dist/releases. Each run clears and writes only the selected
-environment subdirectory; local production output uses production while the COS channel remains prod.
+environment subdirectory.
 
 .PARAMETER AllowDirty
 Allows a dirty working tree for staging only. Production releases always require a clean tree.
@@ -71,7 +71,7 @@ Controls whether releases/<environment>/latest.json is updated. Defaults to true
 pwsh ./scripts/publish-cos-release.ps1 -Environment staging -CosAlias cees-release
 
 .EXAMPLE
-pwsh ./scripts/publish-cos-release.ps1 -Environment prod `
+pwsh ./scripts/publish-cos-release.ps1 -Environment production `
   -CosAlias cees-release `
   -CosConfigPath "$HOME/.config/cees/cos-release.yaml"
 
@@ -85,7 +85,7 @@ pwsh ./scripts/publish-cos-release.ps1 -Environment staging -AllowDirty -SkipUpl
 [CmdletBinding()]
 param(
     [Parameter(Mandatory, Position = 0)]
-    [ValidateSet('staging', 'prod')]
+    [ValidateSet('staging', 'production')]
     [string]$Environment,
 
     [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$')]
@@ -312,7 +312,7 @@ elseif (-not [System.IO.Path]::IsPathRooted($OutputRoot)) {
     $OutputRoot = Join-Path $repositoryRoot $OutputRoot
 }
 $OutputRoot = [System.IO.Path]::GetFullPath($OutputRoot)
-$localEnvironment = if ($Environment -eq 'prod') { 'production' } else { 'staging' }
+$localEnvironment = $Environment
 
 if (-not [string]::IsNullOrWhiteSpace($CosConfigPath)) {
     $CosConfigPath = [System.IO.Path]::GetFullPath($CosConfigPath)
@@ -366,7 +366,7 @@ try {
     ) -CaptureOutput
     $isDirty = -not [string]::IsNullOrWhiteSpace($gitStatus)
 
-    if ($isDirty -and $Environment -eq 'prod') {
+    if ($isDirty -and $Environment -eq 'production') {
         throw 'Production releases require a clean Git working tree. Commit or discard local changes first.'
     }
     if ($isDirty -and -not $AllowDirty) {

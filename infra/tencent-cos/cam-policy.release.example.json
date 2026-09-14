@@ -23,7 +23,7 @@
         "string_like": {
           "cos:prefix": [
             "releases%2Fstaging%2F*",
-            "releases%2Fprod%2F*"
+            "releases%2Fproduction%2F*"
           ]
         }
       }
@@ -42,7 +42,7 @@
       ],
       "resource": [
         "qcs::cos:ap-chengdu:uid/1403013862:cees-ai-1403013862/releases/staging/*",
-        "qcs::cos:ap-chengdu:uid/1403013862:cees-ai-1403013862/releases/prod/*"
+        "qcs::cos:ap-chengdu:uid/1403013862:cees-ai-1403013862/releases/production/*"
       ]
     }
   ]

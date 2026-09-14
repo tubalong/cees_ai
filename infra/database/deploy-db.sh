@@ -35,7 +35,7 @@ case "$ENVIRONMENT" in
   staging)
     ENV_FILE="$BASE_DIR/.env.staging"
     ;;
-  production | prod)
+  production)
     ENVIRONMENT="production"
     ENV_FILE="$BASE_DIR/.env.production"
     ;;

@@ -127,7 +127,7 @@ case "$ENVIRONMENT" in
     ENV_FILE="$BASE_DIR/.env.staging"
     PROJECT_NAME="cees-ai-db-staging"
     ;;
-  production | prod)
+  production)
     ENVIRONMENT="production"
     ENV_FILE="$BASE_DIR/.env.production"
     PROJECT_NAME="cees-ai-db-production"
