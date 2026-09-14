@@ -145,6 +145,108 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponseEnvelope'
 
+    patch:
+      summary: 修改当前成员私有会话的标题
+      description: 使用会话版本进行乐观并发控制；版本不匹配时返回 409。
+      operationId: updateConversation
+      tags: [Conversation]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: conversationId
+          in: path
+          required: true
+          description: 会话 ID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateConversationRequest'
+      responses:
+        '200':
+          description: 返回修改后的会话
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationResponseEnvelope'
+        '400':
+          description: 请求字段校验失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '401':
+          description: 登录状态或租户成员身份无效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '404':
+          description: 会话不存在或不属于当前成员
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '409':
+          description: 会话版本冲突
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+    delete:
+      summary: 软删除当前成员的私有会话
+      description: 删除只隐藏会话；消息、工具调用、事件和审计事实保留。存在运行中轮次时返回 409。
+      operationId: deleteConversation
+      tags: [Conversation]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: conversationId
+          in: path
+          required: true
+          description: 会话 ID
+          schema:
+            type: string
+            format: uuid
+        - name: version
+          in: query
+          required: true
+          description: 当前会话版本
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        '204':
+          description: 会话已软删除
+        '400':
+          description: 请求字段校验失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '401':
+          description: 登录状态或租户成员身份无效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '404':
+          description: 会话不存在或不属于当前成员
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '409':
+          description: 会话版本冲突或仍有执行中的轮次
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
   /conversations/{conversationId}/turns:
     post:
       summary: 发起一轮对话并以 SSE 流式返回事件
@@ -4746,7 +4848,21 @@ components:
           type: [string, 'null']
           minLength: 1
           maxLength: 128
-          description: 会话标题；省略时服务端在首轮完成后根据首条消息自动生成
+
+    UpdateConversationRequest:
+      type: object
+      additionalProperties: false
+      required: [title, version]
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: 新的会话标题
+        version:
+          type: integer
+          minimum: 1
+          description: 当前会话版本，用于防止并发覆盖
 
     ConversationVisibility:
       type: string
@@ -4757,7 +4873,7 @@ components:
     Conversation:
       type: object
       additionalProperties: false
-      required: [id, title, visibility, createdAt, updatedAt]
+      required: [id, title, visibility, createdAt, updatedAt, version]
       properties:
         id:
           type: string
@@ -4781,6 +4897,10 @@ components:
           type: [string, 'null']
           format: date-time
           description: 最近一轮发起时间；尚未发起过轮次时为 null
+        version:
+          type: integer
+          minimum: 1
+          description: 会话资源版本；创建、发起轮次、改标题和删除都会递增
 
     ConversationResponseEnvelope:
       type: object
@@ -4832,7 +4952,7 @@ components:
     ConversationMessage:
       type: object
       additionalProperties: false
-      required: [id, role, content, createdAt]
+      required: [id, role, content, imageFileIds, createdAt]
       properties:
         id:
           type: string
@@ -4844,6 +4964,14 @@ components:
           type: string
           maxLength: 262144
           description: 消息正文
+        imageFileIds:
+          type: array
+          maxItems: 8
+          uniqueItems: true
+          description: Stable image FileObject IDs; signed URLs are resolved only at model invocation time
+          items:
+            type: string
+            format: uuid
         createdAt:
           type: string
           format: date-time
@@ -4888,13 +5016,32 @@ components:
     CreateTurnRequest:
       type: object
       additionalProperties: false
-      required: [content]
+      anyOf:
+        - required: [content]
+          properties:
+            content:
+              type: string
+              minLength: 1
+        - required: [imageFileIds]
+          properties:
+            imageFileIds:
+              type: array
+              minItems: 1
       properties:
         content:
-          type: string
+          type: [string, 'null']
           minLength: 1
           maxLength: 262144
           description: 本轮 user 消息正文；历史消息与摘要由服务端加载
+        imageFileIds:
+          type: array
+          maxItems: 8
+          minItems: 1
+          uniqueItems: true
+          description: Stable image FileObject IDs referenced by this user message
+          items:
+            type: string
+            format: uuid
         mode:
           $ref: '#/components/schemas/ChatMode'
 
@@ -5099,7 +5246,7 @@ components:
     TurnStreamToolResultEvent:
       type: object
       additionalProperties: false
-      required: [type, seq, toolCallId, status]
+      required: [type, seq, toolCallId, status, resource, error]
       properties:
         type:
           type: string
@@ -5116,16 +5263,29 @@ components:
           type: string
           enum: [completed, failed, rejected]
           description: 工具执行结果状态
-        resourceId:
-          type: [string, 'null']
-          description: 工具执行生成的正式资源 ID，例如图片资源 ID
-        resourceUrl:
-          type: [string, 'null']
-          description: 工具执行生成的资源短期访问 URL
+        resource:
+          oneOf:
+            - $ref: '#/components/schemas/ToolResultResourceReference'
+            - type: 'null'
+          description: 工具生成的稳定正式资源引用；访问 URL 必须通过对应资源接口按需获取
         error:
           type: [object, 'null']
           description: 工具失败或被拒绝时的错误信息
       description: 工具执行完成、失败或被 API 拒绝时发送的事件。
+
+    ToolResultResourceReference:
+      type: object
+      additionalProperties: false
+      required: [type, id]
+      properties:
+        type:
+          type: string
+          enum: [IMAGE, DOCUMENT]
+          description: 正式资源类型
+        id:
+          type: string
+          format: uuid
+          description: 正式资源 ID
 
     TurnStreamCompletedEvent:
       type: object

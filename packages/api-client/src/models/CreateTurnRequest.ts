@@ -7,7 +7,11 @@ export type CreateTurnRequest = {
     /**
      * 本轮 user 消息正文；历史消息与摘要由服务端加载
      */
-    content: string;
+    content?: string | null;
+    /**
+     * Stable image FileObject IDs referenced by this user message
+     */
+    imageFileIds?: Array<string>;
     mode?: ChatMode;
 };
 

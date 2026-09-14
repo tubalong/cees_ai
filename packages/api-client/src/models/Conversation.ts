@@ -25,5 +25,9 @@ export type Conversation = {
      * 最近一轮发起时间；尚未发起过轮次时为 null
      */
     lastTurnAt?: string | null;
+    /**
+     * 会话资源版本；创建、发起轮次、改标题和删除都会递增
+     */
+    version: number;
 };
 

@@ -2,6 +2,7 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
+import type { ToolResultResourceReference } from './ToolResultResourceReference';
 /**
  * 工具执行完成、失败或被 API 拒绝时发送的事件。
  */
@@ -20,17 +21,13 @@ export type TurnStreamToolResultEvent = {
      */
     status: TurnStreamToolResultEvent.status;
     /**
-     * 工具执行生成的正式资源 ID，例如图片资源 ID
+     * 工具生成的稳定正式资源引用；访问 URL 必须通过对应资源接口按需获取
      */
-    resourceId?: string | null;
-    /**
-     * 工具执行生成的资源短期访问 URL
-     */
-    resourceUrl?: string | null;
+    resource: (ToolResultResourceReference | null);
     /**
      * 工具失败或被拒绝时的错误信息
      */
-    error?: any | null;
+    error: any | null;
 };
 export namespace TurnStreamToolResultEvent {
     /**
