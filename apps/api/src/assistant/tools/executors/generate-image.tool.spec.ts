@@ -42,13 +42,15 @@ describe('GenerateImageTool', () => {
         });
     });
 
-    it('executes via ImageService and returns the resource summary', async () => {
+    it('executes via ImageService and returns the resource summary with the temporary URL', async () => {
         imageService.generateImage.mockResolvedValue({
             imageId: 'image-1',
             contentType: 'image/png',
             sizeBytes: 1024,
             provider: 'openai_compatible',
             model: 'image-model',
+            url: 'https://cos.example/signed-image-url',
+            urlTtlSeconds: 600,
         });
         const result = await definition!.execute({
             tenantId: 't-1',
@@ -73,8 +75,11 @@ describe('GenerateImageTool', () => {
         expect(result).toEqual({
             resourceType: 'IMAGE',
             resourceId: 'image-1',
-            summary: expect.stringContaining('image-1') as unknown,
+            summary: expect.stringContaining('https://cos.example/signed-image-url') as unknown,
         });
         expect(result.summary).toContain('图片已生成');
+        expect(result.summary).toContain('约 10 分钟内有效');
+        // 回喂模型的摘要不再暴露资源 ID，资源 ID 仍作为稳定引用保留在结果中。
+        expect(result.summary).not.toContain('image-1');
     });
 });

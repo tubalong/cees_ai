@@ -25,8 +25,8 @@ export class GenerateImageTool implements OnModuleInit {
 
   private readonly definition: ToolDefinition = {
     name: 'generate_image',
-    version: '1.0.0',
-    description: '根据文字描述生成一张图片并保存为正式资源；成功返回图片资源 ID。',
+    version: '1.1.0',
+    description: '根据文字描述生成一张图片并保存为正式资源；成功返回图片临时访问 URL（有时效性，过期后可通过图片资源重新获取）。',
     parameters: {
       type: 'object',
       properties: {
@@ -72,7 +72,7 @@ export class GenerateImageTool implements OnModuleInit {
     return {
       resourceType: 'IMAGE',
       resourceId: image.imageId,
-      summary: `图片已生成（${image.contentType}，${image.sizeBytes} 字节，模型 ${image.model}），图片资源 ID：${image.imageId}`,
+      summary: `图片已生成（${image.contentType}，${image.sizeBytes} 字节，模型 ${image.model}），临时访问地址（约 ${Math.max(1, Math.round(image.urlTtlSeconds / 60))} 分钟内有效）：${image.url}`,
     };
   }
 }
