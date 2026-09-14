@@ -30,8 +30,16 @@ describe('loadStorageConfig', () => {
         }));
     });
 
+    it('loads the documented production storage configuration', () => {
+        process.env.TENCENT_COS_OBJECT_PREFIX = 'cees/production';
+        expect(loadStorageConfig()).toEqual(expect.objectContaining({
+            provider: 'TENCENT_COS',
+            objectPrefix: 'cees/production',
+        }));
+    });
+
     it('rejects object prefixes outside the three CEES environments', () => {
-        process.env.TENCENT_COS_OBJECT_PREFIX = 'cees/other';
+        process.env.TENCENT_COS_OBJECT_PREFIX = 'cees/prod';
         expect(() => loadStorageConfig()).toThrow('TENCENT_COS_OBJECT_PREFIX');
     });
 });

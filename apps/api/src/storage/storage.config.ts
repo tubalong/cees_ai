@@ -1,6 +1,6 @@
 import type { StorageConfig } from './storage.types';
 
-const OBJECT_PREFIX_PATTERN = /^cees\/(local|staging|prod)$/;
+const OBJECT_PREFIX_PATTERN = /^cees\/(local|staging|production)$/;
 
 export function loadStorageConfig(): StorageConfig {
     const secretId = required('TENCENT_COS_SECRET_ID');
@@ -9,7 +9,7 @@ export function loadStorageConfig(): StorageConfig {
     const bucket = required('TENCENT_COS_BUCKET');
     const objectPrefix = required('TENCENT_COS_OBJECT_PREFIX');
     if (!OBJECT_PREFIX_PATTERN.test(objectPrefix)) {
-        throw new Error('TENCENT_COS_OBJECT_PREFIX must be cees/local, cees/staging, or cees/prod');
+        throw new Error('TENCENT_COS_OBJECT_PREFIX must be cees/local, cees/staging, or cees/production');
     }
     if (process.env.NODE_ENV === 'production' && (secretId.startsWith('change_me') || secretKey.startsWith('change_me'))) {
         throw new Error('Tencent COS example credentials must be replaced in production');

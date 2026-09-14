@@ -17,11 +17,13 @@ Bucket: cees-ai-1403013862
 | --- | --- | --- |
 | 本地业务文件 | `cees/local/*` | 本地 API 专用凭据 |
 | Staging 业务文件 | `cees/staging/*` | Staging API 专用凭据 |
-| Production 业务文件 | `cees/prod/*` | Production API 专用凭据 |
+| Production 业务文件 | `cees/production/*` | Production API 专用凭据 |
 | Staging 镜像发布 | `releases/staging/*` | 发布子用户 |
-| Production 镜像发布 | `releases/prod/*` | 发布子用户 |
+| Production 镜像发布 | `releases/production/*` | 发布子用户 |
 
-业务 API 的三个环境必须使用不同 CAM 凭据。发布子用户可以同时访问 `releases/staging` 和 `releases/prod`，但不得访问 `cees/*` 业务对象。
+业务 API 的三个环境必须使用不同 CAM 凭据。发布子用户可以同时访问 `releases/staging` 和 `releases/production`，但不得访问 `cees/*` 业务对象。
+
+业务 API 使用 [通用 CAM 策略模板](cam-policy.example.json)。为每个环境分别复制一份，将资源中的 `<environment>` 替换为 `local`、`staging` 或 `production`；不能把三个环境前缀同时放入同一份实际策略。
 
 ## 2. 发布子用户权限
 
@@ -36,13 +38,13 @@ cees-release-bot
 策略只允许：
 
 - Bucket 探测；
-- 对 `releases/staging/*` 和 `releases/prod/*` 进行受限列举；
+- 对 `releases/staging/*` 和 `releases/production/*` 进行受限列举；
 - 上传、下载和 HEAD 对象；
 - 分块上传、查询分块、完成和取消分块上传。
 
 策略不允许：
 
-- 访问 `cees/local`、`cees/staging`、`cees/prod`；
+- 访问 `cees/local`、`cees/staging`、`cees/production`；
 - 删除完整发布对象；
 - 修改 Bucket、ACL、CORS、生命周期或其他配置。
 
@@ -54,7 +56,7 @@ cees-release-bot
     "string_like": {
       "cos:prefix": [
         "releases%2Fstaging%2F*",
-        "releases%2Fprod%2F*"
+        "releases%2Fproduction%2F*"
       ]
     }
   }
@@ -119,7 +121,7 @@ Production 必须是干净工作区：
 
 ```powershell
 pwsh ./scripts/publish-cos-release.ps1 `
-  -Environment prod `
+  -Environment production `
   -ReleaseId <staging-release-id> `
   -UseChinaImageMirror `
   -CosAlias cees-release `
@@ -133,7 +135,7 @@ pwsh ./scripts/publish-cos-release.ps1 `
 ## 5. 发布对象结构
 
 ```text
-releases/{staging|prod}/
+releases/{staging|production}/
 ├── latest.json
 └── <release-id>/
     ├── cees-images-<environment>-<release-id>-<platform>.tar.gz
@@ -182,7 +184,7 @@ TENCENT_COS_SECRET_ID=change_me
 TENCENT_COS_SECRET_KEY=change_me
 TENCENT_COS_REGION=ap-chengdu
 TENCENT_COS_BUCKET=cees-ai-1403013862
-TENCENT_COS_OBJECT_PREFIX=cees/local|cees/staging|cees/prod
+TENCENT_COS_OBJECT_PREFIX=cees/local|cees/staging|cees/production
 TENCENT_COS_SIGNED_URL_TTL_SECONDS=600
 TENCENT_COS_UPLOAD_MAX_BYTES=104857600
 ```
@@ -195,7 +197,7 @@ TENCENT_COS_UPLOAD_MAX_BYTES=104857600
 业务对象键建议：
 
 ```text
-cees/{local|staging|prod}/tenants/{tenantId}/files/{yyyy}/{mm}/{fileId}/source
+cees/{local|staging|production}/tenants/{tenantId}/files/{yyyy}/{mm}/{fileId}/source
 ```
 
 对象键中的租户信息只用于组织和审计，不能替代 API 的租户授权校验。

@@ -4,7 +4,7 @@ export interface StorageConfig {
     secretKey: string;
     region: string;
     bucket: string;
-    objectPrefix: `cees/${'local' | 'staging' | 'prod'}`;
+    objectPrefix: `cees/${'local' | 'staging' | 'production'}`;
     signedUrlTtlSeconds: number;
     maxUploadBytes: number;
 }

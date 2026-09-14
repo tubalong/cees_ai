@@ -26,7 +26,7 @@ Bucket 中使用以下顶层对象前缀：
 cees/
 ├── local/     # 本地开发区域
 ├── staging/   # 共享测试服务器区域
-└── prod/      # 生产区域
+└── production/ # 生产区域
 ```
 
 推荐的完整对象键：
@@ -40,7 +40,7 @@ cees/{environment}/tenants/{tenantId}/files/{yyyy}/{mm}/{fileId}/source
 ```text
 cees/local/tenants/11111111-1111-4111-8111-111111111111/files/2026/09/22222222-2222-4222-8222-222222222222/source
 cees/staging/tenants/33333333-3333-4333-8333-333333333333/files/2026/09/44444444-4444-4444-8444-444444444444/source
-cees/prod/tenants/55555555-5555-4555-8555-555555555555/files/2026/09/66666666-6666-4666-8666-666666666666/source
+cees/production/tenants/55555555-5555-4555-8555-555555555555/files/2026/09/66666666-6666-4666-8666-666666666666/source
 ```
 
 `tenantId` 和 `fileId` 必须为 UUID。当前基础上传接口只签发上述 `source` 路径；自动化测试也必须使用独立测试租户和文件 UUID，不能自行插入额外路径层级。
@@ -58,15 +58,15 @@ cees/prod/tenants/55555555-5555-4555-8555-555555555555/files/2026/09/66666666-66
 
 ## 3. 环境与凭据隔离
 
-本地、Staging 和 Production 分别写入 `cees/local`、`cees/staging` 和 `cees/prod`。同一个 Bucket 下的前缀隔离必须同时由 CAM 权限约束：
+本地、Staging 和 Production 分别写入 `cees/local`、`cees/staging` 和 `cees/production`。同一个 Bucket 下的前缀隔离必须同时由 CAM 权限约束：
 
 - 本地凭据只能访问 `cees/local/*`；
 - Staging 凭据只能访问 `cees/staging/*`；
-- 生产凭据只能访问 `cees/prod/*`；
+- 生产凭据只能访问 `cees/production/*`；
 - 三套环境不得共享同一 SecretId/SecretKey；
 - 长期凭据只注入 NestJS API，不注入桌面端、移动端或 AI 服务。
 
-对应策略模板为 [本地 CAM 策略](../../infra/tencent-cos/cam-policy.local.example.json)、[Staging CAM 策略](../../infra/tencent-cos/cam-policy.staging.example.json) 和 [生产 CAM 策略](../../infra/tencent-cos/cam-policy.prod.example.json)。三者操作集合相同，但授权资源前缀不同。
+业务 API 使用 [通用 CAM 策略模板](../../infra/tencent-cos/cam-policy.example.json)。为三个环境分别复制一份，将资源中的 `<environment>` 替换为 `local`、`staging` 或 `production`；不能把三个环境前缀同时放入同一份实际策略。
 
 COS 中的“文件夹”本质上是对象键前缀，因此仅依赖代码拼接前缀并不足以形成安全隔离。
 
@@ -330,7 +330,7 @@ file.manage
 
 ### 已完成的基础准备
 
-1. 补充 COS 的 `cees/local`、`cees/staging`、`cees/prod` 前缀约定；
+1. 补充 COS 的 `cees/local`、`cees/staging`、`cees/production` 前缀约定；
 2. 为三套环境创建独立、按前缀收窄的 CAM 策略模板；
 3. 在 OpenAPI 0.9.0 定义创建和完成上传会话；
 4. 实现 `StorageProvider`、腾讯云 COS 适配器和规范对象键生成器；
@@ -352,7 +352,7 @@ file.manage
 - `file.*` 权限检查接口可用；
 - 额度能够事务性预占和释放；
 - 审计服务可用；
-- COS 凭据已按 local/staging/prod 前缀隔离。
+- COS 凭据已按 local/staging/production 前缀隔离。
 
 ### 后续能力
 

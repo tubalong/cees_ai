@@ -156,7 +156,7 @@ export class TencentCosStorageProvider implements StorageProvider {
 
     /**
      * 限制所有 COS 操作只能访问当前运行环境的对象前缀，避免错误配置或被篡改的
-     * 数据库记录跨越 local、staging、prod 的存储边界。
+    * 数据库记录跨越 local、staging、production 的存储边界。
      */
     private assertObjectKeyInEnvironment(objectKey: string): void {
         const prefix = `${this.config.objectPrefix}/`;

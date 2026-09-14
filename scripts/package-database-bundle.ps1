@@ -16,7 +16,7 @@ back to the corresponding example file. A bundle containing a real environment f
 contains secrets and must be transferred securely.
 
 .PARAMETER Environment
-Target environment: staging, production, or prod.
+Target environment: staging or production.
 
 .PARAMETER EnvironmentFile
 Optional environment-file override. Relative paths are resolved from the repository root.
@@ -41,7 +41,7 @@ pwsh ./scripts/package-database-bundle.ps1 -Environment production -IncludeImage
 [CmdletBinding()]
 param(
     [Parameter(Mandatory, Position = 0)]
-    [ValidateSet('staging', 'production', 'prod')]
+    [ValidateSet('staging', 'production')]
     [string]$Environment,
 
     [string]$EnvironmentFile,
@@ -239,10 +239,6 @@ function Reset-EnvironmentOutputDirectory {
 $scriptDirectory = Split-Path -Parent $PSCommandPath
 $repositoryRoot = [System.IO.Path]::GetFullPath((Join-Path $scriptDirectory '..'))
 $databaseSourceDirectory = Join-Path $repositoryRoot 'infra/database'
-
-if ($Environment -eq 'prod') {
-    $Environment = 'production'
-}
 
 $environmentFileName = ".env.$Environment"
 $environmentRuntimePath = "infra/database/$environmentFileName"

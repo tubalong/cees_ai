@@ -16,7 +16,7 @@ describe('CosObjectKeyFactory', () => {
     });
 
     it('rejects identifiers that could alter the object path', () => {
-        const factory = new CosObjectKeyFactory(config('cees/prod'));
+        const factory = new CosObjectKeyFactory(config('cees/production'));
         expect(() => factory.buildSourceKey({
             tenantId: '../other-tenant',
             fileId: '22222222-2222-4222-8222-222222222222',

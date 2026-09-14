@@ -37,7 +37,7 @@ Staging 与 Production 部署在不同服务器或服务器组，均使用标准
     │   ├── deploy-cos-release.sh
     │   ├── manage-app.sh
     │   ├── docker-compose.deploy.yml
-    │   └── docker-compose.staging.yml 或 docker-compose.prod.yml
+    │   └── docker-compose.staging.yml 或 docker-compose.production.yml
     ├── DEPLOY.md
     ├── bundle-manifest.json
     └── .release-cache/                # 首次部署后生成
@@ -112,7 +112,7 @@ Production 使用已在 Staging 验证通过的同一 `release-id`，且工作�
 
 ```powershell
 pwsh ./scripts/publish-cos-release.ps1 `
-  -Environment prod `
+  -Environment production `
   -ReleaseId <staging-release-id> `
   -UseChinaImageMirror `
   -CosAlias cees-release
@@ -120,7 +120,7 @@ pwsh ./scripts/publish-cos-release.ps1 `
 
 `-UseChinaImageMirror` 是可选参数，用于构建机无法稳定访问 Docker Hub 或 GHCR 时，将 Node、Python 和 uv 基础镜像切换到 DaoCloud 公共镜像。它只替换基础镜像地址，不配置 HTTP 代理，也不修改 `pnpm-lock.yaml` 或 `uv.lock`；显式传入 `-NodeBaseImage`、`-PythonBaseImage` 或 `-UvBaseImage` 时，以显式值为准。
 
-构建前会清空本地对应环境子目录；本地产物位于 `dist/releases/<staging|production>/<release-id>/`，只保留本次构建。COS 发布渠道仍为 `releases/<staging|prod>/`。
+构建前会清空本地对应环境子目录；本地产物位于 `dist/releases/<staging|production>/<release-id>/`，只保留本次构建。COS 发布渠道为 `releases/<staging|production>/`。
 
 ### 4.2 打包应用服务器目录
 

@@ -163,10 +163,10 @@ case "$ENVIRONMENT" in
     ENV_FILE=".env.staging"
     ENV_COMPOSE_FILE="infra/docker-compose.staging.yml"
     ;;
-  production | prod)
+  production)
     ENVIRONMENT="production"
     ENV_FILE=".env.production"
-    ENV_COMPOSE_FILE="infra/docker-compose.prod.yml"
+    ENV_COMPOSE_FILE="infra/docker-compose.production.yml"
     ;;
   -h | --help | help)
     usage

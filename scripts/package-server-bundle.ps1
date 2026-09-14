@@ -14,7 +14,7 @@ the real files are absent. -EnvironmentFile and -ModelConfigFile override automa
 A bundle containing real runtime configuration contains secrets and must be transferred securely.
 
 .PARAMETER Environment
-Target environment: staging, production, or prod.
+Target environment: staging or production.
 
 .PARAMETER EnvironmentFile
 Optional .env file override. Relative paths are resolved from the repository root. When omitted,
@@ -49,7 +49,7 @@ pwsh ./scripts/package-server-bundle.ps1 `
 [CmdletBinding()]
 param(
     [Parameter(Mandatory, Position = 0)]
-    [ValidateSet('staging', 'production', 'prod')]
+    [ValidateSet('staging', 'production')]
     [string]$Environment,
 
     [string]$EnvironmentFile,
@@ -259,10 +259,6 @@ function Reset-EnvironmentOutputDirectory {
 $scriptDirectory = Split-Path -Parent $PSCommandPath
 $repositoryRoot = [System.IO.Path]::GetFullPath((Join-Path $scriptDirectory '..'))
 
-if ($Environment -eq 'prod') {
-    $Environment = 'production'
-}
-
 if ($Environment -eq 'staging') {
     $environmentFileName = '.env.staging'
     $environmentRuntimePath = '.env.staging'
@@ -289,9 +285,9 @@ else {
         'models.production.toml'
     )
     $modelExamplePath = 'apps/ai-service/config/models.production.example.toml'
-    $composeOverrideName = 'docker-compose.prod.yml'
+    $composeOverrideName = 'docker-compose.production.yml'
     $deployArgument = 'production'
-    $cosChannel = 'prod'
+    $cosChannel = 'production'
 }
 
 $environmentFileExplicit = $PSBoundParameters.ContainsKey('EnvironmentFile')
