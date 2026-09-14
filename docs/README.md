@@ -7,6 +7,7 @@
 | [项目与项目成员管理](product/project-management.md) | 项目可见范围、项目角色、状态机和完成后只读规则 |
 | [通知中心与后台任务](product/notification-center.md) | 站内通知、阅读状态、后台清理和日报提醒 |
 | [工作台与数据看板](product/dashboard-workbench.md) | 工作台概览、待办、任务统计和近期会议 |
+| [知识库管理](product/knowledge-base-management.md) | 第一阶段知识库 CRUD、成员授权、租户隔离和审计 |
 | [用户个人资料管理](product/user-profile-management.md) | 当前租户成员查询和修改自己的展示资料 |
 | [密码修改与凭证安全](security/password-management.md) | 租户成员和平台管理员修改自己的密码及会话安全规则 |
 | [architecture](architecture/overview.md) | 总体架构、目录树、边界与数据流 |
@@ -20,6 +21,7 @@
 | [redis-foundation](architecture/redis-foundation.md) | NestJS Redis 基础 CRUD、命名空间和使用边界 |
 | [api](api/README.md) | 公开与内部契约及生成客户端约定 |
 | [项目管理 API](api/project-management-api.md) | 项目、成员、负责人和状态命令接口 |
+| [知识库管理 API](api/knowledge-base-api.md) | 知识库 CRUD、成员权限和错误语义 |
 | [database](database/README.md) | 数据模型与迁移约定 |
 | [security](security/README.md) | 安全模型、租户隔离与审计 |
 | [基础设施](../infra/README.md) | 应用/数据库分离部署、环境隔离与服务器运维入口 |
