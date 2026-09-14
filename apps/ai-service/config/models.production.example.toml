@@ -75,6 +75,15 @@ api_key_env = "IMAGE_GEN_API_KEY"
 timeout_seconds = 60.0
 max_retries = 2
 
+[image_profiles.backup]
+enabled = true
+provider = "openai_compatible"
+model = "change_me"
+base_url = "https://change_me/v1"
+api_key_env = "IMAGE_GEN_BACKUP_API_KEY"
+timeout_seconds = 60.0
+max_retries = 1
+
 [roles]
 default = ["primary", "backup", "vision-primary"]
 structured = ["primary", "backup"]

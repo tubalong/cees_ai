@@ -91,6 +91,7 @@ Tool Calling 能力只开放给内部可信调用方。NestJS 根据租户能力
 
 - `[image_profiles.*]` 与 Chat Profile 分离；
 - 图片 profile 只支持 `mock` 与 `openai_compatible`；
+- 多个启用的图片 profile 按声明顺序组成主备候选，主模型瞬时失败时回退到下一候选；
 - `/internal/v1/images/generate` 返回 base64 图片、`content_type` 和 execution 元数据；
 - ai-service 不写 COS、不建正式文件、不校验租户额度。
 

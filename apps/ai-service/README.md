@@ -79,6 +79,7 @@ AI_MODEL_CONFIG_PATH=config/models.toml
 PRIMARY_LLM_API_KEY=change_me
 BACKUP_LLM_API_KEY=change_me
 IMAGE_GEN_API_KEY=change_me
+IMAGE_GEN_BACKUP_API_KEY=change_me
 ```
 
 `models.toml` 只保存非敏感 profile、角色映射、Chat 模式策略和图片生成 profile。API Key 通过 profile 的 `api_key_env` 从环境变量读取。生产环境不得将任何角色绑定到 Mock profile，图片生成 profile 也必须使用真实模型。

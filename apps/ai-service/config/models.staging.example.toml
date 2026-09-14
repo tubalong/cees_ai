@@ -75,6 +75,15 @@ api_key_env = "IMAGE_GEN_API_KEY"
 timeout_seconds = 60.0
 max_retries = 2
 
+[image_profiles.backup]
+enabled = true
+provider = "openai_compatible"
+model = "gpt-image-1"
+base_url = "https://www.aikeyhub.top/v1/image"
+api_key_env = "IMAGE_GEN_BACKUP_API_KEY"
+timeout_seconds = 60.0
+max_retries = 1
+
 [roles]
 default = ["primary", "backup", "vision-primary"]
 structured = ["primary", "backup"]

@@ -2,13 +2,55 @@ from __future__ import annotations
 
 import base64
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.core.config import ImageProfile, ModelCatalog, ModelRole
+from app.core.errors import ProviderTransientError
 from app.images.router import ImageRouter
+from app.images.types import GeneratedImage
 from app.llm.router import LLMRouter
 from app.main import create_app
 from tests.helpers import profile, ready_runtime
+
+
+class StubImageProvider:
+    def __init__(self, profile: ImageProfile, outcome: GeneratedImage | Exception) -> None:
+        self.profile = profile
+        self.outcome = outcome
+        self.calls = 0
+
+    async def generate(
+        self,
+        *,
+        prompt: str,
+        size: str,
+        quality: str,
+        response_format: str,
+    ) -> GeneratedImage:
+        del prompt, size, quality, response_format
+        self.calls += 1
+        if isinstance(self.outcome, Exception):
+            raise self.outcome
+        return self.outcome
+
+    async def edit(
+        self,
+        *,
+        prompt: str,
+        source_image: bytes,
+        size: str,
+        quality: str,
+        response_format: str,
+        input_fidelity: str,
+    ) -> GeneratedImage:
+        del source_image, input_fidelity
+        return await self.generate(
+            prompt=prompt,
+            size=size,
+            quality=quality,
+            response_format=response_format,
+        )
 
 
 def image_catalog() -> ModelCatalog:
@@ -28,6 +70,38 @@ def image_catalog() -> ModelCatalog:
             )
         },
     )
+
+
+@pytest.mark.asyncio
+async def test_image_generate_falls_back_to_next_profile_on_transient_failure() -> None:
+    primary_profile = ImageProfile(provider="mock", model="primary-image")
+    backup_profile = ImageProfile(provider="mock", model="backup-image")
+    primary = StubImageProvider(primary_profile, ProviderTransientError("timeout"))
+    backup = StubImageProvider(
+        backup_profile,
+        GeneratedImage(content_type="image/png", data=b"backup-image-bytes"),
+    )
+    providers = {"primary": primary, "backup": backup}
+    catalog = ModelCatalog(
+        profiles={"primary": profile()},
+        roles={ModelRole.default: ["primary"]},
+        image_profiles={"primary": primary_profile, "backup": backup_profile},
+    )
+    router = ImageRouter(catalog, lambda name, _profile: providers[name])
+
+    routed = await router.generate(
+        request_id="req-image-fallback-1",
+        prompt="A cat",
+        size="1024x1024",
+        quality="standard",
+        response_format="png",
+    )
+
+    assert routed.profile_name == "backup"
+    assert routed.profile.model == "backup-image"
+    assert routed.data == b"backup-image-bytes"
+    assert routed.fallback_count == 1
+    assert primary.calls == backup.calls == 1
 
 
 def image_payload() -> dict[str, object]:
