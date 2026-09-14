@@ -74,6 +74,32 @@ validate_inputs() {
   bind_ip="$(read_env_value DB_BIND_IP)"
   if [[ "$bind_ip" == "0.0.0.0" || "$bind_ip" == "::" ]]; then
     echo "Warning: DB_BIND_IP=$bind_ip exposes database ports on all matching interfaces; restrict access with firewall or security-group rules." >&2
+  else
+    local host_addresses=""
+    if command -v ip >/dev/null 2>&1; then
+      host_addresses="$(ip -o addr show 2>/dev/null | awk '{split($4, address, "/"); print address[1]}' || true)"
+    fi
+    if [[ -z "$host_addresses" ]]; then
+      host_addresses="$(hostname -I 2>/dev/null || true)"
+    fi
+
+    if [[ -n "$host_addresses" ]]; then
+      local address
+      local address_found="false"
+      while IFS= read -r address; do
+        if [[ "$address" == "$bind_ip" ]]; then
+          address_found="true"
+          break
+        fi
+      done <<< "$host_addresses"
+
+      if [[ "$address_found" != "true" ]]; then
+        echo "Error: DB_BIND_IP=$bind_ip is not assigned to any interface on this host." >&2
+        echo "Hint: use the private address reported by 'ip -4 addr show'. Cloud public addresses (for example a Tencent Cloud EIP) are NAT-mapped and cannot be bound by Docker." >&2
+        echo "Local addresses: $(printf '%s ' $host_addresses)" >&2
+        exit 1
+      fi
+    fi
   fi
 
   local postgres_port

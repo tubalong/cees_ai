@@ -138,6 +138,8 @@ Production 将命令中的 `staging` 替换为 `production`。`manage-db.sh up` 
 
 Staging 与 Production 位于不同服务器，均使用 PostgreSQL `5432` 和 Redis `6379`。Compose 项目名称继续用于标识环境；两个环境的容器、账号、密码和数据卷不得复用。
 
+`DB_BIND_IP` 必须是本机网卡上已分配的地址，通常就是数据库服务器的私网 IP（`ip -4 addr show` 的输出）。云厂商公网 IP/EIP 经 NAT 映射，不配置在网卡上，Docker 绑定会以 `cannot assign requested address` 失败；`manage-db.sh validate` 会提前拒绝这类配置。
+
 ## 6. Secret
 
 - `POSTGRES_PASSWORD` 与 `REDIS_PASSWORD` 必须分别生成，且 Staging/Production 不得复用。
@@ -153,4 +155,6 @@ Staging 与 Production 位于不同服务器，均使用 PostgreSQL `5432` 和 R
 
 ## 8. 网络安全
 
-数据库端口绑定在 `DB_BIND_IP` 指定的地址。设置为 `0.0.0.0` 或 `::` 时，`manage-db.sh validate` 会输出警告但不会阻止启动；此时必须通过防火墙或安全组限制数据库端口来源并拒绝公网访问。
+数据库端口绑定在 `DB_BIND_IP` 指定的地址。该地址必须是本机网卡上已分配的地址（例如 `ip -4 addr show` 输出的私网 IP）：指向未分配给本机的地址（例如云厂商公网 IP/EIP）时，Docker 会以 `cannot assign requested address` 启动失败，`manage-db.sh validate` 会提前报错并列出本机可用地址。
+
+设置为 `0.0.0.0` 或 `::` 时，`manage-db.sh validate` 会输出警告但不会阻止启动；此时必须通过防火墙或安全组限制数据库端口来源并拒绝公网访问。
