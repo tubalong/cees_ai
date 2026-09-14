@@ -2,12 +2,31 @@ import { Injectable } from '@nestjs/common';
 import { ConversationMessageRole, type Prisma } from '@prisma/client';
 import type { ChatMessage, ChatMode, ChatRequest, ToolTurnMessage } from '@cees/ai-service-client';
 import { PrismaService } from '../../database/prisma.service';
-import { AiServiceGateway } from '../../ai-orchestration/ai-service-gateway.service';
+import { AiServiceGateway, type ChatContextBudgets } from '../../ai-orchestration/ai-service-gateway.service';
 import type { PublicTurnMode } from '../assistant.types';
 
 /** 历史消息达到该数量时触发自动压缩，压缩后上下文为摘要 + 最近 RETAIN_RECENT_COUNT 条。 */
 const COMPACTION_THRESHOLD = 80;
 const RETAIN_RECENT_COUNT = 20;
+
+/**
+ * 各模式输入 Token 预算的兜底默认值（Standard 64K / Ultra 128K）。
+ * 权威值来自 ai-service `/ready` 的 `chat_context_budgets`（运行时拉取）；
+ * 仅在 ai-service 未就绪、字段缺失或调用失败时回退到该值。
+ */
+const DEFAULT_CONTEXT_BUDGET_TOKENS: Record<PublicTurnMode, number> = {
+  standard: 65536,
+  ultra: 131072,
+};
+
+/**
+ * 触发压缩的预算占比：估算输入超过预算的该比例即压缩，留出 system prompt、
+ * instructions 与输出 token 的余量，避免逼近模型上下文窗口才压缩。
+ */
+const COMPACTION_TOKEN_RATIO = 0.8;
+
+/** 每条消息固定开销 Token，与 ai-service `app/chat/context.py` 的 MESSAGE_OVERHEAD_TOKENS 一致。 */
+const MESSAGE_OVERHEAD_TOKENS = 4;
 
 export interface BuildChatRequestInput {
   conversation: { id: string; tenantId: string };
@@ -151,11 +170,13 @@ export class ContextBuilderService {
     });
 
     let summary = latestSummary?.summary ?? null;
-    if (textHistory.length <= COMPACTION_THRESHOLD) {
+
+    const budgets = await this.gateway.fetchChatContextBudgets();
+    const compactCount = this.resolveCompactionCount(input.mode, textHistory, summary, budgets);
+    if (compactCount <= 0) {
       return { summary, history: includeToolMessages ? history : textHistory };
     }
 
-    const compactCount = textHistory.length - RETAIN_RECENT_COUNT;
     const toCompact = textHistory.slice(0, compactCount);
     const compacted = await this.gateway.compactChat(
       {
@@ -192,6 +213,53 @@ export class ContextBuilderService {
     }
     return { summary, history: history.slice(startIndex) };
   }
+
+  /**
+   * 计算需要压缩的最老消息条数，返回 0 表示不压缩。
+   *
+   * 触发条件：文本消息数超过阈值，或「摘要 + 文本历史」的估算 Token 超过预算的
+   * 安全比例。压缩量取条数约束与 Token 约束中「保留更少、压缩更多」的一方，保证
+   * 压缩后上下文回到预算内，避免 ai-service 在模型调用前静默丢弃历史。
+   */
+  private resolveCompactionCount(
+    mode: PublicTurnMode,
+    textHistory: HistoryMessage[],
+    summary: string | null,
+    budgets: ChatContextBudgets | null,
+  ): number {
+    // 条数约束：超过阈值则至少压到剩最近 RETAIN_RECENT_COUNT 条。
+    const countKeepFrom =
+      textHistory.length > COMPACTION_THRESHOLD ? textHistory.length - RETAIN_RECENT_COUNT : 0;
+
+    // Token 约束：从最新往最老累计，保留不超过预算安全比例的最近消息。
+    const budget = budgets?.[mode] ?? DEFAULT_CONTEXT_BUDGET_TOKENS[mode];
+    const tokenLimit = Math.floor(budget * COMPACTION_TOKEN_RATIO);
+    const summaryTokens = summary ? MESSAGE_OVERHEAD_TOKENS + estimateTextTokens(summary) : 0;
+
+    let accumulated = summaryTokens;
+    let tokenKeepFrom = textHistory.length;
+    for (let index = textHistory.length - 1; index >= 0; index--) {
+      const tokens = estimateMessageTokens(textHistory[index]);
+      if (accumulated + tokens > tokenLimit) break;
+      accumulated += tokens;
+      tokenKeepFrom = index;
+    }
+    if (tokenKeepFrom === textHistory.length) {
+      // 连最后一条都无法放入预算时仍保留最后一条，避免上下文为空。
+      tokenKeepFrom = Math.max(0, textHistory.length - 1);
+    }
+
+    return Math.max(countKeepFrom, tokenKeepFrom);
+  }
+}
+
+/** 复用 ai-service `app/chat/context.py` 的估算口径：UTF-8 字节数 / 4 上取整。 */
+function estimateTextTokens(value: string): number {
+  return Math.max(1, Math.ceil(Buffer.byteLength(value, 'utf8') / 4));
+}
+
+function estimateMessageTokens(message: HistoryMessage): number {
+  return MESSAGE_OVERHEAD_TOKENS + estimateTextTokens(message.content);
 }
 
 function toChatMessage(message: HistoryMessage): ChatMessage {

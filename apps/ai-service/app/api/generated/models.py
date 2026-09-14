@@ -20,6 +20,14 @@ class Status(StrEnum):
     not_ready = 'not_ready'
 
 
+class ChatContextBudgets(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    standard: conint(ge=1) | None = None
+    ultra: conint(ge=1) | None = None
+
+
 class ModelRole(StrEnum):
     default = 'default'
     structured = 'structured'
@@ -688,6 +696,10 @@ class ReadinessResponse(BaseModel):
     configured_roles: list[ModelRole]
     configured_chat_modes: list[ChatMode]
     errors: list[str]
+    chat_context_budgets: ChatContextBudgets | None = Field(
+        None,
+        description='各聊天模式的输入 Token 预算（config/models.toml 的 chat.modes.*.context_budget_tokens）。调用方在组装上下文前据此决定 是否触发历史压缩，避免与 ai-service 的模型调用前裁剪上限漂移。',
+    )
 
 
 class UsageEvent(BaseModel):

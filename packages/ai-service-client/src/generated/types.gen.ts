@@ -15,6 +15,13 @@ export type ReadinessResponse = {
     configured_roles: Array<ModelRole>;
     configured_chat_modes: Array<ChatMode>;
     errors: Array<string>;
+    /**
+     * 各聊天模式的输入 Token 预算（config/models.toml 的 chat.modes.*.context_budget_tokens）。调用方在组装上下文前据此决定 是否触发历史压缩，避免与 ai-service 的模型调用前裁剪上限漂移。
+     */
+    chat_context_budgets?: {
+        standard?: number;
+        ultra?: number;
+    };
 };
 
 export type ModelRole = 'default' | 'structured' | 'reasoning' | 'rag' | 'orchestrator';

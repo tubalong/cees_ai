@@ -26,6 +26,7 @@ interface ToolCallRow {
 function createService(history: HistoryMessageRow[], toolCalls: ToolCallRow[]): {
     service: ContextBuilderService;
     prisma: Record<string, any>;
+    gateway: { compactChat: jest.Mock; fetchChatContextBudgets: jest.Mock };
 } {
     const prisma = {
         conversationMessage: {
@@ -40,13 +41,17 @@ function createService(history: HistoryMessageRow[], toolCalls: ToolCallRow[]): 
         },
     };
     const gateway = {
-        compactChat: jest.fn(),
+        compactChat: jest.fn().mockResolvedValue({
+            summary: '压缩后的摘要',
+            summarized_through_message_id: null,
+        }),
+        fetchChatContextBudgets: jest.fn().mockResolvedValue(null),
     };
     const service = new ContextBuilderService(
         prisma as unknown as PrismaService,
         gateway as unknown as AiServiceGateway,
     );
-    return { service, prisma };
+    return { service, prisma, gateway };
 }
 
 function buildInput() {
@@ -152,5 +157,66 @@ describe('ContextBuilderService buildToolTurnMessages', () => {
             { id: 'm1', role: 'user', content: '你好' },
             { id: 'm3', role: 'assistant', content: '图片已生成' },
         ]);
+    });
+});
+
+describe('ContextBuilderService compaction triggers', () => {
+    it('compacts when estimated tokens exceed the budget even if message count is low', async () => {
+        const longContent = 'a'.repeat(120000);
+        const { service, gateway } = createService(
+            [
+                { id: 'm1', role: ConversationMessageRole.USER, content: longContent, turnId: 'turn-1', toolCallId: null },
+                { id: 'm2', role: ConversationMessageRole.ASSISTANT, content: longContent, turnId: 'turn-1', toolCallId: null },
+            ],
+            [],
+        );
+
+        const request = await service.buildChatRequest(buildInput());
+
+        expect(gateway.compactChat).toHaveBeenCalledTimes(1);
+        const [body] = gateway.compactChat.mock.calls[0];
+        expect(body.messages).toHaveLength(1);
+        expect(body.messages[0].id).toBe('m1');
+        expect(request.messages).toEqual([{ id: 'm2', role: 'assistant', content: longContent }]);
+        expect(request.conversation_summary).toBe('压缩后的摘要');
+    });
+
+    it('keeps the most recent messages when the count threshold is exceeded', async () => {
+        const history: HistoryMessageRow[] = Array.from({ length: 81 }, (_, i) => ({
+            id: `m${i}`,
+            role: (i % 2 === 0 ? ConversationMessageRole.USER : ConversationMessageRole.ASSISTANT) as ConversationMessageRole,
+            content: `消息 ${i}`,
+            turnId: null,
+            toolCallId: null,
+        }));
+        const { service, gateway } = createService(history, []);
+
+        const request = await service.buildChatRequest(buildInput());
+
+        expect(gateway.compactChat).toHaveBeenCalledTimes(1);
+        const [body] = gateway.compactChat.mock.calls[0];
+        expect(body.messages).toHaveLength(61);
+        expect(request.messages).toHaveLength(20);
+        expect(request.messages[0].id).toBe('m61');
+        expect(request.messages[19].id).toBe('m80');
+    });
+
+    it('uses budgets fetched from ai-service instead of the built-in default', async () => {
+        const content = 'a'.repeat(2000);
+        const { service, gateway } = createService(
+            [
+                { id: 'm1', role: ConversationMessageRole.USER, content, turnId: 'turn-1', toolCallId: null },
+                { id: 'm2', role: ConversationMessageRole.ASSISTANT, content, turnId: 'turn-1', toolCallId: null },
+            ],
+            [],
+        );
+        // 默认预算(65536)下 2 条短消息不触发；这里把 standard 预算压到 1000，应触发压缩。
+        gateway.fetchChatContextBudgets.mockResolvedValue({ standard: 1000 });
+
+        const request = await service.buildChatRequest(buildInput());
+
+        expect(gateway.fetchChatContextBudgets).toHaveBeenCalledTimes(1);
+        expect(gateway.compactChat).toHaveBeenCalledTimes(1);
+        expect(request.messages).toHaveLength(1);
     });
 });

@@ -4,6 +4,7 @@ import {
   composeDocument as requestComposeDocument,
   createClient,
   generateImage as requestImageGeneration,
+  getReadiness,
   invokeChat as requestChatInvocation,
   invokeLlm,
   streamChat as requestChatStream,
@@ -52,6 +53,15 @@ export interface ChatInvocationTracking {
   turnId: string;
 }
 
+/** ai-service /ready 暴露的各聊天模式输入 Token 预算（context_budget_tokens）。 */
+export interface ChatContextBudgets {
+  standard?: number;
+  ultra?: number;
+}
+
+/** 预算缓存的存活时间：压缩判断低频，短 TTL 足以跟随配置变更。 */
+const CHAT_CONTEXT_BUDGETS_TTL_MS = 60_000;
+
 /** Chat 与 ToolTurn 请求共有的身份与追踪字段；网关据此写调用日志。 */
 interface ChatLikeRequest {
   readonly request_id: string;
@@ -79,8 +89,33 @@ interface RecordableStreamEvent {
 @Injectable()
 export class AiServiceGateway {
   private client?: Client;
+  private cachedChatContextBudgets?: { budgets: ChatContextBudgets; fetchedAt: number };
 
   constructor(private readonly invocationRecorder: AiInvocationRecorderService) {}
+
+  /**
+   * 拉取 ai-service /ready 暴露的各模式输入 Token 预算，供上下文压缩触发使用。
+   * 结果带短 TTL 缓存；ai-service 未就绪、字段缺失或调用失败时返回 null，
+   * 由调用方回退到内置默认预算，避免压缩逻辑因配置服务不可用而失效。
+   */
+  async fetchChatContextBudgets(): Promise<ChatContextBudgets | null> {
+    const cached = this.cachedChatContextBudgets;
+    const now = Date.now();
+    if (cached && now - cached.fetchedAt < CHAT_CONTEXT_BUDGETS_TTL_MS) {
+      return cached.budgets;
+    }
+    try {
+      const result = await getReadiness({ client: this.getClient() });
+      if (result.error || !result.data?.chat_context_budgets) return null;
+      this.cachedChatContextBudgets = {
+        budgets: result.data.chat_context_budgets,
+        fetchedAt: now,
+      };
+      return result.data.chat_context_budgets;
+    } catch {
+      return null;
+    }
+  }
 
   async invoke(input: InvokeRequest): Promise<InvokeResponse> {
     const result = await invokeLlm({ client: this.getClient(), body: input });
