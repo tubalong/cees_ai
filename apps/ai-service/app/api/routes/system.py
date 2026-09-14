@@ -45,7 +45,10 @@ async def ready(request: Request) -> ReadinessResponse | JSONResponse:
     chat_config = runtime.catalog.chat if runtime.catalog is not None else None
     chat_context_budgets = None
     if chat_config is not None:
-        budgets = {mode.value: policy.context_budget_tokens for mode, policy in chat_config.modes.items()}
+        budgets = {
+            mode.value: policy.context_budget_tokens
+            for mode, policy in chat_config.modes.items()
+        }
         chat_context_budgets = ChatContextBudgets(
             standard=budgets.get("standard"),
             ultra=budgets.get("ultra"),
