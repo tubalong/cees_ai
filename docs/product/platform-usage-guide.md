@@ -2,7 +2,7 @@
 
 > 状态：按当前实现整理  
 > 最后同步：2026-09-14
-> 公开契约版本：`0.20.0`
+> 公开契约版本：`0.21.0`
 > 事实源：`packages/contracts/openapi/openapi.yaml`、`apps/api/prisma/schema.prisma`
 
 ## 1. 文档用途
@@ -10,9 +10,9 @@
 本文面向本地开发、接口联调、产品验收和数据库排查，统一说明：
 
 - 平台超级管理员、租户管理员和普通成员的区别；
-- 当前已经实现的 149 个 HTTP 操作；
+- 当前已经实现的 157 个 HTTP 操作；
 - 路径参数、查询参数和 JSON 请求体字段的含义；
-- PostgreSQL 中 44 张业务表、528 个业务字段及 Prisma 迁移表的用途；
+- PostgreSQL 中 48 张业务表及 Prisma 迁移表的用途；
 - 租户创建、成员激活、登录、授权、资源访问、审计、停用和恢复的整体流转；
 - 哪些能力已经有公开 API，哪些目前只有数据库结构或模块占位。
 
@@ -44,6 +44,7 @@
 | 通知中心 | 已实现 | 通知列表、未读统计、已读操作、租户隔离和后台提醒 |
 | 工作台与数据看板 | 已实现 | 概览、任务统计、待办聚合和近期会议 |
 | 知识库 | 第一阶段已实现 | 知识库 CRUD、成员权限、租户隔离、乐观锁和审计；文档处理与 RAG 暂未实现 |
+| 钉钉组织架构和人员同步 | 第一阶段已实现 | 一租户一钉钉企业、凭证验证、部门/人员镜像和同步任务；考勤、文档、消息与 AI 暂未实现 |
 | AI 草稿和额度体系 | 部分基础 | AI 草稿仍为数据结构基础；当前只有实际 Token 指标，没有企业/坑位/成员额度账户或扣减 |
 
 ## 3. 管理员账号到底存在哪里
@@ -427,6 +428,41 @@ API 从 JWT 注入租户、User 和 Membership，客户端不能提交这些内�
 | `DELETE /knowledge-bases/{knowledgeBaseId}/members/{membershipId}` | 移除知识库成员 | 路径参数 | `204` | `knowledge_base.member.manage` + MANAGER |
 
 成员权限为 `READER`、`EDITOR`、`MANAGER`。知识库创建者不能降级或移除，最后一名 `MANAGER` 不能被移除。第一阶段只实现知识库管理，不包含文档上传、COS 绑定、解析、切片、向量化和 RAG；详细说明见 [知识库管理](knowledge-base-management.md) 和 [知识库管理 API](../api/knowledge-base-api.md)。
+
+### 6.15 钉钉组织架构和人员同步
+
+| 方法与路径 | 用途 | 参数/请求体 | 返回 | 权限 |
+| --- | --- | --- | --- | --- |
+| `GET /dingtalk/integration` | 查询当前租户钉钉绑定 | 无 | 集成详情，不含密钥 | `dingtalk.integration.read` |
+| `POST /dingtalk/integration` | 创建钉钉企业绑定并验证凭证 | `corpId/appKey/appSecret` | 集成详情 | `dingtalk.integration.manage` |
+| `PATCH /dingtalk/integration` | 修改凭证或启停状态 | `appKey/appSecret/status/version` | 集成详情 | `dingtalk.integration.manage` |
+| `POST /dingtalk/integration/verify` | 重新验证钉钉凭证 | 无 | 集成详情 | `dingtalk.integration.manage` |
+| `POST /dingtalk/organization/sync` | 全量同步部门和人员 | 无 | 同步任务 | `dingtalk.organization.sync` |
+| `GET /dingtalk/organization/departments` | 查询部门外部镜像 | `limit/cursor/includeDeleted` | 部门列表 | `dingtalk.organization.read` |
+| `GET /dingtalk/organization/users` | 查询人员外部镜像 | `limit/cursor/includeDeleted` | 人员列表 | `dingtalk.organization.read` |
+| `GET /dingtalk/sync-jobs` | 查询同步历史和失败原因 | `limit/cursor` | 同步任务列表 | `dingtalk.integration.read` |
+
+创建绑定示例：
+
+```json
+{
+  corpId: dingxxxxxxxx,
+  appKey: dingxxxxxxxx,
+  appSecret: 钉钉应用密钥
+}
+```
+
+业务规则：一个租户只能绑定一个钉钉企业，一个 `corpId` 不能被其他租户重复绑定；`appSecret` 使用 `DINGTALK_CREDENTIAL_ENCRYPTION_KEY` 以 AES-256-GCM 加密保存，接口不返回密钥。同步数据是外部镜像，不会自动创建 CEES 账号、部门、角色或项目成员。当前只开放组织架构和人员同步，考勤、请假、文档、消息和 AI 派发属于后续阶段。详细说明见 [钉钉组织架构与人员同步](dingtalk-organization-sync.md) 和 [钉钉组织架构与人员同步 API](../api/dingtalk-organization-sync-api.md)。
+
+| 字段 | 含义 |
+| --- | --- |
+| `corpId` | 钉钉企业唯一标识，一个企业只能绑定一个 CEES 租户 |
+| `appKey` | 钉钉企业内部应用 AppKey |
+| `appSecret` | 钉钉应用密钥，仅用于创建或更新请求，不在响应中返回 |
+| `version` | 集成乐观锁版本，修改时必须使用最新值 |
+| `includeDeleted` | 是否包含已删除部门、离职人员或历史失效镜像，默认 `false` |
+| `departmentExternalIds` | 钉钉用户所属部门 ID 数组，用户可能同时属于多个部门 |
+| `membershipId` | 后续人工确认后关联的 CEES 租户成员 UUID，当前同步默认为空 |
 
 ## 7. 请求参数字典
 

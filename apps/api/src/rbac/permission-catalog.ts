@@ -72,6 +72,10 @@ export const TENANT_PERMISSION_DEFINITIONS = [
     ['image.read', '查看图片'],
     ['ai.image.generate', '调用 AI 生成图片'],
     ['ai.document.generate', '调用 AI 生成文档'],
+    ['dingtalk.integration.read', '查看钉钉企业绑定'],
+    ['dingtalk.integration.manage', '管理钉钉企业绑定'],
+    ['dingtalk.organization.read', '查看钉钉组织镜像'],
+    ['dingtalk.organization.sync', '同步钉钉组织架构和人员'],
 ] as const;
 
 export const TENANT_ADMIN_ROLE_CODE = 'tenant_admin';

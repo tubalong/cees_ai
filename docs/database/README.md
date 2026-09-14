@@ -8,7 +8,7 @@
 通知中心与后台任务见 [通知中心与后台任务](../product/notification-center.md)。
 工作台与数据看板见 [工作台与数据看板](../product/dashboard-workbench.md)。
 
-> 新环境使用 `prisma migrate deploy` 按 `0001_init` 到 `0015_knowledge_base_management` 的目录顺序执行迁移；全部迁移完成后与当前 `schema.prisma` 保持一致。
+> 新环境使用 `prisma migrate deploy` 按 `0001_init` 到 `0016_dingtalk_organization_sync` 的目录顺序执行迁移；全部迁移完成后与当前 `schema.prisma` 保持一致。
 
 - `apps/api/prisma/schema.prisma` 是数据模型唯一事实源，迁移提交 `prisma/migrations`。
 - 新建表和字段必须在同一迁移中使用 `COMMENT ON TABLE`、`COMMENT ON COLUMN` 添加 PostgreSQL 注释；`0003_organization_departments_and_database_comments` 已补齐此前全部业务表和字段注释。
@@ -196,6 +196,24 @@ KnowledgeBase
 - `KnowledgeDocument`、`DocumentVersion`、`DocumentChunk` 和 `KnowledgeQueryLog` 是后续文档处理与 RAG 阶段的基础模型，本阶段不开放对应写入接口；
 - `0015_knowledge_base_management` 初始化知识库权限、为 `tenant_admin` 授权并补齐知识库表和字段的 PostgreSQL 中文注释；
 - 详细业务规则见 `docs/product/knowledge-base-management.md` 和 `docs/api/knowledge-base-api.md`。
+
+## 12. 钉钉组织同步模型
+
+```text
+Tenant
+  └── DingTalkIntegration
+        ├── DingTalkDepartment[]
+        ├── DingTalkUser[]
+        └── DingTalkSyncJob[]
+```
+
+- `dingtalk_integrations` 保证 `tenant_id` 和 `corp_id` 唯一，一个租户一个钉钉企业；应用密钥只保存 AES-256-GCM 密文；
+- `dingtalk_departments` 保存钉钉部门 ID、上级部门 ID、名称、排序和软失效状态，`department_id` 是后续人工绑定的 CEES 部门；
+- `dingtalk_users` 保存钉钉 UserId、UnionId、姓名、职位、工号、部门 ID 数组和在职状态，`membership_id` 是后续人工绑定的 CEES 成员；
+- `dingtalk_sync_jobs` 保存全量同步的运行状态、部门/人员数量和失败信息；`integration_id + RUNNING` 部分唯一索引防止并发同步；
+- 未出现在最新快照中的部门和人员只做软失效，不物理删除，便于审计和人工核对；
+- `0016_dingtalk_organization_sync` 创建上述枚举、表、索引、外键、钉钉权限和全部 PostgreSQL 中文表/字段注释；
+- 当前同步只处理组织架构和人员，不处理考勤、请假、文档、消息、日程和 AI 派发。
 
 ## AI 调用计量模型
 
