@@ -15,6 +15,12 @@ describe('AssistantController', () => {
         await harness.controller.getConversation(CONVERSATION_ID);
         expect(harness.conversationService.getDetail).toHaveBeenCalledWith(CONVERSATION_ID);
 
+        await harness.controller.updateConversation(CONVERSATION_ID, { title: '新标题', version: 1 });
+        expect(harness.conversationService.updateTitle).toHaveBeenCalledWith(CONVERSATION_ID, '新标题', 1);
+
+        await harness.controller.deleteConversation(CONVERSATION_ID, { version: 1 });
+        expect(harness.conversationService.delete).toHaveBeenCalledWith(CONVERSATION_ID, 1);
+
         await harness.controller.cancelTurn(CONVERSATION_ID, TURN_ID);
         expect(harness.turnRunner.cancelTurn).toHaveBeenCalledWith(CONVERSATION_ID, TURN_ID);
     });
@@ -100,6 +106,8 @@ function createHarness(): Harness {
         create: jest.fn().mockResolvedValue({}),
         list: jest.fn().mockResolvedValue({ items: [], nextCursor: null }),
         getDetail: jest.fn().mockResolvedValue({}),
+        updateTitle: jest.fn().mockResolvedValue({}),
+        delete: jest.fn().mockResolvedValue(undefined),
     };
     const turnRunner = {
         startTurn: jest.fn().mockResolvedValue({ turnId: TURN_ID }),

@@ -12,14 +12,18 @@ export interface ToolExecutionContext {
   conversationId: string;
   turnId: string;
   toolCallId: string;
+  /** 持有本轮租约的 API 实例标识；业务副作用前必须再次核对。 */
+  executionOwner: string;
+  /** 本次 EXECUTING 抢占令牌；业务服务可据此拒绝失去租约的旧执行者。 */
+  executionToken: string;
   permissions: string[];
 }
 
 /** 工具执行成功结果：正式资源引用供公开 tool_result 事件与 TOOL 消息使用。 */
 export interface ToolExecutionResult {
-  resourceType: string;
-  resourceId: string;
-  resourceUrl: string | null;
+  /** Read-only or side-effect tools may not produce a formal Resource. */
+  resourceType: 'IMAGE' | 'DOCUMENT' | null;
+  resourceId: string | null;
   /** 回喂模型的工具结果摘要。 */
   summary: string;
 }

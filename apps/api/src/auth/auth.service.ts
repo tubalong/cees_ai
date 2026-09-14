@@ -4,6 +4,7 @@ import { AuditOutcome, MembershipStatus, TenantStatus, UserStatus } from '@prism
 import * as argon2 from 'argon2';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { PrismaService } from '../database/prisma.service';
+import { resolveMembershipAuthorization } from '../rbac/authorization-resolver';
 import { normalizeAccount } from './account';
 import { jwtAudience, jwtIssuer, parseDurationSeconds, requireAccessTokenSecret } from './auth.config';
 import {
@@ -419,36 +420,7 @@ export class AuthService {
     }
 
     private async resolveAuthorization(tenantId: string, membershipId: string): Promise<{ roles: string[]; permissions: string[] }> {
-        const assignments = await this.prisma.membershipRole.findMany({
-            where: { tenantId, membershipId },
-            select: { roleId: true },
-        });
-        const roleIds = assignments.map((assignment) => assignment.roleId);
-        if (roleIds.length === 0) return { roles: [], permissions: [] };
-
-        const roles = await this.prisma.role.findMany({
-            where: { tenantId, id: { in: roleIds }, deletedAt: null },
-            select: { id: true, code: true },
-        });
-        const activeRoleIds = roles.map((role) => role.id);
-        const rolePermissions = activeRoleIds.length === 0
-            ? []
-            : await this.prisma.rolePermission.findMany({
-                where: { tenantId, roleId: { in: activeRoleIds } },
-                select: { permissionId: true },
-            });
-        const permissionIds = [...new Set(rolePermissions.map((entry) => entry.permissionId))];
-        const permissions = permissionIds.length === 0
-            ? []
-            : (await this.prisma.permission.findMany({
-                where: { id: { in: permissionIds } },
-                select: { code: true },
-            })).map((permission) => permission.code);
-
-        return {
-            roles: roles.map((role) => role.code).sort(),
-            permissions: [...new Set(permissions)].sort(),
-        };
+        return resolveMembershipAuthorization(this.prisma, tenantId, membershipId);
     }
 
     private async recordPasswordFailure(membershipId: string, currentFailures: number, now: Date): Promise<void> {

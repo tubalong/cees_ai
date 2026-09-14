@@ -1,5 +1,5 @@
-import { AuditOutcome, DraftStatus, FilePurpose, ResourceType } from '@prisma/client';
-import { ImageService } from './image.service';
+import { AuditOutcome, DraftStatus, FilePurpose, ManagedImageStatus, ResourceType, ToolCallStatus } from '@prisma/client';
+import { ImageService, type GenerateImageCommand } from './image.service';
 import type { PrismaService } from '../database/prisma.service';
 import type { AiServiceGateway } from '../ai-orchestration/ai-service-gateway.service';
 import type { StorageProvider, StorageSettings } from '../storage/storage.types';
@@ -9,41 +9,36 @@ import type { TenantContext } from '../tenant/tenant-context';
 const TENANT_ID = '10000000-0000-0000-0000-000000000001';
 const USER_ID = '10000000-0000-0000-0000-000000000002';
 const MEMBERSHIP_ID = '50000000-0000-0000-0000-000000000001';
-const OBJECT_KEY = 'cees/local/source/10000000-0000-0000-0000-000000000001/file-1';
+const TOOL_CALL_ID = '60000000-0000-0000-0000-000000000001';
+const OBJECT_KEY = `cees/local/tenants/${TENANT_ID}/generated-images/${TOOL_CALL_ID}/source`;
 
-interface TransactionMock {
-    fileObject: { create: jest.Mock };
-    resource: { create: jest.Mock };
-    managedImage: { create: jest.Mock };
-    aIActionDraft: { create: jest.Mock };
-    auditLog: { create: jest.Mock };
-}
-
-function createHarness(overrides: {
-    executedDraft?: { executedResourceId: string } | null;
-} = {}) {
-    let transaction: TransactionMock | undefined;
-    const prisma = {
-        aIActionDraft: {
-            findFirst: jest.fn().mockResolvedValue(overrides.executedDraft ?? null),
-        },
+function createHarness() {
+    const prisma: Record<string, any> = {
         managedImage: {
-            findFirst: jest.fn().mockResolvedValue(null),
-        },
-        fileObject: {
             findUnique: jest.fn().mockResolvedValue(null),
+            findFirst: jest.fn().mockResolvedValue(null),
+            create: jest.fn().mockResolvedValue({}),
+            update: jest.fn().mockResolvedValue({}),
+            updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+            findMany: jest.fn().mockResolvedValue([]),
         },
-        $transaction: jest.fn(async (arg: unknown) => {
-            transaction = {
-                fileObject: { create: jest.fn().mockResolvedValue({}) },
-                resource: { create: jest.fn().mockResolvedValue({}) },
-                managedImage: { create: jest.fn().mockResolvedValue({}) },
-                aIActionDraft: { create: jest.fn().mockResolvedValue({}) },
-                auditLog: { create: jest.fn().mockResolvedValue({}) },
-            };
-            return (arg as (tx: unknown) => unknown)(transaction);
-        }),
+        toolCall: {
+            findFirst: jest.fn().mockResolvedValue({ id: TOOL_CALL_ID }),
+        },
+        resource: {
+            create: jest.fn().mockResolvedValue({}),
+            updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+        fileObject: { upsert: jest.fn().mockResolvedValue({}) },
+        aIActionDraft: {
+            create: jest.fn().mockResolvedValue({}),
+            upsert: jest.fn().mockResolvedValue({}),
+        },
+        auditLog: { create: jest.fn().mockResolvedValue({}) },
+        $transaction: jest.fn(),
     };
+    prisma.$transaction.mockImplementation(async (callback: (transaction: unknown) => unknown) => callback(prisma));
+
     const gateway = {
         generateImage: jest.fn().mockResolvedValue({
             request_id: 'request-1',
@@ -60,8 +55,9 @@ function createHarness(overrides: {
         }),
     };
     const storage = {
-        putObject: jest.fn().mockResolvedValue({ sizeBytes: 16, contentType: 'image/png', etag: 'etag-1' }),
+        putObject: jest.fn().mockResolvedValue({ sizeBytes: 16, etag: 'etag-1' }),
         createDownloadUrl: jest.fn().mockResolvedValue('https://cos.example/signed'),
+        deleteObject: jest.fn().mockResolvedValue(undefined),
     };
     const storageSettings: StorageSettings = {
         provider: 'TENCENT_COS',
@@ -72,7 +68,7 @@ function createHarness(overrides: {
         maxUploadBytes: 10485760,
     };
     const objectKeys = {
-        buildSourceKey: jest.fn().mockReturnValue(OBJECT_KEY),
+        buildGeneratedImageKey: jest.fn().mockReturnValue(OBJECT_KEY),
     };
     const tenantContext = {
         require: jest.fn().mockReturnValue({
@@ -90,29 +86,43 @@ function createHarness(overrides: {
         storageSettings,
         objectKeys as unknown as CosObjectKeyFactory,
     );
-    return { service, prisma, gateway, storage, objectKeys, getTransaction: () => transaction! };
+    return { service, prisma, gateway, storage, objectKeys };
 }
 
-function command(overrides: Partial<Parameters<ImageService['generateImage']>[0]> = {}) {
+function command(overrides: Partial<GenerateImageCommand> = {}): GenerateImageCommand {
     return {
         tenantId: TENANT_ID,
         userId: USER_ID,
         membershipId: MEMBERSHIP_ID,
         requestId: 'request-1',
-        turnId: 'turn-1',
-        toolCallId: 'tc-1',
+        conversationId: '60000000-0000-0000-0000-000000000001',
+        turnId: '70000000-0000-0000-0000-000000000001',
+        toolCallId: TOOL_CALL_ID,
+        executionOwner: 'api:test',
+        executionToken: '80000000-0000-0000-0000-000000000001',
         prompt: '一只猫',
-        size: 'auto' as const,
+        size: 'auto',
         ...overrides,
     };
 }
 
 describe('ImageService', () => {
-    it('generates upstream, uploads to COS and persists file/resource/image/draft/audit in one transaction', async () => {
+    it('claims the tool call, generates, uploads and finalizes the formal image resource', async () => {
         const harness = createHarness();
 
         const result = await harness.service.generateImage(command());
 
+        expect(harness.prisma.toolCall.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+            where: expect.objectContaining({
+                id: TOOL_CALL_ID,
+                status: ToolCallStatus.EXECUTING,
+                executionToken: '80000000-0000-0000-0000-000000000001',
+            }),
+        }));
+        expect(harness.objectKeys.buildGeneratedImageKey).toHaveBeenCalledWith({
+            tenantId: TENANT_ID,
+            toolCallId: TOOL_CALL_ID,
+        });
         expect(harness.gateway.generateImage).toHaveBeenCalledWith(
             expect.objectContaining({
                 request_id: 'request-1',
@@ -121,143 +131,146 @@ describe('ImageService', () => {
                 prompt: '一只猫',
                 size: 'auto',
             }),
-            { membershipId: MEMBERSHIP_ID, turnId: 'turn-1', toolCallId: 'tc-1' },
+            {
+                membershipId: MEMBERSHIP_ID,
+                conversationId: command().conversationId,
+                turnId: command().turnId,
+                toolCallId: TOOL_CALL_ID,
+            },
         );
-        expect(harness.objectKeys.buildSourceKey).toHaveBeenCalledWith({
-            tenantId: TENANT_ID,
-            fileId: expect.any(String),
-        });
         expect(harness.storage.putObject).toHaveBeenCalledWith({
             objectKey: OBJECT_KEY,
             body: Buffer.from('fake-image-bytes'),
             contentType: 'image/png',
         });
-
-        const tx = harness.getTransaction();
-        expect(harness.prisma.$transaction).toHaveBeenCalledTimes(1);
-        expect(tx.fileObject.create).toHaveBeenCalledWith({
+        expect(harness.prisma.resource.create).toHaveBeenCalledWith({
+            data: expect.objectContaining({ tenantId: TENANT_ID, type: ResourceType.IMAGE }),
+        });
+        expect(harness.prisma.managedImage.create).toHaveBeenCalledWith({
             data: expect.objectContaining({
                 tenantId: TENANT_ID,
-                originalName: expect.stringMatching(/^generated-.*\.png$/),
+                toolCallId: TOOL_CALL_ID,
+                status: ManagedImageStatus.PENDING,
+                objectKey: OBJECT_KEY,
+            }),
+        });
+        expect(harness.prisma.fileObject.upsert).toHaveBeenCalledWith({
+            where: { id: expect.any(String) },
+            create: expect.objectContaining({
                 purpose: FilePurpose.GENERATED_IMAGE,
                 bucket: 'bucket-1',
                 region: 'ap-guangzhou',
                 objectKey: OBJECT_KEY,
-                mimeType: 'image/png',
                 sizeBytes: BigInt(16),
-                etag: 'etag-1',
-                createdBy: USER_ID,
             }),
+            update: expect.any(Object),
         });
-        expect(tx.resource.create).toHaveBeenCalledWith({
+        expect(harness.prisma.aIActionDraft.create).toHaveBeenCalledWith({
             data: expect.objectContaining({
-                tenantId: TENANT_ID,
-                type: ResourceType.IMAGE,
-                ownerMembershipId: MEMBERSHIP_ID,
-            }),
-        });
-        expect(tx.managedImage.create).toHaveBeenCalledWith({
-            data: expect.objectContaining({
-                tenantId: TENANT_ID,
-                provider: 'openai_compatible',
-                model: 'image-model',
-                prompt: '一只猫',
-                contentType: 'image/png',
-            }),
-        });
-        expect(tx.aIActionDraft.create).toHaveBeenCalledWith({
-            data: expect.objectContaining({
-                tenantId: TENANT_ID,
-                userId: USER_ID,
                 actionType: 'ai.image.generate',
-                status: DraftStatus.EXECUTED,
-                toolCallId: 'tc-1',
-                executedResourceType: 'IMAGE',
-                executedResourceId: expect.any(String),
+                status: DraftStatus.DRAFT,
+                toolCallId: TOOL_CALL_ID,
             }),
         });
-        expect(tx.auditLog.create).toHaveBeenCalledWith({
-            data: expect.objectContaining({
-                tenantId: TENANT_ID,
-                actorUserId: USER_ID,
-                actorMembershipId: MEMBERSHIP_ID,
-                action: 'IMAGE_GENERATED',
-                outcome: AuditOutcome.SUCCESS,
-                resourceType: 'IMAGE',
-                resourceId: expect.any(String),
-                requestId: 'request-1',
-            }),
+        expect(harness.prisma.aIActionDraft.upsert).toHaveBeenCalledWith({
+            where: { toolCallId: TOOL_CALL_ID },
+            update: expect.objectContaining({ status: DraftStatus.EXECUTED, executedResourceType: 'IMAGE' }),
+            create: expect.objectContaining({ status: DraftStatus.EXECUTED }),
         });
-
-        expect(harness.storage.createDownloadUrl).toHaveBeenCalledWith(OBJECT_KEY);
+        expect(harness.prisma.auditLog.create).toHaveBeenCalledWith({
+            data: expect.objectContaining({ action: 'IMAGE_GENERATED', outcome: AuditOutcome.SUCCESS }),
+        });
+        expect(harness.storage.createDownloadUrl).not.toHaveBeenCalled();
+        expect(harness.prisma.managedImage.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+            where: expect.objectContaining({ status: ManagedImageStatus.UPLOADING }),
+            data: expect.objectContaining({ status: ManagedImageStatus.READY }),
+        }));
         expect(result).toEqual({
             imageId: expect.any(String),
             contentType: 'image/png',
             sizeBytes: 16,
             provider: 'openai_compatible',
             model: 'image-model',
-            url: 'https://cos.example/signed',
         });
     });
 
-    it('replays an already executed tool call idempotently without regenerating', async () => {
-        const harness = createHarness({
-            executedDraft: { executedResourceId: 'image-1' },
-        });
+    it('does not upload when the execution claim is lost while the provider is running', async () => {
+        const harness = createHarness();
+        harness.prisma.toolCall.findFirst
+            .mockResolvedValueOnce({ id: TOOL_CALL_ID })
+            .mockResolvedValueOnce({ id: TOOL_CALL_ID })
+            .mockResolvedValueOnce(null);
+
+        await expect(harness.service.generateImage(command())).rejects.toThrow('工具执行权已失效');
+
+        expect(harness.gateway.generateImage).toHaveBeenCalledTimes(1);
+        expect(harness.storage.putObject).not.toHaveBeenCalled();
+        expect(harness.prisma.resource.updateMany).toHaveBeenCalled();
+    });
+
+    it('does not hide a READY resource when a concurrent failure observes no mutable image row', async () => {
+        const harness = createHarness();
+        harness.prisma.managedImage.updateMany.mockResolvedValueOnce({ count: 0 });
+
+        await expect((harness.service as any).markImageFailure(
+            command(),
+            '90000000-0000-0000-0000-000000000001',
+            new Error('late provider error'),
+            false,
+        )).resolves.toBeUndefined();
+
+        expect(harness.prisma.resource.updateMany).not.toHaveBeenCalled();
+        expect(harness.prisma.aIActionDraft.upsert).not.toHaveBeenCalled();
+        expect(harness.prisma.auditLog.create).not.toHaveBeenCalled();
+    });
+
+    it('replays a READY image for the same tool call without invoking the provider again', async () => {
+        const harness = createHarness();
         harness.prisma.managedImage.findFirst.mockResolvedValue({
-            id: 'image-1',
+            id: '90000000-0000-0000-0000-000000000001',
+            tenantId: TENANT_ID,
+            status: ManagedImageStatus.READY,
             contentType: 'image/png',
-            fileObjectId: 'file-1',
             provider: 'openai_compatible',
             model: 'image-model',
-        });
-        harness.prisma.fileObject.findUnique.mockResolvedValue({
-            objectKey: OBJECT_KEY,
-            sizeBytes: BigInt(2048),
+            fileObject: { sizeBytes: BigInt(2048) },
+            resource: { deletedAt: null },
         });
 
         const result = await harness.service.generateImage(command());
 
         expect(result).toEqual({
-            imageId: 'image-1',
+            imageId: '90000000-0000-0000-0000-000000000001',
             contentType: 'image/png',
             sizeBytes: 2048,
             provider: 'openai_compatible',
             model: 'image-model',
-            url: 'https://cos.example/signed',
         });
-        expect(harness.storage.createDownloadUrl).toHaveBeenCalledWith(OBJECT_KEY);
         expect(harness.gateway.generateImage).not.toHaveBeenCalled();
         expect(harness.storage.putObject).not.toHaveBeenCalled();
         expect(harness.prisma.$transaction).not.toHaveBeenCalled();
     });
 
     describe('getImageAccess', () => {
-        it('returns metadata and a fresh signed URL for the owning member', async () => {
+        it('returns metadata with a fresh signed URL only at read time', async () => {
             const harness = createHarness();
             const createdAt = new Date('2026-09-11T00:00:00Z');
             harness.prisma.managedImage.findFirst.mockResolvedValue({
-                id: 'image-1',
+                id: '90000000-0000-0000-0000-000000000001',
                 createdAt,
                 prompt: '一只猫',
                 model: 'image-model',
                 contentType: 'image/png',
-                fileObjectId: 'file-1',
+                status: ManagedImageStatus.READY,
                 resource: { id: 'resource-1', ownerMembershipId: MEMBERSHIP_ID, deletedAt: null },
-            });
-            harness.prisma.fileObject.findUnique.mockResolvedValue({
-                objectKey: OBJECT_KEY,
-                sizeBytes: BigInt(2048),
+                fileObject: { objectKey: OBJECT_KEY, sizeBytes: BigInt(2048) },
             });
 
-            const result = await harness.service.getImageAccess('image-1');
+            const result = await harness.service.getImageAccess('90000000-0000-0000-0000-000000000001');
 
-            expect(harness.prisma.managedImage.findFirst).toHaveBeenCalledWith(
-                expect.objectContaining({ where: expect.objectContaining({ tenantId: TENANT_ID, id: 'image-1' }) }),
-            );
             expect(harness.storage.createDownloadUrl).toHaveBeenCalledWith(OBJECT_KEY);
             expect(result).toEqual({
-                id: 'image-1',
+                id: '90000000-0000-0000-0000-000000000001',
                 resourceId: 'resource-1',
                 mimeType: 'image/png',
                 sizeBytes: 2048,
@@ -271,28 +284,23 @@ describe('ImageService', () => {
         it('denies access for a member who is not the resource owner', async () => {
             const harness = createHarness();
             harness.prisma.managedImage.findFirst.mockResolvedValue({
-                id: 'image-1',
-                createdAt: new Date(),
-                prompt: null,
-                model: null,
+                id: '90000000-0000-0000-0000-000000000001',
+                status: ManagedImageStatus.READY,
                 contentType: 'image/png',
-                fileObjectId: 'file-1',
                 resource: { id: 'resource-1', ownerMembershipId: '50000000-0000-0000-0000-000000000099', deletedAt: null },
+                fileObject: { objectKey: OBJECT_KEY, sizeBytes: BigInt(2048) },
             });
 
-            await expect(harness.service.getImageAccess('image-1')).rejects.toMatchObject({
-                response: { code: 'IMAGE_ACCESS_DENIED' },
-            });
+            await expect(harness.service.getImageAccess('90000000-0000-0000-0000-000000000001'))
+                .rejects.toMatchObject({ response: { code: 'IMAGE_ACCESS_DENIED' } });
             expect(harness.storage.createDownloadUrl).not.toHaveBeenCalled();
         });
 
-        it('returns 404 for a missing image', async () => {
+        it('returns 404 for a missing or non-ready image', async () => {
             const harness = createHarness();
-            harness.prisma.managedImage.findFirst.mockResolvedValue(null);
 
-            await expect(harness.service.getImageAccess('image-404')).rejects.toMatchObject({
-                response: { code: 'IMAGE_NOT_FOUND' },
-            });
+            await expect(harness.service.getImageAccess('90000000-0000-0000-0000-000000000001'))
+                .rejects.toMatchObject({ response: { code: 'IMAGE_NOT_FOUND' } });
         });
     });
 });

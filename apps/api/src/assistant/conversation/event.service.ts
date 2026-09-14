@@ -14,42 +14,45 @@ const POLL_INTERVAL_MS = 250;
 export class EventService {
   constructor(private readonly prisma: PrismaService) {}
 
-  /**
-   * 追加一条事件并返回分配的 seq；seq 由数据库 max+1 分配（冲突时重试），
-   * 并补写进 payload，使持久化 JSON 与公开事件结构完全一致。
-   */
+  /** 追加一条事件；seq 由 AssistantTurn.nextEventSeq 在同一事务内原子分配。 */
   async append(
     turnId: string,
     tenantId: string,
     type: AssistantEventType,
     payload: Record<string, unknown>,
   ): Promise<number> {
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        return await this.prisma.$transaction(async (tx) => {
-          const aggregate = await tx.assistantEvent.aggregate({
-            where: { turnId },
-            _max: { seq: true },
-          });
-          const seq = (aggregate._max.seq ?? 0) + 1;
-          await tx.assistantEvent.create({
-            data: {
-              tenantId,
-              turnId,
-              seq,
-              type,
-              payload: { ...payload, seq } as Prisma.InputJsonObject,
-            },
-            select: { seq: true },
-          });
-          return seq;
-        });
-      } catch (error) {
-        if (isUniqueConstraintError(error) && attempt < 2) continue;
-        throw error;
-      }
-    }
-    throw new Error(`failed to append assistant event for turn ${turnId}`);
+    return this.prisma.$transaction((transaction) =>
+      this.appendInTransaction(transaction, turnId, tenantId, type, payload));
+  }
+
+  /**
+   * 在调用方事务中追加事件。关键状态变更、工具结果消息和事件可借此原子提交，
+   * SSE 仅消费已提交的事实，不再承担一致性职责。
+   */
+  async appendInTransaction(
+    transaction: Prisma.TransactionClient,
+    turnId: string,
+    tenantId: string,
+    type: AssistantEventType,
+    payload: Record<string, unknown>,
+  ): Promise<number> {
+    const allocation = await transaction.assistantTurn.update({
+      where: { id: turnId },
+      data: { nextEventSeq: { increment: 1 } },
+      select: { nextEventSeq: true },
+    });
+    const seq = allocation.nextEventSeq - 1;
+    await transaction.assistantEvent.create({
+      data: {
+        tenantId,
+        turnId,
+        seq,
+        type,
+        payload: { ...payload, seq } as Prisma.InputJsonObject,
+      },
+      select: { seq: true },
+    });
+    return seq;
   }
 
   /**
@@ -98,8 +101,4 @@ async function sleep(milliseconds: number, signal?: AbortSignal): Promise<void> 
       }, { once: true });
     }
   });
-}
-
-function isUniqueConstraintError(error: unknown): boolean {
-  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
 }

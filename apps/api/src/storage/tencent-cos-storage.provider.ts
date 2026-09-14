@@ -61,7 +61,7 @@ export class TencentCosStorageProvider implements StorageProvider {
      * 不提供通配路径；成功后返回可信对象元数据。
      */
     async putObject(input: PutObjectInput): Promise<StoredObjectMetadata> {
-        this.assertSourceObjectKey(input.objectKey);
+        this.assertServerWritableObjectKey(input.objectKey);
         const contentType = normalizeContentType(input.contentType);
         if (!contentType || /[\u0000-\u001f\u007f\s]/u.test(contentType)) {
             throw new TypeError('COS upload Content-Type must be a normalized MIME type');
@@ -184,6 +184,23 @@ export class TencentCosStorageProvider implements StorageProvider {
         );
         if (!sourceKeyPattern.test(objectKey)) {
             throw new TypeError('COS upload object key must match the documented CEES source-file path');
+        }
+    }
+
+    /** 服务端直传允许常规原文件键或与 ToolCall 绑定的生成图片键。 */
+    private assertServerWritableObjectKey(objectKey: string): void {
+        this.assertObjectKeyInEnvironment(objectKey);
+        const prefix = escapeRegExp(this.config.objectPrefix);
+        const sourceKeyPattern = new RegExp(
+            `^${prefix}/tenants/${UUID_SOURCE}/files/[0-9]{4}/(?:0[1-9]|1[0-2])/${UUID_SOURCE}/source$`,
+            'i',
+        );
+        const generatedImagePattern = new RegExp(
+            `^${prefix}/tenants/${UUID_SOURCE}/generated-images/${UUID_SOURCE}/source$`,
+            'i',
+        );
+        if (!sourceKeyPattern.test(objectKey) && !generatedImagePattern.test(objectKey)) {
+            throw new TypeError('COS server upload object key is outside the documented writable paths');
         }
     }
 }

@@ -1,5 +1,12 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { AuditOutcome, DocumentVisibility, DraftStatus, Prisma, ResourceType } from '@prisma/client';
+import {
+    AuditOutcome,
+    DocumentVisibility,
+    DraftStatus,
+    Prisma,
+    ResourceType,
+    ToolCallStatus,
+} from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import type { ComposeDocumentRequest, DocumentSpec } from '@cees/ai-service-client';
 import { AiServiceGateway } from '../ai-orchestration/ai-service-gateway.service';
@@ -21,8 +28,11 @@ export interface GenerateDocumentCommand {
     userId: string;
     membershipId: string;
     requestId: string;
+    conversationId: string;
     turnId: string;
     toolCallId: string;
+    executionOwner: string;
+    executionToken: string;
     instruction: string;
     title?: string;
     visibility: DocumentVisibility;
@@ -135,54 +145,169 @@ export class DocumentService {
      * 本方法只被 generate_document 工具执行器调用，不暴露公开 HTTP 接口。
      */
     async createGeneratedDocument(command: GenerateDocumentCommand): Promise<GeneratedDocument> {
-        const existing = await this.findExecutedDocument(command.tenantId, command.toolCallId);
+        const existing = await this.findExecutedDocument(command.tenantId, command.turnId, command.toolCallId);
         if (existing) return existing;
+        await this.requireGenerationClaim(command);
 
-        const request: ComposeDocumentRequest = {
-            request_id: command.requestId,
-            tenant_id: command.tenantId,
-            user_id: command.userId,
-            instruction: command.instruction,
-            source_materials: [],
-            document_options: {
-                ...(command.title !== undefined ? { title: command.title } : {}),
-                locale: 'zh-CN',
-                template_id: 'business-standard',
-                include_toc: false,
-                generation_mode: 'fast',
+        const reserved = await this.reserveGeneratedDocument(command);
+        if (!reserved) {
+            const replay = await this.findExecutedDocument(command.tenantId, command.turnId, command.toolCallId);
+            if (replay) return replay;
+            throw new Error(`文档工具调用 ${command.toolCallId} 已在执行或需要恢复，禁止并发重复生成`);
+        }
+
+        try {
+            const request: ComposeDocumentRequest = {
+                request_id: command.requestId,
+                tenant_id: command.tenantId,
+                user_id: command.userId,
+                instruction: command.instruction,
+                source_materials: [],
+                document_options: {
+                    ...(command.title !== undefined ? { title: command.title } : {}),
+                    locale: 'zh-CN',
+                    template_id: 'business-standard',
+                    include_toc: false,
+                    generation_mode: 'fast',
+                },
+            };
+            // Re-check immediately before the external model call. A turn
+            // can be cancelled after the draft reservation is created.
+            await this.requireGenerationClaim(command);
+            const upstream = await this.gateway.composeDocument(request, {
+                membershipId: command.membershipId,
+                conversationId: command.conversationId,
+                turnId: command.turnId,
+                toolCallId: command.toolCallId,
+            });
+
+            const documentId = randomUUID();
+            const content = documentSpecToMarkdown(upstream.document);
+            await this.prisma.$transaction(async (transaction) => {
+                const now = new Date();
+                const claim = await transaction.toolCall.findFirst({
+                    where: {
+                        id: command.toolCallId,
+                        tenantId: command.tenantId,
+                        turnId: command.turnId,
+                        status: ToolCallStatus.EXECUTING,
+                        executionToken: command.executionToken,
+                        leaseExpiresAt: { gt: now },
+                        turn: {
+                            is: {
+                                status: 'RUNNING',
+                                executionOwner: command.executionOwner,
+                                leaseExpiresAt: { gt: now },
+                            },
+                        },
+                    },
+                    select: { id: true },
+                });
+                if (!claim) throw new Error('文档生成完成时工具执行权已失效');
+
+                await transaction.resource.create({
+                    data: {
+                        id: documentId,
+                        tenantId: command.tenantId,
+                        type: ResourceType.DOCUMENT,
+                        ownerMembershipId: command.membershipId,
+                        createdBy: command.userId,
+                        updatedBy: command.userId,
+                    },
+                });
+                await transaction.managedDocument.create({
+                    data: {
+                        id: documentId,
+                        tenantId: command.tenantId,
+                        generatedByToolCallId: command.toolCallId,
+                        title: upstream.document.title,
+                        content,
+                        visibility: command.visibility,
+                        createdBy: command.userId,
+                        updatedBy: command.userId,
+                    },
+                });
+                await transaction.aIActionDraft.update({
+                    where: { toolCallId: command.toolCallId },
+                    data: {
+                        payload: {
+                            instruction: command.instruction,
+                            requestedTitle: command.title ?? null,
+                            visibility: command.visibility,
+                            provider: upstream.execution.provider,
+                            model: upstream.execution.model,
+                            contentLength: content.length,
+                            sectionCount: upstream.document.sections.length,
+                        } satisfies Prisma.InputJsonObject,
+                        status: DraftStatus.EXECUTED,
+                        executedResourceType: 'DOCUMENT',
+                        executedResourceId: documentId,
+                        updatedBy: command.userId,
+                    },
+                });
+                await transaction.auditLog.create({
+                    data: {
+                        tenantId: command.tenantId,
+                        actorUserId: command.userId,
+                        actorMembershipId: command.membershipId,
+                        action: 'DOCUMENT_GENERATED',
+                        outcome: AuditOutcome.SUCCESS,
+                        resourceType: 'DOCUMENT',
+                        resourceId: documentId,
+                        requestId: command.requestId,
+                        metadata: {
+                            toolCallId: command.toolCallId,
+                            title: upstream.document.title,
+                            visibility: command.visibility,
+                            provider: upstream.execution.provider,
+                            model: upstream.execution.model,
+                            contentLength: content.length,
+                        },
+                    },
+                });
+            });
+            return {
+                documentId,
+                title: upstream.document.title,
+                contentLength: content.length,
+                provider: upstream.execution.provider,
+                model: upstream.execution.model,
+            };
+        } catch (error) {
+            const replay = await this.findExecutedDocument(command.tenantId, command.turnId, command.toolCallId).catch(() => null);
+            if (replay) return replay;
+            await this.recordGenerationFailure(command, error).catch(() => undefined);
+            throw error;
+        }
+    }
+
+    private async requireGenerationClaim(command: GenerateDocumentCommand): Promise<void> {
+        const now = new Date();
+        const claim = await this.prisma.toolCall.findFirst({
+            where: {
+                id: command.toolCallId,
+                tenantId: command.tenantId,
+                turnId: command.turnId,
+                status: ToolCallStatus.EXECUTING,
+                executionToken: command.executionToken,
+                leaseExpiresAt: { gt: now },
+                turn: {
+                    is: {
+                        status: 'RUNNING',
+                        executionOwner: command.executionOwner,
+                        leaseExpiresAt: { gt: now },
+                    },
+                },
             },
-        };
-        const upstream = await this.gateway.composeDocument(request, {
-            membershipId: command.membershipId,
-            turnId: command.turnId,
-            toolCallId: command.toolCallId,
+            select: { id: true },
         });
+        if (!claim) throw new Error('文档工具执行权已失效，拒绝调用外部模型');
+    }
 
-        const documentId = randomUUID();
-        const content = documentSpecToMarkdown(upstream.document);
-        await this.prisma.$transaction(async (transaction) => {
-            await transaction.resource.create({
-                data: {
-                    id: documentId,
-                    tenantId: command.tenantId,
-                    type: ResourceType.DOCUMENT,
-                    ownerMembershipId: command.membershipId,
-                    createdBy: command.userId,
-                    updatedBy: command.userId,
-                },
-            });
-            await transaction.managedDocument.create({
-                data: {
-                    id: documentId,
-                    tenantId: command.tenantId,
-                    title: upstream.document.title,
-                    content,
-                    visibility: command.visibility,
-                    createdBy: command.userId,
-                    updatedBy: command.userId,
-                },
-            });
-            await transaction.aIActionDraft.create({
+    /** AIActionDraft 的唯一 toolCallId 在调用 Provider 前完成原子抢占。 */
+    private async reserveGeneratedDocument(command: GenerateDocumentCommand): Promise<boolean> {
+        try {
+            await this.prisma.aIActionDraft.create({
                 data: {
                     tenantId: command.tenantId,
                     userId: command.userId,
@@ -191,64 +316,78 @@ export class DocumentService {
                         instruction: command.instruction,
                         requestedTitle: command.title ?? null,
                         visibility: command.visibility,
-                        provider: upstream.execution.provider,
-                        model: upstream.execution.model,
-                        contentLength: content.length,
-                        sectionCount: upstream.document.sections.length,
-                    } satisfies Prisma.InputJsonObject,
-                    status: DraftStatus.EXECUTED,
+                    },
+                    status: DraftStatus.DRAFT,
                     toolCallId: command.toolCallId,
-                    executedResourceType: 'DOCUMENT',
-                    executedResourceId: documentId,
                     createdBy: command.userId,
                     updatedBy: command.userId,
                 },
             });
+            return true;
+        } catch (error) {
+            if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') return false;
+            throw error;
+        }
+    }
+
+    private async recordGenerationFailure(command: GenerateDocumentCommand, error: unknown): Promise<void> {
+        const message = error instanceof Error ? error.message : '文档生成失败';
+        await this.prisma.$transaction(async (transaction) => {
+            const failed = await transaction.aIActionDraft.updateMany({
+                where: {
+                    toolCallId: command.toolCallId,
+                    status: { not: DraftStatus.EXECUTED },
+                },
+                data: {
+                    status: DraftStatus.FAILED,
+                    payload: {
+                        instruction: command.instruction,
+                        requestedTitle: command.title ?? null,
+                        visibility: command.visibility,
+                        error: message,
+                    },
+                    updatedBy: command.userId,
+                },
+            });
+            // A concurrent successful finalization may have committed EXECUTED
+            // after the caller's replay check. Do not append a failure audit or
+            // overwrite the durable success in that case.
+            if (failed.count !== 1) return;
             await transaction.auditLog.create({
                 data: {
                     tenantId: command.tenantId,
                     actorUserId: command.userId,
                     actorMembershipId: command.membershipId,
-                    action: 'DOCUMENT_GENERATED',
-                    outcome: AuditOutcome.SUCCESS,
+                    action: 'DOCUMENT_GENERATION_FAILED',
+                    outcome: AuditOutcome.FAILURE,
                     resourceType: 'DOCUMENT',
-                    resourceId: documentId,
                     requestId: command.requestId,
-                    metadata: {
-                        toolCallId: command.toolCallId,
-                        instruction: command.instruction,
-                        title: upstream.document.title,
-                        visibility: command.visibility,
-                        provider: upstream.execution.provider,
-                        model: upstream.execution.model,
-                        contentLength: content.length,
-                    },
+                    metadata: { toolCallId: command.toolCallId, error: message },
                 },
             });
         });
-        return {
-            documentId,
-            title: upstream.document.title,
-            contentLength: content.length,
-            provider: upstream.execution.provider,
-            model: upstream.execution.model,
-        };
     }
 
-    /** 幂等回放：同一 tool_call_id 已执行成功时返回原文档与执行元数据。 */
-    private async findExecutedDocument(tenantId: string, toolCallId: string): Promise<GeneratedDocument | null> {
-        const draft = await this.prisma.aIActionDraft.findFirst({
-            where: { tenantId, toolCallId, status: DraftStatus.EXECUTED },
-            orderBy: { createdAt: 'desc' },
-            select: { executedResourceId: true, payload: true },
-        });
-        if (!draft?.executedResourceId) return null;
-
+    /** 幂等回放：ManagedDocument 的唯一生成工具引用是事实源。 */
+    private async findExecutedDocument(
+        tenantId: string,
+        turnId: string,
+        toolCallId: string,
+    ): Promise<GeneratedDocument | null> {
         const document = await this.prisma.managedDocument.findFirst({
-            where: { tenantId, id: draft.executedResourceId, deletedAt: null },
+            where: {
+                tenantId,
+                generatedByToolCallId: toolCallId,
+                generatedByToolCall: { is: { tenantId, turnId } },
+            },
             select: { id: true, title: true, content: true },
         });
         if (!document) return null;
+        const draft = await this.prisma.aIActionDraft.findUnique({
+            where: { toolCallId },
+            select: { tenantId: true, status: true, payload: true },
+        });
+        if (!draft || draft.tenantId !== tenantId || draft.status !== DraftStatus.EXECUTED) return null;
 
         const payload = draft.payload as { provider?: string; model?: string };
         return {
