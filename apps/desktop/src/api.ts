@@ -328,6 +328,36 @@ export async function listDocuments(keyword?: string): Promise<CursorPage<Manage
     return authorizedRequest<CursorPage<ManagedDocumentSummary>>(`v1/documents?${query}`);
 }
 
+/** 下载文档的 DOCX 导出（复用 document.read 权限），失败时抛出后端错误消息。 */
+export async function downloadDocumentDocx(documentId: string, title: string): Promise<void> {
+    const accessToken = getStoredValue(ACCESS_TOKEN_KEY);
+    if (!accessToken) throw new Error('登录状态已失效，请重新登录');
+    const response = await fetch(new URL(`v1/documents/${encodeURIComponent(documentId)}/export`, API_BASE_URL), {
+        headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (response.status === 401) {
+        await refreshTokens();
+        return downloadDocumentDocx(documentId, title);
+    }
+    if (!response.ok) {
+        throw new Error(getErrorMessage(await readBody(response)));
+    }
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `${toSafeDownloadName(title)}.docx`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+}
+
+function toSafeDownloadName(title: string): string {
+    const cleaned = title.replace(/[\\/:*?"<>|\x00-\x1f]/g, ' ').replace(/\s+/g, ' ').trim().replace(/\.+$/g, '');
+    return (cleaned || 'document').slice(0, 120);
+}
+
 async function authorizedRequest<T>(path: string, init: RequestInit = {}, retry = true): Promise<T> {
     const accessToken = getStoredValue(ACCESS_TOKEN_KEY);
     if (!accessToken) throw new Error('登录状态已失效，请重新登录');

@@ -1,6 +1,6 @@
 # 通用文档生成
 
-> 状态：MVP 已实现。本文定义 ai-service 的领域无关文档组合与 DOCX 渲染能力，不定义周报、简报等业务流程；NestJS 侧的正式资源落地链路（generate_document 工具 → compose 生成 DocumentSpec → Markdown 落库 → ManagedDocument/AIActionDraft/审计）已随 AI 助手工具循环落地（2026-09-11），见 [AI 助手工具循环](assistant-tool-loop.md)。
+> 状态：MVP 已实现，DOCX 渲染导出已接入（2026-09-14）。本文定义 ai-service 的领域无关文档组合与 DOCX 渲染能力，不定义周报、简报等业务流程；NestJS 侧的正式资源落地链路（generate_document 工具 → compose 生成 DocumentSpec → Markdown 落库 → ManagedDocument/AIActionDraft/审计）已随 AI 助手工具循环落地（2026-09-11），见 [AI 助手工具循环](assistant-tool-loop.md)。
 
 ## 1. 目标与边界
 
@@ -92,4 +92,15 @@ Schema 禁止额外字段并限制章节、块、表格与文本长度。表格�
 - 幂等以 `tool_call_id` 为边界：重复执行直接回放已落库文档，不重复生成；
 - AI 生成文档与手工创建文档同构（同一张 `managed_documents` 表、同一 Resource 归属与 ACL 语义），读取/修改/删除沿用既有 `GET/PATCH/DELETE /documents/:documentId` 与 `document.read/update/delete` 权限；
 - 权限码 `ai.document.generate`（调用 AI 生成文档）与既有 RBAC 权限同体系，由管理员经角色授予；
-- 暂未接入：DOCX 渲染导出（render-docx/generate-docx）、`quality` 规划模式、`source_materials` 材料上传（工具执行器固定传空列表）。
+- 暂未接入：`quality` 规划模式、`source_materials` 材料上传（工具执行器固定传空列表）。
+
+## 9. DOCX 渲染导出落地说明（2026-09-14）
+
+- 公开端点 `GET /api/v1/documents/{documentId}/export`（operationId `documentExportDocx`）：读取生成时落库的 `document_spec`，经 ai-service `render-docx` 确定性渲染为 DOCX 返回，不调用 LLM、零 Token；响应为附件下载（标准 DOCX MIME，ASCII fallback 与 RFC 5987 UTF-8 文件名，`Cache-Control: no-store`）；
+- 权限：复用 `document.read`——导出是同一文档资源的另一种交付视图而不是独立资源，不新增独立权限码；授权仍走既有 Resource(DOCUMENT) 模型（所有权、`TENANT` 可见性、Membership/ROLE ACL 与 `document.manage_all`）；
+- 数据模型：`managed_documents` 新增 `document_spec` JSONB 列（迁移 `0023_document_docx_export`），保存同一次 compose 的 `DocumentSpec` 作为导出事实源，避免导出时二次调用 LLM（成本翻倍且内容可能与落库 Markdown 不一致）；存量文档与手工创建文档该列为空，导出返回明确错误而不猜测内容；
+- 手工修改内容（`PATCH /documents/{documentId}` 传 `content`）后 `document_spec` 置空，防止导出内容与库中 Markdown 不一致；
+- 网关接入 ai-service 三个文档接口：`composeDocument`（生成链路在用）、`renderDocumentDocx`（业务导出调用）、`generateDocumentDocx`（compose+render 一步，仅透传保留，业务不调用以避免重复 LLM 生成）；
+- 桌面端：文档详情提供“导出 DOCX”按钮，经 `downloadDocumentDocx` 复用同一公开端点，文件由浏览器下载；
+- 契约：公开契约兼容新增该端点（开发基线 0.22.0 不变），`packages/api-client` 已重新生成；
+- 扩展约定：后续新增文档格式（如 PDF）时，在 ai-service 增加对应确定性渲染器与内部端点，NestJS 侧按同一模式增加导出端点，`document_spec` 与权限模型无需变化。

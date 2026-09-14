@@ -644,6 +644,8 @@ model ManagedDocument {
   generatedByToolCall   ToolCall?          @relation("GeneratedDocumentToolCall", fields: [generatedByToolCallId], references: [id])
   title                 String
   content               String             @db.Text
+  /// ai-service compose 返回的结构化 DocumentSpec（导出 DOCX 的事实源）；人工创建或内容被手工修改的文档为空。
+  documentSpec          Json?              @map("document_spec")
   visibility            DocumentVisibility @default(PRIVATE)
   createdAt             DateTime           @default(now()) @map("created_at")
   updatedAt             DateTime           @updatedAt @map("updated_at")
