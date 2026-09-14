@@ -1,14 +1,14 @@
 # 上下文对话
 
-> 状态：ai-service MVP 与 NestJS 公开适配均已实现。最后更新：2026-09-09。
+> 状态：ai-service 无状态上下文能力与 NestJS Assistant 适配已实现。最后更新：2026-09-14。
 
 ## 1. 目标与边界
 
 ai-service 提供无状态、多轮、流式的内部对话生成能力，并支持 `standard` 与 `ultra` 两种执行模式。调用方在每一轮传入可信系统指令、可选的历史摘要和按时间排序的近期消息，ai-service 负责上下文预算、模型路由和最终回答生成。
 
-ai-service 不持久化正式会话、消息或摘要。`conversation_id` 只用于调用关联和日志；调用方仍是会话状态的事实源。桌面端、移动端和第三方客户端不得直接访问这些内部接口，而是通过 NestJS 公开 Chat API 调用。当前版本由客户端在本地保存会话状态，不做云端同步。
+ai-service 不持久化正式会话、消息或摘要。`conversation_id` 只用于调用关联和日志；NestJS Assistant 是会话状态的事实源，负责从 PostgreSQL 加载消息、摘要和工具结果后调用本服务。桌面端、移动端和第三方客户端不得直接访问这些内部接口，而是通过 NestJS 的 `/api/v1/conversations/*` 公开接口调用。
 
-本阶段实现的是 Codex 式多轮对话体验，不实现文件系统、Shell、工具调用、审批、长期任务或完整 Agent 状态机。
+本服务实现无状态模型调用、上下文预算、压缩、视觉消息和单回合 Tool Calling；工具批准、正式资源写入、审计、取消/恢复和会话状态机均由 NestJS Assistant 负责。当前不引入 LangGraph。
 
 ## 2. 内部接口
 
@@ -30,7 +30,7 @@ ai-service 不持久化正式会话、消息或摘要。`conversation_id` 只用
 - 每条消息的 `content` 是内容 parts 数组，支持 `text` 与 `image_url`；
 - `max_output_tokens`：可选覆盖值，但不能超过模式和模型 Profile 的双重上限。
 
-上下文按照“基础安全指令、调用方指令、历史摘要、近期消息”的顺序组装。当前 token 数使用文本 UTF-8 字节数除以 4、每张图片按固定预算计入，并叠加每条消息固定开销的确定性估算，不声称与任一 Provider 的精确 tokenizer 等价。
+上下文按照“基础安全指令、调用方指令、历史摘要、近期消息”的顺序组装。当前 token 数使用文本 UTF-8 字节数除以 4、每张图片按固定预算计入，并叠加每条消息固定开销的确定性估算，不声称与任一 Provider 的精确 tokenizer 等价。各模式预算来自 `models.toml` 的 `context_budget_tokens`，并由 `/ready.chat_context_budgets` 暴露给 NestJS；NestJS 在调用 compact 前按同一口径预先压缩，ai-service 在最终模型调用前仍会做最后一道安全裁剪。
 
 如果全部近期消息无法放入模式预算，服务从最新消息向前保留连续后缀，并避免让截断后的上下文以孤立 Assistant 消息开头。最后一条用户消息不能放入预算时返回 `CHAT_CONTEXT_TOO_LARGE`，不会静默删除本轮问题。
 
@@ -94,7 +94,7 @@ completed
 - 未解决问题；
 - 重要引用和后续任务。
 
-响应返回 `summarized_through_message_id`，取输入最后一条消息的可选 ID。调用方保存摘要，并在后续 `/chat/invoke` 或 `/chat/stream` 中作为 `conversation_summary` 传回。
+响应返回 `summarized_through_message_id`，取输入最后一条消息的可选 ID。NestJS 保存摘要边界，并在后续模型调用中作为 `conversation_summary` 传回；客户端不直接调用 compact。
 
 压缩输入不会静默截断；超过 `compaction_context_budget_tokens` 时返回 `CHAT_CONTEXT_TOO_LARGE`。Provider 达到输出上限时返回 `CHAT_COMPACTION_TRUNCATED`，不把不完整摘要作为成功结果。
 
@@ -132,19 +132,19 @@ capabilities = ["chat", "vision"]
 
 ## 8. NestJS 与客户端适配要求
 
-NestJS 已提供 `POST /api/v1/chat/invoke`、`POST /api/v1/chat/stream` 和 `POST /api/v1/chat/compact`，负责从认证上下文注入租户、用户和成员身份，并记录企业、成员、会话、轮次和 Token 指标。详细边界见 [公开 AI 对话链路与 Token 计量](public-chat-api-and-token-metering.md)。
+NestJS Assistant 通过 `AiServiceGateway` 统一调用本服务，公开入口是 `POST /api/v1/conversations/{conversationId}/turns` 及事件重放/取消接口。旧 `/api/v1/chat/*` 在当前开发阶段已删除，不保留兼容层。会话、消息、摘要、ToolCall、审计和正式资源均由 NestJS 持久化；`AIInvocationLog` 记录每次模型调用的执行元数据和 Token 指标。完整前端协议见 [Assistant / Conversation API](../api/assistant-api.md)。
 
 客户端需要：
 
-1. 在本机持久化 Conversation、Message 和摘要；本期不上传云端；
-2. 每轮传入完整可用历史，或 `conversation_summary + recent messages`；
-3. 保证最后一条消息为当前用户消息；
+1. 通过会话 CRUD 获取并保存服务端 `conversationId`；本地只保留渲染缓存；
+2. 每轮只提交本轮消息和 `Idempotency-Key`，历史与摘要由 NestJS 组装；
+3. 图片先通过 File API 上传，再提交 `imageFileIds`；
 4. 将产品展示值映射为小写 `standard` / `ultra`；
 5. 不传 Provider、模型、Profile 或 reasoning effort；
 6. 流式处理 `started`、`status`、`content_delta`、`usage`、`completed` 和 `error`；
-7. 拼接 `content_delta` 并在完成后保存最终 Assistant 消息；
-8. 保存 compact 响应的摘要及 `summarized_through_message_id`；
-9. 在用户取消时断开内部请求；
+7. 拼接 `content_delta`；服务端负责保存最终 Assistant 消息；
+8. 按事件 `seq` 记录游标，断线使用事件重放接口；
+9. 取消必须调用公开 cancel 接口，网络断开不是取消；
 10. 将 `finish_reason=length` 视为可能截断的回答。
 
-NestJS 和 ai-service 均不保存消息、回答或摘要正文。当前 Token 记录不等于企业或成员额度体系，也不执行额度扣减或超额拦截。
+ai-service 不保存消息、回答或摘要正文；NestJS 保存会话事实。当前 Token 记录不等于企业或成员额度体系，也不执行额度扣减或超额拦截；额度预占/结算和人工审批属于后续能力。

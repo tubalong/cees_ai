@@ -206,6 +206,14 @@ enum AssistantTurnStatus {
   CANCELLED
 }
 
+/// Assistant 轮次当前持久化检查点；用于观测、超时判断和进程重启后的保守恢复。
+enum AssistantTurnStage {
+  QUEUED
+  MODEL_CALL
+  TOOL_EXECUTION
+  FINALIZING
+}
+
 /// 轮次事件类型；与公开 TurnStreamEvent 联合一一对应。
 enum AssistantEventType {
   STARTED
@@ -220,6 +228,8 @@ enum AssistantEventType {
 
 /// 工具调用生命周期：程序化批准结论与执行结果。
 enum ToolCallStatus {
+  /// 模型已提出，尚未完成执行前批准。
+  PROPOSED
   /// 批准通过，等待执行。
   APPROVED
   EXECUTING
@@ -227,70 +237,82 @@ enum ToolCallStatus {
   FAILED
   /// 批准拒绝（未知工具 / 无权限 / 参数非法 / 额度不足）。
   REJECTED
+  /// 执行进程在外部副作用期间丢失，禁止自动重放，等待人工或专用恢复器处理。
+  RECOVERY_REQUIRED
+}
+
+/// AI 图片从预留资源到可访问资源的持久化状态。
+enum ManagedImageStatus {
+  PENDING
+  GENERATING
+  UPLOADING
+  READY
+  FAILED
+  ORPHANED
 }
 
 model Tenant {
-  id                   String                 @id @default(uuid()) @db.Uuid
-  code                 String                 @unique
-  name                 String
-  status               TenantStatus           @default(ACTIVE)
-  memberships          TenantMembership[]
-  authSessions         AuthSession[]
-  departments          Department[]
-  roles                Role[]
-  membershipRoles      MembershipRole[]
-  rolePermissions      RolePermission[]
-  resources            Resource[]
-  managedDocuments     ManagedDocument[]
-  managedImages        ManagedImage[]
-  resourceAcls         ResourceAcl[]
-  invitations          TenantInvitation[]
-  projects             Project[]
-  projectMembers       ProjectMember[]
-  projectStatusHistory ProjectStatusHistory[]
-  tasks                Task[]
-  taskAssignees        TaskAssignee[]
-  taskComments         TaskComment[]
-  taskAttachments      TaskAttachment[]
-  taskActivities       TaskActivity[]
-  meetings             Meeting[]
-  meetingParticipants  MeetingParticipant[]
-  meetingMinutes       MeetingMinutes[]
-  workReports          WorkReport[]
-  workReportProjects   WorkReportProject[]
-  workReportTasks      WorkReportTask[]
-  notifications         Notification[]
+  id                     String                  @id @default(uuid()) @db.Uuid
+  code                   String                  @unique
+  name                   String
+  status                 TenantStatus            @default(ACTIVE)
+  memberships            TenantMembership[]
+  authSessions           AuthSession[]
+  departments            Department[]
+  roles                  Role[]
+  membershipRoles        MembershipRole[]
+  rolePermissions        RolePermission[]
+  resources              Resource[]
+  managedDocuments       ManagedDocument[]
+  managedImages          ManagedImage[]
+  resourceAcls           ResourceAcl[]
+  invitations            TenantInvitation[]
+  projects               Project[]
+  projectMembers         ProjectMember[]
+  projectStatusHistory   ProjectStatusHistory[]
+  tasks                  Task[]
+  taskAssignees          TaskAssignee[]
+  taskComments           TaskComment[]
+  taskAttachments        TaskAttachment[]
+  taskActivities         TaskActivity[]
+  meetings               Meeting[]
+  meetingParticipants    MeetingParticipant[]
+  meetingMinutes         MeetingMinutes[]
+  workReports            WorkReport[]
+  workReportProjects     WorkReportProject[]
+  workReportTasks        WorkReportTask[]
+  notifications          Notification[]
   notificationRecipients NotificationRecipient[]
-  createdAt            DateTime               @default(now()) @map("created_at")
-  updatedAt            DateTime               @updatedAt @map("updated_at")
-  deletedAt            DateTime?              @map("deleted_at")
-  version              Int                    @default(1)
+  createdAt              DateTime                @default(now()) @map("created_at")
+  updatedAt              DateTime                @updatedAt @map("updated_at")
+  deletedAt              DateTime?               @map("deleted_at")
+  version                Int                     @default(1)
 
   @@map("tenants")
 }
 
 model User {
-  id                        String                 @id @default(uuid()) @db.Uuid
+  id                        String                  @id @default(uuid()) @db.Uuid
   email                     String?
-  normalizedEmail           String?                @unique @map("normalized_email")
-  passwordHash              String?                @map("password_hash")
-  displayName               String                 @map("display_name")
-  status                    UserStatus             @default(ACTIVE)
-  failedLoginCount          Int                    @default(0) @map("failed_login_count")
-  lockedUntil               DateTime?              @map("locked_until")
-  lastLoginAt               DateTime?              @map("last_login_at")
+  normalizedEmail           String?                 @unique @map("normalized_email")
+  passwordHash              String?                 @map("password_hash")
+  displayName               String                  @map("display_name")
+  status                    UserStatus              @default(ACTIVE)
+  failedLoginCount          Int                     @default(0) @map("failed_login_count")
+  lockedUntil               DateTime?               @map("locked_until")
+  lastLoginAt               DateTime?               @map("last_login_at")
   memberships               TenantMembership[]
   authSessions              AuthSession[]
   platformAdministrator     PlatformAdministrator?
   platformAuthSessions      PlatformAuthSession[]
-  acceptedTenantInvitations TenantInvitation[]     @relation("AcceptedTenantInvitations")
+  acceptedTenantInvitations TenantInvitation[]      @relation("AcceptedTenantInvitations")
   notificationRecipients    NotificationRecipient[]
-  createdAt                 DateTime               @default(now()) @map("created_at")
-  updatedAt                 DateTime               @updatedAt @map("updated_at")
-  createdBy                 String?                @map("created_by") @db.Uuid
-  updatedBy                 String?                @map("updated_by") @db.Uuid
-  deletedAt                 DateTime?              @map("deleted_at")
-  version                   Int                    @default(1)
+  createdAt                 DateTime                @default(now()) @map("created_at")
+  updatedAt                 DateTime                @updatedAt @map("updated_at")
+  createdBy                 String?                 @map("created_by") @db.Uuid
+  updatedBy                 String?                 @map("updated_by") @db.Uuid
+  deletedAt                 DateTime?               @map("deleted_at")
+  version                   Int                     @default(1)
 
   @@map("users")
 }
@@ -591,19 +613,22 @@ model Resource {
 }
 
 model ManagedDocument {
-  id         String             @id @db.Uuid
-  tenantId   String             @map("tenant_id") @db.Uuid
-  tenant     Tenant             @relation(fields: [tenantId], references: [id])
-  resource   Resource           @relation(fields: [id], references: [id])
-  title      String
-  content    String             @db.Text
-  visibility DocumentVisibility @default(PRIVATE)
-  createdAt  DateTime           @default(now()) @map("created_at")
-  updatedAt  DateTime           @updatedAt @map("updated_at")
-  createdBy  String?            @map("created_by") @db.Uuid
-  updatedBy  String?            @map("updated_by") @db.Uuid
-  deletedAt  DateTime?          @map("deleted_at")
-  version    Int                @default(1)
+  id                    String             @id @db.Uuid
+  tenantId              String             @map("tenant_id") @db.Uuid
+  tenant                Tenant             @relation(fields: [tenantId], references: [id])
+  resource              Resource           @relation(fields: [id], references: [id])
+  /// AI 生成文档对应的稳定工具调用；人工创建文档为空。
+  generatedByToolCallId String?            @unique @map("generated_by_tool_call_id") @db.Uuid
+  generatedByToolCall   ToolCall?          @relation("GeneratedDocumentToolCall", fields: [generatedByToolCallId], references: [id])
+  title                 String
+  content               String             @db.Text
+  visibility            DocumentVisibility @default(PRIVATE)
+  createdAt             DateTime           @default(now()) @map("created_at")
+  updatedAt             DateTime           @updatedAt @map("updated_at")
+  createdBy             String?            @map("created_by") @db.Uuid
+  updatedBy             String?            @map("updated_by") @db.Uuid
+  deletedAt             DateTime?          @map("deleted_at")
+  version               Int                @default(1)
 
   @@index([tenantId, visibility, createdAt])
   @@map("managed_documents")
@@ -611,27 +636,36 @@ model ManagedDocument {
 
 /// AI 图片生成结果挂到 Resource（IMAGE）上的受管图片，与 ManagedDocument 同模式。
 model ManagedImage {
-  id           String     @id @db.Uuid
-  tenantId     String     @map("tenant_id") @db.Uuid
-  tenant       Tenant     @relation(fields: [tenantId], references: [id])
-  resource     Resource   @relation(fields: [id], references: [id])
-  fileObjectId String     @map("file_object_id") @db.Uuid
-  fileObject   FileObject @relation(fields: [fileObjectId], references: [id])
+  id             String             @id @db.Uuid
+  tenantId       String             @map("tenant_id") @db.Uuid
+  tenant         Tenant             @relation(fields: [tenantId], references: [id])
+  resource       Resource           @relation(fields: [id], references: [id])
+  toolCallId     String             @unique @map("tool_call_id") @db.Uuid
+  toolCall       ToolCall           @relation("GeneratedImageToolCall", fields: [toolCallId], references: [id])
+  status         ManagedImageStatus @default(PENDING)
+  /// 确定性的长期对象键；签名 URL 不持久化。
+  objectKey      String             @map("object_key")
+  fileObjectId   String?            @unique @map("file_object_id") @db.Uuid
+  fileObject     FileObject?        @relation(fields: [fileObjectId], references: [id], onDelete: Restrict)
   /// 图片生成 Provider / 模型 / 提示词快照。
-  provider     String
-  model        String
-  prompt       String     @db.Text
+  provider       String?
+  model          String?
+  prompt         String             @db.Text
   /// 生成请求的尺寸参数（如 1024x1024）。
-  size         String?
-  contentType  String     @map("content_type")
-  createdAt    DateTime   @default(now()) @map("created_at")
-  updatedAt    DateTime   @updatedAt @map("updated_at")
-  createdBy    String?    @map("created_by") @db.Uuid
-  updatedBy    String?    @map("updated_by") @db.Uuid
-  deletedAt    DateTime?  @map("deleted_at")
-  version      Int        @default(1)
+  size           String?
+  contentType    String?            @map("content_type")
+  failureCode    String?            @map("failure_code")
+  failureMessage String?            @map("failure_message")
+  readyAt        DateTime?          @map("ready_at")
+  createdAt      DateTime           @default(now()) @map("created_at")
+  updatedAt      DateTime           @updatedAt @map("updated_at")
+  createdBy      String?            @map("created_by") @db.Uuid
+  updatedBy      String?            @map("updated_by") @db.Uuid
+  deletedAt      DateTime?          @map("deleted_at")
+  version        Int                @default(1)
 
-  @@index([tenantId, createdAt])
+  @@unique([tenantId, objectKey])
+  @@index([tenantId, status, createdAt])
   @@map("managed_images")
 }
 
@@ -1136,22 +1170,22 @@ model WorkReportTask {
 }
 
 model Notification {
-  id           String    @id @default(uuid()) @db.Uuid
-  tenantId     String    @map("tenant_id") @db.Uuid
-  tenant       Tenant    @relation(fields: [tenantId], references: [id])
+  id           String                  @id @default(uuid()) @db.Uuid
+  tenantId     String                  @map("tenant_id") @db.Uuid
+  tenant       Tenant                  @relation(fields: [tenantId], references: [id])
   title        String
   content      String
-  channel      String    @default("IN_APP")
-  relationType String?   @map("relation_type")
-  relationId   String?   @map("relation_id") @db.Uuid
-  dedupKey     String?   @map("dedup_key")
+  channel      String                  @default("IN_APP")
+  relationType String?                 @map("relation_type")
+  relationId   String?                 @map("relation_id") @db.Uuid
+  dedupKey     String?                 @map("dedup_key")
   recipients   NotificationRecipient[]
-  createdAt    DateTime  @default(now()) @map("created_at")
-  updatedAt    DateTime  @updatedAt @map("updated_at")
-  createdBy    String?   @map("created_by") @db.Uuid
-  updatedBy    String?   @map("updated_by") @db.Uuid
-  deletedAt    DateTime? @map("deleted_at")
-  version      Int       @default(1)
+  createdAt    DateTime                @default(now()) @map("created_at")
+  updatedAt    DateTime                @updatedAt @map("updated_at")
+  createdBy    String?                 @map("created_by") @db.Uuid
+  updatedBy    String?                 @map("updated_by") @db.Uuid
+  deletedAt    DateTime?               @map("deleted_at")
+  version      Int                     @default(1)
 
   @@unique([tenantId, dedupKey], map: "notifications_tenant_id_dedup_key_key")
   @@index([tenantId, createdAt])
@@ -1183,9 +1217,12 @@ model Conversation {
   title             String                 @default("")
   visibility        ConversationVisibility @default(PRIVATE)
   lastTurnAt        DateTime?              @map("last_turn_at")
+  /// 下一个轮次序号；事务内原子递增，避免 count+1 并发竞态。
+  nextTurnSeq       Int                    @default(1) @map("next_turn_seq")
   createdAt         DateTime               @default(now()) @map("created_at")
   updatedAt         DateTime               @updatedAt @map("updated_at")
   deletedAt         DateTime?              @map("deleted_at")
+  version           Int                    @default(1)
 
   messages  ConversationMessage[]
   summaries ConversationSummary[]
@@ -1205,8 +1242,11 @@ model ConversationMessage {
   turn           AssistantTurn?          @relation("TurnMessages", fields: [turnId], references: [id])
   role           ConversationMessageRole
   content        String                  @db.Text
+  /// 稳定的图片文件引用；模型请求前由 Assistant 动态解析为短期 URL。
+  imageFileIds   String[]                @default([]) @map("image_file_ids")
   /// TOOL 消息对应的工具调用 ID；其他角色为空，工具阶段启用。
-  toolCallId     String?                 @map("tool_call_id") @db.Uuid
+  toolCallId     String?                 @unique @map("tool_call_id") @db.Uuid
+  toolCall       ToolCall?               @relation("ToolCallMessage", fields: [toolCallId], references: [id])
   createdAt      DateTime                @default(now()) @map("created_at")
 
   @@index([tenantId, conversationId, createdAt])
@@ -1230,20 +1270,31 @@ model ConversationSummary {
 
 /// 一轮完整 Assistant 运行；幂等键按会话去重，requestHash 防止同键不同内容重放。
 model AssistantTurn {
-  id             String              @id @default(uuid()) @db.Uuid
-  tenantId       String              @map("tenant_id") @db.Uuid
-  conversationId String              @map("conversation_id") @db.Uuid
-  conversation   Conversation        @relation(fields: [conversationId], references: [id])
+  id              String              @id @default(uuid()) @db.Uuid
+  tenantId        String              @map("tenant_id") @db.Uuid
+  conversationId  String              @map("conversation_id") @db.Uuid
+  conversation    Conversation        @relation(fields: [conversationId], references: [id])
   /// 会话内递增的轮次序号，从 1 开始。
-  seq            Int
-  idempotencyKey String              @map("idempotency_key")
+  seq             Int
+  idempotencyKey  String              @map("idempotency_key")
   /// 幂等键对应的请求内容哈希，重复提交同键不同内容时返回 409。
-  requestHash    String              @map("request_hash")
-  status         AssistantTurnStatus @default(RECEIVED)
-  mode           String              @default("standard")
-  error          Json?
-  createdAt      DateTime            @default(now()) @map("created_at")
-  completedAt    DateTime?           @map("completed_at")
+  requestHash     String              @map("request_hash")
+  status          AssistantTurnStatus @default(RECEIVED)
+  stage           AssistantTurnStage  @default(QUEUED)
+  mode            String              @default("standard")
+  userId          String              @map("user_id") @db.Uuid
+  membershipId    String              @map("membership_id") @db.Uuid
+  requestId       String              @map("request_id")
+  /// 事件与工具序号均由轮次行原子分配，避免 max/count+1 并发冲突。
+  nextEventSeq    Int                 @default(1) @map("next_event_seq")
+  nextToolCallSeq Int                 @default(1) @map("next_tool_call_seq")
+  executionOwner  String?             @map("execution_owner")
+  leaseExpiresAt  DateTime?           @map("lease_expires_at")
+  heartbeatAt     DateTime?           @map("heartbeat_at")
+  error           Json?
+  createdAt       DateTime            @default(now()) @map("created_at")
+  updatedAt       DateTime            @updatedAt @map("updated_at")
+  completedAt     DateTime?           @map("completed_at")
 
   messages  ConversationMessage[] @relation("TurnMessages")
   events    AssistantEvent[]
@@ -1252,6 +1303,7 @@ model AssistantTurn {
   @@unique([conversationId, idempotencyKey])
   @@unique([conversationId, seq])
   @@index([tenantId, createdAt])
+  @@index([status, leaseExpiresAt])
   @@map("assistant_turns")
 }
 
@@ -1260,7 +1312,7 @@ model AssistantEvent {
   id        String             @id @default(uuid()) @db.Uuid
   tenantId  String             @map("tenant_id") @db.Uuid
   turnId    String             @map("turn_id") @db.Uuid
-  turn      AssistantTurn      @relation(fields: [turnId], references: [id])
+  turn      AssistantTurn      @relation(fields: [turnId], references: [id], onDelete: Cascade)
   /// 轮次内递增事件序号，从 1 开始。
   seq       Int
   type      AssistantEventType
@@ -1277,15 +1329,24 @@ model ToolCall {
   tenantId             String         @map("tenant_id") @db.Uuid
   conversationId       String         @map("conversation_id") @db.Uuid
   turnId               String         @map("turn_id") @db.Uuid
-  turn                 AssistantTurn  @relation(fields: [turnId], references: [id])
+  turn                 AssistantTurn  @relation(fields: [turnId], references: [id], onDelete: Cascade)
   /// 轮次内工具调用序号，从 1 开始。
   seq                  Int
+  /// 发起该工具调用的模型调用序号；同一模型调用内的多个工具共享该值。
+  modelStep            Int            @default(1) @map("model_step")
   /// 上游模型返回的调用 ID；回填 ToolMessage.tool_call_id 时使用。
   upstreamCallId       String         @map("upstream_call_id")
+  /// 同一模型回合中 assistant 在提出 tool_calls 前产生的正文；用于历史重建。
+  assistantContent     String?        @map("assistant_content") @db.Text
   name                 String
   arguments            Json
-  status               ToolCallStatus @default(APPROVED)
-  /// 执行结果快照（含 resourceId / resourceUrl 或错误信息）。
+  status               ToolCallStatus @default(PROPOSED)
+  approvedAt           DateTime?      @map("approved_at")
+  startedAt            DateTime?      @map("started_at")
+  completedAt          DateTime?      @map("completed_at")
+  executionToken       String?        @map("execution_token") @db.Uuid
+  leaseExpiresAt       DateTime?      @map("lease_expires_at")
+  /// 执行结果快照（只含稳定资源引用和摘要，不保存签名 URL）。
   result               Json?
   errorCode            String?        @map("error_code")
   errorMessage         String?        @map("error_message")
@@ -1294,8 +1355,16 @@ model ToolCall {
   createdAt            DateTime       @default(now()) @map("created_at")
   updatedAt            DateTime       @updatedAt @map("updated_at")
 
+  toolMessage       ConversationMessage? @relation("ToolCallMessage")
+  generatedImage    ManagedImage?        @relation("GeneratedImageToolCall")
+  generatedDocument ManagedDocument?     @relation("GeneratedDocumentToolCall")
+  actionDraft       AIActionDraft?       @relation("ToolCallActionDraft")
+  invocationLogs    AIInvocationLog[]    @relation("ToolCallInvocations")
+
   @@unique([turnId, seq])
+  @@unique([turnId, modelStep, upstreamCallId])
   @@index([tenantId, createdAt])
+  @@index([status, leaseExpiresAt])
   @@map("tool_calls")
 }
 
@@ -1308,7 +1377,8 @@ model AIActionDraft {
   status               DraftStatus @default(DRAFT)
   expiresAt            DateTime?   @map("expires_at")
   /// 关联的工具调用 ID；AI 工具直接执行的动作用 request_id + tool_call_id 做幂等。
-  toolCallId           String?     @map("tool_call_id") @db.Uuid
+  toolCallId           String?     @unique @map("tool_call_id") @db.Uuid
+  toolCall             ToolCall?   @relation("ToolCallActionDraft", fields: [toolCallId], references: [id])
   executedResourceType String?     @map("executed_resource_type")
   executedResourceId   String?     @map("executed_resource_id") @db.Uuid
   createdAt            DateTime    @default(now()) @map("created_at")
@@ -1324,26 +1394,27 @@ model AIActionDraft {
 
 /// NestJS 发起 AI 调用后写入的模型执行指标；不保存对话正文、消息或摘要。
 model AIInvocationLog {
-  id             String   @id @default(uuid()) @db.Uuid
-  tenantId       String   @map("tenant_id") @db.Uuid
-  userId         String   @map("user_id") @db.Uuid
+  id             String    @id @default(uuid()) @db.Uuid
+  tenantId       String    @map("tenant_id") @db.Uuid
+  userId         String    @map("user_id") @db.Uuid
   /// 发起调用时的租户成员身份快照；旧调用和非成员调用可为空。
-  membershipId   String?  @map("membership_id") @db.Uuid
+  membershipId   String?   @map("membership_id") @db.Uuid
   /// 客户端本地会话标识；仅 Chat 调用填写，不代表服务端会话实体。
-  conversationId String?  @map("conversation_id")
+  conversationId String?   @map("conversation_id")
   /// 客户端本地轮次标识；同一轮的压缩与回答可共享该值。
-  turnId         String?  @map("turn_id")
-  requestId      String   @map("request_id")
+  turnId         String?   @map("turn_id")
+  requestId      String    @map("request_id")
   /// 工具执行对应的 ToolCall ID；图片生成等工具调用填写，配合 request_id 做幂等。
-  toolCallId     String?  @map("tool_call_id") @db.Uuid
-  traceId        String?  @map("trace_id")
+  toolCallId     String?   @map("tool_call_id") @db.Uuid
+  toolCall       ToolCall? @relation("ToolCallInvocations", fields: [toolCallId], references: [id])
+  traceId        String?   @map("trace_id")
   model          String
-  latencyMs      Int      @map("latency_ms")
-  inputTokens    Int?     @map("input_tokens")
-  outputTokens   Int?     @map("output_tokens")
+  latencyMs      Int       @map("latency_ms")
+  inputTokens    Int?      @map("input_tokens")
+  outputTokens   Int?      @map("output_tokens")
   operation      String
   metadata       Json?
-  createdAt      DateTime @default(now()) @map("created_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
 
   @@index([tenantId, requestId])
   @@index([tenantId, createdAt], map: "ai_invocation_logs_tenant_created_at_idx")

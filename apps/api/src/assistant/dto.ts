@@ -1,10 +1,14 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
+  ArrayMinSize,
+  ArrayMaxSize,
+  IsArray,
   IsIn,
   IsInt,
   IsOptional,
   IsString,
+  IsUUID,
   Max,
   MaxLength,
   Min,
@@ -27,6 +31,27 @@ export class CreateConversationRequestDto {
   title?: string | null;
 }
 
+export class UpdateConversationRequestDto {
+  @ApiProperty({ description: '新的会话标题', minLength: 1, maxLength: 128 })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(128)
+  title!: string;
+
+  @ApiProperty({ description: '当前会话版本，用于防止并发覆盖', minimum: 1 })
+  @IsInt()
+  @Min(1)
+  version!: number;
+}
+
+export class DeleteConversationQueryDto {
+  @ApiProperty({ description: '当前会话版本，用于防止并发误删', minimum: 1 })
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  version!: number;
+}
+
 export class ListConversationsQueryDto {
   @ApiPropertyOptional({ description: '每页数量，默认 20，最大 100', minimum: 1, maximum: 100, default: 20 })
   @IsOptional()
@@ -45,11 +70,29 @@ export class ListConversationsQueryDto {
 }
 
 export class CreateTurnRequestDto {
-  @ApiProperty({ description: '本轮 user 消息正文；历史消息与摘要由服务端加载', minLength: 1, maxLength: 262144 })
+  @ApiPropertyOptional({
+    description: '本轮 user 消息正文；可与 imageFileIds 同时提供，至少提供正文或一张图片',
+    nullable: true,
+    minLength: 1,
+    maxLength: 262144,
+  })
+  @IsOptional()
   @IsString()
   @MinLength(1)
   @MaxLength(262144)
-  content!: string;
+  content?: string | null;
+
+  @ApiPropertyOptional({
+    description: '本轮 user 消息引用的已上传图片文件 ID；服务端会校验归属、MIME、大小并在调用模型前生成短期 URL',
+    type: [String],
+    maxItems: 8,
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(8)
+  @IsUUID(undefined, { each: true })
+  imageFileIds?: string[];
 
   @ApiPropertyOptional({
     description: '对话执行模式；省略时使用 standard',

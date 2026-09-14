@@ -1,9 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { ConversationMessageRole, type Prisma } from '@prisma/client';
-import type { ChatMessage, ChatMode, ChatRequest, ToolTurnMessage } from '@cees/ai-service-client';
+import type { ChatMessage, ChatMode, ChatRequest, MessageContentPart, ToolTurnMessage } from '@cees/ai-service-client';
 import { PrismaService } from '../../database/prisma.service';
 import { AiServiceGateway, type ChatContextBudgets } from '../../ai-orchestration/ai-service-gateway.service';
 import type { PublicTurnMode } from '../assistant.types';
+import { AssistantMessageContentService } from './message-content.service';
 
 /** 历史消息达到该数量时触发自动压缩，压缩后上下文为摘要 + 最近 RETAIN_RECENT_COUNT 条。 */
 const COMPACTION_THRESHOLD = 80;
@@ -28,6 +29,9 @@ const COMPACTION_TOKEN_RATIO = 0.8;
 /** 每条消息固定开销 Token，与 ai-service `app/chat/context.py` 的 MESSAGE_OVERHEAD_TOKENS 一致。 */
 const MESSAGE_OVERHEAD_TOKENS = 4;
 
+/** 每张图片按固定 Token 计入，与 ai-service `app/chat/context.py` 的 IMAGE_TOKEN_ESTIMATE 一致。 */
+const IMAGE_TOKEN_ESTIMATE = 1024;
+
 export interface BuildChatRequestInput {
   conversation: { id: string; tenantId: string };
   turnId: string;
@@ -44,6 +48,17 @@ interface HistoryMessage {
   content: string;
   turnId: string | null;
   toolCallId: string | null;
+  imageFileIds: string[];
+}
+
+interface ToolCallHistoryRow {
+  id: string;
+  turnId: string;
+  modelStep: number;
+  upstreamCallId: string;
+  assistantContent: string | null;
+  name: string;
+  arguments: Prisma.JsonValue;
 }
 
 /**
@@ -56,6 +71,7 @@ export class ContextBuilderService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly gateway: AiServiceGateway,
+    private readonly messageContent: AssistantMessageContentService,
   ) {}
 
   /** 纯文本轮次：过滤 TOOL 消息，组装普通 ChatRequest。 */
@@ -70,7 +86,7 @@ export class ContextBuilderService {
       conversation_id: conversation.id,
       mode: (input.mode === 'ultra' ? 'ultra' : 'standard') satisfies ChatMode,
       conversation_summary: summary,
-      messages: history.map(toChatMessage),
+      messages: await Promise.all(history.map((message) => this.toChatMessage(message, input))),
     };
   }
 
@@ -78,7 +94,8 @@ export class ContextBuilderService {
    * 工具轮次：保留 TOOL 消息并重建其 assistant(tool_calls) 前缀。持久化的
    * TOOL 消息记录的是公开 toolCallId（NestJS uuid），而 ai-service 校验
    * tool 消息必须引用此前 assistant 消息 tool_calls 中的上游调用 ID，
-   * 这里通过 ToolCall 表把公开 ID 映射回上游 ID。
+   * 这里通过 ToolCall 表把公开 ID 映射回上游 ID，并按 modelStep 重建每次
+   * 独立模型调用的 assistant(tool_calls)，不能把整轮多步调用合并成一组。
    */
   async buildToolTurnMessages(input: BuildChatRequestInput): Promise<{
     summary: string | null;
@@ -90,56 +107,75 @@ export class ContextBuilderService {
     const retainedToolCallIds = history
       .map((message) => message.toolCallId)
       .filter((id): id is string => id !== null);
-    const toolCalls =
+    const toolCalls: ToolCallHistoryRow[] =
       retainedToolCallIds.length > 0
         ? await this.prisma.toolCall.findMany({
             where: { tenantId: conversation.tenantId, id: { in: retainedToolCallIds } },
             orderBy: [{ turnId: 'asc' }, { seq: 'asc' }],
-            select: { id: true, turnId: true, upstreamCallId: true, name: true, arguments: true },
+            select: {
+              id: true,
+              turnId: true,
+              modelStep: true,
+              upstreamCallId: true,
+              assistantContent: true,
+              name: true,
+              arguments: true,
+            },
           })
         : [];
-    const upstreamCallIdById = new Map(toolCalls.map((call) => [call.id, call.upstreamCallId]));
-    const nameById = new Map(toolCalls.map((call) => [call.id, call.name]));
-    const callsByTurn = new Map<string, NonNullable<ToolTurnMessage['tool_calls']>>();
+    const callById = new Map(toolCalls.map((call) => [call.id, call]));
+    const callsByStep = new Map<string, NonNullable<ToolTurnMessage['tool_calls']>>();
+    const assistantContentByStep = new Map<string, string | null>();
     for (const call of toolCalls) {
-      const bucket = callsByTurn.get(call.turnId) ?? [];
+      const stepKey = `${call.turnId}:${call.modelStep}`;
+      const bucket = callsByStep.get(stepKey) ?? [];
       bucket.push({
         id: call.upstreamCallId,
         name: call.name,
         arguments: toJsonArguments(call.arguments),
       });
-      callsByTurn.set(call.turnId, bucket);
+      callsByStep.set(stepKey, bucket);
+      if (!assistantContentByStep.has(stepKey) || call.assistantContent !== null) {
+        assistantContentByStep.set(stepKey, call.assistantContent);
+      }
     }
 
     const items: ToolTurnMessage[] = [];
-    const synthesizedTurns = new Set<string>();
+    const synthesizedSteps = new Set<string>();
     for (const message of history) {
       if (message.role === ConversationMessageRole.TOOL) {
         const { toolCallId } = message;
         if (!toolCallId) continue;
-        const upstreamCallId = upstreamCallIdById.get(toolCallId);
-        if (!upstreamCallId) continue;
-        const turnKey = message.turnId ?? '';
-        if (!synthesizedTurns.has(turnKey)) {
-          synthesizedTurns.add(turnKey);
-          const calls = callsByTurn.get(turnKey) ?? [];
+        const call = callById.get(toolCallId);
+        if (!call) continue;
+        const stepKey = `${call.turnId}:${call.modelStep}`;
+        if (!synthesizedSteps.has(stepKey)) {
+          synthesizedSteps.add(stepKey);
+          const calls = callsByStep.get(stepKey) ?? [];
           if (calls.length > 0) {
-            items.push({ role: 'assistant', content: null, tool_calls: calls });
+            const assistantContent = assistantContentByStep.get(stepKey);
+            items.push({
+              role: 'assistant',
+              content: assistantContent
+                ? [{ type: 'text', text: assistantContent }]
+                : null,
+              tool_calls: calls,
+            });
           }
         }
         items.push({
           role: 'tool',
-          content: message.content,
-          tool_call_id: upstreamCallId,
-          name: nameById.get(toolCallId) ?? null,
+          content: [{ type: 'text', text: message.content }],
+          tool_call_id: call.upstreamCallId,
+          name: call.name,
         });
         continue;
       }
       if (message.role === ConversationMessageRole.USER) {
-        items.push({ role: 'user', content: message.content });
+        items.push({ role: 'user', content: await this.toParts(message, input) });
         continue;
       }
-      items.push({ role: 'assistant', content: message.content });
+      items.push({ role: 'assistant', content: await this.toParts(message, input) });
     }
 
     return { summary, items };
@@ -156,27 +192,37 @@ export class ContextBuilderService {
   ): Promise<{ summary: string | null; history: HistoryMessage[] }> {
     const { conversation, turnId, membershipId, userId, requestId } = input;
 
-    const history = await this.prisma.conversationMessage.findMany({
-      where: { tenantId: conversation.tenantId, conversationId: conversation.id },
-      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-      select: { id: true, role: true, content: true, turnId: true, toolCallId: true },
-    });
-    const textHistory = history.filter((message) => message.role !== ConversationMessageRole.TOOL);
-
     const latestSummary = await this.prisma.conversationSummary.findFirst({
       where: { tenantId: conversation.tenantId, conversationId: conversation.id },
       orderBy: { createdAt: 'desc' },
-      select: { summary: true },
+      select: { summary: true, summarizedThroughMessageId: true },
     });
+
+    const history = await this.loadMessagesAfterBoundary(
+      conversation,
+      latestSummary?.summarizedThroughMessageId ?? null,
+    );
+    const textHistory = history.filter((message) => message.role !== ConversationMessageRole.TOOL);
 
     let summary = latestSummary?.summary ?? null;
 
     const budgets = await this.gateway.fetchChatContextBudgets();
-    const compactCount = this.resolveCompactionCount(input.mode, textHistory, summary, budgets);
+    let compactCount = this.resolveCompactionCount(input.mode, textHistory, summary, budgets);
     if (compactCount <= 0) {
       return { summary, history: includeToolMessages ? history : textHistory };
     }
 
+    // 压缩边界按 Turn 对齐：同一轮的剩余文本一起进入摘要，避免只摘要用户请求
+    // 却把该轮最终回答留在增量区间，造成语义重复或工具消息孤立。
+    const initialBoundary = textHistory[compactCount - 1];
+    if (initialBoundary?.turnId) {
+      while (
+        compactCount < textHistory.length
+        && textHistory[compactCount]?.turnId === initialBoundary.turnId
+      ) {
+        compactCount++;
+      }
+    }
     const toCompact = textHistory.slice(0, compactCount);
     const compacted = await this.gateway.compactChat(
       {
@@ -185,18 +231,22 @@ export class ContextBuilderService {
         user_id: userId,
         conversation_id: conversation.id,
         previous_summary: summary,
-        messages: toCompact.map(toChatMessage),
+        messages: await Promise.all(toCompact.map((message) => this.toChatMessage(message, input))),
       },
       { membershipId, turnId },
     );
     summary = compacted.summary;
+    const textBoundary = toCompact[toCompact.length - 1];
+    const persistedBoundary = textBoundary?.turnId
+      ? [...history].reverse().find((message) => message.turnId === textBoundary.turnId) ?? textBoundary
+      : textBoundary;
     await this.prisma.conversationSummary.create({
       data: {
         tenantId: conversation.tenantId,
         conversationId: conversation.id,
         summary: compacted.summary,
-        summarizedThroughMessageId:
-          compacted.summarized_through_message_id ?? toCompact[toCompact.length - 1]?.id ?? null,
+        // ai-service 只认识传入的文本消息；服务端使用按 Turn 对齐后的真实消息边界。
+        summarizedThroughMessageId: persistedBoundary?.id ?? null,
       },
     });
 
@@ -204,13 +254,9 @@ export class ContextBuilderService {
       return { summary, history: textHistory.slice(compactCount) };
     }
     // 工具轮次：截断点对齐轮次边界，丢弃被截断轮次的剩余消息。
-    const boundary = toCompact[toCompact.length - 1];
-    let startIndex = history.findIndex((message) => message.id === boundary.id) + 1;
-    if (boundary.turnId) {
-      while (startIndex < history.length && history[startIndex].turnId === boundary.turnId) {
-        startIndex++;
-      }
-    }
+    const startIndex = persistedBoundary
+      ? history.findIndex((message) => message.id === persistedBoundary.id) + 1
+      : 0;
     return { summary, history: history.slice(startIndex) };
   }
 
@@ -251,6 +297,78 @@ export class ContextBuilderService {
 
     return Math.max(countKeepFrom, tokenKeepFrom);
   }
+
+  /** 只读取最新摘要边界之后的增量消息，避免摘要与原始历史被重复注入。 */
+  private async loadMessagesAfterBoundary(
+    conversation: { id: string; tenantId: string },
+    boundaryId: string | null,
+  ): Promise<HistoryMessage[]> {
+    const select = {
+      id: true,
+      role: true,
+      content: true,
+      imageFileIds: true,
+      turnId: true,
+      toolCallId: true,
+    } as const;
+    if (!boundaryId) {
+      return this.prisma.conversationMessage.findMany({
+        where: { tenantId: conversation.tenantId, conversationId: conversation.id },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        select,
+      });
+    }
+
+    const boundary = await this.prisma.conversationMessage.findFirst({
+      where: {
+        id: boundaryId,
+        tenantId: conversation.tenantId,
+        conversationId: conversation.id,
+      },
+      select: { id: true, createdAt: true },
+    });
+    if (!boundary) {
+      throw new Error(`conversation summary boundary ${boundaryId} does not exist`);
+    }
+    return this.prisma.conversationMessage.findMany({
+      where: {
+        tenantId: conversation.tenantId,
+        conversationId: conversation.id,
+        OR: [
+          { createdAt: { gt: boundary.createdAt } },
+          { createdAt: boundary.createdAt, id: { gt: boundary.id } },
+        ],
+      },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      select,
+    });
+  }
+
+  private async toChatMessage(
+    message: HistoryMessage,
+    input: BuildChatRequestInput,
+  ): Promise<ChatMessage> {
+    return {
+      id: message.id,
+      role: message.role === ConversationMessageRole.USER ? 'user' : 'assistant',
+      content: await this.toParts(message, input),
+    };
+  }
+
+  private async toParts(
+    message: HistoryMessage,
+    input: BuildChatRequestInput,
+  ): Promise<MessageContentPart[]> {
+    return this.messageContent.toModelParts(
+      message.content,
+      message.imageFileIds,
+      {
+        tenantId: input.conversation.tenantId,
+        userId: input.userId,
+        membershipId: input.membershipId,
+      },
+    );
+  }
 }
 
 /** 复用 ai-service `app/chat/context.py` 的估算口径：UTF-8 字节数 / 4 上取整。 */
@@ -258,16 +376,13 @@ function estimateTextTokens(value: string): number {
   return Math.max(1, Math.ceil(Buffer.byteLength(value, 'utf8') / 4));
 }
 
+/** 估算消息 Token：固定开销 + 文本 + 图片引用，口径与 ai-service `context.py` 一致。 */
 function estimateMessageTokens(message: HistoryMessage): number {
-  return MESSAGE_OVERHEAD_TOKENS + estimateTextTokens(message.content);
-}
-
-function toChatMessage(message: HistoryMessage): ChatMessage {
-  return {
-    id: message.id,
-    role: message.role === ConversationMessageRole.USER ? 'user' : 'assistant',
-    content: message.content,
-  };
+  return (
+    MESSAGE_OVERHEAD_TOKENS
+    + estimateTextTokens(message.content)
+    + message.imageFileIds.length * IMAGE_TOKEN_ESTIMATE
+  );
 }
 
 function toJsonArguments(value: Prisma.JsonValue): Record<string, unknown> {

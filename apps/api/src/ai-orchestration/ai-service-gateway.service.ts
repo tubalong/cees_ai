@@ -51,6 +51,8 @@ export class AiServiceInvocationError extends Error {
 export interface ChatInvocationTracking {
   membershipId: string;
   turnId: string;
+  /** Service-side conversation identity for observability. */
+  conversationId?: string;
 }
 
 /** ai-service /ready 暴露的各聊天模式输入 Token 预算（context_budget_tokens）。 */
@@ -277,6 +279,7 @@ export class AiServiceGateway {
           tenantId: input.tenant_id,
           userId: input.user_id,
           membershipId: tracking.membershipId,
+          conversationId: tracking.conversationId ?? null,
           turnId: tracking.turnId,
           requestId: input.request_id,
           toolCallId: tracking.toolCallId,
@@ -294,6 +297,7 @@ export class AiServiceGateway {
       tenantId: input.tenant_id,
       userId: input.user_id,
       membershipId: tracking.membershipId,
+      conversationId: tracking.conversationId ?? null,
       turnId: tracking.turnId,
       requestId: input.request_id,
       toolCallId: tracking.toolCallId,
@@ -321,6 +325,7 @@ export class AiServiceGateway {
           tenantId: input.tenant_id,
           userId: input.user_id,
           membershipId: tracking.membershipId,
+          conversationId: tracking.conversationId ?? null,
           turnId: tracking.turnId,
           requestId: input.request_id,
           toolCallId: tracking.toolCallId,
@@ -338,6 +343,7 @@ export class AiServiceGateway {
       tenantId: input.tenant_id,
       userId: input.user_id,
       membershipId: tracking.membershipId,
+      conversationId: tracking.conversationId ?? null,
       turnId: tracking.turnId,
       requestId: input.request_id,
       toolCallId: tracking.toolCallId,

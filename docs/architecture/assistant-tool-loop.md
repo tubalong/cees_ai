@@ -1,6 +1,6 @@
 # AI 助手工具循环
 
-> 状态：阶段 0-4 已落地（纯文本会话迁移 + 服务端会话 + 断线重连 + 取消 + 幂等，2026-09-10）；阶段 5-6、9 已落地（Tool Loop / 统一注册与批准 / generate_image 图片生成，2026-09-11）；阶段 10 部分落地（generate_document 文档生成，2026-09-11）；额度（QuotaService）与任务、会议等其余工具执行器暂缓。本文件定义 NestJS 统一驱动的 Assistant Tool Loop 架构、数据模型、工具协议与实施顺序。最后更新：2026-09-11。
+> 状态：阶段 0-4 已落地（纯文本会话迁移 + 服务端会话 + 断线重连 + 取消 + 幂等，2026-09-10）；阶段 5-6、9 已落地（Tool Loop / 统一注册与批准 / generate_image 图片生成，2026-09-11）；阶段 10 部分落地（generate_document 文档生成，2026-09-11）；上下文压缩已升级为条数与 Token 预算双约束触发（2026-09-14，见 13.1）；额度（QuotaService）与任务、会议等其余工具执行器暂缓。本文件定义 NestJS 统一驱动的 Assistant Tool Loop 架构、数据模型、工具协议与实施顺序。最后更新：2026-09-14。
 
 ## 1. 目标与定位
 
@@ -316,7 +316,7 @@ POST   /conversations/{conversationId}/turns/{turnId}/cancel              取消
 | 0 | ✅ 落地 | 契约 0.19.0 重建（`/conversations/*` 6 端点 + `GET /images/{imageId}`）+ 客户端生成 |
 | 1 | ✅ 落地 | `AssistantModule` 建立；`AiServiceClientService` 改名 `AiServiceGateway`；旧 Chat 模块整体删除 |
 | 2 | ✅ 落地（部分） | Prisma migration：Conversation / ConversationMessage / ConversationSummary / AssistantTurn / AssistantEvent；额度账户留待额度体系阶段 |
-| 3 | ✅ 落地 | 纯文本轮次走 `/internal/v1/chat/stream`；历史与摘要服务端加载；超过 80 条自动压缩保留最近 20 条 |
+| 3 | ✅ 落地 | 纯文本轮次走 `/internal/v1/chat/stream`；历史与摘要服务端加载；压缩按消息数与 Token 预算双约束触发（见下方压缩说明） |
 | 4 | ✅ 落地 | 事件递增 seq、`events?afterSeq=N` 重放、显式 cancel、Idempotency-Key 幂等（同键同内容回放原 Turn，同键不同内容 409） |
 | 5 | ✅ 落地（2026-09-11） | Tool Loop 核心：TurnRunner 工具轮次分支（循环 + 硬上限 + assistant(tool_calls)/TOOL 回喂）；migration `0012_ai_tool_loop_image`（ToolCall / ManagedImage / ResourceType.IMAGE / FilePurpose.GENERATED_IMAGE / ToolCallStatus） |
 | 6 | ✅ 落地（部分） | `assistant/tools/`：ToolRegistry（listAllowed 权限过滤）+ ToolPolicyService（存在性/权限/参数两点批准）；QuotaService 暂缓 |
@@ -326,6 +326,7 @@ POST   /conversations/{conversationId}/turns/{turnId}/cancel              取消
 实现与设计的偏差（有意为之）：
 
 - 状态机跳过 `RECEIVED` 持久化（见 6.2）；
+- 压缩触发双约束：条数阈值（80 条）与各模式输入 Token 预算（ai-service `/ready` 暴露的 `chat_context_budgets`，NestJS 60s 短 TTL 缓存、失败回退默认 64K/128K）同时生效；估算输入超过预算 80% 即触发，压缩量取两约束中更激进（保留更少）的一方，压缩边界按 Turn 对齐；图片按固定 1024 Token 计入估算（与 ai-service 口径一致）；
 - 订阅端通过 DB 轮询（250ms）获取新事件，不依赖进程内消息通道，多实例部署安全；
 - 断线只中止订阅 signal，执行 signal 独立，后台 Turn 继续执行；
 - cancel 先抢状态（`RUNNING→CANCELLED` 的 updateMany），抢到者写终止事件并 abort 上游，抢不到返回 400；错过窗口由重放接口兜底；
