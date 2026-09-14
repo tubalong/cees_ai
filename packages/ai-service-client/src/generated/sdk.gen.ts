@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, ServerSentEventsResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { CompactChatData, CompactChatErrors, CompactChatResponses, ComposeDocumentData, ComposeDocumentErrors, ComposeDocumentResponses, EditImageData, EditImageErrors, EditImageResponses, GenerateDocumentDocxData, GenerateDocumentDocxErrors, GenerateDocumentDocxResponses, GenerateImageData, GenerateImageErrors, GenerateImageResponses, GetHealthData, GetHealthResponses, GetReadinessData, GetReadinessErrors, GetReadinessResponses, InvokeChatData, InvokeChatErrors, InvokeChatResponses, InvokeLlmData, InvokeLlmErrors, InvokeLlmResponses, PreviewImageData, PreviewImageErrors, PreviewImageResponses, RenderDocumentDocxData, RenderDocumentDocxErrors, RenderDocumentDocxResponses, StreamChatData, StreamChatErrors, StreamChatResponse, StreamChatResponses, StreamChatToolTurnData, StreamChatToolTurnErrors, StreamChatToolTurnResponse, StreamChatToolTurnResponses, StreamLlmData, StreamLlmErrors, StreamLlmResponse, StreamLlmResponses } from './types.gen';
+import type { CompactChatData, CompactChatErrors, CompactChatResponses, ComposeDocumentData, ComposeDocumentErrors, ComposeDocumentResponses, EditImageData, EditImageErrors, EditImageResponses, ExtractFileData, ExtractFileErrors, ExtractFileResponses, GenerateDocumentDocxData, GenerateDocumentDocxErrors, GenerateDocumentDocxResponses, GenerateImageData, GenerateImageErrors, GenerateImageResponses, GetHealthData, GetHealthResponses, GetReadinessData, GetReadinessErrors, GetReadinessResponses, InvokeChatData, InvokeChatErrors, InvokeChatResponses, InvokeLlmData, InvokeLlmErrors, InvokeLlmResponses, PreviewImageData, PreviewImageErrors, PreviewImageResponses, RenderDocumentDocxData, RenderDocumentDocxErrors, RenderDocumentDocxResponses, StreamChatData, StreamChatErrors, StreamChatResponse, StreamChatResponses, StreamChatToolTurnData, StreamChatToolTurnErrors, StreamChatToolTurnResponse, StreamChatToolTurnResponses, StreamLlmData, StreamLlmErrors, StreamLlmResponse, StreamLlmResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -218,6 +218,21 @@ export const renderDocumentDocx = <ThrowOnError extends boolean = false>(options
 export const generateDocumentDocx = <ThrowOnError extends boolean = false>(options: Options<GenerateDocumentDocxData, ThrowOnError>): RequestResult<GenerateDocumentDocxResponses, GenerateDocumentDocxErrors, ThrowOnError> => (options.client ?? client).post<GenerateDocumentDocxResponses, GenerateDocumentDocxErrors, ThrowOnError>({
     security: [{ name: 'X-AI-Internal-Token', type: 'apiKey' }],
     url: '/internal/v1/documents/generate-docx',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Extract plain text from a document
+ *
+ * Deterministically extracts plain text from uploaded file bytes without invoking an LLM. Supports plain text, Markdown, CSV, JSON, DOCX, PPTX, XLSX, and best-effort PDF. Returns MessageContentPart items ready for chat context assembly.
+ */
+export const extractFile = <ThrowOnError extends boolean = false>(options: Options<ExtractFileData, ThrowOnError>): RequestResult<ExtractFileResponses, ExtractFileErrors, ThrowOnError> => (options.client ?? client).post<ExtractFileResponses, ExtractFileErrors, ThrowOnError>({
+    security: [{ name: 'X-AI-Internal-Token', type: 'apiKey' }],
+    url: '/internal/v1/files/extract',
     ...options,
     headers: {
         'Content-Type': 'application/json',

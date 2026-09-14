@@ -31,6 +31,10 @@
     {
       "name": "images",
       "description": "Internal image generation endpoints available only to trusted CEES services."
+    },
+    {
+      "name": "files",
+      "description": "Internal text extraction from uploaded document bytes available only to trusted CEES services."
     }
   ],
   "paths": {
@@ -1086,6 +1090,60 @@
           },
           "503": {
             "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/internal/v1/files/extract": {
+      "post": {
+        "tags": [
+          "files"
+        ],
+        "operationId": "extractFile",
+        "summary": "Extract plain text from a document",
+        "description": "Deterministically extracts plain text from uploaded file bytes without invoking an LLM. Supports plain text, Markdown, CSV, JSON, DOCX, PPTX, XLSX, and best-effort PDF. Returns MessageContentPart items ready for chat context assembly.",
+        "security": [
+          {
+            "internalToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FileExtractionRequest"
+              },
+              "example": {
+                "request_id": "req-files-extract-001",
+                "tenant_id": "tenant-example",
+                "user_id": "user-example",
+                "filename": "brief.docx",
+                "content_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "data_base64": "UEsDBBQAAAAIAAAAIQAAAAAAAAAAAAAA"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Text extracted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileExtractionResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
           }
         }
       }
@@ -3178,6 +3236,98 @@
           },
           "execution": {
             "$ref": "#/components/schemas/ExecutionMetadata"
+          }
+        }
+      },
+      "FileExtractionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "request_id",
+          "tenant_id",
+          "user_id",
+          "content_type",
+          "data_base64"
+        ],
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "tenant_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "user_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "filename": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "content_type": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "data_base64": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 20971520,
+            "description": "Base64-encoded file bytes using the standard alphabet. The decoded size must not exceed 10 MiB."
+          }
+        }
+      },
+      "FileExtractionResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "request_id",
+          "parts",
+          "metadata"
+        ],
+        "properties": {
+          "request_id": {
+            "type": "string"
+          },
+          "parts": {
+            "type": "array",
+            "maxItems": 256,
+            "items": {
+              "$ref": "#/components/schemas/MessageContentPart"
+            }
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/FileExtractionMetadata"
+          }
+        }
+      },
+      "FileExtractionMetadata": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "content_type",
+          "engine",
+          "text_length"
+        ],
+        "properties": {
+          "content_type": {
+            "type": "string"
+          },
+          "engine": {
+            "type": "string"
+          },
+          "text_length": {
+            "type": "integer",
+            "minimum": 0
           }
         }
       },

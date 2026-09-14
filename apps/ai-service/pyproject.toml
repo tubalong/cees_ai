@@ -13,6 +13,7 @@ dependencies = [
     "llama-index-llms-langchain",
     "openai",
     "pydantic-settings",
+    "pymupdf>=1.28.2",
     "python-docx",
     "uvicorn[standard]",
 ]

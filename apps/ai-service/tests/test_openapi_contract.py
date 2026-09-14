@@ -31,6 +31,9 @@ SCHEMAS_TO_COMPARE = {
     "DocumentPlan",
     "RenderDocxRequest",
     "DocumentSpec",
+    "FileExtractionRequest",
+    "FileExtractionResponse",
+    "FileExtractionMetadata",
     "ErrorResponse",
 }
 

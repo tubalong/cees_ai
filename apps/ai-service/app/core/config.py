@@ -108,11 +108,17 @@ class ChatConfig(BaseModel):
     compaction_context_budget_tokens: int = Field(default=65536, ge=1024, le=2_000_000)
 
 
+class ExtractionConfig(BaseModel):
+    max_bytes: int = Field(default=10 * 1024 * 1024, ge=1)
+    max_part_text_chars: int = Field(default=200_000, ge=1, le=262_144)
+
+
 class ModelCatalog(BaseModel):
     profiles: dict[str, ModelProfile] = Field(min_length=1)
     roles: dict[ModelRole, list[str]] = Field(default_factory=dict)
     chat: ChatConfig | None = None
     image_profiles: dict[str, ImageProfile] = Field(default_factory=dict)
+    extraction: ExtractionConfig | None = None
 
     @field_validator("profiles")
     @classmethod

@@ -634,6 +634,30 @@ class InvokeResponse(BaseModel):
     execution: ExecutionMetadata
 
 
+class FileExtractionRequest(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    request_id: constr(min_length=1, max_length=128)
+    tenant_id: constr(min_length=1, max_length=128)
+    user_id: constr(min_length=1, max_length=128)
+    filename: constr(min_length=1, max_length=256) | None = None
+    content_type: constr(min_length=1, max_length=128)
+    data_base64: constr(min_length=1, max_length=20971520) = Field(
+        ...,
+        description='Base64-encoded file bytes using the standard alphabet. The decoded size must not exceed 10 MiB.',
+    )
+
+
+class FileExtractionMetadata(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    content_type: str
+    engine: str
+    text_length: conint(ge=0)
+
+
 class ErrorDetail(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
@@ -806,3 +830,14 @@ class ComposeDocumentResponse(BaseModel):
     plan: DocumentPlan | None = None
     planning_execution: ExecutionMetadata | None = None
     execution: ExecutionMetadata
+
+
+class FileExtractionResponse(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    request_id: str
+    parts: list[
+        Annotated[TextContentPart | ImageContentPart, Field(discriminator='type')]
+    ] = Field(..., max_length=256)
+    metadata: FileExtractionMetadata

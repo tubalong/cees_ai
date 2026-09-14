@@ -57,3 +57,7 @@ max_retries = 0
 default = ["mock"]
 reasoning = ["mock"]
 orchestrator = ["primary"]
+
+[extraction]
+max_bytes = 1234
+max_part_text_chars = 100

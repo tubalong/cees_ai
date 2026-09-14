@@ -81,3 +81,7 @@ structured = ["primary", "backup"]
 reasoning = ["primary", "backup"]
 rag = ["primary", "backup"]
 orchestrator = ["primary", "backup", "vision-primary"]
+
+[extraction]
+max_bytes = 10485760
+max_part_text_chars = 200000

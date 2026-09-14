@@ -541,6 +541,30 @@ export type InvokeResponse = {
     execution: ExecutionMetadata;
 };
 
+export type FileExtractionRequest = {
+    request_id: string;
+    tenant_id: string;
+    user_id: string;
+    filename?: string | null;
+    content_type: string;
+    /**
+     * Base64-encoded file bytes using the standard alphabet. The decoded size must not exceed 10 MiB.
+     */
+    data_base64: string;
+};
+
+export type FileExtractionResponse = {
+    request_id: string;
+    parts: Array<MessageContentPart>;
+    metadata: FileExtractionMetadata;
+};
+
+export type FileExtractionMetadata = {
+    content_type: string;
+    engine: string;
+    text_length: number;
+};
+
 export type ErrorDetail = {
     code: string;
     message: string;
@@ -1133,3 +1157,36 @@ export type GenerateDocumentDocxResponses = {
 };
 
 export type GenerateDocumentDocxResponse = GenerateDocumentDocxResponses[keyof GenerateDocumentDocxResponses];
+
+export type ExtractFileData = {
+    body: FileExtractionRequest;
+    path?: never;
+    query?: never;
+    url: '/internal/v1/files/extract';
+};
+
+export type ExtractFileErrors = {
+    /**
+     * Internal authentication failed
+     */
+    401: ErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ErrorResponse;
+    /**
+     * Unexpected internal service error
+     */
+    500: ErrorResponse;
+};
+
+export type ExtractFileError = ExtractFileErrors[keyof ExtractFileErrors];
+
+export type ExtractFileResponses = {
+    /**
+     * Text extracted
+     */
+    200: FileExtractionResponse;
+};
+
+export type ExtractFileResponse = ExtractFileResponses[keyof ExtractFileResponses];
