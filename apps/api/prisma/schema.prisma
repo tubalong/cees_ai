@@ -251,6 +251,22 @@ enum ManagedImageStatus {
   ORPHANED
 }
 
+enum DingTalkIntegrationStatus {
+  ACTIVE
+  DISABLED
+  ERROR
+}
+
+enum DingTalkSyncJobStatus {
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
+enum DingTalkSyncType {
+  FULL_ORGANIZATION
+}
+
 model Tenant {
   id                     String                  @id @default(uuid()) @db.Uuid
   code                   String                  @unique
@@ -283,6 +299,10 @@ model Tenant {
   workReportTasks        WorkReportTask[]
   notifications          Notification[]
   notificationRecipients NotificationRecipient[]
+  dingTalkIntegration    DingTalkIntegration?
+  dingTalkDepartments    DingTalkDepartment[]
+  dingTalkUsers          DingTalkUser[]
+  dingTalkSyncJobs       DingTalkSyncJob[]
   createdAt              DateTime                @default(now()) @map("created_at")
   updatedAt              DateTime                @updatedAt @map("updated_at")
   deletedAt              DateTime?               @map("deleted_at")
@@ -352,6 +372,7 @@ model TenantMembership {
   publishedMinutes      MeetingMinutes[]       @relation("MeetingMinutesPublisherMembership")
   authoredWorkReports   WorkReport[]           @relation("WorkReportAuthorMembership")
   reviewedWorkReports   WorkReport[]           @relation("WorkReportReviewerMembership")
+  dingTalkUserBindings  DingTalkUser[]
   createdAt             DateTime               @default(now()) @map("created_at")
   updatedAt             DateTime               @updatedAt @map("updated_at")
   createdBy             String?                @map("created_by") @db.Uuid
@@ -437,26 +458,27 @@ model PlatformAuthSession {
 }
 
 model Department {
-  id             String             @id @default(uuid()) @db.Uuid
-  tenantId       String             @map("tenant_id") @db.Uuid
-  tenant         Tenant             @relation(fields: [tenantId], references: [id])
-  parentId       String?            @map("parent_id") @db.Uuid
-  parent         Department?        @relation("DepartmentHierarchy", fields: [parentId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  children       Department[]       @relation("DepartmentHierarchy")
-  name           String
-  normalizedName String             @map("normalized_name")
-  description    String?
-  sortOrder      Int                @default(0) @map("sort_order")
-  status         DepartmentStatus   @default(ACTIVE)
-  memberships    TenantMembership[]
-  projects       Project[]
-  meetings       Meeting[]
-  createdAt      DateTime           @default(now()) @map("created_at")
-  updatedAt      DateTime           @updatedAt @map("updated_at")
-  createdBy      String?            @map("created_by") @db.Uuid
-  updatedBy      String?            @map("updated_by") @db.Uuid
-  deletedAt      DateTime?          @map("deleted_at")
-  version        Int                @default(1)
+  id                         String               @id @default(uuid()) @db.Uuid
+  tenantId                   String               @map("tenant_id") @db.Uuid
+  tenant                     Tenant               @relation(fields: [tenantId], references: [id])
+  parentId                   String?              @map("parent_id") @db.Uuid
+  parent                     Department?          @relation("DepartmentHierarchy", fields: [parentId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  children                   Department[]         @relation("DepartmentHierarchy")
+  name                       String
+  normalizedName             String               @map("normalized_name")
+  description                String?
+  sortOrder                  Int                  @default(0) @map("sort_order")
+  status                     DepartmentStatus     @default(ACTIVE)
+  memberships                TenantMembership[]
+  projects                   Project[]
+  meetings                   Meeting[]
+  dingTalkDepartmentBindings DingTalkDepartment[]
+  createdAt                  DateTime             @default(now()) @map("created_at")
+  updatedAt                  DateTime             @updatedAt @map("updated_at")
+  createdBy                  String?              @map("created_by") @db.Uuid
+  updatedBy                  String?              @map("updated_by") @db.Uuid
+  deletedAt                  DateTime?            @map("deleted_at")
+  version                    Int                  @default(1)
 
   @@index([tenantId, parentId])
   @@index([tenantId, status, sortOrder])
@@ -918,6 +940,105 @@ model UploadSession {
   @@unique([bucket, objectKey])
   @@index([tenantId, status, expiresAt])
   @@map("upload_sessions")
+}
+
+model DingTalkIntegration {
+  id                  String                    @id @default(uuid()) @db.Uuid
+  tenantId            String                    @unique @map("tenant_id") @db.Uuid
+  tenant              Tenant                    @relation(fields: [tenantId], references: [id])
+  corpId              String                    @unique @map("corp_id")
+  appKey              String                    @map("app_key")
+  appSecretCiphertext String                    @map("app_secret_ciphertext")
+  status              DingTalkIntegrationStatus @default(ACTIVE)
+  lastVerifiedAt      DateTime?                 @map("last_verified_at")
+  lastSyncedAt        DateTime?                 @map("last_synced_at")
+  lastErrorCode       String?                   @map("last_error_code")
+  lastErrorMessage    String?                   @map("last_error_message")
+  departments         DingTalkDepartment[]
+  users               DingTalkUser[]
+  syncJobs            DingTalkSyncJob[]
+  createdAt           DateTime                  @default(now()) @map("created_at")
+  updatedAt           DateTime                  @updatedAt @map("updated_at")
+  createdBy           String?                   @map("created_by") @db.Uuid
+  updatedBy           String?                   @map("updated_by") @db.Uuid
+  version             Int                       @default(1)
+
+  @@index([tenantId, status])
+  @@map("dingtalk_integrations")
+}
+
+model DingTalkDepartment {
+  id                         String              @id @default(uuid()) @db.Uuid
+  tenantId                   String              @map("tenant_id") @db.Uuid
+  tenant                     Tenant              @relation(fields: [tenantId], references: [id])
+  integrationId              String              @map("integration_id") @db.Uuid
+  integration                DingTalkIntegration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  externalDepartmentId       String              @map("external_department_id")
+  parentExternalDepartmentId String?             @map("parent_external_department_id")
+  departmentId               String?             @map("department_id") @db.Uuid
+  department                 Department?         @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  name                       String
+  displayOrder               Int                 @default(0) @map("display_order")
+  isDeleted                  Boolean             @default(false) @map("is_deleted")
+  lastSeenAt                 DateTime            @map("last_seen_at")
+  createdAt                  DateTime            @default(now()) @map("created_at")
+  updatedAt                  DateTime            @updatedAt @map("updated_at")
+
+  @@unique([integrationId, externalDepartmentId])
+  @@index([tenantId, parentExternalDepartmentId])
+  @@index([tenantId, departmentId])
+  @@map("dingtalk_departments")
+}
+
+model DingTalkUser {
+  id                    String              @id @default(uuid()) @db.Uuid
+  tenantId              String              @map("tenant_id") @db.Uuid
+  tenant                Tenant              @relation(fields: [tenantId], references: [id])
+  integrationId         String              @map("integration_id") @db.Uuid
+  integration           DingTalkIntegration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  externalUserId        String              @map("external_user_id")
+  unionId               String?             @map("union_id")
+  membershipId          String?             @map("membership_id") @db.Uuid
+  membership            TenantMembership?   @relation(fields: [membershipId], references: [id], onDelete: SetNull)
+  name                  String
+  title                 String?
+  jobNumber             String?             @map("job_number")
+  departmentExternalIds Json                @map("department_external_ids")
+  active                Boolean             @default(true)
+  admin                 Boolean             @default(false)
+  boss                  Boolean             @default(false)
+  isDeleted             Boolean             @default(false) @map("is_deleted")
+  lastSeenAt            DateTime            @map("last_seen_at")
+  createdAt             DateTime            @default(now()) @map("created_at")
+  updatedAt             DateTime            @updatedAt @map("updated_at")
+
+  @@unique([integrationId, externalUserId])
+  @@unique([integrationId, membershipId])
+  @@index([tenantId, membershipId])
+  @@index([tenantId, active, isDeleted])
+  @@map("dingtalk_users")
+}
+
+model DingTalkSyncJob {
+  id              String                @id @default(uuid()) @db.Uuid
+  tenantId        String                @map("tenant_id") @db.Uuid
+  tenant          Tenant                @relation(fields: [tenantId], references: [id])
+  integrationId   String                @map("integration_id") @db.Uuid
+  integration     DingTalkIntegration   @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  type            DingTalkSyncType      @default(FULL_ORGANIZATION)
+  status          DingTalkSyncJobStatus @default(RUNNING)
+  departmentCount Int                   @default(0) @map("department_count")
+  userCount       Int                   @default(0) @map("user_count")
+  errorCode       String?               @map("error_code")
+  errorMessage    String?               @map("error_message")
+  startedAt       DateTime              @default(now()) @map("started_at")
+  completedAt     DateTime?             @map("completed_at")
+  createdBy       String?               @map("created_by") @db.Uuid
+  createdAt       DateTime              @default(now()) @map("created_at")
+
+  @@index([tenantId, createdAt])
+  @@index([integrationId, status])
+  @@map("dingtalk_sync_jobs")
 }
 
 model KnowledgeBase {

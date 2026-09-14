@@ -1,6 +1,6 @@
 # Assistant / Conversation API
 
-> 公开契约版本：`0.20.0`  
+> 公开契约版本：`0.22.0`  
 > 契约事实源：[`packages/contracts/openapi/openapi.yaml`](../../packages/contracts/openapi/openapi.yaml)  
 > 最后更新：2026-09-14
 

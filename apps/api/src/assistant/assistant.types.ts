@@ -1,5 +1,5 @@
 /**
- * 公开 /conversations 资源类型，与 packages/contracts 0.20.0 的
+ * 公开 /conversations 资源类型，与 packages/contracts 0.22.0 的
  * TurnStreamEvent / Conversation 系列 schema 一一对应；契约是唯一事实源，
  * 本文件仅提供 NestJS 实现侧的类型约束。
  */
@@ -74,7 +74,7 @@ export type PublicToolResultStatus = 'completed' | 'failed' | 'rejected';
 
 /**
  * 公开轮次事件联合。纯文本轮次只产出 started/status/content_delta/usage/completed/error；
- * 工具轮次额外产出 tool_call / tool_result，结构与公开契约 0.20.0 的
+ * 工具轮次额外产出 tool_call / tool_result，结构与公开契约 0.22.0 的
  * TurnStreamToolCallEvent / TurnStreamToolResultEvent 一致。
  */
 export type PublicTurnStreamEvent =

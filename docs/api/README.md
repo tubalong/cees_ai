@@ -7,7 +7,10 @@
 
 ### 契约版本与迁移
 
-- **0.20.0**：当前开发基线。`/api/v1/chat/*` 已删除，正式入口为服务端权威的 `/api/v1/conversations/*`；已包含会话生命周期、SSE 轮次/重放/取消、`generate_image`、`generate_document`、多模态图片引用，以及知识库管理契约。客户端需要重新生成；知识库文档解析、切片、向量化和 RAG 仍不在本版本范围内。
+- **0.19.0**：删除 `/api/v1/chat/*` 旧对话接口（invoke / stream / compact），以 `/api/v1/conversations/*` 会话、轮次、事件重放资源重建，并新增工具循环（generate_image / generate_document）与公开图片访问 `GET /api/v1/images/{imageId}`。旧客户端迁移到 `createConversation` / `createTurn` / `replayTurnEvents`；`chat` 相关生成模型与客户端已移除。
+- **0.20.0**：新增知识库 CRUD、知识库成员管理和 `READER`/`EDITOR`/`MANAGER` 权限契约；新增 `KnowledgeBase*` Schema 和 9 个公开操作。客户端需要重新生成；文档上传、解析、切片、向量化和 RAG 仍不在本版本范围内。
+- **0.21.0**：新增钉钉企业绑定、凭证验证、组织架构和人员镜像同步、同步任务查询，共 8 个公开操作；客户端需要重新生成。考勤、请假、文档、消息和 AI 派发仍不在本版本范围内。
+- **0.22.0**：当前开发基线。会话生命周期补全（UpdateConversationRequest、lastTurnAt、version 乐观锁）、多模态图片引用（CreateTurnRequest.imageFileIds）与 `tool_result.resource {type,id}` 稳定资源引用重构。客户端需要重新生成。
 
 ## 设计草案
 
@@ -31,6 +34,7 @@
 - [Assistant / Conversation API](assistant-api.md)
 - [公开 AI 对话链路与 Token 计量](../architecture/public-chat-api-and-token-metering.md)
 - [用户个人资料管理](../product/user-profile-management.md)
+- [钉钉组织架构与人员同步 API](dingtalk-organization-sync-api.md)
 - [密码修改与凭证安全](../security/password-management.md)
 - [平台使用、接口与数据库字典](../product/platform-usage-guide.md)：按当前 OpenAPI 汇总全部接口、请求参数和验证顺序。
 

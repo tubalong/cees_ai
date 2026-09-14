@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CEES AI API
-  version: 0.20.0
+  version: 0.22.0
   description: 以本文件为唯一事实源的公开 API 契约。资源与操作按 docs/api 约定补充。
 
 servers:
@@ -4576,6 +4576,179 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
 
+  /dingtalk/integration:
+    get:
+      summary: 查询当前租户钉钉企业绑定
+      operationId: getDingTalkIntegration
+      tags: [DingTalk]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: 钉钉企业绑定
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DingTalkIntegrationResponseEnvelope' }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 dingtalk.integration.read 权限 }
+        '404': { description: 当前租户尚未绑定钉钉企业 }
+    post:
+      summary: 创建当前租户钉钉企业绑定
+      operationId: createDingTalkIntegration
+      tags: [DingTalk]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateDingTalkIntegrationRequest' }
+      responses:
+        '201':
+          description: 钉钉企业绑定已创建
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DingTalkIntegrationResponseEnvelope' }
+        '400': { description: 请求字段校验失败 }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 dingtalk.integration.manage 权限 }
+        '409': { description: 当前租户或钉钉企业已经存在绑定 }
+    patch:
+      summary: 修改当前租户钉钉企业绑定
+      operationId: updateDingTalkIntegration
+      tags: [DingTalk]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateDingTalkIntegrationRequest' }
+      responses:
+        '200':
+          description: 钉钉企业绑定已修改
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DingTalkIntegrationResponseEnvelope' }
+        '400': { description: 请求字段校验失败 }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 dingtalk.integration.manage 权限 }
+        '404': { description: 当前租户尚未绑定钉钉企业 }
+        '409': { description: version 与服务端当前版本不一致 }
+
+  /dingtalk/integration/verify:
+    post:
+      summary: 验证当前租户钉钉应用凭证
+      operationId: verifyDingTalkIntegration
+      tags: [DingTalk]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: 凭证验证成功
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DingTalkIntegrationResponseEnvelope' }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 dingtalk.integration.manage 权限 }
+        '404': { description: 当前租户尚未绑定钉钉企业 }
+        '502': { description: 钉钉开放平台凭证验证失败 }
+
+  /dingtalk/organization/sync:
+    post:
+      summary: 同步钉钉组织架构和人员
+      description: 全量拉取钉钉部门和人员并保存为当前租户的外部镜像；不会自动创建 CEES 登录账号。
+      operationId: syncDingTalkOrganization
+      tags: [DingTalk]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: 同步完成
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DingTalkSyncJobResponseEnvelope' }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 dingtalk.organization.sync 权限 }
+        '404': { description: 当前租户尚未绑定钉钉企业 }
+        '409': { description: 当前集成已有同步任务运行中 }
+        '502': { description: 钉钉开放平台同步失败 }
+
+  /dingtalk/organization/departments:
+    get:
+      summary: 查询钉钉部门镜像
+      operationId: listDingTalkDepartments
+      tags: [DingTalk]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - name: cursor
+          in: query
+          schema: { type: string, format: uuid }
+        - name: includeDeleted
+          in: query
+          description: 是否包含已从钉钉组织中删除的部门
+          schema: { type: boolean, default: false }
+      responses:
+        '200':
+          description: 钉钉部门镜像列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DingTalkDepartmentListResponseEnvelope' }
+        '400': { description: 分页参数无效 }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 dingtalk.organization.read 权限 }
+        '404': { description: 当前租户尚未绑定钉钉企业 }
+
+  /dingtalk/organization/users:
+    get:
+      summary: 查询钉钉人员镜像
+      operationId: listDingTalkUsers
+      tags: [DingTalk]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - name: cursor
+          in: query
+          schema: { type: string, format: uuid }
+        - name: includeDeleted
+          in: query
+          description: 是否包含已离职或已从钉钉组织中删除的人员
+          schema: { type: boolean, default: false }
+      responses:
+        '200':
+          description: 钉钉人员镜像列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DingTalkUserListResponseEnvelope' }
+        '400': { description: 分页参数无效 }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 dingtalk.organization.read 权限 }
+        '404': { description: 当前租户尚未绑定钉钉企业 }
+
+  /dingtalk/sync-jobs:
+    get:
+      summary: 查询钉钉同步任务
+      operationId: listDingTalkSyncJobs
+      tags: [DingTalk]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - name: cursor
+          in: query
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: 钉钉同步任务列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DingTalkSyncJobListResponseEnvelope' }
+        '400': { description: 分页参数无效 }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 dingtalk.integration.read 权限 }
+        '404': { description: 当前租户尚未绑定钉钉企业 }
+
   /knowledge-bases/{knowledgeBaseId}/members/{membershipId}:
     parameters:
       - name: knowledgeBaseId
@@ -9019,6 +9192,174 @@ components:
           $ref: "#/components/schemas/PlatformAuditEventList"
         requestId:
           type: [string, "null"]
+
+    DingTalkIntegrationStatus:
+      type: string
+      enum: [ACTIVE, DISABLED, ERROR]
+
+    DingTalkSyncJobStatus:
+      type: string
+      enum: [RUNNING, SUCCEEDED, FAILED]
+
+    DingTalkSyncType:
+      type: string
+      enum: [FULL_ORGANIZATION]
+
+    DingTalkIntegration:
+      type: object
+      required: [id, tenantId, corpId, appKey, status, lastVerifiedAt, lastSyncedAt, lastErrorCode, lastErrorMessage, version, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        corpId: { type: string }
+        appKey: { type: string }
+        status:
+          type: string
+          enum: [ACTIVE, DISABLED]
+        lastVerifiedAt: { type: [string, 'null'], format: date-time }
+        lastSyncedAt: { type: [string, 'null'], format: date-time }
+        lastErrorCode: { type: [string, 'null'] }
+        lastErrorMessage: { type: [string, 'null'] }
+        version: { type: integer, minimum: 1 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    DingTalkDepartment:
+      type: object
+      required: [id, externalDepartmentId, parentExternalDepartmentId, departmentId, name, displayOrder, isDeleted, lastSeenAt, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        externalDepartmentId: { type: string }
+        parentExternalDepartmentId: { type: [string, 'null'] }
+        departmentId: { type: [string, 'null'], format: uuid }
+        name: { type: string }
+        displayOrder: { type: integer }
+        isDeleted: { type: boolean }
+        lastSeenAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    DingTalkDepartmentList:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/DingTalkDepartment' }
+        nextCursor: { type: [string, 'null'], format: uuid }
+
+    DingTalkUser:
+      type: object
+      required: [id, externalUserId, unionId, membershipId, name, title, jobNumber, departmentExternalIds, active, admin, boss, isDeleted, lastSeenAt, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        externalUserId: { type: string }
+        unionId: { type: [string, 'null'] }
+        membershipId: { type: [string, 'null'], format: uuid }
+        name: { type: string }
+        title: { type: [string, 'null'] }
+        jobNumber: { type: [string, 'null'] }
+        departmentExternalIds: { type: array, items: { type: string } }
+        active: { type: boolean }
+        admin: { type: boolean }
+        boss: { type: boolean }
+        isDeleted: { type: boolean }
+        lastSeenAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    DingTalkUserList:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/DingTalkUser' }
+        nextCursor: { type: [string, 'null'], format: uuid }
+
+    DingTalkSyncJob:
+      type: object
+      required: [id, integrationId, type, status, departmentCount, userCount, errorCode, errorMessage, startedAt, completedAt, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        integrationId: { type: string, format: uuid }
+        type: { $ref: '#/components/schemas/DingTalkSyncType' }
+        status: { $ref: '#/components/schemas/DingTalkSyncJobStatus' }
+        departmentCount: { type: integer, minimum: 0 }
+        userCount: { type: integer, minimum: 0 }
+        errorCode: { type: [string, 'null'] }
+        errorMessage: { type: [string, 'null'] }
+        startedAt: { type: string, format: date-time }
+        completedAt: { type: [string, 'null'], format: date-time }
+        createdAt: { type: string, format: date-time }
+
+    DingTalkSyncJobList:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/DingTalkSyncJob' }
+        nextCursor: { type: [string, 'null'], format: uuid }
+
+    CreateDingTalkIntegrationRequest:
+      type: object
+      additionalProperties: false
+      required: [corpId, appKey, appSecret]
+      properties:
+        corpId: { type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9._-]+$' }
+        appKey: { type: string, minLength: 1, maxLength: 128 }
+        appSecret: { type: string, minLength: 1, maxLength: 512, format: password }
+
+    UpdateDingTalkIntegrationRequest:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        appKey: { type: string, minLength: 1, maxLength: 128 }
+        appSecret: { type: string, minLength: 1, maxLength: 512, format: password }
+        status: { $ref: '#/components/schemas/DingTalkIntegrationStatus' }
+        version: { type: integer, minimum: 1 }
+
+    DingTalkIntegrationResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/DingTalkIntegration' }
+        requestId: { type: [string, 'null'] }
+
+    DingTalkDepartmentListResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/DingTalkDepartmentList' }
+        requestId: { type: [string, 'null'] }
+
+    DingTalkUserListResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/DingTalkUserList' }
+        requestId: { type: [string, 'null'] }
+
+    DingTalkSyncJobResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/DingTalkSyncJob' }
+        requestId: { type: [string, 'null'] }
+
+    DingTalkSyncJobListResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/DingTalkSyncJobList' }
+        requestId: { type: [string, 'null'] }
 
     ApiErrorDetail:
       type: object
