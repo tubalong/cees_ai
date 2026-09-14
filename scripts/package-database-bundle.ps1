@@ -350,6 +350,9 @@ Git Commit：$gitCommit
        grep "change_me" $environmentFileName
        chmod 600 $environmentFileName
 
+   同时确认 DB_BIND_IP 是本机网卡上已分配的私网地址（ip -4 addr show）。公网 IP/EIP 经 NAT
+   映射，未配置在网卡上，直接绑定会以 "cannot assign requested address" 启动失败。
+
 2. 一键部署：
 
        bash deploy-db.sh $Environment
