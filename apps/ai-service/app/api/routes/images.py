@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import uuid
+from enum import Enum
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Query, Request, Response
@@ -89,12 +90,8 @@ async def generate_image(
         request_id=payload.request_id,
         prompt=payload.prompt,
         size=payload.size if payload.size is not None else "1024x1024",
-        quality=payload.quality.value if payload.quality is not None else "standard",
-        response_format=(
-            payload.response_format.value
-            if payload.response_format is not None
-            else "png"
-        ),
+        quality=_enum_value(payload.quality, "standard"),
+        response_format=_enum_value(payload.response_format, "png"),
     )
     return _image_response(payload.request_id, routed)
 
@@ -117,17 +114,9 @@ async def edit_image(
         prompt=payload.prompt,
         source_image=source_image,
         size=payload.size if payload.size is not None else "1024x1024",
-        quality=payload.quality.value if payload.quality is not None else "standard",
-        response_format=(
-            payload.response_format.value
-            if payload.response_format is not None
-            else "png"
-        ),
-        input_fidelity=(
-            payload.input_fidelity.value
-            if payload.input_fidelity is not None
-            else "high"
-        ),
+        quality=_enum_value(payload.quality, "standard"),
+        response_format=_enum_value(payload.response_format, "png"),
+        input_fidelity=_enum_value(payload.input_fidelity, "high"),
     )
     return _image_response(payload.request_id, routed)
 
@@ -161,6 +150,15 @@ async def preview_image(
         response_format=response_format,
     )
     return Response(content=routed.data, media_type=routed.content_type)
+
+
+def _enum_value(value: Enum | str | None, default: str) -> str:
+    """生成模型中枚举字段的默认值是字符串字面量，Pydantic 不转换默认值。
+    字段缺失时拿到的是 str，显式传入时拿到的是 Enum，统一取 .value。
+    """
+    if value is None:
+        return default
+    return value.value if isinstance(value, Enum) else value
 
 
 def _decode_source_image(payload: ImageEditRequest) -> bytes:

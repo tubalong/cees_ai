@@ -170,6 +170,34 @@ def test_image_generate_accepts_arbitrary_size() -> None:
     assert response.json()["request_id"] == "req-image-1"
 
 
+def test_image_generate_accepts_missing_optional_fields() -> None:
+    model_catalog = image_catalog()
+    llm_router = LLMRouter(model_catalog, lambda _name, _profile: object())
+    image_router = ImageRouter(model_catalog)
+    client = TestClient(
+        create_app(runtime=ready_runtime(llm_router, model_catalog, image_router=image_router))
+    )
+
+    payload = {
+        "request_id": "req-image-1",
+        "tenant_id": "tenant-1",
+        "user_id": "user-1",
+        "prompt": "A cat",
+    }
+
+    with client:
+        response = client.post(
+            "/internal/v1/images/generate",
+            headers={"X-AI-Internal-Token": "secret"},
+            json=payload,
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["content_type"] == "image/png"
+    assert body["execution"]["profile"] == "mock"
+
+
 def test_image_preview_returns_raw_bytes_with_header_token() -> None:
     model_catalog = image_catalog()
     llm_router = LLMRouter(model_catalog, lambda _name, _profile: object())
@@ -244,6 +272,35 @@ def test_image_edit_returns_mock_image_and_metadata() -> None:
     assert body["execution"]["profile"] == "mock"
     assert body["execution"]["provider"] == "mock"
     assert body["execution"]["model"] == "mock-image-v1"
+
+
+def test_image_edit_accepts_missing_optional_fields() -> None:
+    model_catalog = image_catalog()
+    llm_router = LLMRouter(model_catalog, lambda _name, _profile: object())
+    image_router = ImageRouter(model_catalog)
+    client = TestClient(
+        create_app(runtime=ready_runtime(llm_router, model_catalog, image_router=image_router))
+    )
+
+    payload = {
+        "request_id": "req-edit-1",
+        "tenant_id": "tenant-1",
+        "user_id": "user-1",
+        "prompt": "Make the colors warmer",
+        "source_image_base64": base64.b64encode(b"source-image-bytes").decode("ascii"),
+    }
+
+    with client:
+        response = client.post(
+            "/internal/v1/images/edit",
+            headers={"X-AI-Internal-Token": "secret"},
+            json=payload,
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["content_type"] == "image/png"
+    assert body["execution"]["profile"] == "mock"
 
 
 def test_image_edit_rejects_invalid_source_base64() -> None:
