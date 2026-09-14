@@ -3,6 +3,7 @@ import { AuditOutcome, Prisma } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
 import { TenantContext } from '../tenant/tenant-context';
 import { CreateRoleDto, ListRolesQueryDto, ReplaceRolePermissionsDto, UpdateRoleDto } from './dto';
+import { DEFAULT_ROLE_PERMISSION_CODES } from './permission-catalog';
 import { PermissionListResult, RoleListResult, RoleResult } from './rbac.types';
 
 const roleInclude = {
@@ -97,6 +98,20 @@ export class RbacService {
                     },
                     select: { id: true },
                 });
+                // 新角色默认拥有图片/文档的生成与查看权限，管理员可在角色编辑中调整。
+                const defaultPermissions = await transaction.permission.findMany({
+                    where: { code: { in: [...DEFAULT_ROLE_PERMISSION_CODES] } },
+                    select: { id: true },
+                });
+                if (defaultPermissions.length > 0) {
+                    await transaction.rolePermission.createMany({
+                        data: defaultPermissions.map((permission) => ({
+                            tenantId: context.tenantId,
+                            roleId: role.id,
+                            permissionId: permission.id,
+                        })),
+                    });
+                }
                 await transaction.auditLog.create({
                     data: {
                         tenantId: context.tenantId,

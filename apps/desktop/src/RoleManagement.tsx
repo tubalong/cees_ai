@@ -13,6 +13,9 @@ interface RoleFormValues extends CreateRoleInput {
     permissionIds: string[];
 }
 
+/** 与后端 rbac.permission-catalog.DEFAULT_ROLE_PERMISSION_CODES 保持一致。 */
+const DEFAULT_ROLE_PERMISSION_CODES = ['image.read', 'document.read', 'ai.image.generate', 'ai.document.generate'];
+
 const dataScopeOptions: Array<{ label: string; value: DataScope }> = [
     { label: '仅本人', value: 'SELF' },
     { label: '本部门', value: 'DEPARTMENT' },
@@ -99,7 +102,10 @@ export default function RoleManagement({ authContext, onSessionExpired }: { auth
     const openCreate = (): void => {
         setEditingRole(undefined);
         form.resetFields();
-        form.setFieldsValue({ dataScope: 'SELF', permissionIds: [] });
+        const defaultPermissionIds = (permissionsQuery.data?.items ?? [])
+            .filter((permission) => DEFAULT_ROLE_PERMISSION_CODES.includes(permission.code))
+            .map((permission) => permission.id);
+        form.setFieldsValue({ dataScope: 'SELF', permissionIds: defaultPermissionIds });
         setDialogOpen(true);
     };
     const openEdit = (role: TenantRole): void => {

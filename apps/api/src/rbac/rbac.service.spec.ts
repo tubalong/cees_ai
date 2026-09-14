@@ -36,10 +36,14 @@ describe('RbacService', () => {
         }));
     });
 
-    it('creates a tenant role and writes audit', async () => {
+    it('creates a tenant role with default AI permissions and writes audit', async () => {
         const prisma = createPrismaMock();
         prisma.role.findUnique.mockResolvedValue(null);
         prisma.role.create.mockResolvedValue({ id: ROLE_ID });
+        prisma.permission.findMany.mockResolvedValue([
+            permissionRecord(PERMISSION_ID, 'image.read', '查看图片'),
+            permissionRecord(SECOND_PERMISSION_ID, 'document.read', '读取文档'),
+        ]);
         prisma.role.findFirst.mockResolvedValue(roleRecord());
         const service = createService(prisma);
 
@@ -59,6 +63,12 @@ describe('RbacService', () => {
                 description: '管理项目',
             }),
             select: { id: true },
+        });
+        expect(prisma.rolePermission.createMany).toHaveBeenCalledWith({
+            data: [
+                { tenantId: TENANT_ID, roleId: ROLE_ID, permissionId: PERMISSION_ID },
+                { tenantId: TENANT_ID, roleId: ROLE_ID, permissionId: SECOND_PERMISSION_ID },
+            ],
         });
         expect(prisma.auditLog.create).toHaveBeenCalledWith({
             data: expect.objectContaining({ action: 'ROLE_CREATED', resourceId: ROLE_ID }),
@@ -177,6 +187,7 @@ const MEMBERSHIP_ID = '50000000-0000-0000-0000-000000000001';
 const ROLE_ID = '20000000-0000-0000-0000-000000000001';
 const SECOND_ROLE_ID = '20000000-0000-0000-0000-000000000002';
 const PERMISSION_ID = '30000000-0000-0000-0000-000000000001';
+const SECOND_PERMISSION_ID = '30000000-0000-0000-0000-000000000002';
 
 function createService(prisma: Record<string, any>): RbacService {
     const tenantContext = {
