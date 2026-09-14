@@ -407,3 +407,86 @@ async def test_invoke_with_tools_rejects_profile_without_capability() -> None:
 
     assert raised.value.code == "UNSUPPORTED_TOOL_CALLING"
     assert not provider.tool_calls
+
+
+@pytest.mark.asyncio
+async def test_rejects_image_content_when_profile_lacks_vision_capability() -> None:
+    model_profile = profile()
+    provider = StubProvider(model_profile, [result("ok")])
+    router = LLMRouter(
+        catalog(
+            {"primary": model_profile},
+            {ModelRole.default: ["primary"]},
+        ),
+        lambda _name, _profile: provider,
+    )
+
+    with pytest.raises(AIServiceError, match="supports image input") as raised:
+        await router.invoke(
+            request_id="req-vision-1",
+            tenant_id="tenant-1",
+            user_id="user-1",
+            messages=[
+                ChatMessage(
+                    role="user",
+                    content=[
+                        {"type": "text", "text": "Describe this image."},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": "data:image/png;base64,abc"},
+                        },
+                    ],
+                )
+            ],
+            output_mode=OutputMode.text,
+            role=ModelRole.default,
+            profile_override=None,
+            temperature=None,
+            max_output_tokens=None,
+        )
+
+    assert raised.value.code == "UNSUPPORTED_MULTIMODAL"
+
+
+@pytest.mark.asyncio
+async def test_chooses_vision_profile_when_image_content_is_present() -> None:
+    text_profile = profile()
+    vision_profile = profile(
+        capabilities={ModelCapability.chat, ModelCapability.vision}
+    )
+    text_provider = StubProvider(text_profile, [result("text")])
+    vision_provider = StubProvider(vision_profile, [result("vision")])
+    router = LLMRouter(
+        catalog(
+            {"text": text_profile, "vision": vision_profile},
+            {ModelRole.default: ["text", "vision"]},
+        ),
+        lambda name, _profile: text_provider if name == "text" else vision_provider,
+    )
+
+    routed = await router.invoke(
+        request_id="req-vision-2",
+        tenant_id="tenant-1",
+        user_id="user-1",
+        messages=[
+            ChatMessage(
+                role="user",
+                content=[
+                    {"type": "text", "text": "Describe this image."},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": "data:image/png;base64,abc"},
+                    },
+                ],
+            )
+        ],
+        output_mode=OutputMode.text,
+        role=ModelRole.default,
+        profile_override=None,
+        temperature=None,
+        max_output_tokens=None,
+    )
+
+    assert routed.profile_name == "vision"
+    assert not text_provider.calls
+    assert len(vision_provider.calls) == 1

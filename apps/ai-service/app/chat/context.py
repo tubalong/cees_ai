@@ -10,12 +10,14 @@ from app.api.generated.models import (
     ChatRequest,
     CompactChatRequest,
 )
+from app.api.message_content import message_content_to_internal
 from app.core.config import ChatModePolicy
 from app.core.errors import AIServiceError
-from app.llm.types import ChatMessage
+from app.llm.types import ChatMessage, content_size_bytes
 
 MAX_CHAT_INPUT_BYTES = 1024 * 1024
 MESSAGE_OVERHEAD_TOKENS = 4
+IMAGE_TOKEN_ESTIMATE = 1024
 BASE_SYSTEM_PROMPT = """You are a helpful enterprise collaboration assistant.
 Use the supplied trusted instructions, conversation summary, and recent messages as context.
 Do not claim to remember information that is not present in the supplied context.
@@ -41,11 +43,14 @@ class BuiltCompactionContext:
 def build_chat_context(request: ChatRequest, policy: ChatModePolicy) -> BuiltChatContext:
     _validate_raw_size(
         request_id=request.request_id,
-        values=[
-            BASE_SYSTEM_PROMPT,
-            request.instructions or "",
-            request.conversation_summary or "",
-            *(message.content for message in request.messages),
+        byte_sizes=[
+            len(BASE_SYSTEM_PROMPT.encode("utf-8")),
+            len((request.instructions or "").encode("utf-8")),
+            len((request.conversation_summary or "").encode("utf-8")),
+            *(
+                content_size_bytes(message_content_to_internal(message.content))
+                for message in request.messages
+            ),
         ],
     )
     if request.messages[-1].role.value != "user":
@@ -77,7 +82,10 @@ def build_chat_context(request: ChatRequest, policy: ChatModePolicy) -> BuiltCha
     selected_reversed: list[ChatMessage] = []
     selected_tokens = 0
     for api_message in reversed(request.messages):
-        message = ChatMessage(role=api_message.role.value, content=api_message.content)
+        message = ChatMessage(
+            role=api_message.role.value,
+            content=message_content_to_internal(api_message.content),
+        )
         message_tokens = estimate_message_tokens([message])
         if fixed_tokens + selected_tokens + message_tokens > policy.context_budget_tokens:
             break
@@ -117,10 +125,13 @@ def build_compaction_context(
 ) -> BuiltCompactionContext:
     _validate_raw_size(
         request_id=request.request_id,
-        values=[
-            COMPACTION_SYSTEM_PROMPT,
-            request.previous_summary or "",
-            *(message.content for message in request.messages),
+        byte_sizes=[
+            len(COMPACTION_SYSTEM_PROMPT.encode("utf-8")),
+            len((request.previous_summary or "").encode("utf-8")),
+            *(
+                content_size_bytes(message_content_to_internal(message.content))
+                for message in request.messages
+            ),
         ],
     )
     compaction_input = json.dumps(
@@ -146,17 +157,28 @@ def build_compaction_context(
 
 
 def estimate_message_tokens(messages: list[ChatMessage]) -> int:
-    return sum(
-        estimate_text_tokens(message.content) + MESSAGE_OVERHEAD_TOKENS for message in messages
-    )
+    total = 0
+    for message in messages:
+        total += MESSAGE_OVERHEAD_TOKENS
+        if isinstance(message.content, str):
+            total += estimate_text_tokens(message.content)
+            continue
+        for part in message.content:
+            if not isinstance(part, dict):
+                continue
+            if part.get("type") == "text":
+                total += estimate_text_tokens(str(part.get("text", "")))
+            elif part.get("type") == "image_url":
+                total += IMAGE_TOKEN_ESTIMATE
+    return total
 
 
 def estimate_text_tokens(value: str) -> int:
     return max(1, math.ceil(len(value.encode("utf-8")) / 4))
 
 
-def _validate_raw_size(*, request_id: str, values: list[str]) -> None:
-    if sum(len(value.encode("utf-8")) for value in values) > MAX_CHAT_INPUT_BYTES:
+def _validate_raw_size(*, request_id: str, byte_sizes: list[int]) -> None:
+    if sum(byte_sizes) > MAX_CHAT_INPUT_BYTES:
         raise AIServiceError(
             "INVALID_CHAT_REQUEST",
             "Chat context exceeds 1 MiB",

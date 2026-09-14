@@ -6,6 +6,7 @@ from app.api.generated.models import ChatContextStrategy, ChatRequest, CompactCh
 from app.chat.context import build_chat_context, build_compaction_context
 from app.core.config import ChatModePolicy, ModelRole
 from app.core.errors import AIServiceError
+from tests.helpers import text_parts
 
 
 def policy(*, budget: int = 1024) -> ChatModePolicy:
@@ -26,9 +27,9 @@ def test_builds_full_context_with_instructions_and_history() -> None:
             "conversation_id": "conversation-1",
             "instructions": "Answer concisely.",
             "messages": [
-                {"role": "user", "content": "The project is CEES AI."},
-                {"role": "assistant", "content": "Understood."},
-                {"role": "user", "content": "What is the project name?"},
+                {"role": "user", "content": text_parts("The project is CEES AI.")},
+                {"role": "assistant", "content": text_parts("Understood.")},
+                {"role": "user", "content": text_parts("What is the project name?")},
             ],
         }
     )
@@ -56,9 +57,9 @@ def test_uses_summary_and_recent_suffix_when_history_exceeds_budget() -> None:
             "conversation_id": "conversation-1",
             "conversation_summary": "The user is discussing CEES AI.",
             "messages": [
-                {"role": "user", "content": "old question " * 200},
-                {"role": "assistant", "content": "old answer " * 200},
-                {"role": "user", "content": "latest question"},
+                {"role": "user", "content": text_parts("old question " * 200)},
+                {"role": "assistant", "content": text_parts("old answer " * 200)},
+                {"role": "user", "content": text_parts("latest question")},
             ],
         }
     )
@@ -68,7 +69,7 @@ def test_uses_summary_and_recent_suffix_when_history_exceeds_budget() -> None:
     assert built.usage.strategy == ChatContextStrategy.summary_plus_recent
     assert built.usage.included_message_count == 1
     assert built.usage.history_truncated
-    assert built.messages[-1].content == "latest question"
+    assert built.messages[-1].content == text_parts("latest question")
 
 
 def test_rejects_chat_when_final_message_is_not_user() -> None:
@@ -78,7 +79,7 @@ def test_rejects_chat_when_final_message_is_not_user() -> None:
             "tenant_id": "tenant-1",
             "user_id": "user-1",
             "conversation_id": "conversation-1",
-            "messages": [{"role": "assistant", "content": "finished"}],
+            "messages": [{"role": "assistant", "content": text_parts("finished")}],
         }
     )
 
@@ -97,8 +98,8 @@ def test_compaction_preserves_last_message_identifier() -> None:
             "conversation_id": "conversation-1",
             "previous_summary": "Earlier summary.",
             "messages": [
-                {"id": "message-1", "role": "user", "content": "Question"},
-                {"id": "message-2", "role": "assistant", "content": "Answer"},
+                {"id": "message-1", "role": "user", "content": text_parts("Question")},
+                {"id": "message-2", "role": "assistant", "content": text_parts("Answer")},
             ],
         }
     )

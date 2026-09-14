@@ -168,3 +168,11 @@ def result(value: str | dict[str, object], finish_reason: str | None = "stop") -
         token_usage=TokenUsageData(input_tokens=3, output_tokens=2, total_tokens=5),
         finish_reason=finish_reason,
     )
+
+
+def text_part(text: str) -> dict[str, str]:
+    return {"type": "text", "text": text}
+
+
+def text_parts(text: str) -> list[dict[str, str]]:
+    return [text_part(text)]

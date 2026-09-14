@@ -36,6 +36,7 @@ class ModelCapability(StrEnum):
     chat = "chat"
     tool_calling = "tool_calling"
     image_generation = "image_generation"
+    vision = "vision"
 
 
 class ImageProviderKind(StrEnum):

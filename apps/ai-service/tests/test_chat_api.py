@@ -17,6 +17,7 @@ from tests.helpers import (
     profile,
     ready_runtime,
     result,
+    text_parts,
 )
 
 
@@ -53,7 +54,7 @@ def chat_payload(*, mode: str = "standard") -> dict[str, object]:
         "instructions": "Answer concisely.",
         "conversation_summary": "The project name is CEES AI.",
         "messages": [
-            {"role": "user", "content": "What is the project name?"},
+            {"role": "user", "content": text_parts("What is the project name?")},
         ],
     }
 
@@ -158,8 +159,8 @@ def test_chat_compact_returns_reusable_summary() -> None:
         "user_id": "user-1",
         "conversation_id": "conversation-1",
         "messages": [
-            {"id": "message-1", "role": "user", "content": "Project is CEES AI."},
-            {"id": "message-2", "role": "assistant", "content": "Understood."},
+            {"id": "message-1", "role": "user", "content": text_parts("Project is CEES AI.")},
+            {"id": "message-2", "role": "assistant", "content": text_parts("Understood.")},
         ],
     }
 
@@ -200,7 +201,7 @@ def test_chat_compact_truncation_returns_usage_metadata() -> None:
         "user_id": "user-1",
         "conversation_id": "conversation-1",
         "messages": [
-            {"id": "message-1", "role": "user", "content": "Project is CEES AI."},
+            {"id": "message-1", "role": "user", "content": text_parts("Project is CEES AI.")},
         ],
     }
 
@@ -221,7 +222,7 @@ def test_chat_compact_truncation_returns_usage_metadata() -> None:
 def test_chat_rejects_assistant_as_final_message() -> None:
     client, _ = build_chat_client(outcomes=[result("unused")])
     payload = chat_payload()
-    payload["messages"] = [{"role": "assistant", "content": "done"}]
+    payload["messages"] = [{"role": "assistant", "content": text_parts("done")}]
 
     with client:
         response = client.post(

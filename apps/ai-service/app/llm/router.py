@@ -27,6 +27,7 @@ from app.llm.types import (
     ProviderStreamChunk,
     ReasoningEffort,
     ToolCallingResult,
+    content_has_image,
 )
 
 logger = logging.getLogger(__name__)
@@ -89,7 +90,9 @@ class LLMRouter:
         if output_mode == OutputMode.json_schema:
             _validate_json_schema(json_schema, request_id)
 
-        candidates = self._resolve_candidates(role, profile_override, output_mode, request_id)
+        candidates = self._resolve_candidates(
+            role, profile_override, output_mode, request_id, _requires_vision(messages)
+        )
         started = time.perf_counter()
         last_transient_error: ProviderTransientError | None = None
 
@@ -190,7 +193,13 @@ class LLMRouter:
         max_output_tokens: int | None,
         reasoning_effort: ReasoningEffort | None = None,
     ) -> StreamingRoutingResult:
-        candidates = self._resolve_candidates(role, profile_override, OutputMode.text, request_id)
+        candidates = self._resolve_candidates(
+            role,
+            profile_override,
+            OutputMode.text,
+            request_id,
+            _requires_vision(messages),
+        )
         started_at = time.perf_counter()
         last_transient_error: ProviderTransientError | None = None
 
@@ -284,7 +293,11 @@ class LLMRouter:
             )
 
         candidates = self._resolve_candidates(
-            ModelRole.orchestrator, profile_override, OutputMode.text, request_id
+            ModelRole.orchestrator,
+            profile_override,
+            OutputMode.text,
+            request_id,
+            _requires_vision(messages),
         )
         started = time.perf_counter()
         last_transient_error: ProviderTransientError | None = None
@@ -385,7 +398,11 @@ class LLMRouter:
             )
 
         candidates = self._resolve_candidates(
-            ModelRole.orchestrator, profile_override, OutputMode.text, request_id
+            ModelRole.orchestrator,
+            profile_override,
+            OutputMode.text,
+            request_id,
+            _requires_vision(messages),
         )
         started_at = time.perf_counter()
         last_transient_error: ProviderTransientError | None = None
@@ -473,6 +490,7 @@ class LLMRouter:
         profile_override: str | None,
         output_mode: OutputMode,
         request_id: str,
+        requires_vision: bool = False,
     ) -> list[str]:
         configured = self.catalog.roles.get(role, [])
         if profile_override is not None:
@@ -493,6 +511,7 @@ class LLMRouter:
                 status_code=400,
                 request_id=request_id,
             )
+        eligible: list[str] = []
         for profile_name in candidates:
             profile = self.catalog.profiles.get(profile_name)
             if profile is None or not profile.enabled:
@@ -520,7 +539,25 @@ class LLMRouter:
                     status_code=400,
                     request_id=request_id,
                 )
-        return candidates
+            if requires_vision and ModelCapability.vision not in profile.capabilities:
+                if profile_override is not None:
+                    raise AIServiceError(
+                        "UNSUPPORTED_MULTIMODAL",
+                        f"Profile {profile_name} does not support image input",
+                        status_code=400,
+                        request_id=request_id,
+                    )
+                continue
+            eligible.append(profile_name)
+
+        if requires_vision and not eligible:
+            raise AIServiceError(
+                "UNSUPPORTED_MULTIMODAL",
+                "No configured profile supports image input",
+                status_code=400,
+                request_id=request_id,
+            )
+        return eligible
 
     def _get_provider(self, profile_name: str, profile: ModelProfile) -> LLMProvider:
         provider = self._providers.get(profile_name)
@@ -641,3 +678,7 @@ def _contains_remote_ref(value: Any) -> bool:
     elif isinstance(value, list):
         return any(_contains_remote_ref(item) for item in value)
     return False
+
+
+def _requires_vision(messages: list[ChatMessage]) -> bool:
+    return any(content_has_image(message.content) for message in messages)

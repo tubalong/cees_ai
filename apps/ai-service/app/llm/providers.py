@@ -14,11 +14,13 @@ from app.llm.types import (
     ChatMessage,
     InvocationOptions,
     LLMProvider,
+    MessageContent,
     ProviderResult,
     ProviderStreamChunk,
     TokenUsageData,
     ToolCall,
     ToolCallingResult,
+    content_to_text,
 )
 
 
@@ -32,7 +34,12 @@ class MockLLMProvider:
         if options.output_mode != OutputMode.text:
             raise ProviderPermanentError("mock profiles support text output only")
         last_user_message = next(
-            (message.content for message in reversed(messages) if message.role == "user"), ""
+            (
+                content_to_text(message.content)
+                for message in reversed(messages)
+                if message.role == "user"
+            ),
+            ""
         )
         return ProviderResult(output=f"mock:{last_user_message}", finish_reason="stop")
 
@@ -42,7 +49,12 @@ class MockLLMProvider:
         if options.output_mode != OutputMode.text:
             raise ProviderPermanentError("mock profiles support text output only")
         last_user_message = next(
-            (message.content for message in reversed(messages) if message.role == "user"), ""
+            (
+                content_to_text(message.content)
+                for message in reversed(messages)
+                if message.role == "user"
+            ),
+            ""
         )
         yield ProviderStreamChunk(text=f"mock:{last_user_message}", finish_reason="stop")
 
@@ -257,19 +269,36 @@ def create_provider(profile: ModelProfile, api_key: str | None = None) -> LLMPro
 def _to_langchain_message(
     message: ChatMessage,
 ) -> SystemMessage | HumanMessage | AIMessage | ToolMessage:
+    content = _to_langchain_content(message.content)
     if message.role == "system":
-        return SystemMessage(content=message.content)
+        return SystemMessage(content=content)
     if message.role == "assistant":
         return AIMessage(
-            content=message.content,
+            content=content,
             tool_calls=[tool_call_to_dict(tool_call) for tool_call in message.tool_calls],
         )
     if message.role == "tool":
         return ToolMessage(
-            content=message.content,
+            content=content_to_text(message.content),
             tool_call_id=message.tool_call_id or "",
         )
-    return HumanMessage(content=message.content)
+    return HumanMessage(content=content)
+
+
+def _to_langchain_content(content: MessageContent) -> str | list[dict[str, Any]]:
+    if isinstance(content, str):
+        return content
+    parts: list[dict[str, Any]] = []
+    for part in content:
+        if not isinstance(part, dict):
+            continue
+        if part.get("type") == "text":
+            parts.append({"type": "text", "text": part.get("text", "")})
+        elif part.get("type") == "image_url":
+            image_url = part.get("image_url")
+            if isinstance(image_url, dict):
+                parts.append({"type": "image_url", "image_url": {"url": image_url.get("url", "")}})
+    return parts
 
 
 def tool_call_to_dict(tool_call: ToolCall) -> dict[str, Any]:

@@ -16,7 +16,7 @@ structured_output_method = "function_calling"
 [profiles.primary]
 enabled = true
 provider = "deepseek"
-model = "deepseek-v4-pro"
+model = "deepseek-flash"
 base_url = "https://api.deepseek.com"
 api_key_env = "PRIMARY_LLM_API_KEY"
 modes = ["text", "json_schema"]
@@ -31,7 +31,7 @@ structured_output_method = "function_calling"
 [profiles.backup]
 enabled = true
 provider = "deepseek"
-model = "deepseek-v4-flash"
+model = "deepseek-flash"
 base_url = "https://api.deepseek.com"
 api_key_env = "BACKUP_LLM_API_KEY"
 modes = ["text", "json_schema"]
@@ -41,6 +41,24 @@ default_max_output_tokens = 2048
 max_output_tokens_limit = 32768
 timeout_seconds = 60.0
 max_retries = 1
+structured_output_method = "function_calling"
+
+# Dedicated multimodal chat profile. Keep it disabled until a real vision-capable
+# model and VISION_LLM_API_KEY are provided. When enabled, add "vision-primary"
+# to the roles that may receive image_url content parts.
+[profiles.vision-primary]
+enabled = true
+provider = "deepseek"
+model = "deepseek-flash"
+base_url = "https://api.deepseek.com"
+api_key_env = "VISION_LLM_API_KEY"
+modes = ["text"]
+capabilities = ["chat", "vision", "tool_calling"]
+temperature = 0.7
+default_max_output_tokens = 2048
+max_output_tokens_limit = 32768
+timeout_seconds = 60.0
+max_retries = 2
 structured_output_method = "function_calling"
 
 [chat]
@@ -80,8 +98,8 @@ timeout_seconds = 60.0
 max_retries = 2
 
 [roles]
-default = ["primary", "backup"]
+default = ["primary", "backup", "vision-primary"]
 structured = ["primary", "backup"]
 reasoning = ["primary", "backup"]
 rag = ["primary", "backup"]
-orchestrator = ["primary"]
+orchestrator = ["primary", "backup", "vision-primary"]

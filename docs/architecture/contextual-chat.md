@@ -27,9 +27,10 @@ ai-service 不持久化正式会话、消息或摘要。`conversation_id` 只用
 - `instructions`：可信内部调用方提供的系统指令；
 - `conversation_summary`：早期历史的压缩摘要；
 - `messages`：近期 `user`/`assistant` 消息，最后一条必须是 `user`；
+- 每条消息的 `content` 是内容 parts 数组，支持 `text` 与 `image_url`；
 - `max_output_tokens`：可选覆盖值，但不能超过模式和模型 Profile 的双重上限。
 
-上下文按照“基础安全指令、调用方指令、历史摘要、近期消息”的顺序组装。当前 token 数使用 UTF-8 字节数除以 4 并叠加每条消息固定开销的确定性估算，不声称与任一 Provider 的精确 tokenizer 等价。
+上下文按照“基础安全指令、调用方指令、历史摘要、近期消息”的顺序组装。当前 token 数使用文本 UTF-8 字节数除以 4、每张图片按固定预算计入，并叠加每条消息固定开销的确定性估算，不声称与任一 Provider 的精确 tokenizer 等价。
 
 如果全部近期消息无法放入模式预算，服务从最新消息向前保留连续后缀，并避免让截断后的上下文以孤立 Assistant 消息开头。最后一条用户消息不能放入预算时返回 `CHAT_CONTEXT_TOO_LARGE`，不会静默删除本轮问题。
 
@@ -54,7 +55,7 @@ ai-service 不持久化正式会话、消息或摘要。`conversation_id` 只用
 
 `ultra` 流式调用会把配置的 reasoning effort 传入 `LLMRouter.start_stream`。DeepSeek Provider 显式启用 thinking，但 SSE 只传输阶段状态和最终正文，不传输 Provider 原始推理内容。
 
-模式只能在各自角色的候选 Profile 内回退；Chat API 不接受 `llm_profile`，避免调用方固定单一模型、绕过回退或把多阶段策略绑定到错误 Profile。
+模式只能在各自角色的候选 Profile 内回退；Chat API 不接受 `llm_profile`，避免调用方固定单一模型、绕过回退或把多阶段策略绑定到错误 Profile。当消息包含 `image_url` parts 时，LLMRouter 会从该角色候选中过滤出声明 `vision` capability 的 profile；若无可用视觉 profile，返回 `UNSUPPORTED_MULTIMODAL`。
 
 ## 5. 流式事件
 
@@ -96,6 +97,23 @@ completed
 响应返回 `summarized_through_message_id`，取输入最后一条消息的可选 ID。调用方保存摘要，并在后续 `/chat/invoke` 或 `/chat/stream` 中作为 `conversation_summary` 传回。
 
 压缩输入不会静默截断；超过 `compaction_context_budget_tokens` 时返回 `CHAT_CONTEXT_TOO_LARGE`。Provider 达到输出上限时返回 `CHAT_COMPACTION_TRUNCATED`，不把不完整摘要作为成功结果。
+
+## 6.1 视觉模型建议
+
+图片理解应优先使用专用视觉模型，而不是强制主文本模型支持 `vision`。推荐单独配置一个视觉 profile，并按需加入可能接收图片的角色：
+
+```toml
+[profiles.vision-primary]
+enabled = true
+provider = "openai_compatible"
+model = "your-vision-model"
+base_url = "https://your-provider/v1"
+api_key_env = "VISION_LLM_API_KEY"
+modes = ["text"]
+capabilities = ["chat", "vision"]
+```
+
+如果图片消息还需要触发工具调用，该 profile 还需声明 `tool_calling`。图片生成与编辑继续使用独立的 `[image_profiles.*]`，不与聊天视觉模型混用。
 
 ## 7. 失败语义
 

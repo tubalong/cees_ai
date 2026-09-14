@@ -32,7 +32,7 @@ FastAPI 内部服务，负责受控 LLM 调用与未来 AI 工作流的运行时
 
 非流式响应的 `execution.finish_reason` 与流式 `completed.finish_reason` 保留 Provider 的结束原因；`length` 表示达到输出 token 上限，调用方应将当前输出视为可能被截断。字段为可选且可空，以兼容未提供结束原因的模型服务。
 
-Chat 接口要求调用方在每轮传入完整可用历史，或 `conversation_summary + recent messages`。ai-service 不保存正式会话；`standard` 和 `ultra` 的角色、reasoning effort、输出预算与上下文预算由 `models.toml` 控制。详细设计见 `docs/architecture/contextual-chat.md`。
+Chat 接口要求调用方在每轮传入完整可用历史，或 `conversation_summary + recent messages`。每条消息的 `content` 是内容 parts 数组，支持 `text` 与 `image_url`；包含图片的请求会要求所选模型声明 `vision` capability。ai-service 不保存正式会话；`standard` 和 `ultra` 的角色、reasoning effort、输出预算与上下文预算由 `models.toml` 控制。详细设计见 `docs/architecture/contextual-chat.md`。
 
 Tool Calling 由 NestJS 传入 tools 定义，ai-service 负责一次模型回合并返回 `tool_calls` 或文本增量，不执行任何业务工具。详细设计见 `docs/architecture/ai-tool-calling.md`。
 

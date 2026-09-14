@@ -5,6 +5,7 @@ from typing import Any
 
 from app.api.generated.models import ToolCall as ApiToolCall
 from app.api.generated.models import ToolTurnRequest
+from app.api.message_content import message_content_to_internal
 from app.chat.context import BASE_SYSTEM_PROMPT, estimate_message_tokens
 from app.core.config import ChatMode
 from app.core.errors import AIServiceError
@@ -69,7 +70,7 @@ def _to_chat_message(message: Any) -> ChatMessage:
     tool_calls = tuple(_to_tool_call(call) for call in message.tool_calls or [])
     return ChatMessage(
         role=message.role.value,
-        content=message.content or "",
+        content=message_content_to_internal(message.content) or "",
         tool_calls=tool_calls,
         tool_call_id=message.tool_call_id,
         name=message.name,

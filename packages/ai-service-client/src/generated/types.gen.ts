@@ -21,9 +21,32 @@ export type ModelRole = 'default' | 'structured' | 'reasoning' | 'rag' | 'orches
 
 export type MessageRole = 'system' | 'user' | 'assistant';
 
+export type TextContentPart = {
+    type: 'text';
+    text: string;
+};
+
+export type ImageUrl = {
+    /**
+     * Image URL or data URL containing the encoded image.
+     */
+    url: string;
+};
+
+export type ImageContentPart = {
+    type: 'image_url';
+    image_url: ImageUrl;
+};
+
+export type MessageContentPart = ({
+    type: 'text';
+} & TextContentPart) | ({
+    type: 'image_url';
+} & ImageContentPart);
+
 export type InvokeMessage = {
     role: MessageRole;
-    content: string;
+    content: Array<MessageContentPart>;
 };
 
 export type TextResponseFormat = {
@@ -121,7 +144,7 @@ export type ChatMessageRole = 'user' | 'assistant';
 export type ChatMessage = {
     id?: string | null;
     role: ChatMessageRole;
-    content: string;
+    content: Array<MessageContentPart>;
 };
 
 export type ChatContextStrategy = 'full' | 'summary_plus_recent' | 'recent_only';
@@ -249,7 +272,7 @@ export type ToolCall = {
  */
 export type ToolTurnMessage = {
     role: 'user' | 'assistant' | 'tool';
-    content?: string | null;
+    content?: Array<MessageContentPart> | null;
     tool_calls?: Array<ToolCall>;
     tool_call_id?: string | null;
     name?: string | null;
