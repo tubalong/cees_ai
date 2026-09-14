@@ -8,7 +8,7 @@
 通知中心与后台任务见 [通知中心与后台任务](../product/notification-center.md)。
 工作台与数据看板见 [工作台与数据看板](../product/dashboard-workbench.md)。
 
-> 新环境使用 `prisma migrate deploy` 按 `0001_init` 到 `0012_dashboard_workbench` 的目录顺序执行迁移；全部迁移完成后与当前 `schema.prisma` 保持一致。
+> 新环境使用 `prisma migrate deploy` 按 `0001_init` 到 `0015_knowledge_base_management` 的目录顺序执行迁移；全部迁移完成后与当前 `schema.prisma` 保持一致。
 
 - `apps/api/prisma/schema.prisma` 是数据模型唯一事实源，迁移提交 `prisma/migrations`。
 - 新建表和字段必须在同一迁移中使用 `COMMENT ON TABLE`、`COMMENT ON COLUMN` 添加 PostgreSQL 注释；`0003_organization_departments_and_database_comments` 已补齐此前全部业务表和字段注释。
@@ -181,6 +181,21 @@ Meeting
 - `0008_meeting_management` 兼容迁移旧会议占位结构，新增枚举、关系、索引、权限和 PostgreSQL 中文注释；
 - 已有会议、参会关系和纪要写入由应用层在会议行锁事务中完成；创建关联项目会议时先锁项目行，避免成员关系与会议写入并发冲突；
 - 详细规则见 `docs/product/meeting-management.md` 和 `docs/api/meeting-management-api.md`。
+
+## 11. 知识库模型
+
+```text
+KnowledgeBase
+  └── KnowledgeBaseMember ── User / TenantMembership
+        └── KnowledgeDocument（后续阶段）
+```
+
+- `knowledge_bases` 保存租户知识库名称、说明、创建者、更新者、软删除时间和乐观锁版本；
+- `knowledge_base_members` 保存知识库与用户的授权关系，权限值为 `READER`、`EDITOR` 或 `MANAGER`；
+- 成员唯一约束为 `tenant_id + knowledge_base_id + user_id`，所有服务端查询都带 `tenant_id`；
+- `KnowledgeDocument`、`DocumentVersion`、`DocumentChunk` 和 `KnowledgeQueryLog` 是后续文档处理与 RAG 阶段的基础模型，本阶段不开放对应写入接口；
+- `0015_knowledge_base_management` 初始化知识库权限、为 `tenant_admin` 授权并补齐知识库表和字段的 PostgreSQL 中文注释；
+- 详细业务规则见 `docs/product/knowledge-base-management.md` 和 `docs/api/knowledge-base-api.md`。
 
 ## AI 调用计量模型
 

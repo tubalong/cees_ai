@@ -1,8 +1,8 @@
 # CEES AI 平台使用、接口与数据库字典
 
 > 状态：按当前实现整理  
-> 最后同步：2026-09-11
-> 公开契约版本：`0.19.0`
+> 最后同步：2026-09-14
+> 公开契约版本：`0.20.0`
 > 事实源：`packages/contracts/openapi/openapi.yaml`、`apps/api/prisma/schema.prisma`
 
 ## 1. 文档用途
@@ -10,7 +10,7 @@
 本文面向本地开发、接口联调、产品验收和数据库排查，统一说明：
 
 - 平台超级管理员、租户管理员和普通成员的区别；
-- 当前已经实现的 136 个 HTTP 操作；
+- 当前已经实现的 149 个 HTTP 操作；
 - 路径参数、查询参数和 JSON 请求体字段的含义；
 - PostgreSQL 中 44 张业务表、528 个业务字段及 Prisma 迁移表的用途；
 - 租户创建、成员激活、登录、授权、资源访问、审计、停用和恢复的整体流转；
@@ -43,7 +43,7 @@
 | AI 对话与 Token 记录 | 已实现 | 客户端本地保存历史，API 调用 ai-service 并按企业、成员、会话和轮次记录 Token |
 | 通知中心 | 已实现 | 通知列表、未读统计、已读操作、租户隔离和后台提醒 |
 | 工作台与数据看板 | 已实现 | 概览、任务统计、待办聚合和近期会议 |
-| 知识库 | 仅数据库结构/设计基础 | 当前没有对应公开 API |
+| 知识库 | 第一阶段已实现 | 知识库 CRUD、成员权限、租户隔离、乐观锁和审计；文档处理与 RAG 暂未实现 |
 | AI 草稿和额度体系 | 部分基础 | AI 草稿仍为数据结构基础；当前只有实际 Token 指标，没有企业/坑位/成员额度账户或扣减 |
 
 ## 3. 管理员账号到底存在哪里
@@ -412,6 +412,22 @@ API 从 JWT 注入租户、User 和 Membership，客户端不能提交这些内�
 
 工作台仅聚合当前成员有权读取的数据。`dashboard.read` 不会绕过 `project.read`、`task.read`、`work_report.read`、`meeting.read` 或 `notification.read`。
 
+### 6.14 知识库管理
+
+| 方法与路径 | 用途 | 参数/请求体 | 返回 | 权限 |
+| --- | --- | --- | --- | --- |
+| `GET /knowledge-bases` | 查询当前成员可访问的知识库 | `keyword/limit/cursor` | 知识库列表 | `knowledge_base.read` |
+| `POST /knowledge-bases` | 创建知识库并自动授予创建者 MANAGER | `CreateKnowledgeBaseRequest` | 知识库详情 | `knowledge_base.create` |
+| `GET /knowledge-bases/{knowledgeBaseId}` | 查询知识库详情 | `knowledgeBaseId` | 知识库详情 | `knowledge_base.read` + 知识库范围 |
+| `PATCH /knowledge-bases/{knowledgeBaseId}` | 修改知识库名称或说明 | `knowledgeBaseId` + `version` | 修改后的知识库 | `knowledge_base.update` + MANAGER |
+| `DELETE /knowledge-bases/{knowledgeBaseId}` | 软删除知识库 | `knowledgeBaseId` + 查询参数 `version` | `204` | `knowledge_base.delete` + MANAGER |
+| `GET /knowledge-bases/{knowledgeBaseId}/members` | 查询知识库成员 | `knowledgeBaseId/cursor` | 成员列表 | `knowledge_base.member.manage` + MANAGER |
+| `POST /knowledge-bases/{knowledgeBaseId}/members` | 添加知识库成员 | `membershipId/permission` | 成员详情 | `knowledge_base.member.manage` + MANAGER |
+| `PATCH /knowledge-bases/{knowledgeBaseId}/members/{membershipId}` | 修改成员知识库权限 | `permission` | 成员详情 | `knowledge_base.member.manage` + MANAGER |
+| `DELETE /knowledge-bases/{knowledgeBaseId}/members/{membershipId}` | 移除知识库成员 | 路径参数 | `204` | `knowledge_base.member.manage` + MANAGER |
+
+成员权限为 `READER`、`EDITOR`、`MANAGER`。知识库创建者不能降级或移除，最后一名 `MANAGER` 不能被移除。第一阶段只实现知识库管理，不包含文档上传、COS 绑定、解析、切片、向量化和 RAG；详细说明见 [知识库管理](knowledge-base-management.md) 和 [知识库管理 API](../api/knowledge-base-api.md)。
+
 ## 7. 请求参数字典
 
 ### 7.1 路径与查询参数
@@ -420,6 +436,7 @@ API 从 JWT 注入租户、User 和 Membership，客户端不能提交这些内�
 | --- | --- |
 | `tenantId` | 平台管理场景中的租户 UUID |
 | `membershipId` | 用户在某一租户内的成员关系 UUID，不等于 `userId` |
+| `knowledgeBaseId` | 当前租户知识库 UUID；普通成员只能访问已加入的知识库 |
 | `projectId` | 当前租户项目 UUID；无项目范围时接口按不存在处理 |
 | `taskId` | 当前项目内的任务 UUID；必须同时匹配当前租户和 `projectId` |
 | `commentId` | 当前任务评论 UUID |
@@ -434,6 +451,7 @@ API 从 JWT 注入租户、User 和 Membership，客户端不能提交这些内�
 | `status` | 对应领域状态，如租户、成员或邀请状态 |
 | `visibility` | 文档可见性筛选：`PRIVATE` 或 `TENANT` |
 | `version` | 当前资源版本，用于乐观锁删除或修改 |
+| `permission` | 知识库成员权限：`READER`、`EDITOR` 或 `MANAGER` |
 | `action` | 审计动作编码筛选 |
 | `outcome` | 审计结果：`SUCCESS` 或 `FAILURE` |
 | `actorId` | 租户审计中的操作者 User UUID |

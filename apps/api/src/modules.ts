@@ -15,8 +15,8 @@ import { NotificationModule } from './notification/notification.module';
 import { JobsModule } from './jobs/jobs.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { AssistantModule } from './assistant/assistant.module';
+import { KnowledgeModule } from './knowledge/knowledge.module';
 
-@Module({}) export class KnowledgeModule { }
 @Module({}) export class IntegrationModule { }
 @Module({}) export class CommonModule { }
 

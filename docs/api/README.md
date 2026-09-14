@@ -8,6 +8,7 @@
 ### 契约版本与迁移
 
 - **0.19.0**：删除 `/api/v1/chat/*` 旧对话接口（invoke / stream / compact），以 `/api/v1/conversations/*` 会话、轮次、事件重放资源重建，并新增工具循环（generate_image / generate_document）与公开图片访问 `GET /api/v1/images/{imageId}`。旧客户端迁移到 `createConversation` / `createTurn` / `replayTurnEvents`；`chat` 相关生成模型与客户端已移除。
+- **0.20.0**：新增知识库 CRUD、知识库成员管理和 `READER`/`EDITOR`/`MANAGER` 权限契约；新增 `KnowledgeBase*` Schema 和 9 个公开操作。客户端需要重新生成；文档上传、解析、切片、向量化和 RAG 仍不在本版本范围内。
 
 ## 设计草案
 
@@ -24,6 +25,7 @@
 - [日报与周报 API](work-report-management-api.md)
 - [日报与周报管理](../product/work-report-management.md)
 - [通知中心 API](notification-center-api.md)
+- [知识库管理 API](knowledge-base-api.md)
 - [通知中心与后台任务](../product/notification-center.md)
 - [工作台与数据看板 API](dashboard-api.md)
 - [工作台与数据看板](../product/dashboard-workbench.md)
