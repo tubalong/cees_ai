@@ -78,11 +78,12 @@ AI_DOCS_ENABLED=true
 AI_MODEL_CONFIG_PATH=config/models.toml
 PRIMARY_LLM_API_KEY=change_me
 BACKUP_LLM_API_KEY=change_me
+VISION_LLM_API_KEY=change_me
 IMAGE_GEN_API_KEY=change_me
 IMAGE_GEN_BACKUP_API_KEY=change_me
 ```
 
-`models.toml` 只保存非敏感 profile、角色映射、Chat 模式策略和图片生成 profile。API Key 通过 profile 的 `api_key_env` 从环境变量读取。生产环境不得将任何角色绑定到 Mock profile，图片生成 profile 也必须使用真实模型。
+`models.toml` 只保存非敏感 profile、角色映射、Chat 模式策略和图片生成 profile。API Key 通过 profile 的 `api_key_env` 从环境变量读取。生产环境不得将任何角色绑定到 Mock profile，图片生成 profile 也必须使用真实模型。容器只会看到 Compose 显式声明的变量：新增已启用 profile 或改用新的 `api_key_env` 名称时，必须同时更新 `infra/docker-compose.deploy.yml` 与部署环境文件，否则 `/ready` 会因该变量为空返回 503。
 
 升级现有部署时，部署拥有的模型配置必须补充 `[chat]`、`[chat.modes.standard]` 和 `[chat.modes.ultra]`；缺少任一模式时 `/ready` 返回 503。`/ready` 的 `configured_chat_modes` 会列出当前已配置模式。
 

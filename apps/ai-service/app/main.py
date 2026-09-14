@@ -57,6 +57,11 @@ def create_app(
         )
         configure_logging(resolved_runtime.settings.log_level)
         application.state.runtime = resolved_runtime
+        if resolved_runtime.readiness_errors:
+            logger.error(
+                "ai-service is not ready; /ready returns 503 until the following is fixed: %s",
+                "; ".join(resolved_runtime.readiness_errors),
+            )
         yield
 
     application = FastAPI(

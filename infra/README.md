@@ -160,11 +160,35 @@ bash infra/deploy-cos-release.sh <environment> <release-reference>
 
 部署前必须清除环境文件和模型配置中的 `change_me`，并填写 `SEED_PLATFORM_ADMIN_ACCOUNT`、`SEED_PLATFORM_ADMIN_PASSWORD`、`SEED_PLATFORM_ADMIN_DISPLAY_NAME`。`deploy-cos-release.sh` 会从 COS 下载并校验镜像包、导入镜像和更新镜像标签；Compose 随后执行 Prisma migration、创建缺失的平台超级管理员，再启动 ai-service 和 API。平台初始化不会创建默认租户或租户管理员，同名平台账号已存在时也不会覆盖现有凭证或状态。
 
+ai-service 只接收 `docker-compose.deploy.yml` 中显式声明的环境变量。模型配置里每个已启用 profile 的 `api_key_env` 都必须在 `.env.<environment>` 中提供非空值，并由 Compose 透传；当前透传 `PRIMARY_LLM_API_KEY`、`BACKUP_LLM_API_KEY`、`VISION_LLM_API_KEY`、`IMAGE_GEN_API_KEY` 和 `IMAGE_GEN_BACKUP_API_KEY`。新增已启用 profile、启用带 `vision` capability 的 profile 或改用新的 `api_key_env` 名称时，必须同时修改模型配置、环境文件和 `docker-compose.deploy.yml`，否则 ai-service 的 `/ready` 返回 503，容器被判定为 unhealthy，`api` 因 `depends_on: service_healthy` 无法启动。
+
 服务器目录结构不变时，日常发布无需重新打目录包，只需发布新镜像并再次执行 `deploy-cos-release.sh`。
 
 ```bash
 bash infra/manage-app.sh <staging|production> ps
 bash infra/manage-app.sh <staging|production> logs
 ```
+
+### 4.4 ai-service 未就绪排查
+
+`manage-app.sh up` 失败时会打印未通过健康检查的容器及其最后一次健康检查输出，随后可用日志查看完整原因：
+
+```bash
+bash infra/manage-app.sh <staging|production> logs ai-service
+```
+
+ai-service 在启动时会把 `/ready` 的全部未就绪原因写入容器日志；镜像早于该日志能力时，可读取健康检查的响应体，healthcheck 会打印 `/ready` 的响应：
+
+```bash
+docker inspect --format '{{json .State.Health.Log}}' <container>
+```
+
+`/ready` 返回 503 的常见原因：
+
+- 模型配置缺少 `[chat]`、`[chat.modes.standard]` 或 `[chat.modes.ultra]`；
+- 缺少 `[image_profiles.*]`，或没有任何 `enabled = true` 的图片 profile；
+- `roles` 缺少必要角色（尤其是 `orchestrator`）、引用了未启用 profile，或该 profile 缺少 `tool_calling` capability；
+- 生产环境仍启用 Mock profile，或模型、Base URL、API Key 仍是 `change_me` 占位值；
+- 已启用 profile 的 `api_key_env` 在容器内为空，即环境文件未填写或 Compose 未透传。
 
 > `.env`、模型配置、COSCLI 配置和各类密钥不得提交到 Git 或放入 COS 镜像发布包。服务器目录包若包含真实配置，应按 Secret 文件处理。
