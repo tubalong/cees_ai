@@ -36,6 +36,9 @@ services:
       AI_MODEL_CONFIG_PATH: /run/config/ai-models.toml
       PRIMARY_LLM_API_KEY: ${PRIMARY_LLM_API_KEY}
       BACKUP_LLM_API_KEY: ${BACKUP_LLM_API_KEY:-}
+      IMAGE_GEN_API_KEY: ${IMAGE_GEN_API_KEY:-}
+      IMAGE_GEN_BACKUP_API_KEY: ${IMAGE_GEN_BACKUP_API_KEY:-}
+      VISION_LLM_API_KEY: ${VISION_LLM_API_KEY:-}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     volumes:
       - type: bind
