@@ -38,6 +38,16 @@ NestJS API   = 业务事实、权限、状态与审计层（apps/api）
   -> NestJS 记录 KnowledgeQueryLog 与审计，返回客户端
 ```
 
+一句话概括"文件如何变成知识"：**文件 → 解析成文本 → 切成小块 → 每块转成向量 → 存进向量库**；提问时把问题也转成向量，按相似度找出最相关的块，交给模型基于证据作答。各技术栈的分工（通俗版）：
+
+| 环节 | 谁来承担 | 通俗解释 |
+| --- | --- | --- |
+| 文件上传、状态、权限、审计 | NestJS API（`apps/api`） | 档案管理员：文件属于哪个知识库、处理到哪一步、谁能看、谁问过，都由它记账 |
+| PDF/Word/图片转文本 | MinerU（GPU 服务器，独立部署） | 扫描仪：把版式复杂的文件还原成带页码、带位置坐标的纯文本 |
+| 切块与向量化 | ai-service（LlamaIndex + EmbeddingRouter） | 翻译官：把文本切成小段，每段翻译成一串数字（向量），意思相近的段落数字也相近 |
+| 存储与相似检索 | 独立 pgvector database | 图书馆检索台：存下所有向量，提问时按相似度快速找出最相关的段落 |
+| 基于证据作答 | LLMRouter（ai-service，`rag` role） | 撰稿人：只依据检索到的证据段落组织答案，证据不足就明说，不许凭空编造 |
+
 两条硬约束，与项目架构边界一致：
 
 1. ai-service 不直接连接、不写入 `apps/api` 业务数据库；向量库是独立 database，由 ai-service 的 `VectorStoreGateway` 管理。
@@ -116,6 +126,32 @@ ai-service 不自行推断权限。NestJS 计算可信 scope 后随检索请求�
 ```
 
 节点 metadata 至少携带 `tenant_id`、`knowledge_base_id`、`document_id`、`document_version_id`、`visibility_scope`、`department_id`、`project_id`、`acl_version`。检索查询缓存（如引入）的 key 必须包含 `tenant_id + 访问者 scope + knowledge_base_id + query + acl_version + index_version`，防止跨用户缓存泄漏。
+
+### 3.6 知识库归属与权限颗粒
+
+**归属锚点单一**：一个知识库只属于一个租户，`tenantId` 是企业隔离底线，不做"多租户字段存储"；租户内按锚点分类——挂项目为项目知识库（一个项目一个知识库，最常见形态）、挂部门为部门知识库、不挂锚点为公司级知识库。跨部门协作不靠锚点，靠成员授权（见下）。
+
+**可见性分层**（版本级，`DocumentVersion.visibilityScope`）：
+
+| 层级 | 谁能看到 |
+| --- | --- |
+| `TENANT` | 全公司 |
+| `DEPARTMENT` | 本部门及全部子部门（按组织树向上递归解析，对应 `DataScope.DEPARTMENT_TREE`） |
+| `PROJECT` | 项目成员 |
+| `PRIVATE` | 仅知识库成员：**不同部门的人加为成员即可看到同一个知识库**，不要求同部门 |
+| `CUSTOM` | 自定义范围（预留） |
+
+**读写权限三层叠加**：
+
+1. 组织数据范围：`Role.dataScope` 决定角色覆盖企业/部门/部门的树/项目等哪些数据；
+2. 知识库成员：`KnowledgeBaseMember`（knowledgeBaseId + userId + permission）显式授权，是跨部门协作的落点，也是"以项目为颗粒分配读写"的落点（项目级知识库可由项目成员自动获得，也可按成员表逐个授权）；
+3. 文档级可见范围：版本级 `visibilityScope` 在上述基础上进一步收窄；检索时 NestJS 把三层折叠成 `scope`（见 3.5）传给 ai-service，过滤在向量检索阶段完成。
+
+**表设计现状与差距**：
+
+- `KnowledgeBaseMember` 已存在（`@@unique([tenantId, knowledgeBaseId, userId])`），跨部门共享同一知识库的余地已留；
+- `DocumentVersion` 已带 `visibilityScope` + `departmentId` / `projectId`；
+- `KnowledgeBase` 自身尚无 `departmentId` / `projectId` 锚点字段，且 `KnowledgeBaseMember.permission` 目前是裸 String：块 5 公开 Query API 前需补 migration，把归属锚点落到 `KnowledgeBase`，并把成员 permission 收敛为 `READ` / `WRITE` / `MANAGE` 枚举语义与校验逻辑。
 
 ## 4. 索引流程与状态机
 

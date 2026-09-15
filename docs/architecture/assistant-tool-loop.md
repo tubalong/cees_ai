@@ -1,6 +1,6 @@
 # AI 助手工具循环
 
-> 状态：阶段 0-4 已落地（纯文本会话迁移 + 服务端会话 + 断线重连 + 取消 + 幂等，2026-09-10）；阶段 5-6、9 已落地（Tool Loop / 统一注册与批准 / generate_image 图片生成，2026-09-11）；阶段 10 部分落地（generate_document 文档生成，2026-09-11）；上下文压缩已升级为条数与 Token 预算双约束触发（2026-09-14，见 13.1）；额度（QuotaService）与任务、会议等其余工具执行器暂缓；联网搜索（Tavily）只读工具与结构化来源回填已于 2026-09-14 落地。本文件定义 NestJS 统一驱动的 Assistant Tool Loop 架构、数据模型、工具协议与实施顺序。最后更新：2026-09-14。
+> 状态：阶段 0-4 已落地（纯文本会话迁移 + 服务端会话 + 断线重连 + 取消 + 幂等，2026-09-10）；阶段 5-6、9 已落地（Tool Loop / 统一注册与批准 / generate_image 图片生成，2026-09-11）；阶段 10 部分落地（generate_document 文档生成，2026-09-11）；上下文压缩已升级为条数与 Token 预算双约束触发（2026-09-14，见 13.1）；额度（QuotaService）与任务、会议等其余工具执行器暂缓；联网搜索（Tavily）只读工具与结构化来源回填已于 2026-09-14 落地；2026-09-15 补充第 3.1 节三层关系说明。本文件定义 NestJS 统一驱动的 Assistant Tool Loop 架构、数据模型、工具协议与实施顺序。最后更新：2026-09-15。
 
 ## 1. 目标与定位
 
@@ -36,6 +36,25 @@ PR25 已定义的事件结构不浪费：`tool_call` / `tool_result` / `tool_exe
 | ai-service | 模型调用、上下文处理、bind_tools 与结构化 ToolCall 解析、图片生成路由 | 不保存正式会话，不执行工具，不修改业务数据 |
 | ImageRouter（位于 ai-service 内） | 在允许范围内选择图片 Provider 和模型 | 不决定用户额度和权限 |
 | Task/Document/File 等业务模块 | 执行自己的业务规则、事务、状态机和审计 | 不重复实现 AI 编排、批准或额度 |
+
+### 3.1 三层关系：前端 / NestJS / ai-service
+
+```text
+前端（desktop / mobile，客户端由 packages/contracts 生成，不手改）
+   │  只调公开契约，如 /conversations/* 与 SSE 事件
+   ▼
+NestJS（apps/api）—— 唯一编排核心
+   │  认证、租户、权限、额度、会话状态机、工具程序化批准与执行、正式写入、审计
+   │  经 AiServiceGateway（全系统通往 ai-service 的唯一入口，零编排逻辑）调内部接口
+   ▼
+ai-service（Python）
+   模型调用、上下文组装、bind_tools 结构化解析、图片/文档生成路由
+   —— 不保存会话、不执行工具、不写业务库、不接触 COS
+```
+
+- **前端 ↔ NestJS**：前端不直接访问 ai-service，只经公开契约与 NestJS 交互；客户端生成物由 `packages/contracts` 生成；
+- **NestJS ↔ ai-service**：内部 HTTP（`/internal/v1/*`，内部 Token 鉴权）；NestJS 把可信上下文（用户、租户、允许的工具清单、知识库检索 scope 等）传给 ai-service，ai-service 返回模型决策或生成结果；一切业务事实（会话、消息、工具结果、正式资源、审计）只落在 NestJS/PostgreSQL；
+- **为什么模型不能直达前端或业务库**：模型输出只是建议（`final_answer` / `tool_call`），必须经 NestJS 程序化批准与执行，保证权限、额度、幂等、审计不被旁路。
 
 ## 4. 已确认决策
 
