@@ -59,6 +59,8 @@ type KnowledgeBaseRecord = Prisma.KnowledgeBaseGetPayload<{ select: typeof knowl
 type KnowledgeBaseMemberRecord = Prisma.KnowledgeBaseMemberGetPayload<{ select: typeof knowledgeBaseMemberSelect }>;
 type MembershipRecord = Prisma.TenantMembershipGetPayload<{ select: typeof membershipSelect }>;
 
+export type KnowledgeBaseAccess = KnowledgeBaseRecord;
+
 const permissionRank: Record<KnowledgeBaseMemberPermission, number> = {
     READER: 1,
     EDITOR: 2,
@@ -348,6 +350,17 @@ export class KnowledgeService {
                 permission: current.permission,
             });
         });
+    }
+
+    /** 校验知识库属于当前租户且当前成员达到最低权限，返回知识库记录；供文档服务复用。 */
+    async requireKnowledgeBaseAccess(
+        knowledgeBaseId: string,
+        minimumPermission: KnowledgeBaseMemberPermission,
+    ): Promise<KnowledgeBaseAccess> {
+        const context = this.tenantContext.require();
+        const knowledgeBase = await this.requireKnowledgeBase(context.tenantId, knowledgeBaseId);
+        await this.requireKnowledgeBasePermission(knowledgeBaseId, minimumPermission);
+        return knowledgeBase;
     }
 
     private async listVisibleKnowledgeBaseIds(tenantId: string, userId: string): Promise<string[]> {
