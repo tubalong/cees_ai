@@ -24,6 +24,7 @@ from app.api.routes.files import router as files_router
 from app.api.routes.images import preview_router
 from app.api.routes.images import router as images_router
 from app.api.routes.invoke import router as invoke_router
+from app.api.routes.knowledge import router as knowledge_router
 from app.api.routes.stream import router as stream_router
 from app.api.routes.system import router as system_router
 from app.core.config import get_settings
@@ -83,6 +84,7 @@ def create_app(
     application.include_router(chat_router)
     application.include_router(files_router)
     application.include_router(documents_router)
+    application.include_router(knowledge_router)
 
     @application.exception_handler(AIServiceError)
     async def handle_ai_service_error(request: Request, exc: AIServiceError) -> JSONResponse:
