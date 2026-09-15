@@ -66,6 +66,7 @@ describe('TurnStateService', () => {
       summary: '{"type":"web_search_result"}',
       resourceType: null,
       resourceId: null,
+      resourceUrl: null,
       sources,
     })).resolves.toBe(true);
 

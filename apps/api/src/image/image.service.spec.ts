@@ -180,7 +180,7 @@ describe('ImageService', () => {
         expect(harness.prisma.auditLog.create).toHaveBeenCalledWith({
             data: expect.objectContaining({ action: 'IMAGE_GENERATED', outcome: AuditOutcome.SUCCESS }),
         });
-        expect(harness.storage.createDownloadUrl).not.toHaveBeenCalled();
+        expect(harness.storage.createDownloadUrl).toHaveBeenCalledWith(OBJECT_KEY);
         expect(harness.prisma.managedImage.updateMany).toHaveBeenCalledWith(expect.objectContaining({
             where: expect.objectContaining({ status: ManagedImageStatus.UPLOADING }),
             data: expect.objectContaining({ status: ManagedImageStatus.READY }),
@@ -191,6 +191,8 @@ describe('ImageService', () => {
             sizeBytes: 16,
             provider: 'openai_compatible',
             model: 'image-model',
+            url: 'https://cos.example/signed',
+            urlTtlSeconds: 900,
         });
     });
 
@@ -233,7 +235,7 @@ describe('ImageService', () => {
             contentType: 'image/png',
             provider: 'openai_compatible',
             model: 'image-model',
-            fileObject: { sizeBytes: BigInt(2048) },
+            fileObject: { sizeBytes: BigInt(2048), objectKey: OBJECT_KEY },
             resource: { deletedAt: null },
         });
 
@@ -245,9 +247,13 @@ describe('ImageService', () => {
             sizeBytes: 2048,
             provider: 'openai_compatible',
             model: 'image-model',
+            url: 'https://cos.example/signed',
+            urlTtlSeconds: 900,
         });
         expect(harness.gateway.generateImage).not.toHaveBeenCalled();
         expect(harness.storage.putObject).not.toHaveBeenCalled();
+        // 回放时重新签发短期 URL，让调用者拿到的是新鲜签名。
+        expect(harness.storage.createDownloadUrl).toHaveBeenCalledWith(OBJECT_KEY);
         expect(harness.prisma.$transaction).not.toHaveBeenCalled();
     });
 

@@ -111,6 +111,8 @@ export type PublicTurnStreamEvent =
       toolCallId: string;
       status: PublicToolResultStatus;
       resource: { type: 'IMAGE' | 'DOCUMENT'; id: string } | null;
+      /** 图片资源生成时签发的短期可下载 URL；其他资源或失败/拒绝事件为 null。 */
+      resourceUrl: string | null;
       /** 联网搜索等非资源型工具返回的结构化来源。老事件可能缺少该字段。 */
       sources?: PublicToolSource[];
       error: { code: string; message: string } | null;

@@ -61,6 +61,7 @@ describe('WebSearchTool', () => {
     expect(result).toEqual({
       resourceType: null,
       resourceId: null,
+      resourceUrl: null,
       summary: expect.stringContaining('web_search_result'),
       sources: [{
         id: 'tool-1:1',

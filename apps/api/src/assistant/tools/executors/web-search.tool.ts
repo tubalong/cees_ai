@@ -99,6 +99,7 @@ export class WebSearchTool implements OnModuleInit {
     return {
       resourceType: null,
       resourceId: null,
+      resourceUrl: null,
       summary,
       sources,
     };
@@ -157,4 +158,3 @@ function normalizeDomain(value: string): string {
     throw new Error(`无效域名：${value}`);
   }
 }
-

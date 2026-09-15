@@ -26,8 +26,8 @@ export class GenerateDocumentTool implements OnModuleInit {
 
   private readonly definition: ToolDefinition = {
     name: 'generate_document',
-    version: '1.0.0',
-    description: '根据指令生成一份结构化文档并保存到文档库；成功返回文档 ID 与标题。',
+    version: '1.1.0',
+    description: '根据指令生成一份结构化文档并保存到文档库；成功返回文档标题与篇幅。',
     parameters: {
       type: 'object',
       properties: {
@@ -69,7 +69,10 @@ export class GenerateDocumentTool implements OnModuleInit {
     return {
       resourceType: 'DOCUMENT',
       resourceId: document.documentId,
-      summary: `文档已生成：${document.title}（${document.contentLength} 字符，模型 ${document.model}），文档 ID ${document.documentId}`,
+      resourceUrl: null,
+      // 回喂模型的摘要只放用户关心的信息：内部标识（文档 ID、模型名）不进回喂文本，
+      // 否则模型会原样转述给用户；资源引用仅保留在 resourceType/resourceId 结构化字段中。
+      summary: `文档已生成：《${document.title}》（共 ${document.contentLength} 字）`,
     };
   }
 }

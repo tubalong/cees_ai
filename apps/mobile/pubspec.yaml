@@ -19,6 +19,11 @@ dependencies:
   hive_flutter: ^1.1.0
   connectivity_plus: ^6.1.1
 
+dependency_overrides:
+  # objective_c 9.6.1 references Architecture.arm64e, which is unavailable in
+  # the Dart SDK bundled by the Flutter 3.47.2 CI toolchain.
+  objective_c: 9.6.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -29,3 +34,9 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+# 2026-09-15: objective_c 9.6.1 的 native assets hook 引用了 Dart 3.11（Flutter 3.47.2）
+# 尚未提供的 Architecture.arm64e，导致 CI flutter test 编译 hook 失败；
+# 临时固定到 9.6.0，待上游发布修复版本后移除此 override。
+dependency_overrides:
+  objective_c: 9.6.0

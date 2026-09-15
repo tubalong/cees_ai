@@ -5441,6 +5441,9 @@ components:
             - $ref: '#/components/schemas/ToolResultResourceReference'
             - type: 'null'
           description: 工具生成的稳定正式资源引用；访问 URL 必须通过对应资源接口按需获取
+        resourceUrl:
+          type: [string, 'null']
+          description: 图片资源生成时签发的短期可下载 URL；有时效性，过期后经 GET /api/v1/images/{imageId} 重新获取；其他资源或历史事件为 null
         sources:
           type: array
           maxItems: 20
