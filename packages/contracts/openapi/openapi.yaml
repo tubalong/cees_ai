@@ -4993,6 +4993,51 @@ paths:
         '403': { description: 缺少 dingtalk.organization.read 权限 }
         '404': { description: 当前租户尚未绑定钉钉企业 }
 
+  /dingtalk/organization/mapping/preview:
+    post:
+      summary: 预览钉钉组织映射
+      description: 按部门层级和人员姓名/部门生成安全映射方案，不修改正式租户数据。
+      operationId: previewDingTalkOrganizationMapping
+      tags: [DingTalk]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PreviewDingTalkMappingRequest' }
+      responses:
+        '200':
+          description: 映射预览
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DingTalkMappingPreviewResponseEnvelope' }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 dingtalk.organization.mapping.preview 权限 }
+        '404': { description: 当前租户尚未绑定钉钉企业 }
+
+  /dingtalk/organization/mapping/apply:
+    post:
+      summary: 应用钉钉组织映射
+      description: 应用自动匹配、人工冲突处理和缺失部门/成员创建；新成员激活凭证仅在本次响应返回。
+      operationId: applyDingTalkOrganizationMapping
+      tags: [DingTalk]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApplyDingTalkMappingRequest' }
+      responses:
+        '200':
+          description: 映射已应用
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DingTalkMappingResponseEnvelope' }
+        '400': { description: 映射参数无效或仍有未解决冲突 }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 dingtalk.organization.mapping.manage 权限 }
+        '404': { description: 当前租户、部门或成员不存在 }
+        '409': { description: 映射或账号已被其他请求修改 }
   /dingtalk/sync-jobs:
     get:
       summary: 查询钉钉同步任务
@@ -9680,6 +9725,135 @@ components:
         requestId:
           type: [string, "null"]
 
+    PreviewDingTalkMappingRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        activationExpiresInDays: { type: integer, minimum: 1, maximum: 30, default: 7 }
+        createMissingDepartments: { type: boolean, default: true }
+        createMissingMembers: { type: boolean, default: true }
+
+    DingTalkDepartmentMappingResolution:
+      type: object
+      additionalProperties: false
+      required: [dingtalkDepartmentId, action]
+      properties:
+        dingtalkDepartmentId: { type: string, format: uuid }
+        action: { type: string, enum: [BIND_EXISTING, CREATE, SKIP] }
+        departmentId: { type: [string, 'null'], format: uuid }
+
+    DingTalkUserMappingResolution:
+      type: object
+      additionalProperties: false
+      required: [dingtalkUserId, action]
+      properties:
+        dingtalkUserId: { type: string, format: uuid }
+        action: { type: string, enum: [BIND_EXISTING, CREATE, SKIP] }
+        membershipId: { type: [string, 'null'], format: uuid }
+        account: { type: [string, 'null'], minLength: 3, maxLength: 32, pattern: '^[A-Za-z0-9]+$' }
+
+    ApplyDingTalkMappingRequest:
+      allOf:
+        - $ref: '#/components/schemas/PreviewDingTalkMappingRequest'
+        - type: object
+          properties:
+            departmentResolutions:
+              type: array
+              items: { $ref: '#/components/schemas/DingTalkDepartmentMappingResolution' }
+            userResolutions:
+              type: array
+              items: { $ref: '#/components/schemas/DingTalkUserMappingResolution' }
+
+    DingTalkDepartmentMappingPreview:
+      type: object
+      required: [dingtalkDepartmentId, externalDepartmentId, name, path, action, departmentId, candidateDepartmentIds, reason]
+      properties:
+        dingtalkDepartmentId: { type: string, format: uuid }
+        externalDepartmentId: { type: string }
+        name: { type: string }
+        path: { type: string }
+        action: { type: string, enum: [MATCH_EXISTING, CREATE, CONFLICT, SKIP] }
+        departmentId: { type: [string, 'null'], format: uuid }
+        candidateDepartmentIds: { type: array, items: { type: string, format: uuid } }
+        reason: { type: string }
+
+    DingTalkUserMappingPreview:
+      type: object
+      required: [dingtalkUserId, externalUserId, name, departmentPaths, action, membershipId, candidateMembershipIds, suggestedAccount, reason]
+      properties:
+        dingtalkUserId: { type: string, format: uuid }
+        externalUserId: { type: string }
+        name: { type: string }
+        departmentPaths: { type: array, items: { type: string } }
+        action: { type: string, enum: [MATCH_EXISTING, CREATE, CONFLICT, SKIP] }
+        membershipId: { type: [string, 'null'], format: uuid }
+        candidateMembershipIds: { type: array, items: { type: string, format: uuid } }
+        suggestedAccount: { type: string, pattern: '^[A-Za-z0-9]+$' }
+        reason: { type: string }
+
+    DingTalkMappingSummary:
+      type: object
+      required: [departmentMatchedCount, departmentCreateCount, departmentConflictCount, userMatchedCount, userCreateCount, userConflictCount]
+      properties:
+        departmentMatchedCount: { type: integer, minimum: 0 }
+        departmentCreateCount: { type: integer, minimum: 0 }
+        departmentConflictCount: { type: integer, minimum: 0 }
+        userMatchedCount: { type: integer, minimum: 0 }
+        userCreateCount: { type: integer, minimum: 0 }
+        userConflictCount: { type: integer, minimum: 0 }
+
+    DingTalkMappingPreview:
+      type: object
+      required: [activationExpiresInDays, departments, users, summary]
+      properties:
+        activationExpiresInDays: { type: integer, minimum: 1, maximum: 30 }
+        departments: { type: array, items: { $ref: '#/components/schemas/DingTalkDepartmentMappingPreview' } }
+        users: { type: array, items: { $ref: '#/components/schemas/DingTalkUserMappingPreview' } }
+        summary: { $ref: '#/components/schemas/DingTalkMappingSummary' }
+
+    DingTalkMappingCredential:
+      type: object
+      required: [dingtalkUserId, membershipId, displayName, account, departmentId, tenantCode, activationToken, activationExpiresAt]
+      properties:
+        dingtalkUserId: { type: string, format: uuid }
+        membershipId: { type: string, format: uuid }
+        displayName: { type: string }
+        account: { type: string, pattern: '^[A-Za-z0-9]+$' }
+        departmentId: { type: [string, 'null'], format: uuid }
+        tenantCode: { type: string }
+        activationToken: { type: string, format: password }
+        activationExpiresAt: { type: string, format: date-time }
+
+    DingTalkMappingResult:
+      type: object
+      required: [preview, credentials, summary]
+      properties:
+        preview: { $ref: '#/components/schemas/DingTalkMappingPreview' }
+        credentials: { type: array, items: { $ref: '#/components/schemas/DingTalkMappingCredential' } }
+        summary:
+          allOf:
+            - $ref: '#/components/schemas/DingTalkMappingSummary'
+            - type: object
+              required: [departmentSkippedCount, userSkippedCount]
+              properties:
+                departmentSkippedCount: { type: integer, minimum: 0 }
+                userSkippedCount: { type: integer, minimum: 0 }
+
+    DingTalkMappingPreviewResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/DingTalkMappingPreview' }
+        requestId: { type: [string, 'null'] }
+
+    DingTalkMappingResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/DingTalkMappingResult' }
+        requestId: { type: [string, 'null'] }
     DingTalkIntegrationStatus:
       type: string
       enum: [ACTIVE, DISABLED, ERROR]

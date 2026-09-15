@@ -18,7 +18,10 @@ import {
     ListDingTalkOrganizationQueryDto,
     ListDingTalkSyncJobsQueryDto,
     UpdateDingTalkIntegrationDto,
+    ApplyDingTalkMappingDto,
+    PreviewDingTalkMappingDto,
 } from './dto';
+import { DingTalkMappingService } from './dingtalk-mapping.service';
 import { DingTalkService } from './dingtalk.service';
 import {
     CursorListResult,
@@ -26,6 +29,8 @@ import {
     DingTalkIntegrationResult,
     DingTalkSyncJobResult,
     DingTalkUserResult,
+    DingTalkMappingPreviewResult,
+    DingTalkMappingResult,
 } from './dingtalk.types';
 
 @ApiTags('dingtalk')
@@ -34,7 +39,10 @@ import {
 @UseGuards(JwtAuthGuard, TenantGuard, PermissionGuard)
 @UseInterceptors(TenantContextInterceptor)
 export class DingTalkController {
-    constructor(private readonly dingTalkService: DingTalkService) { }
+    constructor(
+        private readonly dingTalkService: DingTalkService,
+        private readonly dingTalkMappingService: DingTalkMappingService,
+    ) { }
 
     @Get('integration')
     @RequirePermissions('dingtalk.integration.read')
@@ -87,6 +95,19 @@ export class DingTalkController {
         return this.dingTalkService.listUsers(query);
     }
 
+    @Post('organization/mapping/preview')
+    @RequirePermissions('dingtalk.organization.mapping.preview')
+    @ApiOkResponse({ description: '钉钉组织映射预览' })
+    previewOrganizationMapping(@Body() input: PreviewDingTalkMappingDto): Promise<DingTalkMappingPreviewResult> {
+        return this.dingTalkMappingService.preview(input);
+    }
+
+    @Post('organization/mapping/apply')
+    @RequirePermissions('dingtalk.organization.mapping.manage')
+    @ApiOkResponse({ description: '钉钉组织映射已应用，并返回新成员的一次性激活凭证' })
+    applyOrganizationMapping(@Body() input: ApplyDingTalkMappingDto): Promise<DingTalkMappingResult> {
+        return this.dingTalkMappingService.apply(input);
+    }
     @Get('sync-jobs')
     @RequirePermissions('dingtalk.integration.read')
     @ApiOkResponse({ description: '钉钉同步任务列表' })

@@ -98,3 +98,63 @@ export interface DingTalkOrganizationSnapshot {
     users: DingTalkUserSnapshot[];
 }
 
+
+export type DingTalkMappingAction = 'MATCH_EXISTING' | 'CREATE' | 'CONFLICT' | 'SKIP';
+
+export interface DingTalkDepartmentMappingPreview {
+    dingtalkDepartmentId: string;
+    externalDepartmentId: string;
+    name: string;
+    path: string;
+    action: DingTalkMappingAction;
+    departmentId: string | null;
+    candidateDepartmentIds: string[];
+    reason: string;
+}
+
+export interface DingTalkUserMappingPreview {
+    dingtalkUserId: string;
+    externalUserId: string;
+    name: string;
+    departmentPaths: string[];
+    action: DingTalkMappingAction;
+    membershipId: string | null;
+    candidateMembershipIds: string[];
+    suggestedAccount: string;
+    reason: string;
+}
+
+export interface DingTalkMappingPreviewResult {
+    activationExpiresInDays: number;
+    departments: DingTalkDepartmentMappingPreview[];
+    users: DingTalkUserMappingPreview[];
+    summary: {
+        departmentMatchedCount: number;
+        departmentCreateCount: number;
+        departmentConflictCount: number;
+        userMatchedCount: number;
+        userCreateCount: number;
+        userConflictCount: number;
+    };
+}
+
+export interface DingTalkMappingCredential {
+    dingtalkUserId: string;
+    membershipId: string;
+    displayName: string;
+    account: string;
+    departmentId: string | null;
+    tenantCode: string;
+    activationToken: string;
+    activationExpiresAt: Date;
+}
+
+export interface DingTalkMappingResult {
+    preview: DingTalkMappingPreviewResult;
+    credentials: DingTalkMappingCredential[];
+    summary: DingTalkMappingPreviewResult['summary'] & {
+        departmentSkippedCount: number;
+        userSkippedCount: number;
+    };
+}
+
