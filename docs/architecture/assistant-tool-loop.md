@@ -239,7 +239,7 @@ ai-service /internal/v1/chat/tool-turn/stream 第二轮
 NestJS 通过 SSE 流式返回给用户
 ```
 
-注意：ai-service 返回的 Base64 字节不能直接成为正式业务文件；正式文件必须由 NestJS 上传 COS 并登记 `FileObject`。生成完成时签发短期签名 URL，随公开 `tool_result` 事件的新增兼容可选字段 `resourceUrl` 返回，客户端可直接下载/展示图片（2026-09-14 起）；回喂模型的工具结果摘要同样携带 URL，`resource {type,id}` 稳定引用保留，URL 过期后通过 `GET /images/{imageId}` 重新获取。
+注意：ai-service 返回的 Base64 字节不能直接成为正式业务文件；正式文件必须由 NestJS 上传 COS 并登记 `FileObject`。生成结果只返回稳定资源引用（`resource {type,id}`），事件、消息与快照一律不携带签名 URL；下载地址由前端经 `GET /images/{imageId}` 按需签发（契约 0.24.0 起移除 `resourceUrl`），历史图片永不裂图。
 
 ## 9. 断线重连
 
@@ -335,6 +335,7 @@ POST   /conversations/{conversationId}/turns/{turnId}/cancel              取消
 - 工具轮次历史回放：ai-service 校验 tool 消息必须引用此前 assistant 消息 tool_calls 中的上游调用 ID，而持久化的 ConversationMessage.toolCallId 是 NestJS uuid，回放时通过 ToolCall 表做公开 ID → 上游 ID 映射，并按轮次合成 assistant(tool_calls) 消息插在 TOOL 消息之前（context-builder.buildToolTurnMessages）；
 - 两点程序化批准落地为 `ToolRegistry.listAllowed`（给模型工具列表前）+ `ToolPolicyService.approve`（执行前）；额度检查点预留，接入计费后补在 approve 内；
 - 工具批准拒绝与执行失败不回退 Turn 状态：记录 ToolCall 状态（REJECTED/FAILED）并以 TOOL 消息回喂模型，由模型生成解释；回喂模型的失败摘要与落库/事件的错误详情分离：上游技术错误（`AiServiceInvocationError`，含地址、主机名等细节）只进 `errorMessage`（落库与事件），回喂模型的是用户友好通用文案，避免技术细节被模型转述（2026-09-15）；
+- 权限拒绝的友好文案：`ToolPolicyError.userFacingSummary` 为服务端固定模板（经 `ToolRegistry.getByPermission` 把权限码翻译成工具 `displayName` 功能名），指引用户联系租户管理员开通；权限码只存在于 `error.code`/`permissionCodes` 结构化字段与审计中，不进入模型上下文，用户无法通过对话诱导模型输出权限码等内部信息（2026-09-15）；
 - 工具结果摘要不回喂系统内部标识（资源 ID、模型名），内部标识仅保留在 `resource {type,id}` 结构化字段与事件中（2026-09-15）；
 - 生成即落正式资源：图片不经过待确认交互，AIActionDraft 以 EXECUTED 状态作为动作流水保留写入；
 - 模块结构：工具全部收进 `assistant/tools/`（执行器目录 `executors/`）；图片正式资源仿 document 模式独立为 `image/` 模块：执行器路径不复制编排，公开访问经 ImageController 走 Resource 归属校验（见 14 节图片授权边界）；
