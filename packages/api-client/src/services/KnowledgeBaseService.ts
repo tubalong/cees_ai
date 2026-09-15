@@ -4,10 +4,14 @@
 /* eslint-disable */
 import type { CreateKnowledgeBaseMemberRequest } from '../models/CreateKnowledgeBaseMemberRequest';
 import type { CreateKnowledgeBaseRequest } from '../models/CreateKnowledgeBaseRequest';
+import type { CreateKnowledgeDocumentRequest } from '../models/CreateKnowledgeDocumentRequest';
+import type { CreateKnowledgeDocumentVersionRequest } from '../models/CreateKnowledgeDocumentVersionRequest';
 import type { KnowledgeBaseListResponseEnvelope } from '../models/KnowledgeBaseListResponseEnvelope';
 import type { KnowledgeBaseMemberListResponseEnvelope } from '../models/KnowledgeBaseMemberListResponseEnvelope';
 import type { KnowledgeBaseMemberResponseEnvelope } from '../models/KnowledgeBaseMemberResponseEnvelope';
 import type { KnowledgeBaseResponseEnvelope } from '../models/KnowledgeBaseResponseEnvelope';
+import type { KnowledgeDocumentListResponseEnvelope } from '../models/KnowledgeDocumentListResponseEnvelope';
+import type { KnowledgeDocumentResponseEnvelope } from '../models/KnowledgeDocumentResponseEnvelope';
 import type { UpdateKnowledgeBaseMemberRequest } from '../models/UpdateKnowledgeBaseMemberRequest';
 import type { UpdateKnowledgeBaseRequest } from '../models/UpdateKnowledgeBaseRequest';
 import type { CancelablePromise } from '../core/CancelablePromise';
@@ -235,6 +239,160 @@ export class KnowledgeBaseService {
                 403: `缺少 knowledge_base.member.manage 权限或知识库 MANAGER 权限`,
                 404: `知识库或目标成员不存在`,
                 409: `目标成员已经加入知识库`,
+            },
+        });
+    }
+    /**
+     * 查询知识库文档
+     * 返回知识库内未删除文档的分页列表，包含处理状态；普通成员只能查看自己加入的知识库。
+     * @returns KnowledgeDocumentListResponseEnvelope 知识库文档列表
+     * @throws ApiError
+     */
+    public static listKnowledgeDocuments({
+        knowledgeBaseId,
+        keyword,
+        limit = 20,
+        cursor,
+    }: {
+        /**
+         * 知识库 ID
+         */
+        knowledgeBaseId: string,
+        /**
+         * 按文档名称模糊搜索
+         */
+        keyword?: string,
+        /**
+         * 每页数量，默认 20，最大 100
+         */
+        limit?: number,
+        /**
+         * 上一页返回的文档 ID
+         */
+        cursor?: string,
+    }): CancelablePromise<KnowledgeDocumentListResponseEnvelope> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/knowledge-bases/{knowledgeBaseId}/documents',
+            path: {
+                'knowledgeBaseId': knowledgeBaseId,
+            },
+            query: {
+                'keyword': keyword,
+                'limit': limit,
+                'cursor': cursor,
+            },
+            errors: {
+                400: `分页游标无效或请求参数校验失败`,
+                401: `登录状态无效或缺少有效租户成员身份`,
+                403: `缺少 knowledge_base.read 权限`,
+                404: `知识库不存在或当前成员无权访问`,
+            },
+        });
+    }
+    /**
+     * 上传知识库文档
+     * 关联一个已上传的文件对象并创建文档，文档进入 PENDING 状态后由后台任务解析并建立索引。可见范围为 DEPARTMENT 时必须提供 departmentId，为 PROJECT 时必须提供 projectId。
+     * @returns KnowledgeDocumentResponseEnvelope 文档已创建，等待后台解析与索引
+     * @throws ApiError
+     */
+    public static createKnowledgeDocument({
+        knowledgeBaseId,
+        requestBody,
+    }: {
+        /**
+         * 知识库 ID
+         */
+        knowledgeBaseId: string,
+        requestBody: CreateKnowledgeDocumentRequest,
+    }): CancelablePromise<KnowledgeDocumentResponseEnvelope> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/knowledge-bases/{knowledgeBaseId}/documents',
+            path: {
+                'knowledgeBaseId': knowledgeBaseId,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                400: `请求字段校验失败或可见范围与部门、项目字段不一致`,
+                401: `登录状态无效或缺少有效租户成员身份`,
+                403: `缺少 knowledge_base.document.manage 权限或知识库 EDITOR 权限`,
+                404: `知识库不存在或文件对象不属于当前租户`,
+                409: `文件对象已被其他文档使用或已删除`,
+            },
+        });
+    }
+    /**
+     * 上传文档新版本
+     * 关联新的文件对象并创建文档新版本，文档重新进入 PENDING 状态并重建索引。
+     * @returns KnowledgeDocumentResponseEnvelope 新版本已创建，文档重新进入处理队列
+     * @throws ApiError
+     */
+    public static createKnowledgeDocumentVersion({
+        knowledgeBaseId,
+        documentId,
+        requestBody,
+    }: {
+        /**
+         * 知识库 ID
+         */
+        knowledgeBaseId: string,
+        /**
+         * 文档 ID
+         */
+        documentId: string,
+        requestBody: CreateKnowledgeDocumentVersionRequest,
+    }): CancelablePromise<KnowledgeDocumentResponseEnvelope> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/knowledge-bases/{knowledgeBaseId}/documents/{documentId}/versions',
+            path: {
+                'knowledgeBaseId': knowledgeBaseId,
+                'documentId': documentId,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                400: `请求字段校验失败或可见范围与部门、项目字段不一致`,
+                401: `登录状态无效或缺少有效租户成员身份`,
+                403: `缺少 knowledge_base.document.manage 权限或知识库 EDITOR 权限`,
+                404: `知识库、文档不存在或文件对象不属于当前租户`,
+                409: `文件对象已被其他文档使用或已删除`,
+            },
+        });
+    }
+    /**
+     * 重试文档处理
+     * 将处理失败的文档重新放入 PENDING 队列，重置重试计数与失败原因。
+     * @returns KnowledgeDocumentResponseEnvelope 文档已重新进入处理队列
+     * @throws ApiError
+     */
+    public static retryKnowledgeDocument({
+        knowledgeBaseId,
+        documentId,
+    }: {
+        /**
+         * 知识库 ID
+         */
+        knowledgeBaseId: string,
+        /**
+         * 文档 ID
+         */
+        documentId: string,
+    }): CancelablePromise<KnowledgeDocumentResponseEnvelope> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/knowledge-bases/{knowledgeBaseId}/documents/{documentId}/retry',
+            path: {
+                'knowledgeBaseId': knowledgeBaseId,
+                'documentId': documentId,
+            },
+            errors: {
+                401: `登录状态无效或缺少有效租户成员身份`,
+                403: `缺少 knowledge_base.document.manage 权限或知识库 EDITOR 权限`,
+                404: `知识库或文档不存在`,
+                409: `文档当前状态不允许重试`,
             },
         });
     }

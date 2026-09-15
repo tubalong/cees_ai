@@ -10,7 +10,12 @@ import {
     Min,
     MinLength,
 } from 'class-validator';
-import { KNOWLEDGE_BASE_MEMBER_PERMISSIONS, KnowledgeBaseMemberPermission } from './knowledge.types';
+import {
+    KNOWLEDGE_BASE_MEMBER_PERMISSIONS,
+    KNOWLEDGE_DOCUMENT_VISIBILITY_SCOPES,
+    KnowledgeBaseMemberPermission,
+    KnowledgeDocumentVisibilityScope,
+} from './knowledge.types';
 
 export class ListKnowledgeBasesQueryDto {
     @IsOptional()
@@ -83,4 +88,59 @@ export class ListKnowledgeBaseMembersQueryDto {
     @IsOptional()
     @IsUUID()
     cursor?: string;
+}
+
+export class ListKnowledgeDocumentsQueryDto {
+    @IsOptional()
+    @IsString()
+    @MaxLength(100)
+    keyword?: string;
+
+    @IsOptional()
+    @Type(() => Number)
+    @IsInt()
+    @Min(1)
+    @Max(100)
+    limit = 20;
+
+    @IsOptional()
+    @IsUUID()
+    cursor?: string;
+}
+
+export class CreateKnowledgeDocumentDto {
+    @IsUUID()
+    fileObjectId!: string;
+
+    @IsString()
+    @MinLength(1)
+    @MaxLength(200)
+    name!: string;
+
+    @IsIn(KNOWLEDGE_DOCUMENT_VISIBILITY_SCOPES)
+    visibilityScope!: KnowledgeDocumentVisibilityScope;
+
+    @IsOptional()
+    @IsUUID()
+    departmentId?: string | null;
+
+    @IsOptional()
+    @IsUUID()
+    projectId?: string | null;
+}
+
+export class CreateKnowledgeDocumentVersionDto {
+    @IsUUID()
+    fileObjectId!: string;
+
+    @IsIn(KNOWLEDGE_DOCUMENT_VISIBILITY_SCOPES)
+    visibilityScope!: KnowledgeDocumentVisibilityScope;
+
+    @IsOptional()
+    @IsUUID()
+    departmentId?: string | null;
+
+    @IsOptional()
+    @IsUUID()
+    projectId?: string | null;
 }

@@ -1,8 +1,9 @@
 # 知识库 RAG（MinerU + LlamaIndex）
 
-> 状态：分块实施中。块 1（本文档与内部契约 `index`/`retrieve`）与块 2（ai-service 内存闭环 + HTTP 路由）已落地，其余内容按第 8 节分块计划推进。
+> 状态：分块实施中。块 1（本文档与内部契约 `index`/`retrieve`）、块 2（ai-service 内存闭环 + HTTP 路由）、块 3（NestJS 文档状态机与上传触发索引）已落地，其余按第 8 节分块计划推进。
 > 最后同步：2026-09-15
 > 内部契约版本：`0.3.0`
+> 公开契约版本：`0.23.0`（块 3 文档接口）
 
 ## 1. 目标与边界
 
@@ -50,16 +51,18 @@ NestJS API   = 业务事实、权限、状态与审计层（apps/api）
 | --- | --- |
 | 知识库 CRUD、成员授权、租户隔离、审计 | `apps/api/src/knowledge`（[产品文档](../product/knowledge-base-management.md)） |
 | `KnowledgeBase` / `KnowledgeBaseMember` / `KnowledgeDocument` / `DocumentVersion` / `DocumentChunk` / `KnowledgeQueryLog` 数据模型 | `apps/api/prisma/schema.prisma` |
-| `DocumentChunk` 已含 `visibilityScope`、`departmentId`、`projectId`、`version`、pgvector `embedding` 字段 | 同上 |
+| `KnowledgeDocument` 处理状态机、失败重试、后台索引 Worker（块 3） | `apps/api/src/knowledge/knowledge-indexing.service.ts` |
+| 文档上传/版本/重试公开接口与版本级可见范围（块 3） | `apps/api/src/knowledge/knowledge-document.service.ts` |
 | ai-service 内存索引与检索验证（LlamaIndex 薄适配，不用全局 Settings） | [ai-service-foundation.md](ai-service-foundation.md) |
 | ai-service 知识内存闭环：EmbeddingRouter、节点构建、内存 VectorStore、HTTP `index`/`retrieve` | `apps/ai-service/app/{embeddings,knowledge}`、`app/api/routes/knowledge.py` |
 | LLMRouter 多模型路由与 `rag` role | `apps/ai-service/app/llm` |
 
 缺失：
 
-- `DocumentChunk` 无任何读写代码；`KnowledgeDocument` 无版本与处理状态机
-- MinerU 服务；真实 Embedding provider 与独立 pgvector 向量库（块 4）
-- 答案生成与引用校验（块 5）
+- `DocumentChunk` 仍无读写代码（业务侧引用定位事实源，块 4 后启用）
+- MinerU 真机服务；真实 Embedding provider 与独立 pgvector 向量库（块 4）
+- 解析产物到 `ParsedDocument` 的真实转换（块 3 为占位解析器，块 6 真机替换）；答案生成与引用校验（块 5）
+- 内部契约 `index/delete`、`answer`
 
 ## 3. 关键决策
 
@@ -74,7 +77,7 @@ NestJS API   = 业务事实、权限、状态与审计层（apps/api）
 
 向量库 schema 由 ai-service 自己管理，**不进 Prisma**。
 
-`DocumentChunk` 表保留为业务侧引用定位事实源（citation 映射 document / page / bbox 时由 NestJS 查询），其 `embedding` 字段停用，后续迁移删除（见块 3）。
+`DocumentChunk` 表保留为业务侧引用定位事实源（citation 映射 document / page / bbox 时由 NestJS 查询），其 `embedding` 字段已在块 3 迁移 0026 中删除。
 
 ### 3.2 编排：NestJS Job Worker 编排
 
@@ -116,7 +119,7 @@ ai-service 不自行推断权限。NestJS 计算可信 scope 后随检索请求�
 
 ## 4. 索引流程与状态机
 
-`KnowledgeDocument` 的处理状态机由 NestJS 持久化：
+`KnowledgeDocument` 的处理状态机由 NestJS 持久化（块 3 已落地）：
 
 ```text
 PENDING -> PARSING -> PARSED -> INDEXING -> READY
@@ -124,10 +127,17 @@ PENDING -> PARSING -> PARSED -> INDEXING -> READY
                         +-> FAILED <+
 ```
 
-- 每个状态迁移记录重试次数、失败原因与幂等键；
-- 幂等键 = `(document_id, document_version_id, chunking_version, embedding_profile, index_version)`，同一幂等键重复提交不产生重复节点；
-- MinerU 调用超时/失败由 NestJS 重试；ai-service 的 index 是幂等 upsert；
-- 文档删除或新版本上线时调用 `index/delete`（后续块）删除旧版本派生索引，不删除业务文档。
+落地细节：
+
+- Worker（`KnowledgeIndexingService`）定时轮询 PENDING 文档，用 `updateMany` 条件更新声明所有权，多实例间以 Redis 锁（`jobs:knowledge-document-indexer`）互斥；
+- 上传/新版本/重试后调用 `kick()` 即时触发，与轮询共用同一把锁，不会重复处理同一文档；
+- 解析器经 `KNOWLEDGE_DOCUMENT_PARSER` 抽象注入，块 3 为 MinerU 占位实现（抛 `MINERU_NOT_CONFIGURED`），块 6 真机替换；
+- 失败按 retryable 语义处理：可重试错误回 `PENDING` 并递增 `retryCount`，达到上限（默认 3，`KNOWLEDGE_INDEX_MAX_RETRIES`）置 `FAILED`；不可重试错误直接 `FAILED`；`FAILED` 可由用户手动重试；
+- 可见范围（`visibilityScope`）是版本级属性，存储在 `DocumentVersion`，索引请求从当前处理版本读取；
+- `acl_version` 当前由版本 ID 派生（`acl-{version.id 前 8 位}`），块 5 引入真正的 ACL 版本机制；
+- 索引请求三元组可通过环境变量覆盖：`KNOWLEDGE_CHUNKING_VERSION`（默认 `knowledge-chunking-v1`）、`KNOWLEDGE_EMBEDDING_PROFILE`（默认 `deterministic`）、`KNOWLEDGE_INDEX_VERSION`（默认 `knowledge-index-v1`）；
+- 幂等键 = `(document_id, document_version_id, chunking_version, embedding_profile, index_version)`，同一幂等键重复提交不产生重复节点；ai-service 的 index 是幂等 upsert；
+- 文档删除或新版本上线时调用 `index/delete`（块 4）删除旧版本派生索引，不删除业务文档。
 
 ## 5. 检索与答案
 
@@ -168,15 +178,15 @@ PENDING -> PARSING -> PARSED -> INDEXING -> READY
 
 ## 8. 分块实施计划
 
-| 块 | 内容 | 依赖 |
-| --- | --- | --- |
-| 1 | 本文档 + 内部契约 `index`/`retrieve`（0.3.0） | 无 |
-| 2 | ✅ 已落地：ai-service 内存闭环（`parsed_models`、`mineru_artifact_reader`、`node_builder`、`EmbeddingRouter`、内存 VectorStore、`ingestion`/`retrieval`、HTTP 路由 `index`/`retrieve`），pytest 覆盖 | 块 1 |
-| 3 | NestJS `KnowledgeDocument` 状态机 + `DocumentChunk` 迁移改造（停用 embedding 字段）+ 上传触发索引任务 | 块 1 |
-| 4 | 真实 pgvector Gateway（独立 `cees_ai_vectors` database）+ `index/delete` 契约 | 块 2 |
-| 5 | 公开 Query API + `answer` 契约（LLMRouter rag role）+ citation 校验 | 块 2、4 |
-| 6 | MinerU 真机联调（192.168.5.29，pip 版部署中） | 块 3 |
-| 7 | Assistant RAG 工具接入（阶段 B） | 块 5 |
+| 块 | 内容 | 依赖 | 状态 |
+| --- | --- | --- | --- |
+| 1 | 本文档 + 内部契约 `index`/`retrieve`（0.3.0） | 无 | ✅ 已落地 |
+| 2 | ai-service 内存闭环（`parsed_models`、`mineru_artifact_reader`、`node_builder`、`EmbeddingRouter`、内存 VectorStore、`ingestion`/`retrieval`、HTTP 路由 `index`/`retrieve`），pytest 覆盖 | 块 1 | ✅ 已落地 |
+| 3 | NestJS `KnowledgeDocument` 状态机 + `DocumentChunk` 迁移改造（删除 embedding 字段）+ 上传触发索引任务 | 块 1 | ✅ 已落地 |
+| 4 | 真实 pgvector Gateway（独立 `cees_ai_vectors` database）+ `index/delete` 契约 | 块 2 | 待开始 |
+| 5 | 公开 Query API + `answer` 契约（LLMRouter rag role）+ citation 校验 | 块 2、4 | 待开始 |
+| 6 | MinerU 真机联调（192.168.5.29，pip 版部署中） | 块 3 | 待开始 |
+| 7 | Assistant RAG 工具接入（阶段 B） | 块 5 | 待开始 |
 
 每块独立可验证、可提交；块 2 使用内存向量库与假解析产物，不依赖 GPU 服务器。
 
@@ -192,12 +202,12 @@ PENDING -> PARSING -> PARSED -> INDEXING -> READY
 
 每块的最低验证：
 
-| 块 | 验证 |
-| --- | --- |
-| 1 | `pnpm contracts:lint` + `pnpm contracts:check` + 文档评审 |
-| 2 | ✅ pytest 全绿：解析产物转换、切分稳定性、重复索引幂等、租户与 scope 过滤、index_version 隔离、文档版本删除；ruff 与契约漂移测试通过 |
-| 3 | jest：状态机迁移、上传触发、失败重试；Prisma 迁移检查 |
-| 4 | pytest：Gateway upsert/delete/filter；幂等与部分失败 |
-| 5 | jest + pytest：citation ID 校验、无证据拒答、查询日志写入 |
-| 6 | 真机解析样例 → 索引 → 检索端到端验收 |
-| 7 | jest：工具 approve/执行前二次校验/失败语义；契约兼容检查 |
+| 块 | 验证 | 状态 |
+| --- | --- | --- |
+| 1 | `pnpm contracts:lint` + `pnpm contracts:check` + 文档评审 | ✅ 完成 |
+| 2 | ✅ pytest 全绿：解析产物转换、切分稳定性、重复索引幂等、租户与 scope 过滤、index_version 隔离、文档版本删除；ruff 与契约漂移测试通过 | ✅ 完成 |
+| 3 | jest：状态机迁移、上传触发、失败重试（32 用例通过）；Prisma 迁移检查 | ✅ 完成 |
+| 4 | pytest：Gateway upsert/delete/filter；幂等与部分失败 | 待验证 |
+| 5 | jest + pytest：citation ID 校验、无证据拒答、查询日志写入 | 待验证 |
+| 6 | 真机解析样例 → 索引 → 检索端到端验收 | 待验证 |
+| 7 | jest：工具 approve/执行前二次校验/失败语义；契约兼容检查 | 待验证 |

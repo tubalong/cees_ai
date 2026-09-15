@@ -1,10 +1,21 @@
 import { Module } from '@nestjs/common';
+import { AiOrchestrationModule } from '../ai-orchestration/ai-orchestration.module';
 import { KnowledgeController } from './knowledge.controller';
+import { KnowledgeDocumentService } from './knowledge-document.service';
+import { KNOWLEDGE_DOCUMENT_PARSER, MinerUDocumentParser } from './knowledge-document-parser';
+import { KnowledgeIndexingService } from './knowledge-indexing.service';
 import { KnowledgeService } from './knowledge.service';
 
 @Module({
+    imports: [AiOrchestrationModule],
     controllers: [KnowledgeController],
-    providers: [KnowledgeService],
-    exports: [KnowledgeService],
+    providers: [
+        KnowledgeService,
+        KnowledgeDocumentService,
+        KnowledgeIndexingService,
+        MinerUDocumentParser,
+        { provide: KNOWLEDGE_DOCUMENT_PARSER, useExisting: MinerUDocumentParser },
+    ],
+    exports: [KnowledgeService, KnowledgeDocumentService],
 })
 export class KnowledgeModule { }
