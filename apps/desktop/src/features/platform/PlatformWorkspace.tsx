@@ -2,9 +2,9 @@ import { BankOutlined, LogoutOutlined, PlusOutlined, SafetyCertificateOutlined, 
 import { Alert, App as AntdApp, Button, Empty, Form, Input, Modal, Spin, Tag } from 'antd';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
-import { createPlatformTenant, listPlatformTenants, platformLogout, type CreatePlatformTenantInput, type PlatformMeResult } from './api';
+import { createPlatformTenant, listPlatformTenants, platformLogout, type CreatePlatformTenantInput, type PlatformMeResult } from '../../core/api';
 import PlatformTenantDetails from './PlatformTenantDetails';
-import { useDateFormatter, useI18n } from './i18n';
+import { useDateFormatter, useI18n } from '../../core/i18n';
 
 interface OneTimeCredential {
     tenantCode: string;

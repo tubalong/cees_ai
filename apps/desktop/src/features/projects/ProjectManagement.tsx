@@ -18,9 +18,9 @@ import {
     type ProjectStatus, type ProjectSummary, type ProjectTransitionAction, type TaskAttachment,
     type TaskActivity, type TaskComment, type TaskPriority, type TaskStatus, type TaskSummary,
     type TenantMember,
-} from './api';
-import './project.css';
-import { useDateFormatter, useI18n } from './i18n';
+} from '../../core/api';
+import '../../styles/shared.css';
+import { useDateFormatter, useI18n } from '../../core/i18n';
 
 const projectStatusLabels: Record<ProjectStatus, string> = {
     PLANNING: '规划中', ACTIVE: '进行中', PAUSED: '已暂停', COMPLETED: '已完成', CANCELLED: '已取消', ARCHIVED: '已归档',

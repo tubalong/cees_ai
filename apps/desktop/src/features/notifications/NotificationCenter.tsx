@@ -2,9 +2,9 @@ import { BellOutlined, CheckOutlined } from '@ant-design/icons';
 import { App as AntdApp, Badge, Button, Empty, Spin, Switch, Tag } from 'antd';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
-import { getUnreadNotificationCount, hasStoredSession, listNotifications, markAllNotificationsRead, markNotificationRead, type MeResult, type NotificationItem } from './api';
-import './project.css';
-import { useDateFormatter, useI18n } from './i18n';
+import { getUnreadNotificationCount, hasStoredSession, listNotifications, markAllNotificationsRead, markNotificationRead, type MeResult, type NotificationItem } from '../../core/api';
+import '../../styles/shared.css';
+import { useDateFormatter, useI18n } from '../../core/i18n';
 
 interface NotificationCenterProps {
     authContext: MeResult;

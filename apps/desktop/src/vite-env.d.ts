@@ -5,5 +5,6 @@ interface Window {
         platform: string;
         version: string;
         setZoomFactor: (factor: number) => void;
+        openDevTools: () => void;
     };
 }

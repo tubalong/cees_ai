@@ -7,8 +7,8 @@ import {
     listPlatformTenantAdministrators, removePlatformTenantAdministrator,
     restorePlatformTenant, suspendPlatformTenant, updatePlatformTenant,
     type AssignPlatformTenantAdministratorInput, type PlatformTenant,
-} from './api';
-import { useDateFormatter, useI18n } from './i18n';
+} from '../../core/api';
+import { useDateFormatter, useI18n } from '../../core/i18n';
 
 interface TenantNameForm { name: string }
 interface SuspendForm { reason: string }
