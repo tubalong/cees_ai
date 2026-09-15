@@ -23,6 +23,7 @@ interface StableToolResult {
   summary: string;
   resourceType: 'IMAGE' | 'DOCUMENT' | null;
   resourceId: string | null;
+  resourceUrl: string | null;
 }
 
 /**
@@ -320,11 +321,11 @@ export class TurnStateService {
       status: ToolCallStatus.REJECTED,
       eventStatus: 'rejected',
       executionToken: null,
-      result: { summary: input.summary, resourceType: null, resourceId: null },
+      result: { summary: input.summary, resourceType: null, resourceId: null, resourceUrl: null },
     });
   }
 
-  /** 执行成功：仅保存稳定资源引用；签名 URL 由资源读取接口按需生成。 */
+  /** 执行成功：保存稳定资源引用与生成时签发的短期可下载 URL（仅图片工具提供）。 */
   async completeToolCall(input: {
     toolCallId: string;
     turnId: string;
@@ -335,6 +336,7 @@ export class TurnStateService {
     summary: string;
     resourceType: 'IMAGE' | 'DOCUMENT' | null;
     resourceId: string | null;
+    resourceUrl: string | null;
   }): Promise<boolean> {
     return this.settleToolCall({
       ...input,
@@ -345,6 +347,7 @@ export class TurnStateService {
         summary: input.summary,
         resourceType: input.resourceType,
         resourceId: input.resourceId,
+        resourceUrl: input.resourceUrl,
       },
     });
   }
@@ -359,13 +362,16 @@ export class TurnStateService {
     executionToken: string;
     code: string;
     summary: string;
+    /** 落库与事件携带的详细错误信息；缺省时与 summary 一致。 */
+    errorMessage?: string;
   }): Promise<boolean> {
     return this.settleToolCall({
       ...input,
       expectedStatus: ToolCallStatus.EXECUTING,
       status: ToolCallStatus.FAILED,
       eventStatus: 'failed',
-      result: { summary: input.summary, resourceType: null, resourceId: null },
+      errorMessage: input.errorMessage ?? input.summary,
+      result: { summary: input.summary, resourceType: null, resourceId: null, resourceUrl: null },
     });
   }
 
@@ -558,6 +564,8 @@ export class TurnStateService {
     executionToken: string | null;
     code?: string;
     summary: string;
+    /** 详细错误信息，仅落库与事件携带；回喂模型只使用 summary。 */
+    errorMessage?: string;
     result: StableToolResult;
   }): Promise<boolean> {
     return this.prisma.$transaction(async (transaction) => {
@@ -586,7 +594,7 @@ export class TurnStateService {
           leaseExpiresAt: null,
           result: input.result as unknown as Prisma.InputJsonObject,
           errorCode: input.eventStatus === 'completed' ? null : input.code ?? 'TOOL_EXECUTION_FAILED',
-          errorMessage: input.eventStatus === 'completed' ? null : input.summary,
+          errorMessage: input.eventStatus === 'completed' ? null : input.errorMessage ?? input.summary,
           executedResourceType: input.result.resourceType,
           executedResourceId: input.result.resourceId,
         },
@@ -614,9 +622,13 @@ export class TurnStateService {
           resource: input.result.resourceId && input.result.resourceType
             ? { type: input.result.resourceType, id: input.result.resourceId }
             : null,
+          resourceUrl: input.result.resourceUrl,
           error: input.eventStatus === 'completed'
             ? null
-            : { code: input.code ?? 'TOOL_EXECUTION_FAILED', message: input.summary },
+            : {
+                code: input.code ?? 'TOOL_EXECUTION_FAILED',
+                message: input.errorMessage ?? input.summary,
+              },
         },
       );
       return true;
@@ -702,6 +714,7 @@ export class TurnStateService {
             summary,
             resourceType: null,
             resourceId: null,
+            resourceUrl: null,
           } as Prisma.InputJsonObject,
         },
       });
@@ -727,6 +740,7 @@ export class TurnStateService {
           toolCallId: call.id,
           status: eventStatus,
           resource: null,
+          resourceUrl: null,
           error: { code, message: summary },
         },
       );

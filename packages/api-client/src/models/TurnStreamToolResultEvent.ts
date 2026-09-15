@@ -25,6 +25,10 @@ export type TurnStreamToolResultEvent = {
      */
     resource: (ToolResultResourceReference | null);
     /**
+     * 图片资源生成时签发的短期可下载 URL；有时效性，过期后经 GET /api/v1/images/{imageId} 重新获取；其他资源或历史事件为 null
+     */
+    resourceUrl?: string | null;
+    /**
      * 工具失败或被拒绝时的错误信息
      */
     error: any | null;

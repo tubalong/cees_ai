@@ -356,10 +356,22 @@ GET    /api/v1/projects/{projectId}/tasks/{taskId}/activities
 ## 工具阶段启用说明（2026-09-11）
 
 - 公开契约版本不变（0.16.0 已定义的 `tool_call`/`tool_result` 事件结构沿用，`tool_executing` 阶段未启用）；
-- 会话 SSE 事件 `tool_call`（toolCallId/name/arguments）与 `tool_result`（toolCallId/status: completed|failed|rejected/resourceId/resourceUrl/error）正式启用；`generate_image` 与 `generate_document` 工具执行的产物落在 `resourceId/resourceUrl`（图片为短期签名 URL，文档为文档 ID，resourceUrl 为 null）；
+- 会话 SSE 事件 `tool_call`（toolCallId/name/arguments）与 `tool_result`（toolCallId/status: completed|failed|rejected/resource/error）正式启用；`generate_image` 与 `generate_document` 工具执行的产物落在稳定资源引用 `resource {type,id}`，访问 URL 通过对应资源接口按需获取；
 - 权限目录新增 `ai.image.generate`（调用 AI 生成图片）与 `ai.document.generate`（调用 AI 生成文档），与既有 RBAC 权限同体系，由管理员经角色授予；
 - Prisma 新增 `0012_ai_tool_loop_image` 迁移：`tool_calls`（含 upstreamCallId 上游调用 ID 映射、ToolCallStatus 状态机）、`managed_images`，`ResourceType` 新增 `IMAGE`，`FilePurpose` 新增 `GENERATED_IMAGE`，`conversation_messages`/`ai_action_drafts` 增加 `tool_call_id`；文档生成复用既有 `Resource(DOCUMENT)`/`ManagedDocument`，无新增迁移；
 - 公开事件无破坏性变更，客户端无需重新生成；工具轮次行为详见 [AI 助手工具循环](../architecture/assistant-tool-loop.md)，文档生成落地详见 [通用文档生成](../architecture/document-generation.md)。
+
+## 图片工具结果返回 URL 说明（2026-09-14）
+
+- 公开 `tool_result` 事件新增兼容可选字段 `resourceUrl`：`generate_image` 执行成功时携带生成时签发的短期可下载 URL（TTL 与 `TENCENT_COS_SIGNED_URL_TTL_SECONDS` 一致），客户端可直接下载/展示图片，无需再经 `GET /images/{imageId}` 查询；
+- 回喂模型的工具结果摘要同样携带该 URL（含有效时长提示），模型可直接把地址展示给用户；
+- 稳定资源引用 `resource {type,id}` 保留；`resourceUrl` 有时效性，过期后经 `GET /images/{imageId}` 重新获取；非图片资源或失败/拒绝事件该字段为 `null`；
+- 字段为兼容新增（可选），老客户端无需改造即可继续使用既有 `resource` 字段。
+
+## 工具回喂内容脱敏说明（2026-09-15）
+
+- 回喂模型的工具结果摘要只放用户关心的信息，不携带系统内部标识（资源 ID、模型名），避免模型原样转述给用户；内部标识仅保留在 `resource {type,id}` 结构化字段与事件中；
+- 工具失败时回喂摘要与错误详情分离：上游技术错误（如 AI 服务不可用的连接细节、内部地址）只写入 ToolCall 的 `errorMessage` 与公开 `tool_result` 事件的 `error` 字段供排障，回喂模型的是用户友好通用文案；业务性拒绝（参数非法、权限不足）保持原用户友好消息回喂。
 
 ## 契约事实源
 

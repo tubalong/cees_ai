@@ -29,3 +29,9 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+# 2026-09-15: objective_c 9.6.1 的 native assets hook 引用了 Dart 3.11（Flutter 3.47.2）
+# 尚未提供的 Architecture.arm64e，导致 CI flutter test 编译 hook 失败；
+# 临时固定到 9.6.0，待上游发布修复版本后移除此 override。
+dependency_overrides:
+  objective_c: 9.6.0
