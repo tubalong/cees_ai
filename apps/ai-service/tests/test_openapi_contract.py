@@ -34,6 +34,15 @@ SCHEMAS_TO_COMPARE = {
     "FileExtractionRequest",
     "FileExtractionResponse",
     "FileExtractionMetadata",
+    "KnowledgeIndexRequest",
+    "KnowledgeIndexResponse",
+    "KnowledgeRetrieveScope",
+    "KnowledgeRetrieveRequest",
+    "KnowledgeRetrieveResponse",
+    "RetrievedChunk",
+    "ParsedBlock",
+    "ParsedDocument",
+    "KnowledgeVisibilityScope",
     "ErrorResponse",
 }
 

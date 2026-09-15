@@ -6,6 +6,7 @@ import {
   generateDocumentDocx as requestGenerateDocumentDocx,
   generateImage as requestImageGeneration,
   getReadiness,
+  indexKnowledgeDocument,
   invokeChat as requestChatInvocation,
   invokeLlm,
   renderDocumentDocx as requestRenderDocumentDocx,
@@ -27,6 +28,8 @@ import {
   type ImageGenerationMetadata,
   type InvokeRequest,
   type InvokeResponse,
+  type KnowledgeIndexRequest,
+  type KnowledgeIndexResponse,
   type RenderDocxRequest,
   type StreamExecutionMetadata,
   type TokenUsage,
@@ -380,6 +383,17 @@ export class AiServiceGateway {
     if (result.error) throw this.toInvocationError(result.error, result.response?.status);
     if (!result.data) throw this.emptyResponseError();
     return Buffer.from(await result.data.arrayBuffer());
+  }
+
+  /**
+   * 调用 ai-service 知识索引路由：接收 ParsedDocument 后切分、Embedding 并幂等写入
+   * 独立向量库。索引不调用 LLM、不产生 Token 指标；处理状态与审计由 knowledge 模块负责。
+   */
+  async indexKnowledge(input: KnowledgeIndexRequest): Promise<KnowledgeIndexResponse> {
+    const result = await indexKnowledgeDocument({ client: this.getClient(), body: input });
+    if (result.error) throw this.toInvocationError(result.error, result.response?.status);
+    if (!result.data) throw this.emptyResponseError();
+    return result.data;
   }
 
   /**

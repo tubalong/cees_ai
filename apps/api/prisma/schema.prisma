@@ -74,6 +74,15 @@ enum VisibilityScope {
   CUSTOM
 }
 
+enum KnowledgeDocumentStatus {
+  PENDING
+  PARSING
+  PARSED
+  INDEXING
+  READY
+  FAILED
+}
+
 enum DataScope {
   SELF
   DEPARTMENT
@@ -1072,56 +1081,60 @@ model KnowledgeBaseMember {
 }
 
 model KnowledgeDocument {
-  id              String    @id @default(uuid()) @db.Uuid
-  tenantId        String    @map("tenant_id") @db.Uuid
-  knowledgeBaseId String    @map("knowledge_base_id") @db.Uuid
-  fileObjectId    String    @map("file_object_id") @db.Uuid
-  name            String
-  status          String    @default("PENDING")
-  departmentId    String?   @map("department_id") @db.Uuid
-  projectId       String?   @map("project_id") @db.Uuid
-  createdAt       DateTime  @default(now()) @map("created_at")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
-  createdBy       String?   @map("created_by") @db.Uuid
-  updatedBy       String?   @map("updated_by") @db.Uuid
-  deletedAt       DateTime? @map("deleted_at")
-  version         Int       @default(1)
+  id               String                  @id @default(uuid()) @db.Uuid
+  tenantId         String                  @map("tenant_id") @db.Uuid
+  knowledgeBaseId  String                  @map("knowledge_base_id") @db.Uuid
+  fileObjectId     String                  @map("file_object_id") @db.Uuid
+  name             String
+  status           KnowledgeDocumentStatus @default(PENDING)
+  currentVersionId String?                 @map("current_version_id") @db.Uuid
+  retryCount       Int                     @default(0) @map("retry_count")
+  lastError        String?                 @map("last_error") @db.Text
+  lastProcessedAt  DateTime?               @map("last_processed_at")
+  createdAt        DateTime                @default(now()) @map("created_at")
+  updatedAt        DateTime                @updatedAt @map("updated_at")
+  createdBy        String?                 @map("created_by") @db.Uuid
+  updatedBy        String?                 @map("updated_by") @db.Uuid
+  deletedAt        DateTime?               @map("deleted_at")
+  version          Int                     @default(1)
 
   @@index([tenantId, knowledgeBaseId])
   @@map("documents")
 }
 
 model DocumentVersion {
-  id            String   @id @default(uuid()) @db.Uuid
-  tenantId      String   @map("tenant_id") @db.Uuid
-  documentId    String   @map("document_id") @db.Uuid
-  fileObjectId  String   @map("file_object_id") @db.Uuid
-  versionNumber Int      @map("version_number")
-  createdAt     DateTime @default(now()) @map("created_at")
-  createdBy     String?  @map("created_by") @db.Uuid
+  id              String         @id @default(uuid()) @db.Uuid
+  tenantId        String         @map("tenant_id") @db.Uuid
+  documentId      String         @map("document_id") @db.Uuid
+  fileObjectId    String         @unique @map("file_object_id") @db.Uuid
+  versionNumber   Int            @map("version_number")
+  visibilityScope VisibilityScope @map("visibility_scope")
+  departmentId    String?        @map("department_id") @db.Uuid
+  projectId       String?        @map("project_id") @db.Uuid
+  createdAt       DateTime       @default(now()) @map("created_at")
+  createdBy       String?        @map("created_by") @db.Uuid
 
   @@unique([tenantId, documentId, versionNumber])
   @@map("document_versions")
 }
 
 model DocumentChunk {
-  id              String                @id @default(uuid()) @db.Uuid
-  tenantId        String                @map("tenant_id") @db.Uuid
-  knowledgeBaseId String                @map("knowledge_base_id") @db.Uuid
-  documentId      String                @map("document_id") @db.Uuid
-  departmentId    String?               @map("department_id") @db.Uuid
-  projectId       String?               @map("project_id") @db.Uuid
-  visibilityScope VisibilityScope       @map("visibility_scope")
-  content         String                @db.Text
-  embedding       Unsupported("vector")
+  id              String          @id @default(uuid()) @db.Uuid
+  tenantId        String          @map("tenant_id") @db.Uuid
+  knowledgeBaseId String          @map("knowledge_base_id") @db.Uuid
+  documentId      String          @map("document_id") @db.Uuid
+  departmentId    String?         @map("department_id") @db.Uuid
+  projectId       String?         @map("project_id") @db.Uuid
+  visibilityScope VisibilityScope @map("visibility_scope")
+  content         String          @db.Text
   metadata        Json
-  chunkIndex      Int                   @map("chunk_index")
-  createdAt       DateTime              @default(now()) @map("created_at")
-  updatedAt       DateTime              @updatedAt @map("updated_at")
-  createdBy       String?               @map("created_by") @db.Uuid
-  updatedBy       String?               @map("updated_by") @db.Uuid
-  deletedAt       DateTime?             @map("deleted_at")
-  version         Int                   @default(1)
+  chunkIndex      Int             @map("chunk_index")
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+  createdBy       String?         @map("created_by") @db.Uuid
+  updatedBy       String?         @map("updated_by") @db.Uuid
+  deletedAt       DateTime?       @map("deleted_at")
+  version         Int             @default(1)
 
   @@index([tenantId, knowledgeBaseId, documentId])
   @@map("document_chunks")

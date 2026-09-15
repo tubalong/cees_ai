@@ -1,12 +1,14 @@
 # 知识库管理
 
-> 状态：第一阶段已落地
-> 最后同步：2026-09-14
-> 公开契约版本：`0.20.0`
+> 状态：第二阶段（文档上传与处理状态机）已落地
+> 最后同步：2026-09-15
+> 公开契约版本：`0.23.0`
 
-## 1. 第一阶段范围
+## 1. 阶段范围
 
-知识库属于租户业务域，业务事实源位于 `apps/api`。本阶段只完成知识库本身和成员授权管理：
+知识库属于租户业务域，业务事实源位于 `apps/api`。
+
+第一阶段完成知识库本身和成员授权管理：
 
 - 知识库创建、查询、修改和软删除；
 - 知识库成员添加、权限修改和移除；
@@ -15,7 +17,15 @@
 - 乐观锁、RBAC 和操作审计；
 - OpenAPI 契约和 TypeScript 客户端生成。
 
-本阶段不实现文件上传、腾讯云 COS 关联、文档解析、文档版本处理、切片、Embedding、向量检索和 RAG。`KnowledgeDocument`、`DocumentVersion`、`DocumentChunk`、`KnowledgeQueryLog` 只是后续阶段的数据库基础，不能据此认为对应接口已经可用。
+第二阶段落地文档上传与处理状态机：
+
+- 复用文件模块上传文件对象，再关联为知识库文档；
+- 文档版本管理，可见范围是版本级属性；
+- `PENDING -> PARSING -> PARSED -> INDEXING -> READY / FAILED` 处理状态机；
+- 失败自动重试（默认上限 3 次）与手动重试；
+- 后台索引任务由 NestJS Worker 轮询推进，上传/新版本/重试后即时触发。
+
+文档解析真机接入、Embedding、向量检索和 RAG 仍在后续阶段；`DocumentChunk`、`KnowledgeQueryLog` 只是后续阶段的数据库基础，不能据此认为对应接口已经可用。
 
 ## 2. 知识库可见范围
 
@@ -53,6 +63,10 @@
 | `POST /knowledge-bases/{knowledgeBaseId}/members` | 添加知识库成员 | `knowledge_base.member.manage` + MANAGER |
 | `PATCH /knowledge-bases/{knowledgeBaseId}/members/{membershipId}` | 修改成员权限 | `knowledge_base.member.manage` + MANAGER |
 | `DELETE /knowledge-bases/{knowledgeBaseId}/members/{membershipId}` | 移除知识库成员 | `knowledge_base.member.manage` + MANAGER |
+| `GET /knowledge-bases/{knowledgeBaseId}/documents` | 分页查询知识库文档与处理状态 | `knowledge_base.read` + 知识库可见范围 |
+| `POST /knowledge-bases/{knowledgeBaseId}/documents` | 关联文件对象创建文档，进入处理队列 | `knowledge_base.document.manage` + EDITOR |
+| `POST /knowledge-bases/{knowledgeBaseId}/documents/{documentId}/versions` | 上传新版本，重新进入处理队列 | `knowledge_base.document.manage` + EDITOR |
+| `POST /knowledge-bases/{knowledgeBaseId}/documents/{documentId}/retry` | 重试处理失败的文档 | `knowledge_base.document.manage` + EDITOR |
 
 ### 4.1 创建示例
 
@@ -95,6 +109,11 @@
 | `409` | `KNOWLEDGE_BASE_MEMBER_EXISTS` | 成员已经加入该知识库 |
 | `409` | `KNOWLEDGE_BASE_OWNER_REQUIRED` | 创建者必须保留 MANAGER，不能降级或移除 |
 | `409` | `KNOWLEDGE_BASE_LAST_MANAGER` | 不能移除最后一名 MANAGER |
+| `404` | `KNOWLEDGE_DOCUMENT_NOT_FOUND` | 文档不存在、已删除或不属于该知识库 |
+| `409` | `KNOWLEDGE_DOCUMENT_RETRY_INVALID` | 只有 `FAILED` 状态的文档可以重试 |
+| `400` | `KNOWLEDGE_DOCUMENT_SCOPE_INVALID` | 可见范围缺少部门/项目，或部门/项目不属于当前租户 |
+| `404` | `KNOWLEDGE_FILE_OBJECT_NOT_FOUND` | 文件不存在、非当前租户或已删除 |
+| `409` | `KNOWLEDGE_FILE_OBJECT_IN_USE` | 文件已作为其他文档版本的内容源 |
 
 ## 6. 审计与数据模型
 
@@ -107,24 +126,33 @@
 - `KNOWLEDGE_BASE_MEMBER_UPDATED`；
 - `KNOWLEDGE_BASE_MEMBER_REMOVED`。
 
+文档相关事件：
+
+- `KNOWLEDGE_DOCUMENT_CREATED`；
+- `KNOWLEDGE_DOCUMENT_VERSION_CREATED`；
+- `KNOWLEDGE_DOCUMENT_RETRY_REQUESTED`；
+- `KNOWLEDGE_DOCUMENT_INDEXED`（后台任务，无操作者）；
+- `KNOWLEDGE_DOCUMENT_PROCESS_FAILED`（后台任务，无操作者）。
+
 当前阶段使用以下模型：
 
 ```text
 KnowledgeBase
-  └── KnowledgeBaseMember ── User / TenantMembership
+  ├── KnowledgeBaseMember ── User / TenantMembership
+  └── KnowledgeDocument
+        └── DocumentVersion（版本级可见范围，fileObjectId 唯一）
 ```
 
 `KnowledgeBaseMember` 以 `tenantId + knowledgeBaseId + userId` 保证成员关系唯一。知识库删除采用软删除；成员关系当前没有 `deletedAt` 字段，移除采用硬删除。
 
-数据库迁移为 `apps/api/prisma/migrations/0015_knowledge_base_management/migration.sql`，负责初始化知识库权限、为 `tenant_admin` 授权并补齐知识库表和字段的 PostgreSQL 中文注释。
+数据库迁移为 `apps/api/prisma/migrations/0015_knowledge_base_management/migration.sql`（第一阶段）与 `0026_knowledge_document_indexing/migration.sql`（第二阶段：处理状态机字段、可见范围下沉 `DocumentVersion`、删除 `DocumentChunk.embedding`）。
 
 ## 7. 后续阶段
 
 后续实现应在新的契约和迁移中逐步加入：
 
-1. 文件和 COS 对象绑定；
-2. 文档上传、版本和处理状态；
-3. 文档解析与切片；
-4. Embedding、向量索引和权限过滤后的 RAG 查询；
-5. 文档处理失败重试、配额、病毒扫描和后台任务。
+1. 文档解析真机接入（MinerU，替换占位实现）；
+2. 文档切片与解析产物转换；
+3. Embedding、向量索引和权限过滤后的 RAG 查询；
+4. 文档删除、配额、病毒扫描与后台任务监控。
 

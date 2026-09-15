@@ -572,6 +572,126 @@ export type FileExtractionMetadata = {
     text_length: number;
 };
 
+export type ParsedBlock = {
+    block_id: string;
+    /**
+     * Normalized block kind produced by the parser. Unknown parser kinds must be mapped by the caller before submitting.
+     */
+    type: 'title' | 'paragraph' | 'list_item' | 'table' | 'formula' | 'code_block' | 'image' | 'caption';
+    /**
+     * Block text when the block carries inline content; null for pure asset blocks.
+     */
+    text?: string | null;
+    page_index?: number | null;
+    /**
+     * Page-relative bounding box in reading order [x0, y0, x1, y1].
+     */
+    bbox?: [
+        number,
+        number,
+        number,
+        number
+    ] | null;
+    /**
+     * Ancestor heading titles from root to the closest heading, in reading order.
+     */
+    heading_path?: Array<string>;
+    source_order: number;
+    asset_ref?: string | null;
+};
+
+export type ParsedDocument = {
+    document_id: string;
+    document_version_id: string;
+    parser_name: string;
+    parser_version: string;
+    blocks: Array<ParsedBlock>;
+};
+
+export type KnowledgeVisibilityScope = {
+    visibility_scope: 'PRIVATE' | 'DEPARTMENT' | 'PROJECT' | 'TENANT' | 'CUSTOM';
+    department_id?: string | null;
+    project_id?: string | null;
+    /**
+     * Version of the access-control snapshot the caller used to compute the scope. Retrieval must compare it against the node metadata to avoid serving stale visibility information.
+     */
+    acl_version: string;
+};
+
+export type KnowledgeIndexRequest = {
+    request_id: string;
+    tenant_id: string;
+    user_id: string;
+    knowledge_base_id: string;
+    document_id: string;
+    document_version_id: string;
+    parsed_document: ParsedDocument;
+    chunking_version: string;
+    embedding_profile: string;
+    /**
+     * Identity of the index generation. Switching embedding models or chunking strategies creates a new index_version instead of overwriting existing vectors.
+     */
+    index_version: string;
+    visibility_scope: KnowledgeVisibilityScope;
+};
+
+export type KnowledgeIndexResponse = {
+    request_id: string;
+    indexed_chunks: number;
+    chunking_version: string;
+    embedding_profile: string;
+    index_version: string;
+    latency_ms?: number;
+};
+
+export type KnowledgeRetrieveScope = {
+    knowledge_base_ids: Array<string>;
+    /**
+     * Optional document-level allowlist computed by the caller. When omitted, all documents inside the given knowledge bases match.
+     */
+    allowed_document_ids?: Array<string>;
+    department_ids?: Array<string>;
+    project_ids?: Array<string>;
+    acl_version: string;
+};
+
+export type KnowledgeRetrieveRequest = {
+    request_id: string;
+    tenant_id: string;
+    user_id: string;
+    query: string;
+    scope: KnowledgeRetrieveScope;
+    top_k?: number;
+    index_version: string;
+    /**
+     * Embedding profile for the query. Null selects the configured default; the effective profile is returned in the response.
+     */
+    embedding_profile?: string | null;
+};
+
+export type RetrievedChunk = {
+    chunk_id: string;
+    document_id: string;
+    document_version_id: string;
+    text: string;
+    score: number;
+    page_index?: number | null;
+    bbox?: [
+        number,
+        number,
+        number,
+        number
+    ] | null;
+    heading_path?: Array<string>;
+};
+
+export type KnowledgeRetrieveResponse = {
+    request_id: string;
+    chunks: Array<RetrievedChunk>;
+    index_version: string;
+    embedding_profile: string;
+};
+
 export type ErrorDetail = {
     code: string;
     message: string;
@@ -1197,3 +1317,85 @@ export type ExtractFileResponses = {
 };
 
 export type ExtractFileResponse = ExtractFileResponses[keyof ExtractFileResponses];
+
+export type IndexKnowledgeDocumentData = {
+    body: KnowledgeIndexRequest;
+    path?: never;
+    query?: never;
+    url: '/internal/v1/knowledge/index';
+};
+
+export type IndexKnowledgeDocumentErrors = {
+    /**
+     * Invalid profile or unsupported output mode
+     */
+    400: ErrorResponse;
+    /**
+     * Internal authentication failed
+     */
+    401: ErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ErrorResponse;
+    /**
+     * Unexpected internal service error
+     */
+    500: ErrorResponse;
+    /**
+     * Service or configured providers unavailable
+     */
+    503: ErrorResponse;
+};
+
+export type IndexKnowledgeDocumentError = IndexKnowledgeDocumentErrors[keyof IndexKnowledgeDocumentErrors];
+
+export type IndexKnowledgeDocumentResponses = {
+    /**
+     * Document indexed idempotently
+     */
+    200: KnowledgeIndexResponse;
+};
+
+export type IndexKnowledgeDocumentResponse = IndexKnowledgeDocumentResponses[keyof IndexKnowledgeDocumentResponses];
+
+export type RetrieveKnowledgeData = {
+    body: KnowledgeRetrieveRequest;
+    path?: never;
+    query?: never;
+    url: '/internal/v1/knowledge/retrieve';
+};
+
+export type RetrieveKnowledgeErrors = {
+    /**
+     * Invalid profile or unsupported output mode
+     */
+    400: ErrorResponse;
+    /**
+     * Internal authentication failed
+     */
+    401: ErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ErrorResponse;
+    /**
+     * Unexpected internal service error
+     */
+    500: ErrorResponse;
+    /**
+     * Service or configured providers unavailable
+     */
+    503: ErrorResponse;
+};
+
+export type RetrieveKnowledgeError = RetrieveKnowledgeErrors[keyof RetrieveKnowledgeErrors];
+
+export type RetrieveKnowledgeResponses = {
+    /**
+     * Chunks retrieved within the trusted scope
+     */
+    200: KnowledgeRetrieveResponse;
+};
+
+export type RetrieveKnowledgeResponse = RetrieveKnowledgeResponses[keyof RetrieveKnowledgeResponses];

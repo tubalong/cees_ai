@@ -21,18 +21,24 @@ import { TenantGuard } from '../tenant/tenant.guard';
 import {
     CreateKnowledgeBaseDto,
     CreateKnowledgeBaseMemberDto,
+    CreateKnowledgeDocumentDto,
+    CreateKnowledgeDocumentVersionDto,
     DeleteKnowledgeBaseQueryDto,
     ListKnowledgeBaseMembersQueryDto,
     ListKnowledgeBasesQueryDto,
+    ListKnowledgeDocumentsQueryDto,
     UpdateKnowledgeBaseDto,
     UpdateKnowledgeBaseMemberDto,
 } from './dto';
+import { KnowledgeDocumentService } from './knowledge-document.service';
 import { KnowledgeService } from './knowledge.service';
 import {
     KnowledgeBaseMemberListResult,
     KnowledgeBaseMemberResult,
     KnowledgeBaseListResult,
     KnowledgeBaseResult,
+    KnowledgeDocumentListResult,
+    KnowledgeDocumentResult,
 } from './knowledge.types';
 
 @ApiTags('knowledge-base')
@@ -41,7 +47,10 @@ import {
 @UseGuards(JwtAuthGuard, TenantGuard, PermissionGuard)
 @UseInterceptors(TenantContextInterceptor)
 export class KnowledgeController {
-    constructor(private readonly knowledgeService: KnowledgeService) { }
+    constructor(
+        private readonly knowledgeService: KnowledgeService,
+        private readonly knowledgeDocumentService: KnowledgeDocumentService,
+    ) { }
 
     @Get()
     @RequirePermissions('knowledge_base.read')
@@ -125,5 +134,46 @@ export class KnowledgeController {
         @Param('membershipId', new ParseUUIDPipe()) membershipId: string,
     ): Promise<void> {
         return this.knowledgeService.removeMember(knowledgeBaseId, membershipId);
+    }
+
+    @Get(':knowledgeBaseId/documents')
+    @RequirePermissions('knowledge_base.read')
+    @ApiOkResponse({ description: '知识库文档列表' })
+    listDocuments(
+        @Param('knowledgeBaseId', new ParseUUIDPipe()) knowledgeBaseId: string,
+        @Query() query: ListKnowledgeDocumentsQueryDto,
+    ): Promise<KnowledgeDocumentListResult> {
+        return this.knowledgeDocumentService.listDocuments(knowledgeBaseId, query);
+    }
+
+    @Post(':knowledgeBaseId/documents')
+    @RequirePermissions('knowledge_base.document.manage')
+    @ApiCreatedResponse({ description: '文档已创建，等待后台解析与索引' })
+    createDocument(
+        @Param('knowledgeBaseId', new ParseUUIDPipe()) knowledgeBaseId: string,
+        @Body() input: CreateKnowledgeDocumentDto,
+    ): Promise<KnowledgeDocumentResult> {
+        return this.knowledgeDocumentService.createDocument(knowledgeBaseId, input);
+    }
+
+    @Post(':knowledgeBaseId/documents/:documentId/versions')
+    @RequirePermissions('knowledge_base.document.manage')
+    @ApiCreatedResponse({ description: '新版本已创建，文档重新进入处理队列' })
+    createDocumentVersion(
+        @Param('knowledgeBaseId', new ParseUUIDPipe()) knowledgeBaseId: string,
+        @Param('documentId', new ParseUUIDPipe()) documentId: string,
+        @Body() input: CreateKnowledgeDocumentVersionDto,
+    ): Promise<KnowledgeDocumentResult> {
+        return this.knowledgeDocumentService.createDocumentVersion(knowledgeBaseId, documentId, input);
+    }
+
+    @Post(':knowledgeBaseId/documents/:documentId/retry')
+    @RequirePermissions('knowledge_base.document.manage')
+    @ApiOkResponse({ description: '文档已重新进入处理队列' })
+    retryDocument(
+        @Param('knowledgeBaseId', new ParseUUIDPipe()) knowledgeBaseId: string,
+        @Param('documentId', new ParseUUIDPipe()) documentId: string,
+    ): Promise<KnowledgeDocumentResult> {
+        return this.knowledgeDocumentService.retryDocument(knowledgeBaseId, documentId);
     }
 }

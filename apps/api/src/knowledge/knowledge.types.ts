@@ -35,3 +35,35 @@ export interface KnowledgeBaseMemberListResult {
     items: KnowledgeBaseMemberResult[];
     nextCursor: string | null;
 }
+
+export const KNOWLEDGE_DOCUMENT_STATUSES = ['PENDING', 'PARSING', 'PARSED', 'INDEXING', 'READY', 'FAILED'] as const;
+export type KnowledgeDocumentStatus = typeof KNOWLEDGE_DOCUMENT_STATUSES[number];
+
+export const KNOWLEDGE_DOCUMENT_VISIBILITY_SCOPES = ['PRIVATE', 'DEPARTMENT', 'PROJECT', 'TENANT'] as const;
+export type KnowledgeDocumentVisibilityScope = typeof KNOWLEDGE_DOCUMENT_VISIBILITY_SCOPES[number];
+
+export interface KnowledgeDocumentResult {
+    id: string;
+    tenantId: string;
+    knowledgeBaseId: string;
+    name: string;
+    status: KnowledgeDocumentStatus;
+    fileObjectId: string;
+    versionNumber: number;
+    currentVersionId: string | null;
+    retryCount: number;
+    lastError: string | null;
+    visibilityScope: KnowledgeDocumentVisibilityScope;
+    departmentId: string | null;
+    projectId: string | null;
+    createdBy: string | null;
+    updatedBy: string | null;
+    version: number;
+    createdAt: Date;
+    updatedAt: Date;
+}
+
+export interface KnowledgeDocumentListResult {
+    items: KnowledgeDocumentResult[];
+    nextCursor: string | null;
+}
