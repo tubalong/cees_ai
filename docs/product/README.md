@@ -33,3 +33,4 @@
 - [企业角色与权限管理](role-management.md)
 - [平台租户与管理员管理](platform-tenant-management.md)
 - [Desktop 多语言支持](desktop-i18n.md)
+- [协作域客户端对接（项目/任务/会议/报告/通知/工作台/AI/批量导入/文件上传）](collaboration-domains.md)

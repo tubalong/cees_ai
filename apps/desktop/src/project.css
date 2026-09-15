@@ -1,0 +1,249 @@
+.workspace-page.project-management-page {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+}
+
+.project-layout {
+    display: grid;
+    grid-template-columns: 320px minmax(0, 1fr);
+    gap: 18px;
+    min-height: 0;
+}
+
+.project-list-panel,
+.project-detail-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    min-height: 0;
+    padding: 16px 18px;
+}
+
+.project-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    overflow-y: auto;
+}
+
+.project-row {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    width: 100%;
+    padding: 14px 16px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--surface);
+    cursor: pointer;
+    text-align: left;
+    transition: border-color .15s ease, background .15s ease, box-shadow .15s ease;
+}
+
+.project-row:hover {
+    border-color: #3478ff;
+    box-shadow: 0 2px 8px rgba(52, 120, 255, .08);
+}
+
+.project-row.is-selected {
+    border-color: #3478ff;
+    background: rgba(52, 120, 255, .08);
+}
+
+.project-row strong {
+    font-size: 14px;
+    color: var(--text);
+}
+
+.project-row small {
+    color: var(--muted);
+}
+
+.project-detail-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.project-detail-header h2 {
+    margin: 0;
+    font-size: 20px;
+    color: var(--text);
+}
+
+.project-meta-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 10px;
+}
+
+.project-meta-grid>div {
+    padding: 12px 14px;
+    border-radius: 10px;
+    background: var(--app-surface-soft, #f8f9fb);
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.project-meta-grid dt {
+    font-size: 12px;
+    color: var(--muted);
+}
+
+.project-meta-grid dd {
+    margin: 0;
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--text);
+}
+
+.project-transition-bar {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.task-toolbar {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.inline-switch {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--muted);
+    white-space: nowrap;
+}
+
+.task-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.task-row-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    padding: 12px 14px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--surface);
+    cursor: pointer;
+    text-align: left;
+    transition: border-color .15s ease, box-shadow .15s ease;
+}
+
+.task-row-item:hover {
+    border-color: #3478ff;
+    box-shadow: 0 2px 8px rgba(52, 120, 255, .08);
+}
+
+.task-row-item.is-subtask {
+    padding-left: 24px;
+    border-left: 3px solid #cfd8ea;
+}
+
+.task-row-item>strong {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.task-row-item>small {
+    color: var(--muted);
+    white-space: nowrap;
+}
+
+.task-detail-sections {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+}
+
+.task-comment-list,
+.task-activity-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-height: 240px;
+    overflow-y: auto;
+}
+
+.import-issue-row {
+    background: rgba(255, 77, 79, .08);
+}
+
+.task-comment-item,
+.task-activity-item {
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: var(--app-surface-soft, #f8f9fb);
+}
+
+.task-comment-item header,
+.task-activity-item header {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 4px;
+}
+
+.task-comment-item p,
+.task-activity-item p {
+    margin: 0;
+    font-size: 13px;
+    color: var(--text);
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.attachment-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.attachment-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface);
+}
+
+.attachment-row>strong {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;
+    color: var(--text);
+}
+
+.attachment-row>small {
+    color: var(--muted);
+    white-space: nowrap;
+}
+
+@media (max-width: 1100px) {
+    .project-layout {
+        grid-template-columns: 1fr;
+    }
+}

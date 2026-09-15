@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 
 import '../../core/l10n.dart';
 import '../home/home_page.dart';
-import '../messages/messages_page.dart';
 import '../organization/organization_page.dart';
 import '../profile/profile_page.dart';
+import '../workbench/workbench_page.dart';
 
 class MobileShell extends StatefulWidget {
   const MobileShell({super.key});
@@ -14,7 +14,7 @@ class MobileShell extends StatefulWidget {
 
 class _MobileShellState extends State<MobileShell> {
   int selectedIndex = 0;
-  static const pages = [HomePage(), OrganizationPage(), MessagesPage(), ProfilePage()];
+  static const pages = [HomePage(), OrganizationPage(), WorkbenchPage(), ProfilePage()];
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -29,7 +29,7 @@ class _MobileShellState extends State<MobileShell> {
         child: Row(children: [
           _TabItem(index: 0, selectedIndex: selectedIndex, icon: Icons.auto_awesome_outlined, label: context.tr('nav.ai'), onTap: selectTab),
           _TabItem(index: 1, selectedIndex: selectedIndex, icon: Icons.grid_view_outlined, label: context.tr('nav.org'), onTap: selectTab),
-          _TabItem(index: 2, selectedIndex: selectedIndex, icon: Icons.chat_bubble_outline_rounded, label: context.tr('nav.messages'), onTap: selectTab),
+          _TabItem(index: 2, selectedIndex: selectedIndex, icon: Icons.hub_outlined, label: context.tr('nav.workbench'), onTap: selectTab),
           _TabItem(index: 3, selectedIndex: selectedIndex, icon: Icons.person_outline_rounded, label: context.tr('nav.profile'), onTap: selectTab),
         ]),
       ),

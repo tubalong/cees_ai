@@ -33,7 +33,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
   @override
   Widget build(BuildContext context) {
     final loading = ref.watch(authControllerProvider).isLoading;
-    ref.listen(authControllerProvider, (_, next) {
+    ref.listen(authControllerProvider, (_, next) { 
       next.whenOrNull(error: (error, __) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(apiErrorMessage(error))));
       });
