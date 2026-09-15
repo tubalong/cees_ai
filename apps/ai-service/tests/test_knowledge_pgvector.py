@@ -217,6 +217,83 @@ async def test_repeated_upsert_replaces_nodes(clean_gateway: PGVectorStoreGatewa
     assert [item.node.node_id for item in scored] == ["n-2"]
 
 
+async def test_repeated_upsert_same_node_id_keeps_single_latest_row(
+    clean_gateway: PGVectorStoreGateway,
+) -> None:
+    """同 node_id 重复写入：旧行被替换，不产生重复行。"""
+    gateway = clean_gateway
+    old = make_node(node_id="n-1", text="旧内容。", embedding=[1.0, 0.0, 0.0, 0.0])
+    await gateway.upsert_nodes(
+        tenant_id=TENANT,
+        document_version_id=VERSION_ID,
+        index_version=INDEX_VERSION,
+        nodes=[old],
+    )
+    updated = make_node(node_id="n-1", text="新内容。", embedding=[1.0, 0.0, 0.0, 0.0])
+    await gateway.upsert_nodes(
+        tenant_id=TENANT,
+        document_version_id=VERSION_ID,
+        index_version=INDEX_VERSION,
+        nodes=[updated],
+    )
+
+    scored = await gateway.retrieve(
+        tenant_id=TENANT,
+        query_embedding=[1.0, 0.0, 0.0, 0.0],
+        scope=make_scope(),
+        index_version=INDEX_VERSION,
+        top_k=8,
+    )
+    assert len(scored) == 1
+    assert scored[0].node.node_id == "n-1"
+    assert scored[0].node.get_content() == "新内容。"
+
+
+async def test_partial_overlap_upsert_replaces_only_stale_nodes(
+    clean_gateway: PGVectorStoreGateway,
+) -> None:
+    """第二次写入与第一次部分重叠：更新的覆盖、新增的保留、废弃的删除。"""
+    gateway = clean_gateway
+    first = [
+        make_node(
+            node_id="n-1", text="将被更新的块。", embedding=[1.0, 0.0, 0.0, 0.0]
+        ),
+        make_node(
+            node_id="n-2", text="将被废弃的块。", embedding=[0.0, 1.0, 0.0, 0.0]
+        ),
+    ]
+    await gateway.upsert_nodes(
+        tenant_id=TENANT,
+        document_version_id=VERSION_ID,
+        index_version=INDEX_VERSION,
+        nodes=first,
+    )
+    second = [
+        make_node(
+            node_id="n-1", text="更新后的块。", embedding=[1.0, 0.0, 0.0, 0.0]
+        ),
+        make_node(
+            node_id="n-3", text="新增的块。", embedding=[0.0, 0.0, 1.0, 0.0]
+        ),
+    ]
+    await gateway.upsert_nodes(
+        tenant_id=TENANT,
+        document_version_id=VERSION_ID,
+        index_version=INDEX_VERSION,
+        nodes=second,
+    )
+
+    scored = await gateway.retrieve(
+        tenant_id=TENANT,
+        query_embedding=[1.0, 0.0, 0.0, 0.0],
+        scope=make_scope(),
+        index_version=INDEX_VERSION,
+        top_k=8,
+    )
+    by_id = {item.node.node_id: item.node.get_content() for item in scored}
+    assert by_id == {"n-1": "更新后的块。", "n-3": "新增的块。"}
+
+
 async def test_upsert_isolated_by_tenant_version_and_index(
     clean_gateway: PGVectorStoreGateway,
 ) -> None:

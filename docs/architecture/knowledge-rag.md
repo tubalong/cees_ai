@@ -86,7 +86,11 @@ NestJS API   = 业务事实、权限、状态与审计层（apps/api）
 - LlamaIndex 官方 `PGVectorStore` 支持 metadata filter、批量 upsert、按 filter 删除；
 - `VectorStoreGateway` 屏蔽后端差异，数据量增长后可替换 Qdrant 而不改契约。
 
-向量库 schema 由 ai-service 自己管理，**不进 Prisma**。
+向量库 schema 由 ai-service 自己管理，**不进 Prisma**，治理机制（块 4 落地）：
+
+- **库**：`cees_ai_vectors` 由 `infra/database/manage-db.sh <env> create-vector-db` 在运行中的 postgres 容器里创建（CREATE DATABASE + CREATE EXTENSION vector），与业务库同实例，不新增基础设施；
+- **表**：`knowledge_chunks` 由 ai-service 首次使用时自动创建（PGVectorStore 初始化时建表并启用 vector 扩展），表名固定为 `knowledge_chunks`，向量维度由 `KNOWLEDGE_VECTOR_DIMENSION` 决定；
+- **版本治理**：向量表结构不原地迁移——切换 embedding 模型或切分策略时创建新 `index_version` 并行重建，旧版本由 `index/delete` 清理（见 3.4），避免重建期间读请求落在半迁移表上。
 
 `DocumentChunk` 表保留为业务侧引用定位事实源（citation 映射 document / page / bbox 时由 NestJS 查询），其 `embedding` 字段已在块 3 迁移 0026 中删除。
 
@@ -108,7 +112,7 @@ NestJS API   = 业务事实、权限、状态与审计层（apps/api）
 
 - 切换 embedding 模型或切分策略时创建新 `index_version`，完成重建后再切换读取版本，不覆盖旧向量；
 - 索引请求必须声明三元组，检索请求必须声明 `index_version`；
-- 向量库中每个节点携带该三元组，删除按 `(document_version_id, index_version)` 过滤。
+- 向量库中每个节点携带该三元组，删除按 `(tenant_id, document_version_id, index_version)` 过滤。
 
 ### 3.5 权限过滤
 
@@ -173,7 +177,7 @@ PENDING -> PARSING -> PARSED -> INDEXING -> READY
 - 可见范围（`visibilityScope`）是版本级属性，存储在 `DocumentVersion`，索引请求从当前处理版本读取；
 - `acl_version` 当前由版本 ID 派生（`acl-{version.id 前 8 位}`），块 5 引入真正的 ACL 版本机制；
 - 索引请求三元组可通过环境变量覆盖：`KNOWLEDGE_CHUNKING_VERSION`（默认 `knowledge-chunking-v1`）、`KNOWLEDGE_EMBEDDING_PROFILE`（默认 `deterministic`）、`KNOWLEDGE_INDEX_VERSION`（默认 `knowledge-index-v1`）；
-- 幂等键 = `(document_id, document_version_id, chunking_version, embedding_profile, index_version)`，同一幂等键重复提交不产生重复节点；ai-service 的 index 是幂等 upsert；
+- 幂等键 = `(document_id, document_version_id, chunking_version, embedding_profile, index_version)`，同一幂等键重复提交不产生重复节点；ai-service 的 index 是幂等 upsert，块 4 起采用「先写新后删旧」语义：新节点先落地，再删除三元组内的旧行（含同 node_id 旧内容行），读请求只见全旧或全新，不存在先删后写的空桶窗口；add 失败时旧行原样保留，清理失败最坏出现重复行，幂等重试后收敛；
 - 文档删除或新版本上线时调用 `index/delete`（块 4）删除旧版本派生索引，不删除业务文档。
 
 ## 5. 检索与答案

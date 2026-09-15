@@ -9,7 +9,7 @@ from llama_index.core.vector_stores.types import (
     VectorStoreQuery,
 )
 from llama_index.vector_stores.postgres import PGVectorStore
-from sqlalchemy import text
+from sqlalchemy import and_, text
 
 from app.api.generated.models import KnowledgeRetrieveScope
 from app.knowledge.stores import ScoredNode
@@ -26,10 +26,12 @@ class PGVectorStoreGateway:
     存 JSONB，租户/scope/index_version 过滤在 SQL WHERE 层完成，与
     排序在同一个查询内执行（过滤先于 top-k）。
 
-    幂等语义：`upsert_nodes` 先按 (tenant_id, document_version_id,
-    index_version) 删除旧节点再写入，重复提交同一三元组是替换而非追加。
-    该操作不跨事务，add 失败时旧节点可能已删除——调用方按幂等重试
-    语义重新提交即可恢复，最终一致。
+    幂等语义：`upsert_nodes` 采用「先写新后删旧」——新节点先落地，
+    再删除三元组内的全部旧行（含同 node_id 的旧内容行与本次集合外
+    的废弃行）。重复提交同一三元组是替换而非追加，读请求只见全旧
+    或全新，不存在先删后写的中间态空桶窗口。add 失败时旧行原样
+    保留；清理失败时最坏出现重复行，按幂等语义重试后收敛，最终
+    一致。
     """
 
     def __init__(
@@ -63,11 +65,49 @@ class PGVectorStoreGateway:
             return 0
         self._assert_embedding_dimensions(nodes)
         self._store._initialize()
-        await self._store.adelete_nodes(
-            filters=_version_filters(tenant_id, document_version_id, index_version)
-        )
+        # 先写新后删旧：新节点先落地，读请求只见全旧或全新，
+        # 不存在先删后写的空桶中间态窗口。
         await self._store.async_add(nodes)
+        await self._delete_stale_nodes(
+            tenant_id=tenant_id,
+            document_version_id=document_version_id,
+            index_version=index_version,
+            keep_node_ids={node.node_id for node in nodes},
+        )
         return len(nodes)
+
+    async def _delete_stale_nodes(
+        self,
+        *,
+        tenant_id: str,
+        document_version_id: str,
+        index_version: str,
+        keep_node_ids: set[str],
+    ) -> None:
+        """删除三元组内除本次写入的最新行外的全部旧行。
+
+        PGVectorStore 的 node_id 无唯一约束，async_add 对相同 node_id
+        只会追加新行（自增 id 递增）。本方法保留三元组内每个 node_id
+        的 id 最大行（即本次写入的新行），删除其余旧行：同 node_id 的
+        旧内容行，以及不在本次节点集合中的废弃行。
+        """
+        from sqlalchemy import delete, func, select
+
+        table = self._store._table_class
+        metadata_ = table.metadata_
+        triple = and_(
+            metadata_["tenant_id"].astext == tenant_id,
+            metadata_["document_version_id"].astext == document_version_id,
+            metadata_["index_version"].astext == index_version,
+        )
+        keep_rows = (
+            select(func.max(table.id))
+            .where(triple, table.node_id.in_(keep_node_ids))
+            .group_by(table.node_id)
+        )
+        stmt = delete(table).where(triple, table.id.not_in(keep_rows))
+        async with self._store._async_session() as session, session.begin():
+            await session.execute(stmt)
 
     async def delete_document_version(
         self,
