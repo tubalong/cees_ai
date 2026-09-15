@@ -184,7 +184,8 @@ jobs:
 
       - name: Install dependencies
         working-directory: apps/mobile
-        run: flutter pub get
+        # Keep the committed pubspec.lock; newer transitive native-asset packages may require a newer Dart SDK.
+        run: flutter pub get --enforce-lockfile
 
       - name: Analyze project
         working-directory: apps/mobile
