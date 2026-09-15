@@ -153,6 +153,15 @@ Staging 与 Production 位于不同服务器，均使用 PostgreSQL `5432` 和 R
 
 应用部署包中的一次性 `migrate` 服务使用 API 镜像执行 `prisma migrate deploy`，随后 `seed-platform-admin` 服务根据应用服务器环境文件创建缺失的平台超级管理员。该初始化不读取 `SEED_TENANT_*` 或 `SEED_ADMIN_*`，同名平台账号已存在时不会覆盖密码或状态。部署顺序必须是：先通过本部署包启动数据库，再部署应用。
 
+### 知识库向量库（cees_ai_vectors）
+
+ai-service 的知识库 RAG 向量数据存储在独立的 `cees_ai_vectors` database，不经过 Prisma：
+
+- `deploy-db.sh` 启动容器后会调用 `manage-db.sh <environment> create-vector-db` 幂等创建该库；库不存在时创建，已存在时跳过，可安全重复执行。
+- 连接凭据与业务库相同（`POSTGRES_USER` / `POSTGRES_PASSWORD`），向量表 `knowledge_chunks` 与 `vector` 扩展由 ai-service 首次写入时自动创建，无需手工建表。
+- 应用服务器环境文件必须配置 `KNOWLEDGE_VECTOR_DATABASE_URL`，指向同一实例的 `cees_ai_vectors` 库；仅当 `KNOWLEDGE_VECTOR_STORE=pgvector` 时生效。
+- 向量库不含业务主数据，重建只影响检索结果，可通过重新索引恢复。
+
 ## 8. 网络安全
 
 数据库端口绑定在 `DB_BIND_IP` 指定的地址。该地址必须是本机网卡上已分配的地址（例如 `ip -4 addr show` 输出的私网 IP）：指向未分配给本机的地址（例如云厂商公网 IP/EIP）时，Docker 会以 `cannot assign requested address` 启动失败，`manage-db.sh validate` 会提前报错并列出本机可用地址。

@@ -232,9 +232,12 @@ def test_docs_are_enabled_for_staging_configuration() -> None:
 
 
 def test_docs_are_disabled_by_default_in_production() -> None:
+    # _env_file=None 隔离开发者本地 .env（如 AI_DOCS_ENABLED=true），
+    # 确保测试真正覆盖“生产环境默认禁用”的代码路径。
     settings = Settings(
         node_env="production",
         ai_internal_token="secret",
+        _env_file=None,
     )
     client, _ = build_client(settings=settings)
 

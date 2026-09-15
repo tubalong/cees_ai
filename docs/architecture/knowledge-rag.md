@@ -1,8 +1,8 @@
 # 知识库 RAG（MinerU + LlamaIndex）
 
-> 状态：分块实施中。块 1（本文档与内部契约 `index`/`retrieve`）、块 2（ai-service 内存闭环 + HTTP 路由）、块 3（NestJS 文档状态机与上传触发索引）已落地，其余按第 8 节分块计划推进。
+> 状态：分块实施中。块 1（本文档与内部契约 `index`/`retrieve`）、块 2（ai-service 内存闭环 + HTTP 路由）、块 3（NestJS 文档状态机与上传触发索引）、块 4（真实 pgvector Gateway + `index/delete`）已落地，其余按第 8 节分块计划推进。
 > 最后同步：2026-09-15
-> 内部契约版本：`0.3.0`
+> 内部契约版本：`0.4.0`
 > 公开契约版本：`0.23.0`（块 3 文档接口）
 
 ## 1. 目标与边界
@@ -65,14 +65,15 @@ NestJS API   = 业务事实、权限、状态与审计层（apps/api）
 | 文档上传/版本/重试公开接口与版本级可见范围（块 3） | `apps/api/src/knowledge/knowledge-document.service.ts` |
 | ai-service 内存索引与检索验证（LlamaIndex 薄适配，不用全局 Settings） | [ai-service-foundation.md](ai-service-foundation.md) |
 | ai-service 知识内存闭环：EmbeddingRouter、节点构建、内存 VectorStore、HTTP `index`/`retrieve` | `apps/ai-service/app/{embeddings,knowledge}`、`app/api/routes/knowledge.py` |
+| 真实 pgvector Gateway（独立 `cees_ai_vectors` 库，upsert/delete/检索过滤下推 SQL）与 `index/delete` 路由（块 4） | `apps/ai-service/app/knowledge/pgvector_store.py`、`app/knowledge/deletion.py` |
+| 真实 Embedding provider 接入（`models.toml` `embedding_profiles`，openai_compatible + L2 归一化，块 4） | `apps/ai-service/app/embeddings/` |
 | LLMRouter 多模型路由与 `rag` role | `apps/ai-service/app/llm` |
 
 缺失：
 
 - `DocumentChunk` 仍无读写代码（业务侧引用定位事实源，块 4 后启用）
-- MinerU 真机服务；真实 Embedding provider 与独立 pgvector 向量库（块 4）
-- 解析产物到 `ParsedDocument` 的真实转换（块 3 为占位解析器，块 6 真机替换）；答案生成与引用校验（块 5）
-- 内部契约 `index/delete`、`answer`
+- MinerU 真机服务（块 6）；解析产物到 `ParsedDocument` 的真实转换（块 3 为占位解析器，块 6 真机替换）；答案生成与引用校验（块 5）
+- 内部契约 `answer`
 
 ## 3. 关键决策
 
@@ -101,7 +102,7 @@ NestJS API   = 业务事实、权限、状态与审计层（apps/api）
 
 ### 3.4 Embedding 与索引版本
 
-新增 `EmbeddingRouter`（`app/embeddings/`），与 LLMRouter 分离；`models.toml` 的 `rag` role 只用于答案生成，不承担 embedding 配置。块 2 已落地：路由解析与维度校验就绪，目前只注册确定性 `deterministic` provider（开发/测试用），真实 provider 在块 4 接入。
+新增 `EmbeddingRouter`（`app/embeddings/`），与 LLMRouter 分离；`models.toml` 的 `rag` role 只用于答案生成，不承担 embedding 配置。块 2 落地了路由解析与维度校验，块 4 已接入真实 provider：`[embedding_profiles.*]` 声明 OpenAI-compatible embedding 模型（`embedding_profiles.primary`，默认禁用，启用后 `EMBEDDING_API_KEY` 必填），输出统一 L2 归一化；未启用任何外部 profile 时回退确定性 `deterministic` provider（开发/测试用）。
 
 版本三元组 `(chunking_version, embedding_profile, index_version)` 是索引身份的一部分：
 
@@ -202,7 +203,7 @@ PENDING -> PARSING -> PARSED -> INDEXING -> READY
 | --- | --- | --- |
 | `POST /internal/v1/knowledge/index` | 接收 ParsedDocument，切分、Embedding、幂等写入向量库 | 已实现（块 2） |
 | `POST /internal/v1/knowledge/retrieve` | 按可信 scope 检索，返回节点与来源 metadata | 已实现（块 2） |
-| `POST /internal/v1/knowledge/index/delete` | 删除指定文档版本 + 索引版本的派生索引 | 块 4 定义 |
+| `POST /internal/v1/knowledge/index/delete` | 删除指定文档版本 + 索引版本的派生索引 | 已实现（块 4） |
 | `POST /internal/v1/knowledge/answer` | retrieve + LLMRouter 生成带引用校验的答案 | 块 5 定义 |
 
 ## 7. 与后续公开 API 的关系
@@ -219,7 +220,7 @@ PENDING -> PARSING -> PARSED -> INDEXING -> READY
 | 1 | 本文档 + 内部契约 `index`/`retrieve`（0.3.0） | 无 | ✅ 已落地 |
 | 2 | ai-service 内存闭环（`parsed_models`、`mineru_artifact_reader`、`node_builder`、`EmbeddingRouter`、内存 VectorStore、`ingestion`/`retrieval`、HTTP 路由 `index`/`retrieve`），pytest 覆盖 | 块 1 | ✅ 已落地 |
 | 3 | NestJS `KnowledgeDocument` 状态机 + `DocumentChunk` 迁移改造（删除 embedding 字段）+ 上传触发索引任务 | 块 1 | ✅ 已落地 |
-| 4 | 真实 pgvector Gateway（独立 `cees_ai_vectors` database）+ `index/delete` 契约 | 块 2 | 待开始 |
+| 4 | 真实 pgvector Gateway（独立 `cees_ai_vectors` database）+ `index/delete` 契约 | 块 2 | ✅ 已落地 |
 | 5 | 公开 Query API + `answer` 契约（LLMRouter rag role）+ citation 校验 | 块 2、4 | 待开始 |
 | 6 | MinerU 真机联调（192.168.5.29，pip 版部署中） | 块 3 | 待开始 |
 | 7 | Assistant RAG 工具接入（阶段 B） | 块 5 | 待开始 |
@@ -243,7 +244,7 @@ PENDING -> PARSING -> PARSED -> INDEXING -> READY
 | 1 | `pnpm contracts:lint` + `pnpm contracts:check` + 文档评审 | ✅ 完成 |
 | 2 | ✅ pytest 全绿：解析产物转换、切分稳定性、重复索引幂等、租户与 scope 过滤、index_version 隔离、文档版本删除；ruff 与契约漂移测试通过 | ✅ 完成 |
 | 3 | jest：状态机迁移、上传触发、失败重试（32 用例通过）；Prisma 迁移检查 | ✅ 完成 |
-| 4 | pytest：Gateway upsert/delete/filter；幂等与部分失败 | 待验证 |
+| 4 | pytest：Gateway upsert/delete/filter；幂等与部分失败；真实 embedding 归一化与缺失 key 拒绝 | ✅ 完成 |
 | 5 | jest + pytest：citation ID 校验、无证据拒答、查询日志写入 | 待验证 |
 | 6 | 真机解析样例 → 索引 → 检索端到端验收 | 待验证 |
 | 7 | jest：工具 approve/执行前二次校验/失败语义；契约兼容检查 | 待验证 |
