@@ -76,7 +76,6 @@ describe('GenerateDocumentTool', () => {
         expect(result).toEqual({
             resourceType: 'DOCUMENT',
             resourceId: 'doc-1',
-            resourceUrl: null,
             summary: expect.stringContaining('项目周报') as unknown,
         });
         expect(result.summary).toContain('文档已生成');

@@ -26,6 +26,11 @@ export class ToolRegistryService {
     return this.tools.get(name);
   }
 
+  /** 按权限码查工具定义；用于把权限码翻译成用户可理解的功能名。 */
+  getByPermission(permissionCode: string): ToolDefinition | undefined {
+    return [...this.tools.values()].find((tool) => tool.requiredPermissions.includes(permissionCode));
+  }
+
   /** 是否有任何工具注册；决定 TurnRunner 走纯文本还是工具轮次。 */
   hasAny(): boolean {
     return this.tools.size > 0;

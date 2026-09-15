@@ -5,6 +5,7 @@ function makeTool(name: string, requiredPermissions: string[]): ToolDefinition {
     return {
         name,
         version: '1.0.0',
+        displayName: `工具 ${name}`,
         description: `工具 ${name}`,
         parameters: { type: 'object', properties: {} },
         requiredPermissions,
@@ -45,5 +46,14 @@ describe('ToolRegistryService', () => {
         for (const tool of allowed) {
             expect(tool).toEqual(expect.objectContaining({ name: expect.any(String), description: expect.any(String), parameters: expect.any(Object) }));
         }
+    });
+
+    it('resolves a tool display name by permission code', () => {
+        registry.register(makeTool('generate_image', ['ai.image.generate']));
+        registry.register(makeTool('generate_document', ['ai.document.generate']));
+
+        expect(registry.getByPermission('ai.image.generate')?.displayName).toBe('工具 generate_image');
+        expect(registry.getByPermission('ai.document.generate')?.displayName).toBe('工具 generate_document');
+        expect(registry.getByPermission('ai.web.search')).toBeUndefined();
     });
 });

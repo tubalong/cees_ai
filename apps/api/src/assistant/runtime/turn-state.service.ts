@@ -24,7 +24,6 @@ interface StableToolResult {
   summary: string;
   resourceType: 'IMAGE' | 'DOCUMENT' | null;
   resourceId: string | null;
-  resourceUrl: string | null;
   sources: ToolSource[];
 }
 
@@ -323,11 +322,11 @@ export class TurnStateService {
       status: ToolCallStatus.REJECTED,
       eventStatus: 'rejected',
       executionToken: null,
-      result: { summary: input.summary, resourceType: null, resourceId: null, resourceUrl: null, sources: [] },
+      result: { summary: input.summary, resourceType: null, resourceId: null, sources: [] },
     });
   }
 
-  /** 执行成功：保存稳定资源引用与生成时签发的短期可下载 URL（仅图片工具提供）。 */
+  /** 执行成功：保存稳定资源引用；访问 URL 一律由资源接口按需生成，不进事件与快照。 */
   async completeToolCall(input: {
     toolCallId: string;
     turnId: string;
@@ -338,7 +337,6 @@ export class TurnStateService {
     summary: string;
     resourceType: 'IMAGE' | 'DOCUMENT' | null;
     resourceId: string | null;
-    resourceUrl: string | null;
     sources?: ToolSource[];
   }): Promise<boolean> {
     return this.settleToolCall({
@@ -350,7 +348,6 @@ export class TurnStateService {
         summary: input.summary,
         resourceType: input.resourceType,
         resourceId: input.resourceId,
-        resourceUrl: input.resourceUrl,
         sources: input.sources ?? [],
       },
     });
@@ -375,7 +372,7 @@ export class TurnStateService {
       status: ToolCallStatus.FAILED,
       eventStatus: 'failed',
       errorMessage: input.errorMessage ?? input.summary,
-      result: { summary: input.summary, resourceType: null, resourceId: null, resourceUrl: null, sources: [] },
+      result: { summary: input.summary, resourceType: null, resourceId: null, sources: [] },
     });
   }
 
@@ -626,7 +623,6 @@ export class TurnStateService {
           resource: input.result.resourceId && input.result.resourceType
             ? { type: input.result.resourceType, id: input.result.resourceId }
             : null,
-          resourceUrl: input.result.resourceUrl,
           sources: input.eventStatus === 'completed' ? input.result.sources : [],
           error: input.eventStatus === 'completed'
             ? null
@@ -719,7 +715,6 @@ export class TurnStateService {
             summary,
             resourceType: null,
             resourceId: null,
-            resourceUrl: null,
             sources: [],
           } as Prisma.InputJsonObject,
         },
@@ -746,7 +741,6 @@ export class TurnStateService {
           toolCallId: call.id,
           status: eventStatus,
           resource: null,
-          resourceUrl: null,
           error: { code, message: summary },
         },
       );
@@ -868,9 +862,9 @@ export class TurnStateService {
         tenantId: turn.tenantId,
         now,
         executingCode: 'TOOL_EXECUTION_RECOVERY_REQUIRED',
-        executingMessage: '服务进程失联时工具可能已经产生外部副作用，需要核对后再处理',
+        executingMessage: '该操作在服务中断前未能确认结果，请告知用户稍后重试',
         pendingCode: 'TURN_EXECUTION_LOST',
-        pendingMessage: '轮次执行进程已失联，尚未执行的工具调用已拒绝',
+        pendingMessage: '该操作因服务中断未能执行，请告知用户稍后重试',
       });
       await this.events.appendInTransaction(
         transaction,

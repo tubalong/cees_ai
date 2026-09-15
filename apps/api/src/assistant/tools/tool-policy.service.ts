@@ -4,10 +4,17 @@ import { ToolRegistryService } from './tool-registry';
 
 export type ToolRejectionCode = 'UNKNOWN_TOOL' | 'PERMISSION_DENIED' | 'INVALID_ARGUMENTS';
 
+/**
+ * 工具审批拒绝错误。message 面向服务端（落库、日志与公开事件的 error 字段）；
+ * userFacingSummary 是回喂模型的固定友好文案，不携带权限码、错误码等内部信息，
+ * 保证模型输出（含用户诱导场景）不可能泄露系统内部细节。
+ */
 export class ToolPolicyError extends Error {
   constructor(
     public readonly code: ToolRejectionCode,
     message: string,
+    public readonly userFacingSummary: string,
+    public readonly permissionCodes: string[] = [],
   ) {
     super(message);
     this.name = 'ToolPolicyError';
@@ -36,11 +43,25 @@ export class ToolPolicyService {
   }): ToolApproval {
     const definition = this.registry.get(input.name);
     if (!definition) {
-      throw new ToolPolicyError('UNKNOWN_TOOL', `工具不存在或未启用：${input.name}`);
+      throw new ToolPolicyError(
+        'UNKNOWN_TOOL',
+        `工具不存在或未启用：${input.name}`,
+        '该操作暂不可用，请告知用户稍后重试或换一种方式表达',
+      );
     }
     const denied = definition.requiredPermissions.filter((code) => !input.permissions.includes(code));
     if (denied.length > 0) {
-      throw new ToolPolicyError('PERMISSION_DENIED', `缺少工具权限：${denied.join('、')}`);
+      const displayNames = denied
+        .map((code) => {
+          const tool = this.registry.getByPermission(code);
+          return tool ? `「${tool.displayName}」` : '「该功能」';
+        });
+      throw new ToolPolicyError(
+        'PERMISSION_DENIED',
+        `缺少工具权限：${denied.join('、')}`,
+        `该操作需要 ${displayNames.join('、')} 权限，用户当前没有此权限。请告知用户：请联系租户管理员，在角色管理中为你的角色开通相应功能权限后重试。`,
+        denied,
+      );
     }
     try {
       return { definition, parsedArguments: definition.validate(input.arguments) };
@@ -48,6 +69,7 @@ export class ToolPolicyService {
       throw new ToolPolicyError(
         'INVALID_ARGUMENTS',
         error instanceof Error ? error.message : '工具参数非法',
+        '该操作未完成，请告知用户调整表述后重试',
       );
     }
   }

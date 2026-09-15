@@ -6,6 +6,7 @@ function makeTool(overrides: Partial<ToolDefinition> = {}): ToolDefinition {
     return {
         name: 'generate_image',
         version: '1.0.0',
+        displayName: '生成图片',
         description: '生成图片',
         parameters: { type: 'object', properties: {} },
         requiredPermissions: ['ai.image.generate'],
@@ -33,9 +34,19 @@ describe('ToolPolicyService', () => {
 
     it('rejects tools the caller lacks permission for with PERMISSION_DENIED', () => {
         registry.register(makeTool());
-        expect(() =>
-            policy.approve({ name: 'generate_image', arguments: {}, permissions: [] }),
-        ).toThrow(expect.objectContaining({ code: 'PERMISSION_DENIED' }) as unknown as Error);
+        let caught: unknown;
+        try {
+            policy.approve({ name: 'generate_image', arguments: {}, permissions: [] });
+        } catch (error) {
+            caught = error;
+        }
+        expect(caught).toBeInstanceOf(ToolPolicyError);
+        expect((caught as ToolPolicyError).code).toBe('PERMISSION_DENIED');
+        // 回喂模型的友好文案用功能名表达缺少的权限，不携带权限码等内部信息。
+        expect((caught as ToolPolicyError).userFacingSummary).toContain('「生成图片」');
+        expect((caught as ToolPolicyError).userFacingSummary).toContain('租户管理员');
+        expect((caught as ToolPolicyError).userFacingSummary).not.toContain('ai.image.generate');
+        expect((caught as ToolPolicyError).permissionCodes).toEqual(['ai.image.generate']);
     });
 
     it('maps validation failures to INVALID_ARGUMENTS and keeps the parsed error message', () => {

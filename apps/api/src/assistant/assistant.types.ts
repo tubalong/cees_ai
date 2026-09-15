@@ -1,5 +1,5 @@
 /**
- * 公开 /conversations 资源类型，与 packages/contracts 0.22.0 的
+ * 公开 /conversations 资源类型，与 packages/contracts 0.24.0 的
  * TurnStreamEvent / Conversation 系列 schema 一一对应；契约是唯一事实源，
  * 本文件仅提供 NestJS 实现侧的类型约束。
  */
@@ -8,6 +8,12 @@ export type PublicConversationMessageRole = 'USER' | 'ASSISTANT' | 'TOOL';
 export type PublicTurnStatus = 'RECEIVED' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
 export type PublicTurnMode = 'standard' | 'ultra';
 export type PublicTurnPhase = 'reasoning' | 'answering' | 'tool_executing';
+
+/** 工具产生的稳定正式资源引用；访问 URL 由对应资源接口按需签发。 */
+export interface PublicResourceReference {
+  type: 'IMAGE' | 'DOCUMENT';
+  id: string;
+}
 
 export interface PublicConversation {
   id: string;
@@ -32,6 +38,8 @@ export interface PublicConversationMessage {
   content: string;
   /** 稳定的图片文件引用；不保存或返回带签名的长期 URL。 */
   imageFileIds: string[];
+  /** 工具产生的稳定正式资源引用；非 TOOL 消息为空数组；访问 URL 由资源接口按需签发。 */
+  resources: PublicResourceReference[];
   createdAt: Date;
   turnId: string | null;
   toolCallId: string | null;
@@ -113,8 +121,6 @@ export type PublicTurnStreamEvent =
       toolCallId: string;
       status: PublicToolResultStatus;
       resource: { type: 'IMAGE' | 'DOCUMENT'; id: string } | null;
-      /** 图片资源生成时签发的短期可下载 URL；其他资源或失败/拒绝事件为 null。 */
-      resourceUrl: string | null;
       /** 联网搜索等非资源型工具返回的结构化来源。老事件可能缺少该字段。 */
       sources?: PublicToolSource[];
       error: { code: string; message: string } | null;

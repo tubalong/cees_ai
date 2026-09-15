@@ -52,10 +52,6 @@ export interface GeneratedImage {
   sizeBytes: number;
   provider: string;
   model: string;
-  /** 生成完成时签发的短期下载 URL，供工具结果即时返回给调用者。 */
-  url: string;
-  /** URL 有效秒数，与存储配置 signedUrlTtlSeconds 一致。 */
-  urlTtlSeconds: number;
 }
 
 interface ImageReservation {
@@ -68,8 +64,8 @@ interface ImageReservation {
 /**
  * 图片正式资源入口。先在 PostgreSQL 以 toolCallId 原子预留资源，再调用 Provider，
  * 使用确定性 COS object key 上传，最后把 FileObject/ManagedImage/审计一次提交。
- * 生成完成时签发短期签名 URL 随工具结果返回（供调用者即时访问）；事件与消息快照
- * 仍只保存资源 ID，URL 过期后通过 GET /images/{id} 重新签发。
+ * 生成结果只返回稳定资源 ID；下载 URL 一律由 GET /images/{id} 按需签发，
+ * 事件与消息快照不保存签名 URL，历史图片可随时重新签发恢复。
  */
 @Injectable()
 export class ImageService {
@@ -389,7 +385,6 @@ export class ImageService {
   ): Promise<GeneratedImage> {
     const fileId = reservation.id;
     const contentType = normalizeImageMimeType(upstream.content_type);
-    const url = await this.storage.createDownloadUrl(reservation.objectKey);
     await this.prisma.$transaction(async (transaction) => {
       const now = new Date();
       const claim = await transaction.toolCall.findFirst({
@@ -512,8 +507,6 @@ export class ImageService {
       sizeBytes: stored.sizeBytes,
       provider: upstream.execution.provider,
       model: upstream.execution.model,
-      url,
-      urlTtlSeconds: this.storageSettings.signedUrlTtlSeconds,
     };
   }
 
@@ -635,8 +628,6 @@ export class ImageService {
       sizeBytes: Number(image.fileObject.sizeBytes),
       provider: image.provider,
       model: image.model,
-      url: await this.storage.createDownloadUrl(image.fileObject.objectKey),
-      urlTtlSeconds: this.storageSettings.signedUrlTtlSeconds,
     };
   }
 }

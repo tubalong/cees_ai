@@ -644,7 +644,6 @@ export class TurnRunnerService implements OnModuleDestroy {
         summary: result.summary,
         resourceType: result.resourceType,
         resourceId: result.resourceId,
-        resourceUrl: result.resourceUrl,
         sources: result.sources ?? [],
       });
       if (!settled) {
@@ -871,12 +870,13 @@ function hashTurnRequest(
 }
 
 /**
- * 把执行器异常拆成两部分：summary 回喂模型（只放可转述给用户的用户友好文案，
- * 不暴露上游技术细节与内部标识），errorMessage 落库与进公开事件供排障。
+ * 把执行器异常拆成两部分：summary 回喂模型（只允许服务端固定友好文案，
+ * 不携带权限码、错误码或任何动态错误详情——内部信息一旦进入模型上下文，
+ * 用户即可通过诱导让模型复述），errorMessage 落库与进公开事件供排障。
  */
 function toToolFailure(error: unknown): { summary: string; errorMessage: string; code: string } {
   if (error instanceof ToolPolicyError) {
-    return { summary: error.message, errorMessage: error.message, code: error.code };
+    return { summary: error.userFacingSummary, errorMessage: error.message, code: error.code };
   }
   if (error instanceof AiServiceInvocationError) {
     return {
@@ -885,11 +885,13 @@ function toToolFailure(error: unknown): { summary: string; errorMessage: string;
       code: 'TOOL_EXECUTION_FAILED',
     };
   }
-  if (isCodedToolError(error)) {
-    return { summary: error.message, errorMessage: error.message, code: error.code };
-  }
+  const code = isCodedToolError(error) ? error.code : 'TOOL_EXECUTION_FAILED';
   const detail = error instanceof Error ? error.message : '工具执行失败';
-  return { summary: detail, errorMessage: detail, code: 'TOOL_EXECUTION_FAILED' };
+  return {
+    summary: '该操作未能完成，请告知用户稍后重试或换一种方式表达',
+    errorMessage: isCodedToolError(error) ? `${code}: ${detail}` : detail,
+    code,
+  };
 }
 
 function isCodedToolError(error: unknown): error is { code: string; message: string } {
