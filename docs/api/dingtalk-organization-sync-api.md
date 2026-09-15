@@ -70,7 +70,7 @@ POST /api/v1/dingtalk/organization/mapping/preview
 }
 ```
 
-预览不会写入正式部门、成员或映射，返回 `MATCH_EXISTING`、`CREATE` 和 `CONFLICT` 三类结果。部门按同父级同名唯一规则匹配，人员优先按已有钉钉映射，其次按同名且部门一致匹配。
+预览不会写入正式部门、成员或映射，返回 `MATCH_EXISTING`、`CREATE` 和 `CONFLICT` 三类结果。部门按同父级同名唯一规则匹配，人员优先按已有钉钉映射，其次按同名且部门一致匹配。部门按父子关系逐级分析：父部门为 `CREATE` 时，子部门将该父部门视为计划可用父级并继续判断，应用时按父到子的顺序创建；不会因为父部门尚未落库而返回 `PARENT_MAPPING_MISSING`。只有父部门冲突未解决或同步镜像缺少父级时，才会返回 `PARENT_MAPPING_MISSING`。
 
 ### 应用
 
