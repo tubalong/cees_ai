@@ -14,6 +14,7 @@ Assistant 是 NestJS 提供的服务端会话与 AI 编排入口。NestJS 负责
 
 - `generate_image`：调用图片模型，上传生成结果到 COS，并登记 `FileObject`、`Resource(IMAGE)`、`ManagedImage`、`AIActionDraft` 和审计记录。
 - `generate_document`：调用文档模型，把结构化 `DocumentSpec` 序列化为 Markdown，登记 `Resource(DOCUMENT)`、`ManagedDocument`、`AIActionDraft` 和审计记录。
+- `web_search`：调用 Tavily 搜索公开互联网资料，通过 `tool_result.sources` 返回可引用的网页来源，不产生正式业务资源。需要 `ai.web.search` 权限，当前仅默认授予租户管理员角色，其他角色由管理员在 RBAC 中显式授予。
 
 额度预占/结算和人工审批流本次暂不实现。工具调用目前是 NestJS 的程序化批准（工具存在、权限和参数校验），不是等待人工点击的审批单。
 
@@ -156,7 +157,7 @@ data: {"type":"content_delta","seq":7,"text":"你好"}
 | `status` | `reasoning`、`answering` 或 `tool_executing` 阶段 |
 | `content_delta` | 增量回答文本；客户端按顺序拼接 `text` |
 | `tool_call` | 模型提出工具建议；不代表已获准执行 |
-| `tool_result` | 工具完成、失败或被拒绝；包含稳定 `resource` 引用或错误 |
+| `tool_result` | 工具完成、失败或被拒绝；包含稳定 `resource` 引用、联网搜索 `sources` 或错误 |
 | `usage` | 本次模型调用的 Token 指标 |
 | `completed` | 本次轮次完成（无未处理工具调用） |
 | `error` | 轮次失败或工具循环达到安全上限 |
@@ -177,6 +178,34 @@ ai-service 的 `completed` 表示一次模型调用完成；当该调用同时�
 ```
 
 `resource` 只含稳定资源类型和 ID，不含签名 URL。
+
+联网搜索的 `tool_result` 不携带 `resource`，改用 `sources` 数组返回公开网页来源：
+
+```json
+{
+  "type": "tool_result",
+  "seq": 9,
+  "toolCallId": "…",
+  "status": "completed",
+  "resource": null,
+  "resourceUrl": null,
+  "sources": [
+    {
+      "id": "…:1",
+      "title": "…",
+      "url": "https://…",
+      "domain": "…",
+      "snippet": "…",
+      "publishedAt": "…"
+    }
+  ],
+  "error": null
+}
+```
+
+`source.id` 是本次工具调用内稳定的来源 ID；模型回答只会引用 `sources` 中存在的 ID。来源不是 CEES 正式资源，不创建图片/文档等业务记录；旧客户端可忽略 `sources` 字段。
+
+`web_search` 失败语义：角色缺少 `ai.web.search` 权限时 `status` 为 `rejected`、`error.code` 为 `PERMISSION_DENIED`；搜索服务未配置、超时、不可用或响应异常时 `status` 为 `failed`，`error.code` 为 `WEB_SEARCH_NOT_CONFIGURED` / `WEB_SEARCH_TIMEOUT` / `WEB_SEARCH_UNAVAILABLE` / `WEB_SEARCH_INVALID_RESPONSE`。搜索无结果不是失败，`sources` 为空数组，模型会向用户解释。
 
 ## 5. 断线重连和取消
 
