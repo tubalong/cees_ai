@@ -3,10 +3,12 @@ import {
   compactChat as requestChatCompaction,
   composeDocument as requestComposeDocument,
   createClient,
+  generateDocumentDocx as requestGenerateDocumentDocx,
   generateImage as requestImageGeneration,
   getReadiness,
   invokeChat as requestChatInvocation,
   invokeLlm,
+  renderDocumentDocx as requestRenderDocumentDocx,
   streamChat as requestChatStream,
   streamChatToolTurn as requestToolTurnStream,
   type ChatInvokeResponse,
@@ -25,6 +27,7 @@ import {
   type ImageGenerationMetadata,
   type InvokeRequest,
   type InvokeResponse,
+  type RenderDocxRequest,
   type StreamExecutionMetadata,
   type TokenUsage,
   type ToolTurnRequest,
@@ -352,6 +355,31 @@ export class AiServiceGateway {
       metadata: { outcome: 'completed', instructionLength: input.instruction.length },
     });
     return response;
+  }
+
+  /**
+   * 调用 ai-service 文档 DOCX 渲染路由：DocxRenderer 对结构化 DocumentSpec 做
+   * 确定性渲染，不调用 LLM、不产生 Token 指标，返回 DOCX 文件字节；不落库、
+   * 不创建正式资源。导出动作的审计由业务层负责。
+   */
+  async renderDocumentDocx(input: RenderDocxRequest): Promise<Buffer> {
+    const result = await requestRenderDocumentDocx({ client: this.getClient(), body: input });
+    if (result.error) throw this.toInvocationError(result.error, result.response?.status);
+    if (!result.data) throw this.emptyResponseError();
+    return Buffer.from(await result.data.arrayBuffer());
+  }
+
+  /**
+   * 调用 ai-service 文档 DOCX 一键生成路由：compose + render 一步完成，
+   * 返回 DOCX 文件字节；不落库、不创建正式资源。
+   * 注意：该路由内部会再执行一次 LLM compose，业务链路已有 DocumentSpec 时
+   * 应使用 renderDocumentDocx 避免重复生成与内容不一致，本方法仅作透传保留。
+   */
+  async generateDocumentDocx(input: ComposeDocumentRequest): Promise<Buffer> {
+    const result = await requestGenerateDocumentDocx({ client: this.getClient(), body: input });
+    if (result.error) throw this.toInvocationError(result.error, result.response?.status);
+    if (!result.data) throw this.emptyResponseError();
+    return Buffer.from(await result.data.arrayBuffer());
   }
 
   /**
