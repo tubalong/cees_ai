@@ -120,4 +120,5 @@ IMAGE_GEN_BACKUP_API_KEY=change_me
 - `ImageService`（`apps/api/src/image`，仿 document 模块模式）：ai-service 出图（Base64）→ 服务端 `StorageProvider.putObject` 上传 COS → 同一事务内写 FileObject（`purpose=GENERATED_IMAGE`）、Resource(IMAGE)、ManagedImage、AIActionDraft（`status=EXECUTED`，作为动作流水）、AuditLog（`IMAGE_GENERATED`）→ 生成完成时签发短期下载 URL（TTL 与 `signedUrlTtlSeconds` 一致）随公开 `tool_result` 事件返回；
 - 幂等以 `tool_call_id` 为边界：重复执行直接回放已落库资源（重新签发新短期 URL），不重复生成与上传；
 - 图片访问通过既有 `GET /images/{imageId}` 资源接口完成，权限沿用 `image.read`；
-- 自 2026-09-14 起公开 `tool_result` 事件携带生成时签发的短期可下载 URL（新增兼容可选字段 `resourceUrl`），客户端可直接下载/展示图片，无需再经 `GET /images/{imageId}` 查询；`resource {type,id}` 稳定引用与回喂模型的摘要（摘要同样携带 URL）保留，URL 过期后经 `GET /images/{imageId}` 重新获取。
+- 自 2026-09-14 起公开 `tool_result` 事件携带生成时签发的短期可下载 URL（新增兼容可选字段 `resourceUrl`），客户端可直接下载/展示图片，无需再经 `GET /images/{imageId}` 查询；`resource {type,id}` 稳定引用保留，URL 过期后经 `GET /images/{imageId}` 重新获取；
+- 回喂模型的工具结果摘要只放用户关心的信息（格式、大小、URL 与有效时长），不携带系统内部标识（图片 ID、模型名），避免模型转述给用户（2026-09-15）。

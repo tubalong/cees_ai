@@ -3,7 +3,7 @@ import { AssistantTurnStage, AssistantTurnStatus, ToolCallStatus } from '@prisma
 import type { ChatStreamEvent, ToolCall, ToolTurnStreamEvent } from '@cees/ai-service-client';
 import { PrismaService } from '../../database/prisma.service';
 import { TenantContext } from '../../tenant/tenant-context';
-import { AiServiceGateway } from '../../ai-orchestration/ai-service-gateway.service';
+import { AiServiceGateway, AiServiceInvocationError } from '../../ai-orchestration/ai-service-gateway.service';
 import type { PublicTurnStreamEvent } from '../assistant.types';
 import { ConversationService } from '../conversation/conversation.service';
 import { EventService } from '../conversation/event.service';
@@ -256,6 +256,54 @@ describe('TurnRunnerService', () => {
             }),
         ]));
         expect(harness.gateway.streamToolTurn).toHaveBeenCalledTimes(2);
+        expect(harness.state.completeTurn).toHaveBeenCalled();
+    });
+
+    it('keeps upstream technical errors out of the model reply while persisting them for diagnostics', async () => {
+        const harness = createHarness({
+            allowedTools: [chatTool('generate_image')],
+            toolTurnStreams: [toolCallProposalStream(true), () => secondRoundCompletedStream()],
+        });
+        harness.toolPolicy.approve.mockReturnValue({
+            definition: {
+                execute: jest.fn().mockRejectedValue(
+                    new AiServiceInvocationError(
+                        'AI_SERVICE_UNAVAILABLE',
+                        'connect ECONNREFUSED 127.0.0.1:8000',
+                        true,
+                        503,
+                    ),
+                ),
+            },
+            parsedArguments: { prompt: '一只猫' },
+        });
+
+        await harness.service.startTurn({
+            conversationId: CONVERSATION_ID,
+            idempotencyKey: 'key-upstream-error',
+            content: '帮我画一只猫',
+            mode: 'standard',
+        });
+        const events = await consumeAll(await harness.service.subscribeTurn({
+            conversationId: CONVERSATION_ID,
+            turnId: TURN_ID,
+            afterSeq: 0,
+        }));
+
+        // 回喂模型的是通用用户友好文案，上游技术细节不进模型上下文。
+        expect(harness.state.failToolCall).toHaveBeenCalledWith(expect.objectContaining({
+            summary: 'AI 服务暂时不可用，本次操作未能完成；请告知用户稍后重试',
+            errorMessage: expect.stringContaining('127.0.0.1'),
+        }));
+        // 公开事件保留技术细节供客户端/排障使用。
+        const toolResultEvent = events.find((event) => event.type === 'tool_result');
+        expect(toolResultEvent).toMatchObject({
+            status: 'failed',
+            error: {
+                code: 'TOOL_EXECUTION_FAILED',
+                message: expect.stringContaining('127.0.0.1') as unknown,
+            },
+        });
         expect(harness.state.completeTurn).toHaveBeenCalled();
     });
 
@@ -513,12 +561,12 @@ function createHarness(options: {
             });
             return true;
         }),
-        failToolCall: jest.fn(async (input: { toolCallId: string; code: string; summary: string }) => {
+        failToolCall: jest.fn(async (input: { toolCallId: string; code: string; summary: string; errorMessage?: string }) => {
             const record = records.get(input.toolCallId);
             if (record) {
                 record.status = ToolCallStatus.FAILED;
                 record.errorCode = input.code;
-                record.errorMessage = input.summary;
+                record.errorMessage = input.errorMessage ?? input.summary;
             }
             appendEvent({
                 type: 'tool_result',
@@ -526,7 +574,7 @@ function createHarness(options: {
                 status: 'failed',
                 resource: null,
                 resourceUrl: null,
-                error: { code: input.code, message: input.summary },
+                error: { code: input.code, message: input.errorMessage ?? input.summary },
             });
             return true;
         }),

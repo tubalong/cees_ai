@@ -334,7 +334,8 @@ POST   /conversations/{conversationId}/turns/{turnId}/cancel              取消
 - 模块结构微调：`message.service.ts` 并入 `conversation.service.ts`（appendUserMessage / appendAssistantMessage）；
 - 工具轮次历史回放：ai-service 校验 tool 消息必须引用此前 assistant 消息 tool_calls 中的上游调用 ID，而持久化的 ConversationMessage.toolCallId 是 NestJS uuid，回放时通过 ToolCall 表做公开 ID → 上游 ID 映射，并按轮次合成 assistant(tool_calls) 消息插在 TOOL 消息之前（context-builder.buildToolTurnMessages）；
 - 两点程序化批准落地为 `ToolRegistry.listAllowed`（给模型工具列表前）+ `ToolPolicyService.approve`（执行前）；额度检查点预留，接入计费后补在 approve 内；
-- 工具批准拒绝与执行失败不回退 Turn 状态：记录 ToolCall 状态（REJECTED/FAILED）并以 TOOL 消息回喂模型，由模型生成解释；
+- 工具批准拒绝与执行失败不回退 Turn 状态：记录 ToolCall 状态（REJECTED/FAILED）并以 TOOL 消息回喂模型，由模型生成解释；回喂模型的失败摘要与落库/事件的错误详情分离：上游技术错误（`AiServiceInvocationError`，含地址、主机名等细节）只进 `errorMessage`（落库与事件），回喂模型的是用户友好通用文案，避免技术细节被模型转述（2026-09-15）；
+- 工具结果摘要不回喂系统内部标识（资源 ID、模型名），内部标识仅保留在 `resource {type,id}` 结构化字段与事件中（2026-09-15）；
 - 生成即落正式资源：图片不经过待确认交互，AIActionDraft 以 EXECUTED 状态作为动作流水保留写入；
 - 模块结构：工具全部收进 `assistant/tools/`（执行器目录 `executors/`）；图片正式资源仿 document 模式独立为 `image/` 模块：执行器路径不复制编排，公开访问经 ImageController 走 Resource 归属校验（见 14 节图片授权边界）；
 - 文档生成零迁移：DocumentSpec 在 NestJS 侧序列化为 Markdown 文本落既有 `ManagedDocument`（无文件/COS 链路），DOCX 导出（render-docx/generate-docx）暂不接入；文档创建复用 `Resource(DOCUMENT)` 归属与 ACL 语义，AI 生成文档与手工创建文档同构。

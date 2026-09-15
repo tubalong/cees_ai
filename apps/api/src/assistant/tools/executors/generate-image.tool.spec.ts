@@ -80,7 +80,8 @@ describe('GenerateImageTool', () => {
         });
         expect(result.summary).toContain('图片已生成');
         expect(result.summary).toContain('约 10 分钟内有效');
-        // 回喂模型的摘要不再暴露资源 ID，资源 ID 仍作为稳定引用保留在结果中。
+        // 回喂模型的摘要不得暴露系统内部信息：资源 ID 与模型名均不进回喂文本。
         expect(result.summary).not.toContain('image-1');
+        expect(result.summary).not.toContain('image-model');
     });
 });

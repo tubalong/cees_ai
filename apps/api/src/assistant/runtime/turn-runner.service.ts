@@ -20,7 +20,7 @@ import type {
   ToolTurnRequest,
   ToolTurnStreamEvent,
 } from '@cees/ai-service-client';
-import { AiServiceGateway } from '../../ai-orchestration/ai-service-gateway.service';
+import { AiServiceGateway, AiServiceInvocationError } from '../../ai-orchestration/ai-service-gateway.service';
 import { PrismaService } from '../../database/prisma.service';
 import { TenantContext } from '../../tenant/tenant-context';
 import { describeAssistantError } from '../assistant.errors';
@@ -623,6 +623,7 @@ export class TurnRunnerService implements OnModuleDestroy {
           executionToken,
           code: failure.code,
           summary: failure.summary,
+          errorMessage: failure.errorMessage,
         });
         if (!settled) return { limitExceeded: false, ownershipLost: true };
         continue;
@@ -858,14 +859,23 @@ function hashTurnRequest(
     .digest('hex');
 }
 
-function toToolFailure(error: unknown): { summary: string; code: string } {
+/**
+ * 把执行器异常拆成两部分：summary 回喂模型（只放可转述给用户的用户友好文案，
+ * 不暴露上游技术细节与内部标识），errorMessage 落库与进公开事件供排障。
+ */
+function toToolFailure(error: unknown): { summary: string; errorMessage: string; code: string } {
   if (error instanceof ToolPolicyError) {
-    return { summary: error.message, code: error.code };
+    return { summary: error.message, errorMessage: error.message, code: error.code };
   }
-  return {
-    summary: error instanceof Error ? error.message : '工具执行失败',
-    code: 'TOOL_EXECUTION_FAILED',
-  };
+  if (error instanceof AiServiceInvocationError) {
+    return {
+      summary: 'AI 服务暂时不可用，本次操作未能完成；请告知用户稍后重试',
+      errorMessage: `${error.code}: ${error.message}`,
+      code: 'TOOL_EXECUTION_FAILED',
+    };
+  }
+  const detail = error instanceof Error ? error.message : '工具执行失败';
+  return { summary: detail, errorMessage: detail, code: 'TOOL_EXECUTION_FAILED' };
 }
 
 /** Compare provider JSON arguments independent of object-key insertion order. */

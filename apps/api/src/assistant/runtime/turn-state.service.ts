@@ -362,12 +362,15 @@ export class TurnStateService {
     executionToken: string;
     code: string;
     summary: string;
+    /** 落库与事件携带的详细错误信息；缺省时与 summary 一致。 */
+    errorMessage?: string;
   }): Promise<boolean> {
     return this.settleToolCall({
       ...input,
       expectedStatus: ToolCallStatus.EXECUTING,
       status: ToolCallStatus.FAILED,
       eventStatus: 'failed',
+      errorMessage: input.errorMessage ?? input.summary,
       result: { summary: input.summary, resourceType: null, resourceId: null, resourceUrl: null },
     });
   }
@@ -561,6 +564,8 @@ export class TurnStateService {
     executionToken: string | null;
     code?: string;
     summary: string;
+    /** 详细错误信息，仅落库与事件携带；回喂模型只使用 summary。 */
+    errorMessage?: string;
     result: StableToolResult;
   }): Promise<boolean> {
     return this.prisma.$transaction(async (transaction) => {
@@ -589,7 +594,7 @@ export class TurnStateService {
           leaseExpiresAt: null,
           result: input.result as unknown as Prisma.InputJsonObject,
           errorCode: input.eventStatus === 'completed' ? null : input.code ?? 'TOOL_EXECUTION_FAILED',
-          errorMessage: input.eventStatus === 'completed' ? null : input.summary,
+          errorMessage: input.eventStatus === 'completed' ? null : input.errorMessage ?? input.summary,
           executedResourceType: input.result.resourceType,
           executedResourceId: input.result.resourceId,
         },
@@ -620,7 +625,10 @@ export class TurnStateService {
           resourceUrl: input.result.resourceUrl,
           error: input.eventStatus === 'completed'
             ? null
-            : { code: input.code ?? 'TOOL_EXECUTION_FAILED', message: input.summary },
+            : {
+                code: input.code ?? 'TOOL_EXECUTION_FAILED',
+                message: input.errorMessage ?? input.summary,
+              },
         },
       );
       return true;

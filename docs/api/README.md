@@ -368,6 +368,11 @@ GET    /api/v1/projects/{projectId}/tasks/{taskId}/activities
 - 稳定资源引用 `resource {type,id}` 保留；`resourceUrl` 有时效性，过期后经 `GET /images/{imageId}` 重新获取；非图片资源或失败/拒绝事件该字段为 `null`；
 - 字段为兼容新增（可选），老客户端无需改造即可继续使用既有 `resource` 字段。
 
+## 工具回喂内容脱敏说明（2026-09-15）
+
+- 回喂模型的工具结果摘要只放用户关心的信息，不携带系统内部标识（资源 ID、模型名），避免模型原样转述给用户；内部标识仅保留在 `resource {type,id}` 结构化字段与事件中；
+- 工具失败时回喂摘要与错误详情分离：上游技术错误（如 AI 服务不可用的连接细节、内部地址）只写入 ToolCall 的 `errorMessage` 与公开 `tool_result` 事件的 `error` 字段供排障，回喂模型的是用户友好通用文案；业务性拒绝（参数非法、权限不足）保持原用户友好消息回喂。
+
 ## 契约事实源
 
 - `packages/contracts/openapi/openapi.yaml` 是 NestJS 公开 API 的事实源。

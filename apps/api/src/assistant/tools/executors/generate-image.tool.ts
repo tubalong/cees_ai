@@ -73,7 +73,9 @@ export class GenerateImageTool implements OnModuleInit {
       resourceType: 'IMAGE',
       resourceId: image.imageId,
       resourceUrl: image.url,
-      summary: `图片已生成（${image.contentType}，${image.sizeBytes} 字节，模型 ${image.model}），临时访问地址（约 ${Math.max(1, Math.round(image.urlTtlSeconds / 60))} 分钟内有效）：${image.url}`,
+      // 回喂模型的摘要只放用户关心的信息：内部标识（图片 ID、模型名）不进回喂文本，
+      // 否则模型会原样转述给用户；资源引用仅保留在 resourceType/resourceId/resourceUrl 结构化字段中。
+      summary: `图片已生成（${image.contentType}，${image.sizeBytes} 字节），临时访问地址（约 ${Math.max(1, Math.round(image.urlTtlSeconds / 60))} 分钟内有效）：${image.url}`,
     };
   }
 }
