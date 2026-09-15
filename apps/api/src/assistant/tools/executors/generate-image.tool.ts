@@ -25,8 +25,9 @@ export class GenerateImageTool implements OnModuleInit {
 
   private readonly definition: ToolDefinition = {
     name: 'generate_image',
-    version: '1.1.0',
-    description: '根据文字描述生成一张图片并保存为正式资源；成功返回图片临时访问 URL（有时效性，过期后可通过图片资源重新获取）。',
+    version: '1.2.0',
+    displayName: '生成图片',
+    description: '根据文字描述生成一张图片并保存为正式资源；成功后图片可通过资源接口随时获取。',
     parameters: {
       type: 'object',
       properties: {
@@ -72,12 +73,18 @@ export class GenerateImageTool implements OnModuleInit {
     return {
       resourceType: 'IMAGE',
       resourceId: image.imageId,
-      resourceUrl: image.url,
-      // 回喂模型的摘要只放用户关心的信息：内部标识（图片 ID、模型名）不进回喂文本，
-      // 否则模型会原样转述给用户；资源引用仅保留在 resourceType/resourceId/resourceUrl 结构化字段中。
-      summary: `图片已生成（${image.contentType}，${image.sizeBytes} 字节），临时访问地址（约 ${Math.max(1, Math.round(image.urlTtlSeconds / 60))} 分钟内有效）：${image.url}`,
+      // 回喂模型的摘要只放用户关心的信息；不嵌签名 URL、图片 ID、模型名等
+      // 内部信息（防模型转述泄露，且历史消息不能依赖会过期的临时地址）；
+      // 稳定资源引用仅保留在 resourceType/resourceId 结构化字段中，前端按需
+      // 经 GET /v1/images/{imageId} 换取访问 URL。
+      summary: `图片已生成（${image.contentType}，约 ${formatSizeMegaBytes(image.sizeBytes)} MB）。`,
     };
   }
+}
+
+/** 字节数转 MB 的友好展示，最小 1 MB。 */
+function formatSizeMegaBytes(sizeBytes: number): number {
+  return Math.max(1, Math.round(sizeBytes / (1024 * 1024)));
 }
 
 /** 校验并解析模型参数；非法输入抛错，由 ToolPolicy 统一映射为 INVALID_ARGUMENTS 拒绝。 */

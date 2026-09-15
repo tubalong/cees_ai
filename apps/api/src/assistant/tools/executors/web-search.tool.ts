@@ -23,7 +23,8 @@ export class WebSearchTool implements OnModuleInit {
 
   private readonly definition: ToolDefinition = {
     name: 'web_search',
-    version: '1.0.0',
+    version: '1.1.0',
+    displayName: '联网搜索',
     description: '搜索公开互联网中的资料，返回可引用的网页来源。遇到需要实时或外部资料的问题时使用。',
     parameters: {
       type: 'object',
@@ -80,10 +81,10 @@ export class WebSearchTool implements OnModuleInit {
       snippet: result.snippet,
       publishedAt: result.publishedAt,
     }));
+    // 回喂模型的摘要只含公开搜索结果；provider 等内部信息不进入模型上下文。
     const summary = JSON.stringify({
       type: 'web_search_result',
       query: response.query,
-      provider: response.provider,
       results: sources.map((source) => ({
         source_id: source.id,
         title: source.title,
@@ -99,7 +100,6 @@ export class WebSearchTool implements OnModuleInit {
     return {
       resourceType: null,
       resourceId: null,
-      resourceUrl: null,
       summary,
       sources,
     };

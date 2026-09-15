@@ -7,7 +7,7 @@ import type { ConversationMessage } from './ConversationMessage';
 export type ConversationDetail = {
     conversation: Conversation;
     /**
-     * 按时间升序排列的最近消息，最多 100 条
+     * 按轮次顺序升序排列的最近消息，最多 100 条；同一轮次内按写入时间排序，跨轮次迟到的工具消息归位到所属轮次，不会插入后续轮次
      */
     messages: Array<ConversationMessage>;
 };

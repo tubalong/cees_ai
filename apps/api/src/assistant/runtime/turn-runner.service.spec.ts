@@ -179,7 +179,6 @@ describe('TurnRunnerService', () => {
             type: 'tool_result',
             status: 'completed',
             resource: { type: 'IMAGE', id: 'image-1' },
-            resourceUrl: 'https://cos.example/signed-image-url',
             error: null,
         });
         expect(toolCallEvent && toolResultEvent && toolCallEvent.toolCallId).toBe(
@@ -201,8 +200,9 @@ describe('TurnRunnerService', () => {
                 name: 'generate_image',
             },
         ]);
-        // 公开 tool_result 事件携带生成时签发的可下载 URL；资源 ID 仍作为稳定引用保留。
-        expect(JSON.stringify(events)).toContain('signed-image-url');
+        // 公开事件只携带稳定资源引用，不携带任何签名 URL；
+        // 下载地址一律由前端经 GET /v1/images/{imageId} 按需签发。
+        expect(JSON.stringify(events)).not.toContain('signed-image-url');
     });
 
     it('executes web search and publishes structured sources through the tool result', async () => {
@@ -220,7 +220,6 @@ describe('TurnRunnerService', () => {
             toolExecutionResult: {
                 resourceType: null,
                 resourceId: null,
-                resourceUrl: null,
                 summary: JSON.stringify({
                     type: 'web_search_result',
                     query: 'CEES',
@@ -316,7 +315,11 @@ describe('TurnRunnerService', () => {
             toolTurnStreams: [toolCallProposalStream(true), () => secondRoundCompletedStream()],
         });
         harness.toolPolicy.approve.mockImplementation(() => {
-            throw new ToolPolicyError('PERMISSION_DENIED', '缺少工具权限');
+            throw new ToolPolicyError(
+                'PERMISSION_DENIED',
+                '缺少工具权限',
+                '该操作需要相关功能权限，请告知用户联系租户管理员开通后重试',
+            );
         });
 
         await harness.service.startTurn({
@@ -621,7 +624,6 @@ function createHarness(options: {
                 toolCallId: input.toolCallId,
                 status: 'rejected',
                 resource: null,
-                resourceUrl: null,
                 error: { code: input.code, message: input.summary },
             });
             return true;
@@ -631,7 +633,6 @@ function createHarness(options: {
             summary: string;
             resourceType: 'IMAGE' | 'DOCUMENT' | null;
             resourceId: string | null;
-            resourceUrl: string | null;
             sources?: ToolExecutionResult['sources'];
         }) => {
             const record = records.get(input.toolCallId);
@@ -641,7 +642,6 @@ function createHarness(options: {
                     summary: input.summary,
                     resourceType: input.resourceType,
                     resourceId: input.resourceId,
-                    resourceUrl: input.resourceUrl,
                     sources: input.sources ?? [],
                 };
             }
@@ -652,7 +652,6 @@ function createHarness(options: {
                 resource: input.resourceType && input.resourceId
                     ? { type: input.resourceType, id: input.resourceId }
                     : null,
-                resourceUrl: input.resourceUrl,
                 sources: input.sources ?? [],
                 error: null,
             });
@@ -670,7 +669,6 @@ function createHarness(options: {
                 toolCallId: input.toolCallId,
                 status: 'failed',
                 resource: null,
-                resourceUrl: null,
                 sources: [],
                 error: { code: input.code, message: input.errorMessage ?? input.summary },
             });
@@ -724,7 +722,6 @@ function chatTool(name: string): { name: string; description: string; parameters
 const EXECUTED_IMAGE_RESULT = {
     resourceType: 'IMAGE' as const,
     resourceId: 'image-1',
-    resourceUrl: 'https://cos.example/signed-image-url',
     summary: '图片已生成',
 };
 

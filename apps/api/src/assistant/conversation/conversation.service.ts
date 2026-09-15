@@ -127,18 +127,40 @@ export class ConversationService {
 
   async getDetail(conversationId: string): Promise<PublicConversationDetail> {
     const conversation = await this.requireMemberConversation(conversationId);
+    // 轮次序号是消息的权威排序键：迟到的 TOOL 消息归位到自己轮次，
+    // 跨轮交错写入也不会打乱历史顺序；无轮次的旧消息 seq 视为 0 排最前。
+    // Prisma 对可空 to-one 关联的排序在 null 上行为不确定，故全量查询后内存排序。
     const messages = await this.prisma.conversationMessage.findMany({
       where: { tenantId: conversation.tenantId, conversationId },
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      take: 100,
+      select: {
+        id: true,
+        role: true,
+        content: true,
+        imageFileIds: true,
+        createdAt: true,
+        turnId: true,
+        toolCallId: true,
+        turn: { select: { seq: true } },
+        toolCall: { select: { executedResourceType: true, executedResourceId: true } },
+      },
     });
+    const ordered = messages.slice().sort(compareMessagesByTurn);
     return {
       conversation: toPublicConversation(conversation),
-      messages: messages.reverse().map((message) => ({
+      messages: ordered.slice(-100).map((message) => ({
         id: message.id,
         role: message.role,
         content: message.content,
         imageFileIds: message.imageFileIds,
+        resources:
+          message.toolCall?.executedResourceType && message.toolCall.executedResourceId
+            ? [
+                {
+                  type: message.toolCall.executedResourceType as 'IMAGE' | 'DOCUMENT',
+                  id: message.toolCall.executedResourceId,
+                },
+              ]
+            : [],
         createdAt: message.createdAt,
         turnId: message.turnId,
         toolCallId: message.toolCallId,
@@ -314,6 +336,18 @@ function toPublicConversation(conversation: {
     lastTurnAt: conversation.lastTurnAt,
     version: conversation.version,
   };
+}
+
+/** 轮次序号升序（无轮次旧消息视为 0），同轮次内按写入时间与 ID 稳定排序。 */
+function compareMessagesByTurn(
+  a: { turn: { seq: number } | null; createdAt: Date; id: string },
+  b: { turn: { seq: number } | null; createdAt: Date; id: string },
+): number {
+  const seqDelta = (a.turn?.seq ?? 0) - (b.turn?.seq ?? 0);
+  if (seqDelta !== 0) return seqDelta;
+  const timeDelta = a.createdAt.getTime() - b.createdAt.getTime();
+  if (timeDelta !== 0) return timeDelta;
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 }
 
 function normalizeConversationMode(mode: PublicTurnMode | undefined): 'standard' | 'ultra' {

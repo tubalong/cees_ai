@@ -105,11 +105,81 @@ describe('ConversationService', () => {
     const result = await service.getDetail(CONVERSATION_ID);
 
     expect(result.messages).toHaveLength(1);
+    expect(result.messages[0]).toMatchObject({
+      id: MESSAGE_ID,
+      role: 'USER',
+      content: '你好',
+      imageFileIds: [],
+      resources: [],
+    });
     expect(prisma.conversationMessage.findMany).toHaveBeenCalledWith({
       where: { tenantId: TENANT_ID, conversationId: CONVERSATION_ID },
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      take: 100,
+      select: expect.objectContaining({
+        id: true,
+        role: true,
+        content: true,
+        imageFileIds: true,
+        turn: { select: { seq: true } },
+        toolCall: { select: { executedResourceType: true, executedResourceId: true } },
+      }),
     });
+  });
+
+  it('orders messages by turn seq and fills stable resources for TOOL messages', async () => {
+    const prisma = createPrismaMock();
+    prisma.conversation.findFirst.mockResolvedValue(conversationRecord());
+    // 模拟数据库无序返回：迟到的 TOOL 消息（createdAt 晚）与跨轮交错写入。
+    const lateToolMessage = messageRecord({
+      id: '70000000-0000-4000-8000-000000000004',
+      role: ConversationMessageRole.TOOL,
+      content: '图片已生成',
+      toolCallId: '80000000-0000-4000-8000-000000000001',
+      turnId: '90000000-0000-4000-8000-000000000002',
+      turn: { seq: 2 },
+      toolCall: { executedResourceType: 'IMAGE', executedResourceId: 'a0000000-0000-4000-8000-000000000001' },
+      createdAt: new Date('2026-09-01T00:00:04.000Z'),
+    });
+    const secondTurnUser = messageRecord({
+      id: '70000000-0000-4000-8000-000000000003',
+      turnId: '90000000-0000-4000-8000-000000000002',
+      turn: { seq: 2 },
+      createdAt: new Date('2026-09-01T00:00:02.000Z'),
+    });
+    const firstTurnUser = messageRecord({
+      id: '70000000-0000-4000-8000-000000000002',
+      turnId: '90000000-0000-4000-8000-000000000001',
+      turn: { seq: 1 },
+      createdAt: new Date('2026-09-01T00:00:03.000Z'),
+    });
+    const legacyUser = messageRecord({
+      id: '70000000-0000-4000-8000-000000000005',
+      turnId: null,
+      turn: null,
+      createdAt: new Date('2026-09-01T00:00:01.000Z'),
+    });
+    prisma.conversationMessage.findMany.mockResolvedValue([
+      lateToolMessage,
+      secondTurnUser,
+      firstTurnUser,
+      legacyUser,
+    ]);
+    const service = createService(prisma);
+
+    const result = await service.getDetail(CONVERSATION_ID);
+
+    // 无轮次的旧消息排最前，随后按轮次 seq 升序；同轮次内按 createdAt 归位。
+    expect(result.messages.map((message) => message.id)).toEqual([
+      legacyUser.id,
+      firstTurnUser.id,
+      secondTurnUser.id,
+      lateToolMessage.id,
+    ]);
+    expect(result.messages.map((message) => message.resources)).toEqual([
+      [],
+      [],
+      [],
+      [{ type: 'IMAGE', id: 'a0000000-0000-4000-8000-000000000001' }],
+    ]);
   });
 
   it('updates a title with optimistic locking and an audit record', async () => {

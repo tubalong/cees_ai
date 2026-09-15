@@ -3,6 +3,7 @@
 /* tslint:disable */
 /* eslint-disable */
 import type { ConversationMessageRole } from './ConversationMessageRole';
+import type { ToolResultResourceReference } from './ToolResultResourceReference';
 export type ConversationMessage = {
     /**
      * 服务端生成的消息 ID
@@ -14,9 +15,13 @@ export type ConversationMessage = {
      */
     content: string;
     /**
-     * Stable image FileObject IDs; signed URLs are resolved only at model invocation time
+     * 用户消息引用的稳定图片文件 ID（用户输入的附件），仅用户消息可能非空；展示/下载地址由前端通过文件接口按需获取
      */
     imageFileIds: Array<string>;
+    /**
+     * 工具产生的稳定正式资源引用（IMAGE 为 AI 生成图片、DOCUMENT 为 AI 生成文档）；非 TOOL 消息为空数组；资源访问 URL 必须通过对应资源接口按需获取（图片为 GET /api/v1/images/{imageId}），消息正文不携带签名 URL
+     */
+    resources: Array<ToolResultResourceReference>;
     /**
      * 消息写入时间
      */

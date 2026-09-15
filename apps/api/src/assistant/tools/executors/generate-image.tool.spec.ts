@@ -42,15 +42,13 @@ describe('GenerateImageTool', () => {
         });
     });
 
-    it('executes via ImageService and returns the resource summary with the temporary URL', async () => {
+    it('executes via ImageService and returns the resource summary without any signed URL', async () => {
         imageService.generateImage.mockResolvedValue({
             imageId: 'image-1',
             contentType: 'image/png',
             sizeBytes: 1024,
             provider: 'openai_compatible',
             model: 'image-model',
-            url: 'https://cos.example/signed-image-url',
-            urlTtlSeconds: 600,
         });
         const result = await definition!.execute({
             tenantId: 't-1',
@@ -75,12 +73,11 @@ describe('GenerateImageTool', () => {
         expect(result).toEqual({
             resourceType: 'IMAGE',
             resourceId: 'image-1',
-            resourceUrl: 'https://cos.example/signed-image-url',
-            summary: expect.stringContaining('https://cos.example/signed-image-url') as unknown,
+            summary: '图片已生成（image/png，约 1 MB）。',
         });
         expect(result.summary).toContain('图片已生成');
-        expect(result.summary).toContain('约 10 分钟内有效');
-        // 回喂模型的摘要不得暴露系统内部信息：资源 ID 与模型名均不进回喂文本。
+        // 回喂模型的摘要不得携带签名 URL 与系统内部信息：资源 ID 与模型名均不进回喂文本。
+        expect(result.summary).not.toContain('signed-image-url');
         expect(result.summary).not.toContain('image-1');
         expect(result.summary).not.toContain('image-model');
     });

@@ -180,7 +180,9 @@ describe('ImageService', () => {
         expect(harness.prisma.auditLog.create).toHaveBeenCalledWith({
             data: expect.objectContaining({ action: 'IMAGE_GENERATED', outcome: AuditOutcome.SUCCESS }),
         });
-        expect(harness.storage.createDownloadUrl).toHaveBeenCalledWith(OBJECT_KEY);
+        // 生成路径不签发下载 URL：事件与快照只保存稳定资源 ID，
+        // 访问 URL 一律由 getImageAccess 按需签发。
+        expect(harness.storage.createDownloadUrl).not.toHaveBeenCalled();
         expect(harness.prisma.managedImage.updateMany).toHaveBeenCalledWith(expect.objectContaining({
             where: expect.objectContaining({ status: ManagedImageStatus.UPLOADING }),
             data: expect.objectContaining({ status: ManagedImageStatus.READY }),
@@ -191,8 +193,6 @@ describe('ImageService', () => {
             sizeBytes: 16,
             provider: 'openai_compatible',
             model: 'image-model',
-            url: 'https://cos.example/signed',
-            urlTtlSeconds: 900,
         });
     });
 
@@ -247,13 +247,11 @@ describe('ImageService', () => {
             sizeBytes: 2048,
             provider: 'openai_compatible',
             model: 'image-model',
-            url: 'https://cos.example/signed',
-            urlTtlSeconds: 900,
         });
         expect(harness.gateway.generateImage).not.toHaveBeenCalled();
         expect(harness.storage.putObject).not.toHaveBeenCalled();
-        // 回放时重新签发短期 URL，让调用者拿到的是新鲜签名。
-        expect(harness.storage.createDownloadUrl).toHaveBeenCalledWith(OBJECT_KEY);
+        // 回放同样只返回稳定资源引用，下载 URL 由 getImageAccess 按需签发。
+        expect(harness.storage.createDownloadUrl).not.toHaveBeenCalled();
         expect(harness.prisma.$transaction).not.toHaveBeenCalled();
     });
 

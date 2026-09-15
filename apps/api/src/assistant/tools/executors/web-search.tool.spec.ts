@@ -31,7 +31,7 @@ describe('WebSearchTool', () => {
 
     expect(definition).toEqual(expect.objectContaining({
       name: 'web_search',
-      version: '1.0.0',
+      version: '1.1.0',
       requiredPermissions: ['ai.web.search'],
       riskLevel: 'READ',
     }));
@@ -61,7 +61,6 @@ describe('WebSearchTool', () => {
     expect(result).toEqual({
       resourceType: null,
       resourceId: null,
-      resourceUrl: null,
       summary: expect.stringContaining('web_search_result'),
       sources: [{
         id: 'tool-1:1',
