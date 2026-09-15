@@ -22,13 +22,9 @@ export type TurnStreamToolResultEvent = {
      */
     status: TurnStreamToolResultEvent.status;
     /**
-     * 工具生成的稳定正式资源引用；访问 URL 必须通过对应资源接口按需获取
+     * 工具生成的稳定正式资源引用；访问 URL 必须通过对应资源接口按需获取（图片为 GET /api/v1/images/{imageId}）；事件与历史消息一律不携带签名 URL
      */
     resource: (ToolResultResourceReference | null);
-    /**
-     * 图片资源生成时签发的短期可下载 URL；有时效性，过期后经 GET /api/v1/images/{imageId} 重新获取；其他资源或历史事件为 null
-     */
-    resourceUrl?: string | null;
     /**
      * 联网搜索等非资源型工具返回的结构化来源；老客户端可忽略该字段
      */

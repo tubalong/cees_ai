@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CEES AI API
-  version: 0.23.0
+  version: 0.24.0
   description: 以本文件为唯一事实源的公开 API 契约。资源与操作按 docs/api 约定补充。
 
 servers:
@@ -5543,7 +5543,7 @@ components:
     ConversationMessage:
       type: object
       additionalProperties: false
-      required: [id, role, content, imageFileIds, createdAt]
+      required: [id, role, content, imageFileIds, resources, createdAt]
       properties:
         id:
           type: string
@@ -5559,10 +5559,17 @@ components:
           type: array
           maxItems: 8
           uniqueItems: true
-          description: Stable image FileObject IDs; signed URLs are resolved only at model invocation time
+          description: 用户消息引用的稳定图片文件 ID（用户输入的附件），仅用户消息可能非空；展示/下载地址由前端通过文件接口按需获取
           items:
             type: string
             format: uuid
+        resources:
+          type: array
+          maxItems: 20
+          default: []
+          description: 工具产生的稳定正式资源引用（IMAGE 为 AI 生成图片、DOCUMENT 为 AI 生成文档）；非 TOOL 消息为空数组；资源访问 URL 必须通过对应资源接口按需获取（图片为 GET /api/v1/images/{imageId}），消息正文不携带签名 URL
+          items:
+            $ref: '#/components/schemas/ToolResultResourceReference'
         createdAt:
           type: string
           format: date-time
@@ -5586,7 +5593,7 @@ components:
         messages:
           type: array
           maxItems: 100
-          description: 按时间升序排列的最近消息，最多 100 条
+          description: 按轮次顺序升序排列的最近消息，最多 100 条；同一轮次内按写入时间排序，跨轮次迟到的工具消息归位到所属轮次，不会插入后续轮次
           items:
             $ref: '#/components/schemas/ConversationMessage'
 
@@ -5860,10 +5867,7 @@ components:
           oneOf:
             - $ref: '#/components/schemas/ToolResultResourceReference'
             - type: 'null'
-          description: 工具生成的稳定正式资源引用；访问 URL 必须通过对应资源接口按需获取
-        resourceUrl:
-          type: [string, 'null']
-          description: 图片资源生成时签发的短期可下载 URL；有时效性，过期后经 GET /api/v1/images/{imageId} 重新获取；其他资源或历史事件为 null
+          description: 工具生成的稳定正式资源引用；访问 URL 必须通过对应资源接口按需获取（图片为 GET /api/v1/images/{imageId}）；事件与历史消息一律不携带签名 URL
         sources:
           type: array
           maxItems: 20

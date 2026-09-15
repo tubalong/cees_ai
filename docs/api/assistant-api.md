@@ -1,6 +1,6 @@
 # Assistant / Conversation API
 
-> 公开契约版本：`0.22.0`  
+> 公开契约版本：`0.24.0`  
 > 契约事实源：[`packages/contracts/openapi/openapi.yaml`](../../packages/contracts/openapi/openapi.yaml)  
 > 最后更新：2026-09-15
 
@@ -83,7 +83,12 @@ GET /api/v1/conversations/{conversationId}
 Authorization: Bearer <access-token>
 ```
 
-返回会话元数据和按时间升序排列的最近 100 条消息。消息的 `content` 是持久化文本；用户消息的图片引用在 `imageFileIds` 中。工具消息包含 `toolCallId`，工具产生的稳定资源引用通过 SSE `tool_result.resource` 获取，图片访问 URL 通过 `GET /api/v1/images/{imageId}` 按需生成。
+返回会话元数据和最近 100 条消息。消息按轮次顺序升序排列（同一轮次内按写入时间排序），跨轮次迟到的工具消息归位到所属轮次，不会插入后续轮次。消息字段语义：
+
+- `content` 是持久化文本，不携带任何签名 URL；
+- 用户消息的图片引用（用户输入的附件）在 `imageFileIds` 中，展示/下载地址由前端通过文件接口按需获取；
+- 工具消息（`role: TOOL`）携带 `toolCallId` 和 `resources`：`resources` 是工具产生的稳定正式资源引用（`IMAGE` 为 AI 生成图片、`DOCUMENT` 为 AI 生成文档），非 TOOL 消息为空数组；
+- 图片访问 URL 通过 `GET /api/v1/images/{imageId}` 按需生成（短期有效，过期后重新请求即可），文档资源同理走对应资源接口。前端拿到 `resources` 后按需换取 URL，不要缓存或持久化签名 URL，历史消息中的图片/文档由此永久可恢复。
 
 ### 3.4 修改会话标题
 
@@ -135,7 +140,7 @@ Accept: text/event-stream
 { "type": "image_url", "image_url": { "url": "https://短期地址" } }
 ```
 
-签名 URL 不写入会话、事件、ToolCall 或调用日志。
+签名 URL 不写入会话、事件、ToolCall 或调用日志；`tool_result` 事件与历史消息只携带稳定资源引用（`resource` / `resources`），访问 URL 一律由前端通过资源接口按需生成。
 
 同一会话内重复提交相同 `Idempotency-Key` 且请求内容相同，会重新订阅原轮次事件，不会创建新轮次；同一键对应不同内容返回 `409 IDEMPOTENCY_KEY_CONFLICT`。幂等键长度为 1～128 个字符。
 
@@ -157,7 +162,7 @@ data: {"type":"content_delta","seq":7,"text":"你好"}
 | `status` | `reasoning`、`answering` 或 `tool_executing` 阶段 |
 | `content_delta` | 增量回答文本；客户端按顺序拼接 `text` |
 | `tool_call` | 模型提出工具建议；不代表已获准执行 |
-| `tool_result` | 工具完成、失败或被拒绝；包含稳定 `resource` 引用、联网搜索 `sources` 或错误 |
+| `tool_result` | 工具完成、失败或被拒绝；包含稳定 `resource` 引用、联网搜索 `sources` 或错误（错误码见 `error.code`，不携带签名 URL） |
 | `usage` | 本次模型调用的 Token 指标 |
 | `completed` | 本次轮次完成（无未处理工具调用） |
 | `error` | 轮次失败或工具循环达到安全上限 |
@@ -177,7 +182,9 @@ ai-service 的 `completed` 表示一次模型调用完成；当该调用同时�
 }
 ```
 
-`resource` 只含稳定资源类型和 ID，不含签名 URL。
+`resource` 只含稳定资源类型和 ID，不含签名 URL；事件与历史消息一律不携带签名 URL，图片访问 URL 由前端经 `GET /api/v1/images/{imageId}` 按需生成。
+
+工具失败/拒绝的语义：`status` 为 `failed`（执行失败）或 `rejected`（审批未通过，如缺少权限）时 `error` 携带稳定错误码（如 `PERMISSION_DENIED`）；回喂模型的工具摘要只使用服务端友好文案，不包含权限码、错误详情等内部信息，模型输出中也不会出现这些信息。
 
 联网搜索的 `tool_result` 不携带 `resource`，改用 `sources` 数组返回公开网页来源：
 
@@ -188,7 +195,6 @@ ai-service 的 `completed` 表示一次模型调用完成；当该调用同时�
   "toolCallId": "…",
   "status": "completed",
   "resource": null,
-  "resourceUrl": null,
   "sources": [
     {
       "id": "…:1",
@@ -239,7 +245,7 @@ Assistant 不接受把任意公网 URL 直接写入消息。前端先走现有 F
 3. `POST /api/v1/upload-sessions/{uploadSessionId}/complete`，由服务端 COS HEAD 校验实际 MIME 和大小并创建 `FileObject`。
 4. 将返回的 `fileId` 放入 `CreateTurnRequest.imageFileIds`。
 
-生成图片的正式资源使用 `GET /api/v1/images/{imageId}` 读取。该接口在读取时校验当前租户和资源所有成员，并动态生成短期下载 URL；URL 过期后重新请求即可。
+生成图片的正式资源使用 `GET /api/v1/images/{imageId}` 读取。该接口在读取时校验当前租户和资源所有成员，并动态生成短期下载 URL；URL 过期后重新请求即可。对话历史中的生成图片通过 TOOL 消息的 `resources` 字段（或 SSE `tool_result.resource`）拿到稳定资源 ID 后按同样方式恢复，不会因临时 URL 过期而变成裂图。
 
 ## 7. 当前稳定错误码（节选）
 
