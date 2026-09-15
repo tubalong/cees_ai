@@ -91,6 +91,7 @@ POST   /api/v1/documents
 GET    /api/v1/documents/{documentId}
 PATCH  /api/v1/documents/{documentId}
 DELETE /api/v1/documents/{documentId}?version={version}
+GET    /api/v1/documents/{documentId}/export
 
 GET    /api/v1/resources/{resourceId}/acl
 POST   /api/v1/resources/{resourceId}/acl
@@ -238,6 +239,7 @@ GET    /api/v1/projects/{projectId}/tasks/{taskId}/activities
 - ACL 仅支持 `MEMBERSHIP`、`ROLE` 主体和 `document.read/update/delete/share` 权限，可设置过期时间；
 - Document 修改、删除和 ACL 撤销使用 `version` 乐观锁；Document 删除为软删除，ACL 正常撤销为硬删除；
 - Document 与 Resource 共用同一个 ID，创建、修改、删除和 ACL 变更均写入审计日志。
+- DOCX 导出（`GET /documents/{documentId}/export`）复用 `document.read` 权限，是同一文档资源的交付视图而不是独立资源；文件由生成时落库的 `document_spec` 经 ai-service 确定性渲染，不调用 LLM。
 
 ## 0.6.0 迁移说明
 
@@ -372,7 +374,13 @@ GET    /api/v1/projects/{projectId}/tasks/{taskId}/activities
 ## 工具回喂内容脱敏说明（2026-09-15）
 
 - 回喂模型的工具结果摘要只放用户关心的信息，不携带系统内部标识（资源 ID、模型名），避免模型原样转述给用户；内部标识仅保留在 `resource {type,id}` 结构化字段与事件中；
-- 工具失败时回喂摘要与错误详情分离：上游技术错误（如 AI 服务不可用的连接细节、内部地址）只写入 ToolCall 的 `errorMessage` 与公开 `tool_result` 事件的 `error` 字段供排障，回喂模型的是用户友好通用文案；业务性拒绝（参数非法、权限不足）保持原用户友好消息回喂。
+
+## 文档 DOCX 导出说明（2026-09-14）
+
+- 公开契约兼容新增 `GET /api/v1/documents/{documentId}/export`（版本仍为开发基线 0.22.0），返回 DOCX 附件（标准 DOCX MIME，ASCII fallback 与 RFC 5987 UTF-8 文件名）；TypeScript 客户端已重新生成；
+- 导出复用 `document.read` 权限与既有 Resource(DOCUMENT) 授权模型，不新增独立权限码；手工创建或内容被手工修改的文档没有落库的 `document_spec`，导出返回 400 明确错误；
+- Prisma 新增 `0023_document_docx_export` 迁移：`managed_documents` 增加 `document_spec` JSONB 列，保存 ai-service compose 返回的结构化 DocumentSpec 作为导出事实源；
+- 内部链路：NestJS 网关 `renderDocumentDocx` 调用 `POST /internal/v1/documents/render-docx` 确定性渲染（不调用 LLM）；`generateDocumentDocx`（compose+render）仅透传保留，业务不调用以避免重复 LLM 生成；
 
 ## 契约事实源
 

@@ -147,4 +147,30 @@ export class DocumentService {
             },
         });
     }
+    /**
+     * 导出授权范围内文档为 DOCX
+     * 由生成时落库的结构化 DocumentSpec 经 ai-service 确定性渲染为 DOCX 文件， 不调用 LLM；复用 document.read 权限，导出是文档资源的另一种交付视图而非独立资源。
+     * @returns binary DOCX 文档文件
+     * @throws ApiError
+     */
+    public static documentExportDocx({
+        documentId,
+    }: {
+        documentId: string,
+    }): CancelablePromise<Blob> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/documents/{documentId}/export',
+            path: {
+                'documentId': documentId,
+            },
+            errors: {
+                400: `文档没有可导出的生成规格`,
+                401: `登录状态无效或已过期`,
+                403: `缺少 document.read 权限`,
+                404: `文档不存在或不在授权范围内`,
+                503: `AI 服务不可用`,
+            },
+        });
+    }
 }

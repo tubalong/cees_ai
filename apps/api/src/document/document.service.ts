@@ -8,7 +8,7 @@ import {
     ToolCallStatus,
 } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
-import type { ComposeDocumentRequest, DocumentSpec } from '@cees/ai-service-client';
+import type { ComposeDocumentRequest, DocumentSpec, RenderDocxRequest } from '@cees/ai-service-client';
 import { AiServiceGateway } from '../ai-orchestration/ai-service-gateway.service';
 import { PrismaService } from '../database/prisma.service';
 import {
@@ -44,6 +44,13 @@ export interface GeneratedDocument {
     contentLength: number;
     provider: string;
     model: string;
+}
+
+export interface DocumentExportResult {
+    /** 建议的下载文件名（不含扩展名）；已去除文件系统非法字符。 */
+    filename: string;
+    /** DOCX 文件字节。 */
+    bytes: Buffer;
 }
 
 @Injectable()
@@ -183,6 +190,9 @@ export class DocumentService {
 
             const documentId = randomUUID();
             const content = documentSpecToMarkdown(upstream.document);
+            // 同一次 compose 的 DocumentSpec 一并落库，作为后续 DOCX 等格式导出的事实源，
+            // 避免导出时重新调用 LLM（成本翻倍且内容可能与落库 Markdown 不一致）。
+            const documentSpec = upstream.document as unknown as Prisma.InputJsonObject;
             await this.prisma.$transaction(async (transaction) => {
                 const now = new Date();
                 const claim = await transaction.toolCall.findFirst({
@@ -222,6 +232,7 @@ export class DocumentService {
                         generatedByToolCallId: command.toolCallId,
                         title: upstream.document.title,
                         content,
+                        documentSpec,
                         visibility: command.visibility,
                         createdBy: command.userId,
                         updatedBy: command.userId,
@@ -405,6 +416,58 @@ export class DocumentService {
         return this.toDetail(document, roleIds);
     }
 
+    /**
+     * 导出文档为 DOCX：读取落库的 DocumentSpec，经 ai-service render-docx
+     * 确定性渲染为文件字节。渲染不调用 LLM、不产生 Token 成本，内容与库中
+     * Markdown 同源一致。复用 document.read 权限：导出是文档的另一种交付
+     * 视图，不是独立资源，不新增权限码。
+     */
+    async exportDocumentDocx(documentId: string): Promise<DocumentExportResult> {
+        const context = this.tenantContext.require();
+        const roleIds = await this.resourceAccess.resolveCurrentRoleIds();
+        const document = await this.findAccessibleDocument(documentId, 'document.read', roleIds);
+        if (!document.documentSpec) {
+            throw new BadRequestException({
+                code: 'DOCUMENT_DOCX_UNAVAILABLE',
+                message: '该文档没有可导出的生成规格（可能由人工创建或内容已被手工修改）',
+            });
+        }
+
+        const request: RenderDocxRequest = {
+            request_id: context.requestId,
+            tenant_id: context.tenantId,
+            user_id: context.userId,
+            document: document.documentSpec as unknown as DocumentSpec,
+            document_options: {
+                title: document.title,
+                locale: 'zh-CN',
+                template_id: 'business-standard',
+                include_toc: false,
+                generation_mode: 'fast',
+            },
+        };
+        const bytes = await this.gateway.renderDocumentDocx(request);
+        await this.prisma.auditLog.create({
+            data: {
+                tenantId: context.tenantId,
+                actorUserId: context.userId,
+                actorMembershipId: context.membershipId,
+                action: 'DOCUMENT_EXPORTED',
+                outcome: AuditOutcome.SUCCESS,
+                resourceType: 'DOCUMENT',
+                resourceId: documentId,
+                requestId: context.requestId,
+                metadata: {
+                    format: 'docx',
+                    title: document.title,
+                    contentLength: document.content.length,
+                    byteLength: bytes.length,
+                },
+            },
+        });
+        return { filename: toSafeFilename(document.title), bytes };
+    }
+
     async updateDocument(documentId: string, input: UpdateDocumentDto): Promise<DocumentResult> {
         const context = this.tenantContext.require();
         if (input.title === undefined && input.content === undefined && input.visibility === undefined) {
@@ -417,7 +480,12 @@ export class DocumentService {
             updatedBy: context.userId,
         };
         if (input.title !== undefined) data.title = input.title.trim();
-        if (input.content !== undefined) data.content = input.content;
+        if (input.content !== undefined) {
+            data.content = input.content;
+            // 手工修改内容后原 DocumentSpec 不再代表库中内容，导出必须忠实于
+            // 库中 Markdown，因此清空规格并让导出接口返回明确错误。
+            data.documentSpec = Prisma.DbNull;
+        }
         if (input.visibility !== undefined) data.visibility = input.visibility;
 
         await this.prisma.$transaction(async (transaction) => {
@@ -545,6 +613,16 @@ function documentSnapshot(document: ManagedDocumentWithAccess): Prisma.InputJson
         contentLength: document.content.length,
         version: document.version,
     };
+}
+
+/** 清理下载文件名中的非法字符并限制长度，避免 Content-Disposition 注入与文件系统兼容问题。 */
+function toSafeFilename(title: string): string {
+    const cleaned = title
+        .replace(/[\\/:*?"<>|\x00-\x1f]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .replace(/\.+$/g, '');
+    return (cleaned || 'document').slice(0, 120);
 }
 
 /** 把 ai-service 的结构化 DocumentSpec 序列化为 Markdown 文本落库。 */

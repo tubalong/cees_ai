@@ -1,5 +1,5 @@
-import { NotFoundException } from '@nestjs/common';
-import { AuditOutcome, DocumentVisibility, DraftStatus, ResourceType } from '@prisma/client';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { AuditOutcome, DocumentVisibility, DraftStatus, Prisma, ResourceType } from '@prisma/client';
 import type { ComposeDocumentResponse } from '@cees/ai-service-client';
 import { AiServiceGateway } from '../ai-orchestration/ai-service-gateway.service';
 import { PrismaService } from '../database/prisma.service';
@@ -132,6 +132,7 @@ describe('DocumentService', () => {
             data: expect.objectContaining({
                 title: '项目周报',
                 content: expect.stringContaining('# 项目周报') as unknown,
+                documentSpec: expect.objectContaining({ schema_version: '1.0', title: '项目周报' }) as unknown,
                 visibility: DocumentVisibility.PRIVATE,
             }),
         });
@@ -189,6 +190,71 @@ describe('DocumentService', () => {
             provider: 'openai_compatible',
             model: 'doc-model',
         }));
+    });
+
+    it('clears the stored document spec when content is manually edited', async () => {
+        const prisma = createPrismaMock();
+        prisma.managedDocument.findFirst
+            .mockResolvedValueOnce(documentRecord())
+            .mockResolvedValueOnce(documentRecord({ title: 'Project plan', version: 2 }));
+        prisma.managedDocument.updateMany.mockResolvedValue({ count: 1 });
+        const service = createService(prisma, createAccessMock());
+
+        await service.updateDocument(DOCUMENT_ID, { content: 'manually edited', version: 1 });
+
+        expect(prisma.managedDocument.updateMany).toHaveBeenCalledWith({
+            where: { id: DOCUMENT_ID, tenantId: TENANT_ID, version: 1, deletedAt: null },
+            data: expect.objectContaining({ content: 'manually edited', documentSpec: Prisma.DbNull }),
+        });
+    });
+
+    it('exports the document as DOCX via ai-service render-docx and audits it', async () => {
+        const prisma = createPrismaMock();
+        prisma.managedDocument.findFirst.mockResolvedValue(documentRecord({
+            documentSpec: {
+                schema_version: '1.0',
+                title: 'Project plan',
+                subtitle: null,
+                sections: [{ heading: 'Overview', level: 1, blocks: [{ type: 'paragraph', text: 'content' }] }],
+                source_refs: [],
+            },
+        }));
+        const gateway = {
+            composeDocument: jest.fn(),
+            renderDocumentDocx: jest.fn().mockResolvedValue(Buffer.from('docx-bytes')),
+        };
+        const service = createService(prisma, createAccessMock(), gateway);
+
+        const result = await service.exportDocumentDocx(DOCUMENT_ID);
+
+        expect(gateway.renderDocumentDocx).toHaveBeenCalledWith(expect.objectContaining({
+            request_id: 'request-id',
+            tenant_id: TENANT_ID,
+            user_id: USER_ID,
+            document: expect.objectContaining({ schema_version: '1.0', title: 'Project plan' }),
+            document_options: expect.objectContaining({
+                title: 'Project plan',
+                locale: 'zh-CN',
+                template_id: 'business-standard',
+            }),
+        }));
+        expect(prisma.auditLog.create).toHaveBeenCalledWith({
+            data: expect.objectContaining({
+                action: 'DOCUMENT_EXPORTED',
+                outcome: AuditOutcome.SUCCESS,
+                resourceId: DOCUMENT_ID,
+                metadata: expect.objectContaining({ format: 'docx', byteLength: 10 }),
+            }),
+        });
+        expect(result).toEqual({ filename: 'Project plan', bytes: Buffer.from('docx-bytes') });
+    });
+
+    it('rejects export when the document has no stored spec', async () => {
+        const prisma = createPrismaMock();
+        prisma.managedDocument.findFirst.mockResolvedValue(documentRecord({ documentSpec: null }));
+        const service = createService(prisma, createAccessMock());
+
+        await expect(service.exportDocumentDocx(DOCUMENT_ID)).rejects.toBeInstanceOf(BadRequestException);
     });
 
     it('does not write a failure audit after a concurrent successful finalization', async () => {
@@ -292,6 +358,7 @@ function documentRecord(overrides: Record<string, unknown> = {}): ManagedDocumen
         tenantId: TENANT_ID,
         title: 'Project plan',
         content: 'content',
+        documentSpec: null,
         visibility: DocumentVisibility.PRIVATE,
         createdAt: NOW,
         updatedAt: NOW,

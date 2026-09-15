@@ -3,6 +3,7 @@ import {
     Controller,
     Delete,
     Get,
+    Header,
     HttpCode,
     HttpStatus,
     Param,
@@ -10,6 +11,7 @@ import {
     Patch,
     Post,
     Query,
+    StreamableFile,
     UseGuards,
     UseInterceptors,
 } from '@nestjs/common';
@@ -21,6 +23,9 @@ import { TenantGuard } from '../tenant/tenant.guard';
 import { DocumentService } from './document.service';
 import { DocumentListResult, DocumentResult } from './document.types';
 import { CreateDocumentDto, DeleteDocumentQueryDto, ListDocumentsQueryDto, UpdateDocumentDto } from './dto';
+
+/** DOCX 的 MIME 类型，与 ai-service DocxRenderer 保持一致。 */
+const DOCX_MEDIA_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
 @ApiTags('document')
 @ApiBearerAuth()
@@ -49,6 +54,26 @@ export class DocumentController {
     @ApiOkResponse({ description: '授权范围内文档详情' })
     getDocument(@Param('documentId', new ParseUUIDPipe()) documentId: string): Promise<DocumentResult> {
         return this.documentService.getDocument(documentId);
+    }
+
+    /**
+     * 导出文档为 DOCX：复用 document.read 权限（导出是同一文档资源的交付视图，
+     * 不是独立资源）。文件由落库的 DocumentSpec 确定性渲染，不调用 LLM。
+     */
+    @Get(':documentId/export')
+    @RequirePermissions('document.read')
+    @Header('Cache-Control', 'no-store')
+    @ApiOkResponse({ description: 'DOCX 文档文件' })
+    async exportDocumentDocx(
+        @Param('documentId', new ParseUUIDPipe()) documentId: string,
+    ): Promise<StreamableFile> {
+        const { filename, bytes } = await this.documentService.exportDocumentDocx(documentId);
+        const asciiFallback = 'document.docx';
+        const encoded = encodeURIComponent(`${filename}.docx`);
+        return new StreamableFile(bytes, {
+            type: DOCX_MEDIA_TYPE,
+            disposition: `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encoded}`,
+        });
     }
 
     @Patch(':documentId')
