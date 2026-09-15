@@ -2,7 +2,7 @@
 
 > 公开契约版本：`0.22.0`  
 > 契约事实源：[`packages/contracts/openapi/openapi.yaml`](../../packages/contracts/openapi/openapi.yaml)  
-> 最后更新：2026-09-14
+> 最后更新：2026-09-15
 
 本文是前端接入 Assistant 的业务说明。字段、状态码和响应模型以 OpenAPI 为准；本文不替代生成的 API Client。
 
@@ -38,13 +38,13 @@ Authorization: Bearer <access-token>
 Content-Type: application/json
 ```
 
-请求体（标题可省略）：
+请求体（标题和模式均可省略）：
 
 ```json
-{ "title": "项目周报助手" }
+{ "title": "项目周报助手", "mode": "ultra" }
 ```
 
-返回 `200`：`Conversation`，包含 `id`、`title`、`visibility`、`createdAt`、`updatedAt`、`lastTurnAt` 和 `version`。省略标题时，首轮成功完成后由服务端根据首条用户消息自动生成。
+`mode` 是会话默认对话执行模式：`standard`（快速）或 `ultra`（深度）；省略时默认 `standard`。返回 `200`：`Conversation`，包含 `id`、`title`、`mode`、`visibility`、`createdAt`、`updatedAt`、`lastTurnAt` 和 `version`。省略标题时，首轮成功完成后由服务端根据首条用户消息自动生成。
 
 ### 3.2 查询“我的会话”列表
 
@@ -61,6 +61,7 @@ Authorization: Bearer <access-token>
     {
       "id": "…",
       "title": "项目周报助手",
+      "mode": "standard",
       "visibility": "PRIVATE",
       "createdAt": "…",
       "updatedAt": "…",
@@ -126,7 +127,7 @@ Accept: text/event-stream
 }
 ```
 
-`content` 与 `imageFileIds` 至少提供一个；文本最多 262144 个字符；最多引用 8 张图片。服务端会再次校验图片 UUID、租户/成员归属、已完成上传状态、MIME（PNG/JPEG/WebP）和大小上限，然后在每次调用模型前动态生成短期 COS URL，转换为 ai-service 的多模态 `parts`：
+`content` 与 `imageFileIds` 至少提供一个；文本最多 262144 个字符；最多引用 8 张图片。`mode` 为本轮对话执行模式：`standard`（快速）或 `ultra`（深度）；省略时使用创建会话时设置的会话默认模式。服务端会再次校验图片 UUID、租户/成员归属、已完成上传状态、MIME（PNG/JPEG/WebP）和大小上限，然后在每次调用模型前动态生成短期 COS URL，转换为 ai-service 的多模态 `parts`：
 
 ```json
 { "type": "text", "text": "…" }

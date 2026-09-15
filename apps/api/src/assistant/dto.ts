@@ -29,6 +29,15 @@ export class CreateConversationRequestDto {
   @MinLength(1)
   @MaxLength(128)
   title?: string | null;
+
+  @ApiPropertyOptional({
+    description: '会话默认对话执行模式；省略时使用 standard',
+    enum: ['standard', 'ultra'],
+    default: 'standard',
+  })
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsIn(['standard', 'ultra'])
+  mode?: PublicTurnMode;
 }
 
 export class UpdateConversationRequestDto {
@@ -95,13 +104,12 @@ export class CreateTurnRequestDto {
   imageFileIds?: string[];
 
   @ApiPropertyOptional({
-    description: '对话执行模式；省略时使用 standard',
+    description: '本轮对话执行模式；省略时使用会话的默认模式',
     enum: ['standard', 'ultra'],
-    default: 'standard',
   })
   @ValidateIf((_object, value) => value !== undefined)
   @IsIn(['standard', 'ultra'])
-  mode: PublicTurnMode = 'standard';
+  mode?: PublicTurnMode;
 }
 
 export class ReplayTurnEventsQueryDto {

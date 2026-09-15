@@ -12,6 +12,9 @@ export type CreateTurnRequest = {
      * Stable image FileObject IDs referenced by this user message
      */
     imageFileIds?: Array<string>;
+    /**
+     * 本轮对话执行模式；省略时使用会话的默认模式
+     */
     mode?: ChatMode;
 };
 

@@ -13,6 +13,8 @@ export interface PublicConversation {
   id: string;
   title: string;
   visibility: PublicConversationVisibility;
+  /** 会话默认对话执行模式；发起轮次未显式指定 mode 时使用。 */
+  mode: PublicTurnMode;
   createdAt: Date;
   updatedAt: Date;
   lastTurnAt: Date | null;
