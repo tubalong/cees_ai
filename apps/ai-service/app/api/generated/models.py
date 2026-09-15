@@ -666,6 +666,174 @@ class FileExtractionMetadata(BaseModel):
     text_length: conint(ge=0)
 
 
+class Type(StrEnum):
+    title = 'title'
+    paragraph = 'paragraph'
+    list_item = 'list_item'
+    table = 'table'
+    formula = 'formula'
+    code_block = 'code_block'
+    image = 'image'
+    caption = 'caption'
+
+
+class ParsedBlock(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    block_id: constr(min_length=1, max_length=128)
+    type: Type = Field(
+        ...,
+        description='Normalized block kind produced by the parser. Unknown parser kinds must be mapped by the caller before submitting.',
+    )
+    text: constr(min_length=1, max_length=262144) | None = Field(
+        None,
+        description='Block text when the block carries inline content; null for pure asset blocks.',
+    )
+    page_index: conint(ge=0) | None = None
+    bbox: list[float] | None = Field(
+        None,
+        description='Page-relative bounding box in reading order [x0, y0, x1, y1].',
+        max_length=4,
+        min_length=4,
+    )
+    heading_path: list[constr(min_length=1, max_length=512)] | None = Field(
+        None,
+        description='Ancestor heading titles from root to the closest heading, in reading order.',
+        max_length=16,
+    )
+    source_order: conint(ge=0)
+    asset_ref: constr(min_length=1, max_length=512) | None = None
+
+
+class ParsedDocument(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    document_id: constr(min_length=1, max_length=128)
+    document_version_id: constr(min_length=1, max_length=128)
+    parser_name: constr(min_length=1, max_length=64)
+    parser_version: constr(min_length=1, max_length=64)
+    blocks: list[ParsedBlock] = Field(..., max_length=20000, min_length=1)
+
+
+class VisibilityScope(StrEnum):
+    PRIVATE = 'PRIVATE'
+    DEPARTMENT = 'DEPARTMENT'
+    PROJECT = 'PROJECT'
+    TENANT = 'TENANT'
+    CUSTOM = 'CUSTOM'
+
+
+class KnowledgeVisibilityScope(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    visibility_scope: VisibilityScope
+    department_id: constr(min_length=1, max_length=128) | None = None
+    project_id: constr(min_length=1, max_length=128) | None = None
+    acl_version: constr(min_length=1, max_length=128) = Field(
+        ...,
+        description='Version of the access-control snapshot the caller used to compute the scope. Retrieval must compare it against the node metadata to avoid serving stale visibility information.',
+    )
+
+
+class KnowledgeIndexRequest(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    request_id: constr(min_length=1, max_length=128)
+    tenant_id: constr(min_length=1, max_length=128)
+    user_id: constr(min_length=1, max_length=128)
+    knowledge_base_id: constr(min_length=1, max_length=128)
+    document_id: constr(min_length=1, max_length=128)
+    document_version_id: constr(min_length=1, max_length=128)
+    parsed_document: ParsedDocument
+    chunking_version: constr(min_length=1, max_length=64)
+    embedding_profile: constr(min_length=1, max_length=64)
+    index_version: constr(min_length=1, max_length=64) = Field(
+        ...,
+        description='Identity of the index generation. Switching embedding models or chunking strategies creates a new index_version instead of overwriting existing vectors.',
+    )
+    visibility_scope: KnowledgeVisibilityScope
+
+
+class KnowledgeIndexResponse(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    request_id: str
+    indexed_chunks: conint(ge=0)
+    chunking_version: str
+    embedding_profile: str
+    index_version: str
+    latency_ms: conint(ge=0) | None = None
+
+
+class KnowledgeRetrieveScope(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    knowledge_base_ids: list[constr(min_length=1, max_length=128)] = Field(
+        ..., max_length=64, min_length=1
+    )
+    allowed_document_ids: list[constr(min_length=1, max_length=128)] | None = Field(
+        None,
+        description='Optional document-level allowlist computed by the caller. When omitted, all documents inside the given knowledge bases match.',
+        max_length=10000,
+    )
+    department_ids: list[constr(min_length=1, max_length=128)] | None = Field(
+        None, max_length=256
+    )
+    project_ids: list[constr(min_length=1, max_length=128)] | None = Field(
+        None, max_length=256
+    )
+    acl_version: constr(min_length=1, max_length=128)
+
+
+class KnowledgeRetrieveRequest(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    request_id: constr(min_length=1, max_length=128)
+    tenant_id: constr(min_length=1, max_length=128)
+    user_id: constr(min_length=1, max_length=128)
+    query: constr(min_length=1, max_length=4096)
+    scope: KnowledgeRetrieveScope
+    top_k: conint(ge=1, le=32) | None = 8
+    index_version: constr(min_length=1, max_length=64)
+    embedding_profile: constr(min_length=1, max_length=64) | None = Field(
+        None,
+        description='Embedding profile for the query. Null selects the configured default; the effective profile is returned in the response.',
+    )
+
+
+class RetrievedChunk(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    chunk_id: constr(min_length=1, max_length=128)
+    document_id: constr(min_length=1, max_length=128)
+    document_version_id: constr(min_length=1, max_length=128)
+    text: constr(min_length=1, max_length=262144)
+    score: float
+    page_index: conint(ge=0) | None = None
+    bbox: list[float] | None = Field(None, max_length=4, min_length=4)
+    heading_path: list[constr(min_length=1, max_length=512)] | None = Field(
+        None, max_length=16
+    )
+
+
+class KnowledgeRetrieveResponse(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    request_id: str
+    chunks: list[RetrievedChunk] = Field(..., max_length=32)
+    index_version: str
+    embedding_profile: str
+
+
 class ErrorDetail(BaseModel):
     model_config = ConfigDict(
         extra='forbid',

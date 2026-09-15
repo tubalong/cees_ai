@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CEES AI Service Internal API
-  version: 0.2.0
+  version: 0.3.0
   description: |
     Internal infrastructure API used only by trusted CEES services.
     Desktop, mobile, and third-party clients must call the NestJS public API instead.
@@ -21,6 +21,8 @@ tags:
     description: Internal image generation endpoints available only to trusted CEES services.
   - name: files
     description: Internal text extraction from uploaded document bytes available only to trusted CEES services.
+  - name: knowledge
+    description: Internal knowledge indexing and retrieval available only to trusted CEES services.
 paths:
   /health:
     get:
@@ -740,6 +742,114 @@ paths:
           $ref: "#/components/responses/ValidationError"
         "500":
           $ref: "#/components/responses/InternalError"
+  /internal/v1/knowledge/index:
+    post:
+      tags: [knowledge]
+      operationId: indexKnowledgeDocument
+      summary: Index a parsed knowledge document
+      description: |
+        Builds TextNodes from a normalized ParsedDocument, chunks them,
+        embeds them, and idempotently upserts the vectors into the vector
+        store. Re-submitting the same (document_version_id, chunking_version,
+        embedding_profile, index_version) tuple replaces the previous nodes
+        instead of duplicating them. ai-service never writes the business
+        database and does not create formal resources.
+      security:
+        - internalToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/KnowledgeIndexRequest"
+            example:
+              request_id: req-knowledge-index-001
+              tenant_id: tenant-example
+              user_id: user-example
+              knowledge_base_id: kb-example
+              document_id: doc-example
+              document_version_id: version-example
+              parsed_document:
+                document_id: doc-example
+                document_version_id: version-example
+                parser_name: mineru
+                parser_version: 2.5.2
+                blocks:
+                  - block_id: block-1
+                    type: title
+                    text: Project delay escalation procedure
+                    page_index: 0
+                    heading_path: []
+                    source_order: 0
+              chunking_version: v1
+              embedding_profile: primary
+              index_version: idx-v1
+              visibility_scope:
+                visibility_scope: TENANT
+                acl_version: acl-2026-09-15-42
+      responses:
+        "200":
+          description: Document indexed idempotently
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgeIndexResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /internal/v1/knowledge/retrieve:
+    post:
+      tags: [knowledge]
+      operationId: retrieveKnowledge
+      summary: Retrieve knowledge chunks within a trusted scope
+      description: |
+        Embeds the query and returns the most similar chunks whose metadata
+        satisfies the caller-supplied trusted scope. Scope filtering is applied
+        during the vector query, not after a global top-k. This endpoint does
+        not invoke an LLM; answer generation is a separate capability.
+      security:
+        - internalToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/KnowledgeRetrieveRequest"
+            example:
+              request_id: req-knowledge-retrieve-001
+              tenant_id: tenant-example
+              user_id: user-example
+              query: What is the escalation procedure for delayed projects?
+              scope:
+                knowledge_base_ids: [kb-example]
+                allowed_document_ids: [doc-example]
+                acl_version: acl-2026-09-15-42
+              top_k: 8
+              index_version: idx-v1
+      responses:
+        "200":
+          description: Chunks retrieved within the trusted scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgeRetrieveResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
 components:
   securitySchemes:
     internalToken:
@@ -2049,6 +2159,308 @@ components:
         text_length:
           type: integer
           minimum: 0
+    ParsedBlock:
+      type: object
+      additionalProperties: false
+      required: [block_id, type, source_order]
+      properties:
+        block_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        type:
+          type: string
+          enum: [title, paragraph, list_item, table, formula, code_block, image, caption]
+          description: >-
+            Normalized block kind produced by the parser. Unknown parser kinds
+            must be mapped by the caller before submitting.
+        text:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 262144
+          description: Block text when the block carries inline content; null for pure asset blocks.
+        page_index:
+          type: [integer, "null"]
+          minimum: 0
+        bbox:
+          type: [array, "null"]
+          minItems: 4
+          maxItems: 4
+          items:
+            type: number
+          description: Page-relative bounding box in reading order [x0, y0, x1, y1].
+        heading_path:
+          type: array
+          maxItems: 16
+          items:
+            type: string
+            minLength: 1
+            maxLength: 512
+          description: Ancestor heading titles from root to the closest heading, in reading order.
+        source_order:
+          type: integer
+          minimum: 0
+        asset_ref:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 512
+    ParsedDocument:
+      type: object
+      additionalProperties: false
+      required: [document_id, document_version_id, parser_name, parser_version, blocks]
+      properties:
+        document_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        document_version_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        parser_name:
+          type: string
+          minLength: 1
+          maxLength: 64
+        parser_version:
+          type: string
+          minLength: 1
+          maxLength: 64
+        blocks:
+          type: array
+          minItems: 1
+          maxItems: 20000
+          items:
+            $ref: "#/components/schemas/ParsedBlock"
+    KnowledgeVisibilityScope:
+      type: object
+      additionalProperties: false
+      required: [visibility_scope, acl_version]
+      properties:
+        visibility_scope:
+          type: string
+          enum: [PRIVATE, DEPARTMENT, PROJECT, TENANT, CUSTOM]
+        department_id:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 128
+        project_id:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 128
+        acl_version:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: >-
+            Version of the access-control snapshot the caller used to compute
+            the scope. Retrieval must compare it against the node metadata to
+            avoid serving stale visibility information.
+    KnowledgeIndexRequest:
+      type: object
+      additionalProperties: false
+      required:
+        [request_id, tenant_id, user_id, knowledge_base_id, document_id,
+         document_version_id, parsed_document, chunking_version,
+         embedding_profile, index_version, visibility_scope]
+      properties:
+        request_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        tenant_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        user_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        knowledge_base_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        document_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        document_version_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        parsed_document:
+          $ref: "#/components/schemas/ParsedDocument"
+        chunking_version:
+          type: string
+          minLength: 1
+          maxLength: 64
+        embedding_profile:
+          type: string
+          minLength: 1
+          maxLength: 64
+        index_version:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: >-
+            Identity of the index generation. Switching embedding models or
+            chunking strategies creates a new index_version instead of
+            overwriting existing vectors.
+        visibility_scope:
+          $ref: "#/components/schemas/KnowledgeVisibilityScope"
+    KnowledgeIndexResponse:
+      type: object
+      additionalProperties: false
+      required: [request_id, indexed_chunks, chunking_version, embedding_profile, index_version]
+      properties:
+        request_id:
+          type: string
+        indexed_chunks:
+          type: integer
+          minimum: 0
+        chunking_version:
+          type: string
+        embedding_profile:
+          type: string
+        index_version:
+          type: string
+        latency_ms:
+          type: integer
+          minimum: 0
+    KnowledgeRetrieveScope:
+      type: object
+      additionalProperties: false
+      required: [knowledge_base_ids, acl_version]
+      properties:
+        knowledge_base_ids:
+          type: array
+          minItems: 1
+          maxItems: 64
+          items:
+            type: string
+            minLength: 1
+            maxLength: 128
+        allowed_document_ids:
+          type: array
+          maxItems: 10000
+          items:
+            type: string
+            minLength: 1
+            maxLength: 128
+          description: >-
+            Optional document-level allowlist computed by the caller. When
+            omitted, all documents inside the given knowledge bases match.
+        department_ids:
+          type: array
+          maxItems: 256
+          items:
+            type: string
+            minLength: 1
+            maxLength: 128
+        project_ids:
+          type: array
+          maxItems: 256
+          items:
+            type: string
+            minLength: 1
+            maxLength: 128
+        acl_version:
+          type: string
+          minLength: 1
+          maxLength: 128
+    KnowledgeRetrieveRequest:
+      type: object
+      additionalProperties: false
+      required: [request_id, tenant_id, user_id, query, scope, index_version]
+      properties:
+        request_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        tenant_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        user_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        query:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        scope:
+          $ref: "#/components/schemas/KnowledgeRetrieveScope"
+        top_k:
+          type: integer
+          minimum: 1
+          maximum: 32
+          default: 8
+        index_version:
+          type: string
+          minLength: 1
+          maxLength: 64
+        embedding_profile:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 64
+          description: >-
+            Embedding profile for the query. Null selects the configured
+            default; the effective profile is returned in the response.
+    RetrievedChunk:
+      type: object
+      additionalProperties: false
+      required: [chunk_id, document_id, document_version_id, text, score]
+      properties:
+        chunk_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        document_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        document_version_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        text:
+          type: string
+          minLength: 1
+          maxLength: 262144
+        score:
+          type: number
+        page_index:
+          type: [integer, "null"]
+          minimum: 0
+        bbox:
+          type: [array, "null"]
+          minItems: 4
+          maxItems: 4
+          items:
+            type: number
+        heading_path:
+          type: array
+          maxItems: 16
+          items:
+            type: string
+            minLength: 1
+            maxLength: 512
+    KnowledgeRetrieveResponse:
+      type: object
+      additionalProperties: false
+      required: [request_id, chunks, index_version, embedding_profile]
+      properties:
+        request_id:
+          type: string
+        chunks:
+          type: array
+          maxItems: 32
+          items:
+            $ref: "#/components/schemas/RetrievedChunk"
+        index_version:
+          type: string
+        embedding_profile:
+          type: string
     ErrorDetail:
       type: object
       additionalProperties: false

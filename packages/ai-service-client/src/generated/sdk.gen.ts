@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, ServerSentEventsResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { CompactChatData, CompactChatErrors, CompactChatResponses, ComposeDocumentData, ComposeDocumentErrors, ComposeDocumentResponses, EditImageData, EditImageErrors, EditImageResponses, ExtractFileData, ExtractFileErrors, ExtractFileResponses, GenerateDocumentDocxData, GenerateDocumentDocxErrors, GenerateDocumentDocxResponses, GenerateImageData, GenerateImageErrors, GenerateImageResponses, GetHealthData, GetHealthResponses, GetReadinessData, GetReadinessErrors, GetReadinessResponses, InvokeChatData, InvokeChatErrors, InvokeChatResponses, InvokeLlmData, InvokeLlmErrors, InvokeLlmResponses, PreviewImageData, PreviewImageErrors, PreviewImageResponses, RenderDocumentDocxData, RenderDocumentDocxErrors, RenderDocumentDocxResponses, StreamChatData, StreamChatErrors, StreamChatResponse, StreamChatResponses, StreamChatToolTurnData, StreamChatToolTurnErrors, StreamChatToolTurnResponse, StreamChatToolTurnResponses, StreamLlmData, StreamLlmErrors, StreamLlmResponse, StreamLlmResponses } from './types.gen';
+import type { CompactChatData, CompactChatErrors, CompactChatResponses, ComposeDocumentData, ComposeDocumentErrors, ComposeDocumentResponses, EditImageData, EditImageErrors, EditImageResponses, ExtractFileData, ExtractFileErrors, ExtractFileResponses, GenerateDocumentDocxData, GenerateDocumentDocxErrors, GenerateDocumentDocxResponses, GenerateImageData, GenerateImageErrors, GenerateImageResponses, GetHealthData, GetHealthResponses, GetReadinessData, GetReadinessErrors, GetReadinessResponses, IndexKnowledgeDocumentData, IndexKnowledgeDocumentErrors, IndexKnowledgeDocumentResponses, InvokeChatData, InvokeChatErrors, InvokeChatResponses, InvokeLlmData, InvokeLlmErrors, InvokeLlmResponses, PreviewImageData, PreviewImageErrors, PreviewImageResponses, RenderDocumentDocxData, RenderDocumentDocxErrors, RenderDocumentDocxResponses, RetrieveKnowledgeData, RetrieveKnowledgeErrors, RetrieveKnowledgeResponses, StreamChatData, StreamChatErrors, StreamChatResponse, StreamChatResponses, StreamChatToolTurnData, StreamChatToolTurnErrors, StreamChatToolTurnResponse, StreamChatToolTurnResponses, StreamLlmData, StreamLlmErrors, StreamLlmResponse, StreamLlmResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -233,6 +233,46 @@ export const generateDocumentDocx = <ThrowOnError extends boolean = false>(optio
 export const extractFile = <ThrowOnError extends boolean = false>(options: Options<ExtractFileData, ThrowOnError>): RequestResult<ExtractFileResponses, ExtractFileErrors, ThrowOnError> => (options.client ?? client).post<ExtractFileResponses, ExtractFileErrors, ThrowOnError>({
     security: [{ name: 'X-AI-Internal-Token', type: 'apiKey' }],
     url: '/internal/v1/files/extract',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Index a parsed knowledge document
+ *
+ * Builds TextNodes from a normalized ParsedDocument, chunks them,
+ * embeds them, and idempotently upserts the vectors into the vector
+ * store. Re-submitting the same (document_version_id, chunking_version,
+ * embedding_profile, index_version) tuple replaces the previous nodes
+ * instead of duplicating them. ai-service never writes the business
+ * database and does not create formal resources.
+ *
+ */
+export const indexKnowledgeDocument = <ThrowOnError extends boolean = false>(options: Options<IndexKnowledgeDocumentData, ThrowOnError>): RequestResult<IndexKnowledgeDocumentResponses, IndexKnowledgeDocumentErrors, ThrowOnError> => (options.client ?? client).post<IndexKnowledgeDocumentResponses, IndexKnowledgeDocumentErrors, ThrowOnError>({
+    security: [{ name: 'X-AI-Internal-Token', type: 'apiKey' }],
+    url: '/internal/v1/knowledge/index',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Retrieve knowledge chunks within a trusted scope
+ *
+ * Embeds the query and returns the most similar chunks whose metadata
+ * satisfies the caller-supplied trusted scope. Scope filtering is applied
+ * during the vector query, not after a global top-k. This endpoint does
+ * not invoke an LLM; answer generation is a separate capability.
+ *
+ */
+export const retrieveKnowledge = <ThrowOnError extends boolean = false>(options: Options<RetrieveKnowledgeData, ThrowOnError>): RequestResult<RetrieveKnowledgeResponses, RetrieveKnowledgeErrors, ThrowOnError> => (options.client ?? client).post<RetrieveKnowledgeResponses, RetrieveKnowledgeErrors, ThrowOnError>({
+    security: [{ name: 'X-AI-Internal-Token', type: 'apiKey' }],
+    url: '/internal/v1/knowledge/retrieve',
     ...options,
     headers: {
         'Content-Type': 'application/json',
