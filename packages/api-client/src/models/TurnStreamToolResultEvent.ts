@@ -3,6 +3,7 @@
 /* tslint:disable */
 /* eslint-disable */
 import type { ToolResultResourceReference } from './ToolResultResourceReference';
+import type { ToolSource } from './ToolSource';
 /**
  * 工具执行完成、失败或被 API 拒绝时发送的事件。
  */
@@ -24,6 +25,10 @@ export type TurnStreamToolResultEvent = {
      * 工具生成的稳定正式资源引用；访问 URL 必须通过对应资源接口按需获取
      */
     resource: (ToolResultResourceReference | null);
+    /**
+     * 联网搜索等非资源型工具返回的结构化来源；老客户端可忽略该字段
+     */
+    sources?: Array<ToolSource>;
     /**
      * 工具失败或被拒绝时的错误信息
      */

@@ -16,7 +16,18 @@ export interface ToolExecutionContext {
   executionOwner: string;
   /** 本次 EXECUTING 抢占令牌；业务服务可据此拒绝失去租约的旧执行者。 */
   executionToken: string;
+  /** Turn 被取消时用于终止可取消的外部 I/O。 */
+  signal?: AbortSignal;
   permissions: string[];
+}
+
+export interface ToolSource {
+  id: string;
+  title: string;
+  url: string;
+  domain: string;
+  snippet: string;
+  publishedAt: string | null;
 }
 
 /** 工具执行成功结果：正式资源引用供公开 tool_result 事件与 TOOL 消息使用。 */
@@ -26,6 +37,8 @@ export interface ToolExecutionResult {
   resourceId: string | null;
   /** 回喂模型的工具结果摘要。 */
   summary: string;
+  /** 非资源型工具（例如联网搜索）的结构化来源。 */
+  sources?: ToolSource[];
 }
 
 /**

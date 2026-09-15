@@ -266,6 +266,7 @@ export { TenantStatus } from './models/TenantStatus';
 export type { TokenPairResponse } from './models/TokenPairResponse';
 export type { TokenPairResponseEnvelope } from './models/TokenPairResponseEnvelope';
 export { ToolResultResourceReference } from './models/ToolResultResourceReference';
+export type { ToolSource } from './models/ToolSource';
 export type { TransferProjectOwnerRequest } from './models/TransferProjectOwnerRequest';
 export type { Turn } from './models/Turn';
 export type { TurnErrorDetail } from './models/TurnErrorDetail';

@@ -5441,6 +5441,13 @@ components:
             - $ref: '#/components/schemas/ToolResultResourceReference'
             - type: 'null'
           description: 工具生成的稳定正式资源引用；访问 URL 必须通过对应资源接口按需获取
+        sources:
+          type: array
+          maxItems: 20
+          default: []
+          items:
+            $ref: '#/components/schemas/ToolSource'
+          description: 联网搜索等非资源型工具返回的结构化来源；老客户端可忽略该字段
         error:
           type: [object, 'null']
           description: 工具失败或被拒绝时的错误信息
@@ -5460,6 +5467,35 @@ components:
           format: uuid
           description: 正式资源 ID
 
+    ToolSource:
+      type: object
+      additionalProperties: false
+      required: [id, title, url, domain, snippet, publishedAt]
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 256
+          description: 当前工具调用内稳定的来源 ID
+        title:
+          type: string
+          minLength: 1
+          maxLength: 300
+        url:
+          type: string
+          format: uri
+          maxLength: 4096
+        domain:
+          type: string
+          minLength: 1
+          maxLength: 255
+        snippet:
+          type: string
+          maxLength: 5000
+        publishedAt:
+          type: [string, 'null']
+          format: date-time
+      description: 联网搜索返回的公开网页来源，不代表 CEES 正式业务资源
     TurnStreamCompletedEvent:
       type: object
       additionalProperties: false
