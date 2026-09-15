@@ -48,6 +48,8 @@ export type { CreateDingTalkIntegrationRequest } from './models/CreateDingTalkIn
 export type { CreateDocumentRequest } from './models/CreateDocumentRequest';
 export type { CreateKnowledgeBaseMemberRequest } from './models/CreateKnowledgeBaseMemberRequest';
 export type { CreateKnowledgeBaseRequest } from './models/CreateKnowledgeBaseRequest';
+export type { CreateKnowledgeDocumentRequest } from './models/CreateKnowledgeDocumentRequest';
+export type { CreateKnowledgeDocumentVersionRequest } from './models/CreateKnowledgeDocumentVersionRequest';
 export type { CreateMeetingRequest } from './models/CreateMeetingRequest';
 export type { CreatePlatformTenantRequest } from './models/CreatePlatformTenantRequest';
 export type { CreateProjectRequest } from './models/CreateProjectRequest';
@@ -120,6 +122,12 @@ export type { KnowledgeBaseMemberListResponseEnvelope } from './models/Knowledge
 export { KnowledgeBaseMemberPermission } from './models/KnowledgeBaseMemberPermission';
 export type { KnowledgeBaseMemberResponseEnvelope } from './models/KnowledgeBaseMemberResponseEnvelope';
 export type { KnowledgeBaseResponseEnvelope } from './models/KnowledgeBaseResponseEnvelope';
+export type { KnowledgeDocument } from './models/KnowledgeDocument';
+export type { KnowledgeDocumentList } from './models/KnowledgeDocumentList';
+export type { KnowledgeDocumentListResponseEnvelope } from './models/KnowledgeDocumentListResponseEnvelope';
+export type { KnowledgeDocumentResponseEnvelope } from './models/KnowledgeDocumentResponseEnvelope';
+export { KnowledgeDocumentStatus } from './models/KnowledgeDocumentStatus';
+export { KnowledgeDocumentVisibilityScope } from './models/KnowledgeDocumentVisibilityScope';
 export type { LoginRequest } from './models/LoginRequest';
 export type { LoginResponse } from './models/LoginResponse';
 export type { LoginResponseEnvelope } from './models/LoginResponseEnvelope';

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CEES AI API
-  version: 0.22.0
+  version: 0.23.0
   description: 以本文件为唯一事实源的公开 API 契约。资源与操作按 docs/api 约定补充。
 
 servers:
@@ -4641,6 +4641,209 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
 
+  /knowledge-bases/{knowledgeBaseId}/documents:
+    parameters:
+      - name: knowledgeBaseId
+        in: path
+        required: true
+        description: 知识库 ID
+        schema: { type: string, format: uuid }
+    get:
+      summary: 查询知识库文档
+      description: 返回知识库内未删除文档的分页列表，包含处理状态；普通成员只能查看自己加入的知识库。
+      operationId: listKnowledgeDocuments
+      tags: [KnowledgeBase]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: keyword
+          in: query
+          required: false
+          description: 按文档名称模糊搜索
+          schema: { type: string, maxLength: 100 }
+        - name: limit
+          in: query
+          required: false
+          description: 每页数量，默认 20，最大 100
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - name: cursor
+          in: query
+          required: false
+          description: 上一页返回的文档 ID
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: 知识库文档列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/KnowledgeDocumentListResponseEnvelope' }
+        '400':
+          description: 分页游标无效或请求参数校验失败
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
+        '401':
+          description: 登录状态无效或缺少有效租户成员身份
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
+        '403':
+          description: 缺少 knowledge_base.read 权限
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
+        '404':
+          description: 知识库不存在或当前成员无权访问
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
+
+    post:
+      summary: 上传知识库文档
+      description: 关联一个已上传的文件对象并创建文档，文档进入 PENDING 状态后由后台任务解析并建立索引。可见范围为 DEPARTMENT 时必须提供 departmentId，为 PROJECT 时必须提供 projectId。
+      operationId: createKnowledgeDocument
+      tags: [KnowledgeBase]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateKnowledgeDocumentRequest' }
+      responses:
+        '201':
+          description: 文档已创建，等待后台解析与索引
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/KnowledgeDocumentResponseEnvelope' }
+        '400':
+          description: 请求字段校验失败或可见范围与部门、项目字段不一致
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
+        '401':
+          description: 登录状态无效或缺少有效租户成员身份
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
+        '403':
+          description: 缺少 knowledge_base.document.manage 权限或知识库 EDITOR 权限
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
+        '404':
+          description: 知识库不存在或文件对象不属于当前租户
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
+        '409':
+          description: 文件对象已被其他文档使用或已删除
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
+
+  /knowledge-bases/{knowledgeBaseId}/documents/{documentId}/versions:
+    parameters:
+      - name: knowledgeBaseId
+        in: path
+        required: true
+        description: 知识库 ID
+        schema: { type: string, format: uuid }
+      - name: documentId
+        in: path
+        required: true
+        description: 文档 ID
+        schema: { type: string, format: uuid }
+    post:
+      summary: 上传文档新版本
+      description: 关联新的文件对象并创建文档新版本，文档重新进入 PENDING 状态并重建索引。
+      operationId: createKnowledgeDocumentVersion
+      tags: [KnowledgeBase]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateKnowledgeDocumentVersionRequest' }
+      responses:
+        '201':
+          description: 新版本已创建，文档重新进入处理队列
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/KnowledgeDocumentResponseEnvelope' }
+        '400':
+          description: 请求字段校验失败或可见范围与部门、项目字段不一致
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
+        '401':
+          description: 登录状态无效或缺少有效租户成员身份
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
+        '403':
+          description: 缺少 knowledge_base.document.manage 权限或知识库 EDITOR 权限
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
+        '404':
+          description: 知识库、文档不存在或文件对象不属于当前租户
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
+        '409':
+          description: 文件对象已被其他文档使用或已删除
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
+
+  /knowledge-bases/{knowledgeBaseId}/documents/{documentId}/retry:
+    parameters:
+      - name: knowledgeBaseId
+        in: path
+        required: true
+        description: 知识库 ID
+        schema: { type: string, format: uuid }
+      - name: documentId
+        in: path
+        required: true
+        description: 文档 ID
+        schema: { type: string, format: uuid }
+    post:
+      summary: 重试文档处理
+      description: 将处理失败的文档重新放入 PENDING 队列，重置重试计数与失败原因。
+      operationId: retryKnowledgeDocument
+      tags: [KnowledgeBase]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 文档已重新进入处理队列
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/KnowledgeDocumentResponseEnvelope' }
+        '401':
+          description: 登录状态无效或缺少有效租户成员身份
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
+        '403':
+          description: 缺少 knowledge_base.document.manage 权限或知识库 EDITOR 权限
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
+        '404':
+          description: 知识库或文档不存在
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
+        '409':
+          description: 文档当前状态不允许重试
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
+
   /dingtalk/integration:
     get:
       summary: 查询当前租户钉钉企业绑定
@@ -5071,6 +5274,148 @@ components:
       properties:
         permission:
           $ref: '#/components/schemas/KnowledgeBaseMemberPermission'
+
+    KnowledgeDocumentStatus:
+      type: string
+      enum: [PENDING, PARSING, PARSED, INDEXING, READY, FAILED]
+      description: 知识库文档处理状态；PENDING 等待处理，PARSING 解析中，PARSED 解析完成，INDEXING 建立索引中，READY 可检索，FAILED 处理失败
+
+    KnowledgeDocumentVisibilityScope:
+      type: string
+      enum: [PRIVATE, DEPARTMENT, PROJECT, TENANT]
+      description: 文档可见范围；PRIVATE 仅知识库成员，DEPARTMENT 指定部门成员，PROJECT 指定项目成员，TENANT 租户全部成员
+
+    KnowledgeDocument:
+      type: object
+      required:
+        - id
+        - tenantId
+        - knowledgeBaseId
+        - name
+        - status
+        - fileObjectId
+        - versionNumber
+        - currentVersionId
+        - retryCount
+        - lastError
+        - visibilityScope
+        - departmentId
+        - projectId
+        - createdBy
+        - updatedBy
+        - version
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenantId:
+          type: string
+          format: uuid
+        knowledgeBaseId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        status:
+          $ref: '#/components/schemas/KnowledgeDocumentStatus'
+        fileObjectId:
+          type: string
+          format: uuid
+          description: 当前版本对应的文件对象 ID
+        versionNumber:
+          type: integer
+          minimum: 1
+          description: 当前版本号
+        currentVersionId:
+          type: string
+          format: uuid
+          description: 当前处理中的文档版本 ID
+        retryCount:
+          type: integer
+          minimum: 0
+        lastError:
+          type: [string, 'null']
+        visibilityScope:
+          $ref: '#/components/schemas/KnowledgeDocumentVisibilityScope'
+        departmentId:
+          type: [string, 'null']
+          format: uuid
+        projectId:
+          type: [string, 'null']
+          format: uuid
+        createdBy:
+          type: [string, 'null']
+          format: uuid
+        updatedBy:
+          type: [string, 'null']
+          format: uuid
+        version:
+          type: integer
+          minimum: 1
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    KnowledgeDocumentList:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/KnowledgeDocument'
+        nextCursor:
+          type: [string, 'null']
+          format: uuid
+
+    CreateKnowledgeDocumentRequest:
+      type: object
+      additionalProperties: false
+      required: [fileObjectId, name, visibilityScope]
+      properties:
+        fileObjectId:
+          type: string
+          format: uuid
+          description: 已上传完成的文件对象 ID
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        visibilityScope:
+          $ref: '#/components/schemas/KnowledgeDocumentVisibilityScope'
+        departmentId:
+          type: [string, 'null']
+          format: uuid
+          description: 可见范围为 DEPARTMENT 时必填
+        projectId:
+          type: [string, 'null']
+          format: uuid
+          description: 可见范围为 PROJECT 时必填
+
+    CreateKnowledgeDocumentVersionRequest:
+      type: object
+      additionalProperties: false
+      required: [fileObjectId, visibilityScope]
+      properties:
+        fileObjectId:
+          type: string
+          format: uuid
+          description: 已上传完成的文件对象 ID
+        visibilityScope:
+          $ref: '#/components/schemas/KnowledgeDocumentVisibilityScope'
+        departmentId:
+          type: [string, 'null']
+          format: uuid
+          description: 可见范围为 DEPARTMENT 时必填
+        projectId:
+          type: [string, 'null']
+          format: uuid
+          description: 可见范围为 PROJECT 时必填
 
     ChatMode:
       type: string
@@ -8804,6 +9149,30 @@ components:
           const: true
         data:
           $ref: '#/components/schemas/KnowledgeBaseMemberList'
+        requestId:
+          type: [string, 'null']
+
+    KnowledgeDocumentResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: '#/components/schemas/KnowledgeDocument'
+        requestId:
+          type: [string, 'null']
+
+    KnowledgeDocumentListResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: '#/components/schemas/KnowledgeDocumentList'
         requestId:
           type: [string, 'null']
 
