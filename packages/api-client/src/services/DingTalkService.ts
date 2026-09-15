@@ -2,12 +2,16 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
+import type { ApplyDingTalkMappingRequest } from '../models/ApplyDingTalkMappingRequest';
 import type { CreateDingTalkIntegrationRequest } from '../models/CreateDingTalkIntegrationRequest';
 import type { DingTalkDepartmentListResponseEnvelope } from '../models/DingTalkDepartmentListResponseEnvelope';
 import type { DingTalkIntegrationResponseEnvelope } from '../models/DingTalkIntegrationResponseEnvelope';
+import type { DingTalkMappingPreviewResponseEnvelope } from '../models/DingTalkMappingPreviewResponseEnvelope';
+import type { DingTalkMappingResponseEnvelope } from '../models/DingTalkMappingResponseEnvelope';
 import type { DingTalkSyncJobListResponseEnvelope } from '../models/DingTalkSyncJobListResponseEnvelope';
 import type { DingTalkSyncJobResponseEnvelope } from '../models/DingTalkSyncJobResponseEnvelope';
 import type { DingTalkUserListResponseEnvelope } from '../models/DingTalkUserListResponseEnvelope';
+import type { PreviewDingTalkMappingRequest } from '../models/PreviewDingTalkMappingRequest';
 import type { UpdateDingTalkIntegrationRequest } from '../models/UpdateDingTalkIntegrationRequest';
 import type { CancelablePromise } from '../core/CancelablePromise';
 import { OpenAPI } from '../core/OpenAPI';
@@ -175,6 +179,54 @@ export class DingTalkService {
                 401: `登录状态无效或已过期`,
                 403: `缺少 dingtalk.organization.read 权限`,
                 404: `当前租户尚未绑定钉钉企业`,
+            },
+        });
+    }
+    /**
+     * 预览钉钉组织映射
+     * 按部门层级和人员姓名/部门生成安全映射方案，不修改正式租户数据。
+     * @returns DingTalkMappingPreviewResponseEnvelope 映射预览
+     * @throws ApiError
+     */
+    public static previewDingTalkOrganizationMapping({
+        requestBody,
+    }: {
+        requestBody?: PreviewDingTalkMappingRequest,
+    }): CancelablePromise<DingTalkMappingPreviewResponseEnvelope> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/dingtalk/organization/mapping/preview',
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                401: `登录状态无效或已过期`,
+                403: `缺少 dingtalk.organization.mapping.preview 权限`,
+                404: `当前租户尚未绑定钉钉企业`,
+            },
+        });
+    }
+    /**
+     * 应用钉钉组织映射
+     * 应用自动匹配、人工冲突处理和缺失部门/成员创建；新成员激活凭证仅在本次响应返回。
+     * @returns DingTalkMappingResponseEnvelope 映射已应用
+     * @throws ApiError
+     */
+    public static applyDingTalkOrganizationMapping({
+        requestBody,
+    }: {
+        requestBody: ApplyDingTalkMappingRequest,
+    }): CancelablePromise<DingTalkMappingResponseEnvelope> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/dingtalk/organization/mapping/apply',
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                400: `映射参数无效或仍有未解决冲突`,
+                401: `登录状态无效或已过期`,
+                403: `缺少 dingtalk.organization.mapping.manage 权限`,
+                404: `当前租户、部门或成员不存在`,
+                409: `映射或账号已被其他请求修改`,
             },
         });
     }

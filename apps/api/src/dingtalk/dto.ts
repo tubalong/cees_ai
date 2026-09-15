@@ -11,6 +11,7 @@ import {
     MaxLength,
     Min,
     MinLength,
+    ValidateNested,
 } from 'class-validator';
 import { DingTalkIntegrationStatus } from '@prisma/client';
 
@@ -89,4 +90,63 @@ export class ListDingTalkSyncJobsQueryDto {
     @IsOptional()
     @IsUUID()
     cursor?: string;
+}
+
+export class DingTalkDepartmentMappingResolutionDto {
+    @IsUUID()
+    dingtalkDepartmentId!: string;
+
+    @IsString()
+    @IsIn(['BIND_EXISTING', 'CREATE', 'SKIP'])
+    action!: 'BIND_EXISTING' | 'CREATE' | 'SKIP';
+
+    @IsOptional()
+    @IsUUID()
+    departmentId?: string;
+}
+
+export class DingTalkUserMappingResolutionDto {
+    @IsUUID()
+    dingtalkUserId!: string;
+
+    @IsString()
+    @IsIn(['BIND_EXISTING', 'CREATE', 'SKIP'])
+    action!: 'BIND_EXISTING' | 'CREATE' | 'SKIP';
+
+    @IsOptional()
+    @IsUUID()
+    membershipId?: string;
+
+    @IsOptional()
+    @IsString()
+    @MinLength(3)
+    @MaxLength(32)
+    @Matches(/^[a-zA-Z0-9]+$/)
+    account?: string;
+}
+
+export class PreviewDingTalkMappingDto {
+    @IsOptional()
+    @IsInt()
+    @Min(1)
+    @Max(30)
+    activationExpiresInDays = 7;
+
+    @IsOptional()
+    createMissingDepartments = true;
+
+    @IsOptional()
+    createMissingMembers = true;
+}
+
+export class ApplyDingTalkMappingDto extends PreviewDingTalkMappingDto {
+    @IsOptional()
+    @Type(() => DingTalkDepartmentMappingResolutionDto)
+    @ValidateNested({ each: true })
+    departmentResolutions: DingTalkDepartmentMappingResolutionDto[] = [];
+
+    @IsOptional()
+    @Type(() => DingTalkUserMappingResolutionDto)
+    @ValidateNested({ each: true })
+    userResolutions: DingTalkUserMappingResolutionDto[] = [];
 }
