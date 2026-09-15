@@ -3,7 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from app.core.config import ModelCatalog, Settings, get_settings, load_catalog_safely
+from app.embeddings.router import EmbeddingRouter, build_default_embedding_router
 from app.images.router import ImageRouter
+from app.knowledge.stores import InMemoryVectorStore, VectorStoreGateway
 from app.llm.router import LLMRouter, ProviderBuilder
 
 
@@ -14,6 +16,8 @@ class AppRuntime:
     router: LLMRouter | None
     readiness_errors: list[str]
     image_router: ImageRouter | None = None
+    embedding_router: EmbeddingRouter | None = None
+    knowledge_store: VectorStoreGateway | None = None
 
     @property
     def ready(self) -> bool:
@@ -38,4 +42,16 @@ def build_runtime(
     catalog, errors = load_catalog_safely(resolved_settings)
     router = LLMRouter(catalog, provider_builder) if catalog is not None else None
     image_router = ImageRouter(catalog) if catalog is not None else None
-    return AppRuntime(resolved_settings, catalog, router, errors, image_router)
+    # 块 2 使用确定性 Embedding 与内存向量库跑通闭环；块 4 替换为
+    # 真实 Embedding provider 与 pgvector Gateway。内存库进程重启即丢失。
+    embedding_router = build_default_embedding_router()
+    knowledge_store = InMemoryVectorStore()
+    return AppRuntime(
+        resolved_settings,
+        catalog,
+        router,
+        errors,
+        image_router,
+        embedding_router,
+        knowledge_store,
+    )

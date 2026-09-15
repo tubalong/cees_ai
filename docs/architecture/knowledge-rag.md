@@ -1,6 +1,6 @@
 # 知识库 RAG（MinerU + LlamaIndex）
 
-> 状态：设计阶段，代码尚未实现。块 1（本文档与内部契约 `index`/`retrieve`）已确定，其余内容按第 8 节分块计划推进。
+> 状态：分块实施中。块 1（本文档与内部契约 `index`/`retrieve`）与块 2（ai-service 内存闭环 + HTTP 路由）已落地，其余内容按第 8 节分块计划推进。
 > 最后同步：2026-09-15
 > 内部契约版本：`0.3.0`
 
@@ -52,15 +52,14 @@ NestJS API   = 业务事实、权限、状态与审计层（apps/api）
 | `KnowledgeBase` / `KnowledgeBaseMember` / `KnowledgeDocument` / `DocumentVersion` / `DocumentChunk` / `KnowledgeQueryLog` 数据模型 | `apps/api/prisma/schema.prisma` |
 | `DocumentChunk` 已含 `visibilityScope`、`departmentId`、`projectId`、`version`、pgvector `embedding` 字段 | 同上 |
 | ai-service 内存索引与检索验证（LlamaIndex 薄适配，不用全局 Settings） | [ai-service-foundation.md](ai-service-foundation.md) |
+| ai-service 知识内存闭环：EmbeddingRouter、节点构建、内存 VectorStore、HTTP `index`/`retrieve` | `apps/ai-service/app/{embeddings,knowledge}`、`app/api/routes/knowledge.py` |
 | LLMRouter 多模型路由与 `rag` role | `apps/ai-service/app/llm` |
 
 缺失：
 
 - `DocumentChunk` 无任何读写代码；`KnowledgeDocument` 无版本与处理状态机
-- MinerU 服务、`EmbeddingRouter`、独立向量库
-- 解析产物到 `ParsedDocument` 的转换、节点构建、切分、Embedding 与索引
-- 检索、答案生成与引用校验
-- 内部契约 `/internal/v1/knowledge/*`
+- MinerU 服务；真实 Embedding provider 与独立 pgvector 向量库（块 4）
+- 答案生成与引用校验（块 5）
 
 ## 3. 关键决策
 
@@ -89,7 +88,7 @@ NestJS API   = 业务事实、权限、状态与审计层（apps/api）
 
 ### 3.4 Embedding 与索引版本
 
-新增 `EmbeddingRouter`（`app/embeddings/`），与 LLMRouter 分离；`models.toml` 的 `rag` role 只用于答案生成，不承担 embedding 配置。
+新增 `EmbeddingRouter`（`app/embeddings/`），与 LLMRouter 分离；`models.toml` 的 `rag` role 只用于答案生成，不承担 embedding 配置。块 2 已落地：路由解析与维度校验就绪，目前只注册确定性 `deterministic` provider（开发/测试用），真实 provider 在块 4 接入。
 
 版本三元组 `(chunking_version, embedding_profile, index_version)` 是索引身份的一部分：
 
@@ -155,8 +154,8 @@ PENDING -> PARSING -> PARSED -> INDEXING -> READY
 
 | 方法与路径 | 用途 | 状态 |
 | --- | --- | --- |
-| `POST /internal/v1/knowledge/index` | 接收 ParsedDocument，切分、Embedding、幂等写入向量库 | 块 1 已定义 |
-| `POST /internal/v1/knowledge/retrieve` | 按可信 scope 检索，返回节点与来源 metadata | 块 1 已定义 |
+| `POST /internal/v1/knowledge/index` | 接收 ParsedDocument，切分、Embedding、幂等写入向量库 | 已实现（块 2） |
+| `POST /internal/v1/knowledge/retrieve` | 按可信 scope 检索，返回节点与来源 metadata | 已实现（块 2） |
 | `POST /internal/v1/knowledge/index/delete` | 删除指定文档版本 + 索引版本的派生索引 | 块 4 定义 |
 | `POST /internal/v1/knowledge/answer` | retrieve + LLMRouter 生成带引用校验的答案 | 块 5 定义 |
 
@@ -172,7 +171,7 @@ PENDING -> PARSING -> PARSED -> INDEXING -> READY
 | 块 | 内容 | 依赖 |
 | --- | --- | --- |
 | 1 | 本文档 + 内部契约 `index`/`retrieve`（0.3.0） | 无 |
-| 2 | ai-service 内存闭环：`parsed_models`、`mineru_artifact_reader`、`node_builder`、内存 VectorStore 的 `retrieval`，pytest 覆盖 | 块 1 |
+| 2 | ✅ 已落地：ai-service 内存闭环（`parsed_models`、`mineru_artifact_reader`、`node_builder`、`EmbeddingRouter`、内存 VectorStore、`ingestion`/`retrieval`、HTTP 路由 `index`/`retrieve`），pytest 覆盖 | 块 1 |
 | 3 | NestJS `KnowledgeDocument` 状态机 + `DocumentChunk` 迁移改造（停用 embedding 字段）+ 上传触发索引任务 | 块 1 |
 | 4 | 真实 pgvector Gateway（独立 `cees_ai_vectors` database）+ `index/delete` 契约 | 块 2 |
 | 5 | 公开 Query API + `answer` 契约（LLMRouter rag role）+ citation 校验 | 块 2、4 |
@@ -196,7 +195,7 @@ PENDING -> PARSING -> PARSED -> INDEXING -> READY
 | 块 | 验证 |
 | --- | --- |
 | 1 | `pnpm contracts:lint` + `pnpm contracts:check` + 文档评审 |
-| 2 | pytest：解析产物转换、切分稳定性、重复索引幂等、租户与 scope 过滤、文档版本隔离 |
+| 2 | ✅ pytest 全绿：解析产物转换、切分稳定性、重复索引幂等、租户与 scope 过滤、index_version 隔离、文档版本删除；ruff 与契约漂移测试通过 |
 | 3 | jest：状态机迁移、上传触发、失败重试；Prisma 迁移检查 |
 | 4 | pytest：Gateway upsert/delete/filter；幂等与部分失败 |
 | 5 | jest + pytest：citation ID 校验、无证据拒答、查询日志写入 |
