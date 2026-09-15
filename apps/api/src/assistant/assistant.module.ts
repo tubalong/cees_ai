@@ -3,6 +3,7 @@ import { AiOrchestrationModule } from '../ai-orchestration/ai-orchestration.modu
 import { DocumentModule } from '../document/document.module';
 import { ImageModule } from '../image/image.module';
 import { StorageModule } from '../storage/storage.module';
+import { WebSearchModule } from '../web-search/web-search.module';
 import { AssistantController } from './api/assistant.controller';
 import { ConversationService } from './conversation/conversation.service';
 import { EventService } from './conversation/event.service';
@@ -15,6 +16,7 @@ import { ToolRegistryService } from './tools/tool-registry';
 import { ToolPolicyService } from './tools/tool-policy.service';
 import { GenerateDocumentTool } from './tools/executors/generate-document.tool';
 import { GenerateImageTool } from './tools/executors/generate-image.tool';
+import { WebSearchTool } from './tools/executors/web-search.tool';
 
 /**
  * 统一 AI 编排核心。会话事实源、事件重放与唯一 Tool Loop 运行器都在本模块内，
@@ -23,7 +25,7 @@ import { GenerateImageTool } from './tools/executors/generate-image.tool';
  * 执行器在 onModuleInit 自注册，新增工具只需新增 provider。
  */
 @Module({
-  imports: [AiOrchestrationModule, DocumentModule, ImageModule, StorageModule],
+  imports: [AiOrchestrationModule, DocumentModule, ImageModule, StorageModule, WebSearchModule],
   controllers: [AssistantController],
   providers: [
     ConversationService,
@@ -37,6 +39,7 @@ import { GenerateImageTool } from './tools/executors/generate-image.tool';
     TurnRecoveryService,
     GenerateDocumentTool,
     GenerateImageTool,
+    WebSearchTool,
   ],
 })
 export class AssistantModule {}

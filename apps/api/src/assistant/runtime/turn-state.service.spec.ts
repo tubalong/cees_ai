@@ -45,6 +45,54 @@ describe('TurnStateService', () => {
     });
   });
 
+  it('persists and publishes web-search sources without creating a formal resource', async () => {
+    const harness = createHarness();
+    const sources = [{
+      id: `${TOOL_CALL_ID}:1`,
+      title: 'CEES 文档',
+      url: 'https://example.com/cees',
+      domain: 'example.com',
+      snippet: '公开资料摘要',
+      publishedAt: '2026-09-14T00:00:00.000Z',
+    }];
+
+    await expect(harness.service.completeToolCall({
+      toolCallId: TOOL_CALL_ID,
+      turnId: TURN_ID,
+      tenantId: TENANT_ID,
+      conversationId: CONVERSATION_ID,
+      executionOwner: EXECUTION_OWNER,
+      executionToken: '50000000-0000-0000-0000-000000000001',
+      summary: '{"type":"web_search_result"}',
+      resourceType: null,
+      resourceId: null,
+      resourceUrl: null,
+      sources,
+    })).resolves.toBe(true);
+
+    expect(harness.tx.toolCall.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        result: expect.objectContaining({
+          resourceType: null,
+          resourceId: null,
+          sources,
+        }),
+      }),
+    }));
+    expect(harness.events.appendInTransaction).toHaveBeenCalledWith(
+      harness.tx,
+      TURN_ID,
+      TENANT_ID,
+      AssistantEventType.TOOL_RESULT,
+      expect.objectContaining({
+        type: 'tool_result',
+        status: 'completed',
+        resource: null,
+        sources,
+        error: null,
+      }),
+    );
+  });
   it('reconciles pending and executing tools when a turn is cancelled', async () => {
     const harness = createHarness({
       interruptedCalls: [

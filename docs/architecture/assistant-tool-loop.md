@@ -1,6 +1,6 @@
 # AI 助手工具循环
 
-> 状态：阶段 0-4 已落地（纯文本会话迁移 + 服务端会话 + 断线重连 + 取消 + 幂等，2026-09-10）；阶段 5-6、9 已落地（Tool Loop / 统一注册与批准 / generate_image 图片生成，2026-09-11）；阶段 10 部分落地（generate_document 文档生成，2026-09-11）；上下文压缩已升级为条数与 Token 预算双约束触发（2026-09-14，见 13.1）；额度（QuotaService）与任务、会议等其余工具执行器暂缓。本文件定义 NestJS 统一驱动的 Assistant Tool Loop 架构、数据模型、工具协议与实施顺序。最后更新：2026-09-14。
+> 状态：阶段 0-4 已落地（纯文本会话迁移 + 服务端会话 + 断线重连 + 取消 + 幂等，2026-09-10）；阶段 5-6、9 已落地（Tool Loop / 统一注册与批准 / generate_image 图片生成，2026-09-11）；阶段 10 部分落地（generate_document 文档生成，2026-09-11）；上下文压缩已升级为条数与 Token 预算双约束触发（2026-09-14，见 13.1）；额度（QuotaService）与任务、会议等其余工具执行器暂缓；联网搜索（Tavily）只读工具与结构化来源回填已于 2026-09-14 落地。本文件定义 NestJS 统一驱动的 Assistant Tool Loop 架构、数据模型、工具协议与实施顺序。最后更新：2026-09-14。
 
 ## 1. 目标与定位
 
@@ -358,3 +358,11 @@ POST   /conversations/{conversationId}/turns/{turnId}/cancel              取消
 - 任务工具（get_task / create_task 等）的 ID 解析与写操作确认机制：拟采用 discovery（list_projects/list_tasks）+ action 两层工具，写操作是否走 DRAFT→用户确认待定；
 - AssistantEvent 事件表的清理策略：重放以事件为唯一事实源，暂不设置 TTL；长期运营的归档/分级清理策略待定；
 - AIActionDraft 的语义张力：当前兼具“AI 动作流水”（EXECUTED）与“待用户确认草稿”（PENDING）两种语义，任务工具接入写确认时需统一模型与命名。
+
+## 16. 联网搜索工具（2026-09-14）
+
+当前新增 `web_search` 只读工具，由 NestJS 通过 `WebSearchTool` 调用 Tavily；ai-service 仍只负责单次模型 Tool Calling，不直接访问搜索 Provider。工具需要 `ai.web.search` 权限，首版仅默认授予系统 `tenant_admin` 角色。
+
+搜索来源通过公开 `tool_result.sources` 可选字段回填。来源不是正式 Resource，不创建图片、文档或其他业务数据。当前只支持 Tavily Search API，不支持任意 URL 抓取、浏览器自动化、知识库 RAG 或 LlamaIndex 检索。
+
+实现与配置详见 [联网搜索（Tavily）](web-search.md)。

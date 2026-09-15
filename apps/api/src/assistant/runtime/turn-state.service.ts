@@ -12,6 +12,7 @@ import { PrismaService } from '../../database/prisma.service';
 import type { PublicTurnMode, PublicTurnStreamEvent } from '../assistant.types';
 import { EventService } from '../conversation/event.service';
 import { lockConversationForUpdate } from '../conversation/conversation-transaction-lock';
+import type { ToolSource } from '../tools/tool.types';
 
 export interface TurnErrorDetail {
   code: string;
@@ -24,6 +25,7 @@ interface StableToolResult {
   resourceType: 'IMAGE' | 'DOCUMENT' | null;
   resourceId: string | null;
   resourceUrl: string | null;
+  sources: ToolSource[];
 }
 
 /**
@@ -321,7 +323,7 @@ export class TurnStateService {
       status: ToolCallStatus.REJECTED,
       eventStatus: 'rejected',
       executionToken: null,
-      result: { summary: input.summary, resourceType: null, resourceId: null, resourceUrl: null },
+      result: { summary: input.summary, resourceType: null, resourceId: null, resourceUrl: null, sources: [] },
     });
   }
 
@@ -337,6 +339,7 @@ export class TurnStateService {
     resourceType: 'IMAGE' | 'DOCUMENT' | null;
     resourceId: string | null;
     resourceUrl: string | null;
+    sources?: ToolSource[];
   }): Promise<boolean> {
     return this.settleToolCall({
       ...input,
@@ -348,6 +351,7 @@ export class TurnStateService {
         resourceType: input.resourceType,
         resourceId: input.resourceId,
         resourceUrl: input.resourceUrl,
+        sources: input.sources ?? [],
       },
     });
   }
@@ -371,7 +375,7 @@ export class TurnStateService {
       status: ToolCallStatus.FAILED,
       eventStatus: 'failed',
       errorMessage: input.errorMessage ?? input.summary,
-      result: { summary: input.summary, resourceType: null, resourceId: null, resourceUrl: null },
+      result: { summary: input.summary, resourceType: null, resourceId: null, resourceUrl: null, sources: [] },
     });
   }
 
@@ -623,6 +627,7 @@ export class TurnStateService {
             ? { type: input.result.resourceType, id: input.result.resourceId }
             : null,
           resourceUrl: input.result.resourceUrl,
+          sources: input.eventStatus === 'completed' ? input.result.sources : [],
           error: input.eventStatus === 'completed'
             ? null
             : {
@@ -715,6 +720,7 @@ export class TurnStateService {
             resourceType: null,
             resourceId: null,
             resourceUrl: null,
+            sources: [],
           } as Prisma.InputJsonObject,
         },
       });

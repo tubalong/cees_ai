@@ -27,6 +27,8 @@ src/
 
 NestJS 通过生成的 `@cees/ai-service-client` 调用内部 AI 服务。通用 invoke 不暴露给桌面端或移动端，任何未来业务 AI 功能都必须先定义正式契约和业务边界。
 
+AI 助手当前支持 web_search Tavily 只读工具。工具由 NestJS 执行并通过 i.web.search 权限控制；配置项为 WEB_SEARCH_PROVIDER=tavily、WEB_SEARCH_API_KEY 及 WEB_SEARCH_* 限制参数。ai-service 只解析 Tool Call，不直接访问 Tavily。
+
 依赖清单按需通过 `pnpm --filter @cees/api add ...` 补充后：
 
 ```text

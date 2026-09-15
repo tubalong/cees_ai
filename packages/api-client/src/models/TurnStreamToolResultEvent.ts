@@ -3,6 +3,7 @@
 /* tslint:disable */
 /* eslint-disable */
 import type { ToolResultResourceReference } from './ToolResultResourceReference';
+import type { ToolSource } from './ToolSource';
 /**
  * 工具执行完成、失败或被 API 拒绝时发送的事件。
  */
@@ -28,6 +29,10 @@ export type TurnStreamToolResultEvent = {
      * 图片资源生成时签发的短期可下载 URL；有时效性，过期后经 GET /api/v1/images/{imageId} 重新获取；其他资源或历史事件为 null
      */
     resourceUrl?: string | null;
+    /**
+     * 联网搜索等非资源型工具返回的结构化来源；老客户端可忽略该字段
+     */
+    sources?: Array<ToolSource>;
     /**
      * 工具失败或被拒绝时的错误信息
      */

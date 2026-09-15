@@ -16,6 +16,7 @@
 | [contextual-chat](architecture/contextual-chat.md) | Standard/Ultra、多轮上下文、SSE 与对话摘要压缩 |
 | [公开 AI 对话链路与 Token 计量](architecture/public-chat-api-and-token-metering.md) | 客户端本地历史、NestJS Chat API、ai-service 调用和企业/成员/会话/轮次用量记录 |
 | [ai-tool-calling](architecture/ai-tool-calling.md) | 通用 Tool Calling、Tool Turn SSE、NestJS 工具执行边界 |
+| [web-search](architecture/web-search.md) | Tavily 联网搜索工具、来源回填与安全边界 |
 | [image-generation](architecture/image-generation.md) | 图片生成 profile、ImageRouter、内部生成接口与边界 |
 | [document-generation](architecture/document-generation.md) | 领域无关的文档组合、DocumentSpec 与 DOCX 渲染 |
 | [file-upload](architecture/file-upload.md) | 已落地的 COS 基础直传接口与后续权限、额度、扫描设计 |

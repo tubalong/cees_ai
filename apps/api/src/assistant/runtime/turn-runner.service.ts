@@ -455,6 +455,7 @@ export class TurnRunnerService implements OnModuleDestroy {
         modelStep: modelCall + 1,
         maxExecutable: remainingSteps,
         assistantContent: modelContent,
+        signal: input.signal,
       });
       processedSteps += Math.min(suggestedCalls.length, remainingSteps);
 
@@ -488,6 +489,7 @@ export class TurnRunnerService implements OnModuleDestroy {
     modelStep: number;
     maxExecutable: number;
     assistantContent: string;
+    signal: AbortSignal;
   }): Promise<{ limitExceeded: boolean; ownershipLost: boolean }> {
     for (let index = 0; index < input.calls.length; index++) {
       const call = input.calls[index];
@@ -610,6 +612,7 @@ export class TurnRunnerService implements OnModuleDestroy {
             toolCallId: effectiveToolCallId,
             executionOwner: input.executionOwner,
             executionToken,
+            signal: input.signal,
             permissions: executionPermissions,
           },
           approval.parsedArguments,
@@ -642,6 +645,7 @@ export class TurnRunnerService implements OnModuleDestroy {
         resourceType: result.resourceType,
         resourceId: result.resourceId,
         resourceUrl: result.resourceUrl,
+        sources: result.sources ?? [],
       });
       if (!settled) {
         return { limitExceeded: false, ownershipLost: true };
@@ -881,8 +885,22 @@ function toToolFailure(error: unknown): { summary: string; errorMessage: string;
       code: 'TOOL_EXECUTION_FAILED',
     };
   }
+  if (isCodedToolError(error)) {
+    return { summary: error.message, errorMessage: error.message, code: error.code };
+  }
   const detail = error instanceof Error ? error.message : '工具执行失败';
   return { summary: detail, errorMessage: detail, code: 'TOOL_EXECUTION_FAILED' };
+}
+
+function isCodedToolError(error: unknown): error is { code: string; message: string } {
+  return Boolean(
+    error
+    && typeof error === 'object'
+    && 'code' in error
+    && typeof error.code === 'string'
+    && 'message' in error
+    && typeof error.message === 'string',
+  );
 }
 
 /** Compare provider JSON arguments independent of object-key insertion order. */

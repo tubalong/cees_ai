@@ -9,6 +9,7 @@ import { ConversationService } from '../conversation/conversation.service';
 import { EventService } from '../conversation/event.service';
 import { ToolPolicyError, ToolPolicyService } from '../tools/tool-policy.service';
 import { ToolRegistryService } from '../tools/tool-registry';
+import type { ToolExecutionResult } from '../tools/tool.types';
 import { AssistantMessageContentService } from './message-content.service';
 import { ContextBuilderService } from './context-builder.service';
 import { TurnRunnerService } from './turn-runner.service';
@@ -204,6 +205,76 @@ describe('TurnRunnerService', () => {
         expect(JSON.stringify(events)).toContain('signed-image-url');
     });
 
+    it('executes web search and publishes structured sources through the tool result', async () => {
+        const sources = [{
+            id: 'source-1',
+            title: 'CEES 文档',
+            url: 'https://example.com/cees',
+            domain: 'example.com',
+            snippet: '公开资料摘要',
+            publishedAt: '2026-09-14T00:00:00.000Z',
+        }];
+        const harness = createHarness({
+            allowedTools: [chatTool('web_search')],
+            toolTurnStreams: [webSearchProposalStream(true), () => secondRoundCompletedStream()],
+            toolExecutionResult: {
+                resourceType: null,
+                resourceId: null,
+                resourceUrl: null,
+                summary: JSON.stringify({
+                    type: 'web_search_result',
+                    query: 'CEES',
+                    results: [{ source_id: 'source-1', title: 'CEES 文档', url: 'https://example.com/cees' }],
+                }),
+                sources,
+            },
+        });
+        harness.contextBuilder.buildToolTurnMessages
+            .mockResolvedValueOnce({
+                summary: null,
+                items: [{ role: 'user', content: [{ type: 'text', text: '搜索 CEES' }] }],
+            })
+            .mockResolvedValueOnce({
+                summary: null,
+                items: [
+                    { role: 'user', content: [{ type: 'text', text: '搜索 CEES' }] },
+                    {
+                        role: 'assistant',
+                        content: null,
+                        tool_calls: [{ id: 'call_search', name: 'web_search', arguments: { query: 'CEES' } }],
+                    },
+                    {
+                        role: 'tool',
+                        content: [{ type: 'text', text: 'search result' }],
+                        tool_call_id: 'call_search',
+                        name: 'web_search',
+                    },
+                ],
+            });
+
+        await harness.service.startTurn({
+            conversationId: CONVERSATION_ID,
+            idempotencyKey: 'key-web-search',
+            content: '搜索 CEES',
+            mode: 'standard',
+        });
+        const events = await consumeAll(await harness.service.subscribeTurn({
+            conversationId: CONVERSATION_ID,
+            turnId: TURN_ID,
+            afterSeq: 0,
+        }));
+
+        const toolResult = events.find((event) => event.type === 'tool_result');
+        expect(toolResult).toMatchObject({
+            type: 'tool_result',
+            status: 'completed',
+            resource: null,
+            sources,
+            error: null,
+        });
+        expect(harness.state.completeToolCall).toHaveBeenCalledWith(expect.objectContaining({ sources }));
+        expect(harness.gateway.streamToolTurn).toHaveBeenCalledTimes(2);
+    });
     it('does not execute tool calls beyond the hard step limit', async () => {
         const execute = jest.fn().mockResolvedValue({
             resourceType: 'IMAGE',
@@ -389,6 +460,7 @@ const REQUEST_ID = 'request-1';
 function createHarness(options: {
     allowedTools?: ReturnType<ToolRegistryService['listAllowed']>;
     toolTurnStreams?: Array<(signal?: AbortSignal) => AsyncGenerator<ToolTurnStreamEvent>>;
+    toolExecutionResult?: ToolExecutionResult;
     conversationMode?: 'standard' | 'ultra';
 } = {}) {
     const events: PublicTurnStreamEvent[] = [];
@@ -509,7 +581,7 @@ function createHarness(options: {
     };
     const toolPolicy = {
         approve: jest.fn().mockReturnValue({
-            definition: { execute: jest.fn().mockResolvedValue(EXECUTED_IMAGE_RESULT) },
+            definition: { execute: jest.fn().mockResolvedValue(options.toolExecutionResult ?? EXECUTED_IMAGE_RESULT) },
             parsedArguments: { prompt: '一只猫' },
         }),
     };
@@ -554,7 +626,14 @@ function createHarness(options: {
             });
             return true;
         }),
-        completeToolCall: jest.fn(async (input: { toolCallId: string; summary: string; resourceType: 'IMAGE' | 'DOCUMENT'; resourceId: string; resourceUrl: string | null }) => {
+        completeToolCall: jest.fn(async (input: {
+            toolCallId: string;
+            summary: string;
+            resourceType: 'IMAGE' | 'DOCUMENT' | null;
+            resourceId: string | null;
+            resourceUrl: string | null;
+            sources?: ToolExecutionResult['sources'];
+        }) => {
             const record = records.get(input.toolCallId);
             if (record) {
                 record.status = ToolCallStatus.COMPLETED;
@@ -563,14 +642,18 @@ function createHarness(options: {
                     resourceType: input.resourceType,
                     resourceId: input.resourceId,
                     resourceUrl: input.resourceUrl,
+                    sources: input.sources ?? [],
                 };
             }
             appendEvent({
                 type: 'tool_result',
                 toolCallId: input.toolCallId,
                 status: 'completed',
-                resource: { type: input.resourceType, id: input.resourceId },
+                resource: input.resourceType && input.resourceId
+                    ? { type: input.resourceType, id: input.resourceId }
+                    : null,
                 resourceUrl: input.resourceUrl,
+                sources: input.sources ?? [],
                 error: null,
             });
             return true;
@@ -588,6 +671,7 @@ function createHarness(options: {
                 status: 'failed',
                 resource: null,
                 resourceUrl: null,
+                sources: [],
                 error: { code: input.code, message: input.errorMessage ?? input.summary },
             });
             return true;
@@ -695,6 +779,18 @@ function toolCallProposalStream(withCompleted: boolean): (signal?: AbortSignal) 
     };
 }
 
+function webSearchProposalStream(withCompleted: boolean): (signal?: AbortSignal) => AsyncGenerator<ToolTurnStreamEvent> {
+    return function streamFactory() {
+        return (async function* stream() {
+            yield toolTurnStartedEvent();
+            yield {
+                type: 'tool_calls',
+                tool_calls: [{ id: 'call_search', name: 'web_search', arguments: { query: 'CEES' } }],
+            } as ToolTurnStreamEvent;
+            if (withCompleted) yield { type: 'completed', latency_ms: 1, finish_reason: 'tool_calls' } as ToolTurnStreamEvent;
+        })();
+    };
+}
 function secondRoundCompletedStream(_signal?: AbortSignal): AsyncGenerator<ToolTurnStreamEvent> {
     return (async function* stream() {
         yield toolTurnStartedEvent();
