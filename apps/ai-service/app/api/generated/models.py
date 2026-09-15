@@ -770,6 +770,32 @@ class KnowledgeIndexResponse(BaseModel):
     latency_ms: conint(ge=0) | None = None
 
 
+class KnowledgeIndexDeleteRequest(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    request_id: constr(min_length=1, max_length=128)
+    tenant_id: constr(min_length=1, max_length=128)
+    user_id: constr(min_length=1, max_length=128)
+    document_version_id: constr(min_length=1, max_length=128) = Field(
+        ...,
+        description='Identity of the document version whose derived index should be removed. Deleting the derived index never deletes the business document.',
+    )
+    index_version: constr(min_length=1, max_length=64)
+
+
+class KnowledgeIndexDeleteResponse(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    request_id: str
+    deleted_chunks: conint(ge=0) = Field(
+        ..., description='Number of derived nodes removed from the vector store.'
+    )
+    document_version_id: str
+    index_version: str
+
+
 class KnowledgeRetrieveScope(BaseModel):
     model_config = ConfigDict(
         extra='forbid',

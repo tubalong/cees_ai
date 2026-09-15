@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CEES AI Service Internal API
-  version: 0.3.0
+  version: 0.4.0
   description: |
     Internal infrastructure API used only by trusted CEES services.
     Desktop, mobile, and third-party clients must call the NestJS public API instead.
@@ -794,6 +794,48 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/KnowledgeIndexResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /internal/v1/knowledge/index/delete:
+    post:
+      tags: [knowledge]
+      operationId: deleteKnowledgeIndex
+      summary: Delete derived index of a document version
+      description: |
+        Deletes all derived vectors of the given (document_version_id,
+        index_version) tuple for the tenant. NestJS calls this when a
+        document is deleted or when a new document version supersedes the
+        old one. Never touches business data; deleting the derived index
+        does not delete the business document.
+      security:
+        - internalToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/KnowledgeIndexDeleteRequest"
+            example:
+              request_id: req-knowledge-delete-001
+              tenant_id: tenant-example
+              user_id: user-example
+              document_version_id: version-example
+              index_version: idx-v1
+      responses:
+        "200":
+          description: Derived index deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgeIndexDeleteResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -2326,6 +2368,50 @@ components:
         latency_ms:
           type: integer
           minimum: 0
+    KnowledgeIndexDeleteRequest:
+      type: object
+      additionalProperties: false
+      required: [request_id, tenant_id, user_id, document_version_id, index_version]
+      properties:
+        request_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        tenant_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        user_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        document_version_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: >-
+            Identity of the document version whose derived index should be
+            removed. Deleting the derived index never deletes the business
+            document.
+        index_version:
+          type: string
+          minLength: 1
+          maxLength: 64
+    KnowledgeIndexDeleteResponse:
+      type: object
+      additionalProperties: false
+      required: [request_id, deleted_chunks, document_version_id, index_version]
+      properties:
+        request_id:
+          type: string
+        deleted_chunks:
+          type: integer
+          minimum: 0
+          description: Number of derived nodes removed from the vector store.
+        document_version_id:
+          type: string
+        index_version:
+          type: string
     KnowledgeRetrieveScope:
       type: object
       additionalProperties: false
