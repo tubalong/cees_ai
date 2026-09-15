@@ -93,7 +93,8 @@ export class TurnRunnerService implements OnModuleDestroy {
     idempotencyKey: string;
     content?: string | null;
     imageFileIds?: string[];
-    mode: PublicTurnMode;
+    /** 未显式指定时使用会话的默认模式。 */
+    mode?: PublicTurnMode;
   }): Promise<StartTurnResult> {
     const conversation = await this.conversationService.requireMemberConversation(input.conversationId);
     const context = this.tenantContext.require();
@@ -103,6 +104,7 @@ export class TurnRunnerService implements OnModuleDestroy {
         message: '当前租户成员身份已失效，无法使用 AI 助手',
       });
     }
+    const mode = input.mode ?? toPublicMode(conversation.mode);
     const imageFileIds = await this.messageContent.validateImageFileIds(input.imageFileIds, {
       tenantId: conversation.tenantId,
       userId: context.userId,
@@ -116,7 +118,7 @@ export class TurnRunnerService implements OnModuleDestroy {
     }
     const requestHash = hashTurnRequest(
       input.conversationId,
-      input.mode,
+      mode,
       input.content ?? '',
       imageFileIds,
     );
@@ -141,7 +143,7 @@ export class TurnRunnerService implements OnModuleDestroy {
       requestHash,
       content: input.content,
       imageFileIds,
-      mode: input.mode,
+      mode,
       executionOwner: this.executionOwner,
       leaseExpiresAt: nextTurnLease(),
     });
@@ -167,7 +169,7 @@ export class TurnRunnerService implements OnModuleDestroy {
       userId: context.userId,
       membershipId: context.membershipId,
       requestId: context.requestId,
-      mode: input.mode,
+      mode,
       permissions: context.permissions,
       signal: abortController.signal,
     });
@@ -811,11 +813,16 @@ function toPublicTurn(turn: {
     id: turn.id,
     conversationId: turn.conversationId,
     status: turn.status,
-    mode: turn.mode === 'ultra' ? 'ultra' : 'standard',
+    mode: toPublicMode(turn.mode),
     error: toPublicError(turn.error),
     createdAt: turn.createdAt,
     completedAt: turn.completedAt,
   };
+}
+
+/** DB 存储的模式字符串归一化为公开枚举；非法值回退 standard。 */
+function toPublicMode(mode: string): PublicTurnMode {
+  return mode === 'ultra' ? 'ultra' : 'standard';
 }
 
 function toPublicError(error: Prisma.JsonValue | null): PublicTurn['error'] {

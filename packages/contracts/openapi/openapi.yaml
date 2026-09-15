@@ -5086,6 +5086,10 @@ components:
           type: [string, 'null']
           minLength: 1
           maxLength: 128
+        mode:
+          allOf:
+            - $ref: '#/components/schemas/ChatMode'
+          description: 会话默认对话执行模式；省略时使用 standard
 
     UpdateConversationRequest:
       type: object
@@ -5123,6 +5127,10 @@ components:
           description: 会话标题；未自动生成前为空字符串
         visibility:
           $ref: '#/components/schemas/ConversationVisibility'
+        mode:
+          allOf:
+            - $ref: '#/components/schemas/ChatMode'
+          description: 会话默认对话执行模式；发起轮次未显式指定 mode 时使用
         createdAt:
           type: string
           format: date-time
@@ -5281,7 +5289,9 @@ components:
             type: string
             format: uuid
         mode:
-          $ref: '#/components/schemas/ChatMode'
+          allOf:
+            - $ref: '#/components/schemas/ChatMode'
+          description: 本轮对话执行模式；省略时使用会话的默认模式
 
     TurnStatus:
       type: string
