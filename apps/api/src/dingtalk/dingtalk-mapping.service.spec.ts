@@ -65,6 +65,85 @@ describe('DingTalkMappingService', () => {
         }));
     });
 
+    it('treats planned parent departments as available for child creation', async () => {
+        const prisma = createPrismaMock();
+        prisma.dingTalkDepartment.findMany.mockResolvedValue([
+            {
+                id: 'dingtalk-child',
+                externalDepartmentId: 'dept-rd',
+                parentExternalDepartmentId: 'dept-hq',
+                departmentId: null,
+                name: '研发部',
+                displayOrder: 10,
+                isDeleted: false,
+            },
+            {
+                id: 'dingtalk-parent',
+                externalDepartmentId: 'dept-hq',
+                parentExternalDepartmentId: '1',
+                departmentId: null,
+                name: '总部',
+                displayOrder: 0,
+                isDeleted: false,
+            },
+            {
+                id: 'dingtalk-grandchild',
+                externalDepartmentId: 'dept-backend',
+                parentExternalDepartmentId: 'dept-rd',
+                departmentId: null,
+                name: '后端组',
+                displayOrder: 10,
+                isDeleted: false,
+            },
+        ]);
+
+        const preview = await createService(prisma).preview({
+            activationExpiresInDays: 7,
+            createMissingDepartments: true,
+            createMissingMembers: true,
+        });
+
+        expect(preview.summary).toEqual({
+            departmentMatchedCount: 0,
+            departmentCreateCount: 3,
+            departmentConflictCount: 0,
+            userMatchedCount: 0,
+            userCreateCount: 0,
+            userConflictCount: 0,
+        });
+        expect(preview.departments).toEqual(expect.arrayContaining([
+            expect.objectContaining({ externalDepartmentId: 'dept-hq', action: 'CREATE', reason: 'NOT_FOUND' }),
+            expect.objectContaining({ externalDepartmentId: 'dept-rd', action: 'CREATE', reason: 'NOT_FOUND' }),
+            expect.objectContaining({ externalDepartmentId: 'dept-backend', action: 'CREATE', reason: 'NOT_FOUND' }),
+        ]));
+        expect(preview.departments.some((item) => item.reason === 'PARENT_MAPPING_MISSING')).toBe(false);
+
+        prisma.$transaction.mockImplementation(async (callback: (value: Record<string, any>) => unknown) => callback(prisma));
+        prisma.department.create
+            .mockResolvedValueOnce({ id: 'cees-hq' })
+            .mockResolvedValueOnce({ id: 'cees-rd' })
+            .mockResolvedValueOnce({ id: 'cees-backend' });
+        prisma.dingTalkDepartment.updateMany.mockResolvedValue({ count: 1 });
+        prisma.auditLog.create.mockResolvedValue({});
+
+        await createService(prisma).apply({
+            activationExpiresInDays: 7,
+            createMissingDepartments: true,
+            createMissingMembers: true,
+            departmentResolutions: [],
+            userResolutions: [],
+        });
+
+        expect(prisma.department.create.mock.calls.map((call: [{ data: { name: string; parentId: string | null } }]) => ({
+            name: call[0].data.name,
+            parentId: call[0].data.parentId,
+        }))).toEqual([
+            { name: '总部', parentId: null },
+            { name: '研发部', parentId: 'cees-hq' },
+            { name: '后端组', parentId: 'cees-rd' },
+        ]);
+    });
+
     it('applies a new member mapping with a tenant-wide suffixed account and activation token', async () => {
         const prisma = createPrismaMock();
         prisma.$transaction.mockImplementation(async (callback: (value: Record<string, any>) => unknown) => callback(prisma));

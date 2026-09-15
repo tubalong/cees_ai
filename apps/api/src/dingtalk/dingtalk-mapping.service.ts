@@ -316,6 +316,8 @@ export class DingTalkMappingService {
         const departmentRecords = departments as DepartmentRecord[];
         const membershipRecords = memberships as MembershipRecord[];
         const mappedDepartments = new Map<string, string>();
+        const processedExternalIds = new Set<string>();
+        const plannedActionByExternalId = new Map<string, DepartmentPlan['action']>();
         const departmentPlans: DepartmentPlan[] = [];
         const pending = new Set(dingtalkDepartments.map((item) => item.id));
         const byExternalId = new Map(dingtalkDepartments.map((item) => [item.externalDepartmentId, item]));
@@ -326,12 +328,34 @@ export class DingTalkMappingService {
             for (const item of dingtalkDepartments) {
                 if (!pending.has(item.id)) continue;
                 const parentExternalId = item.parentExternalDepartmentId;
-                if (parentExternalId && parentExternalId !== ROOT_EXTERNAL_DEPARTMENT_ID && byExternalId.has(parentExternalId) && !mappedDepartments.has(parentExternalId)) continue;
-                const parentId = parentExternalId && parentExternalId !== ROOT_EXTERNAL_DEPARTMENT_ID ? mappedDepartments.get(parentExternalId) ?? null : null;
+                const hasSyncedParent = Boolean(
+                    parentExternalId &&
+                    parentExternalId !== ROOT_EXTERNAL_DEPARTMENT_ID &&
+                    byExternalId.has(parentExternalId),
+                );
+                if (hasSyncedParent && !processedExternalIds.has(parentExternalId!)) continue;
+                const parentAction = parentExternalId ? plannedActionByExternalId.get(parentExternalId) : undefined;
+                const parentId = parentExternalId && parentExternalId !== ROOT_EXTERNAL_DEPARTMENT_ID && parentAction === 'MATCH_EXISTING'
+                    ? mappedDepartments.get(parentExternalId) ?? null
+                    : null;
                 const path = buildExternalPath(item.externalDepartmentId, byExternalId);
                 const existingMapping = item.departmentId ? departmentRecords.find((department) => department.id === item.departmentId) : undefined;
-                const candidates = existingMapping ? [existingMapping] : departmentRecords.filter((department) => department.parentId === parentId && normalizeName(department.name) === normalizeName(item.name));
-                const action = existingMapping || candidates.length === 1 ? 'MATCH_EXISTING' : candidates.length > 1 ? 'CONFLICT' : 'CREATE';
+                const candidates = existingMapping
+                    ? [existingMapping]
+                    : parentAction === 'CONFLICT'
+                        ? []
+                        : parentAction === 'CREATE'
+                            ? []
+                            : departmentRecords.filter((department) => department.parentId === parentId && normalizeName(department.name) === normalizeName(item.name));
+                const action = existingMapping
+                    ? 'MATCH_EXISTING'
+                    : parentAction === 'CONFLICT'
+                        ? 'CONFLICT'
+                        : candidates.length === 1
+                            ? 'MATCH_EXISTING'
+                            : candidates.length > 1
+                                ? 'CONFLICT'
+                                : 'CREATE';
                 const departmentId = existingMapping?.id ?? (candidates.length === 1 ? candidates[0].id : null);
                 const candidateDepartmentIds = candidates.map((candidate) => candidate.id);
                 if (departmentId) mappedDepartments.set(item.externalDepartmentId, departmentId);
@@ -344,9 +368,19 @@ export class DingTalkMappingService {
                     action,
                     departmentId,
                     candidateDepartmentIds,
-                    reason: existingMapping ? 'EXISTING_MAPPING' : candidates.length === 1 ? 'SAME_PARENT_AND_NAME' : candidates.length > 1 ? 'MULTIPLE_CANDIDATES' : 'NOT_FOUND',
+                    reason: existingMapping
+                        ? 'EXISTING_MAPPING'
+                        : parentAction === 'CONFLICT'
+                            ? 'PARENT_MAPPING_MISSING'
+                            : candidates.length === 1
+                                ? 'SAME_PARENT_AND_NAME'
+                                : candidates.length > 1
+                                    ? 'MULTIPLE_CANDIDATES'
+                                    : 'NOT_FOUND',
                 };
                 departmentPlans.push(preview);
+                plannedActionByExternalId.set(item.externalDepartmentId, action);
+                processedExternalIds.add(item.externalDepartmentId);
                 pending.delete(item.id);
                 progressed = true;
             }
