@@ -65,7 +65,7 @@ export class AssistantController {
   @ApiOperation({ summary: '创建当前成员的私有 AI 会话' })
   @ApiOkResponse({ description: '会话创建成功' })
   createConversation(@Body() input: CreateConversationRequestDto): Promise<PublicConversation> {
-    return this.conversationService.create(input.title);
+    return this.conversationService.create(input.title, input.mode);
   }
 
   @Get()

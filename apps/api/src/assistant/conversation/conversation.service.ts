@@ -16,6 +16,7 @@ import type {
   PublicConversation,
   PublicConversationDetail,
   PublicConversationListResult,
+  PublicTurnMode,
 } from '../assistant.types';
 import { lockConversationForUpdate } from './conversation-transaction-lock';
 
@@ -31,6 +32,7 @@ const memberConversationSelect = {
   ownerMembershipId: true,
   title: true,
   visibility: true,
+  mode: true,
   lastTurnAt: true,
   createdAt: true,
   updatedAt: true,
@@ -60,15 +62,17 @@ export class ConversationService {
     private readonly tenantContext: TenantContext,
   ) {}
 
-  async create(title?: string | null): Promise<PublicConversation> {
+  async create(title?: string | null, mode?: PublicTurnMode): Promise<PublicConversation> {
     const context = this.tenantContext.require();
     const normalizedTitle = normalizeOptionalTitle(title);
+    const normalizedMode = normalizeConversationMode(mode);
     const conversation = await this.prisma.$transaction(async (transaction) => {
       const created = await transaction.conversation.create({
         data: {
           tenantId: context.tenantId,
           ownerMembershipId: context.membershipId,
           title: normalizedTitle,
+          mode: normalizedMode,
         },
       });
       await transaction.auditLog.create({
@@ -81,7 +85,7 @@ export class ConversationService {
           resourceType: 'CONVERSATION',
           resourceId: created.id,
           requestId: context.requestId,
-          metadata: { title: normalizedTitle || null },
+          metadata: { title: normalizedTitle || null, mode: normalizedMode },
         },
       });
       return created;
@@ -294,6 +298,7 @@ function toPublicConversation(conversation: {
   id: string;
   title: string;
   visibility: 'PRIVATE';
+  mode: string;
   createdAt: Date;
   updatedAt: Date;
   lastTurnAt: Date | null;
@@ -303,11 +308,16 @@ function toPublicConversation(conversation: {
     id: conversation.id,
     title: conversation.title,
     visibility: conversation.visibility,
+    mode: conversation.mode === 'ultra' ? 'ultra' : 'standard',
     createdAt: conversation.createdAt,
     updatedAt: conversation.updatedAt,
     lastTurnAt: conversation.lastTurnAt,
     version: conversation.version,
   };
+}
+
+function normalizeConversationMode(mode: PublicTurnMode | undefined): 'standard' | 'ultra' {
+  return mode === 'ultra' ? 'ultra' : 'standard';
 }
 
 function normalizeOptionalTitle(title: string | null | undefined): string {

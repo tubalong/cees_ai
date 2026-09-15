@@ -1339,6 +1339,8 @@ model Conversation {
   ownerMembershipId String                 @map("owner_membership_id") @db.Uuid
   title             String                 @default("")
   visibility        ConversationVisibility @default(PRIVATE)
+  /// 会话默认对话执行模式；发起轮次未显式指定时使用。
+  mode              String                 @default("standard")
   lastTurnAt        DateTime?              @map("last_turn_at")
   /// 下一个轮次序号；事务内原子递增，避免 count+1 并发竞态。
   nextTurnSeq       Int                    @default(1) @map("next_turn_seq")

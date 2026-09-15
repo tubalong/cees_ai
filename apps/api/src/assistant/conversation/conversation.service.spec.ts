@@ -13,12 +13,26 @@ describe('ConversationService', () => {
     const result = await service.create(' 计划讨论 ');
 
     expect(result).toEqual(expect.objectContaining({ id: CONVERSATION_ID, title: '计划讨论', version: 1 }));
+    expect(result.mode).toBe('standard');
     expect(prisma.conversation.create).toHaveBeenCalledWith({
-      data: { tenantId: TENANT_ID, ownerMembershipId: MEMBERSHIP_ID, title: '计划讨论' },
+      data: { tenantId: TENANT_ID, ownerMembershipId: MEMBERSHIP_ID, title: '计划讨论', mode: 'standard' },
     });
     expect(prisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ action: 'CONVERSATION_CREATED', resourceId: CONVERSATION_ID }),
     }));
+  });
+
+  it('stores an explicit default mode when creating a conversation', async () => {
+    const prisma = createPrismaMock();
+    prisma.conversation.create.mockResolvedValue(conversationRecord({ mode: 'ultra' }));
+    const service = createService(prisma);
+
+    const result = await service.create(null, 'ultra');
+
+    expect(result.mode).toBe('ultra');
+    expect(prisma.conversation.create).toHaveBeenCalledWith({
+      data: { tenantId: TENANT_ID, ownerMembershipId: MEMBERSHIP_ID, title: '', mode: 'ultra' },
+    });
   });
 
   it('lists conversations ordered by updated time and returns a cursor', async () => {
@@ -235,6 +249,7 @@ function conversationRecord(overrides: Record<string, unknown> = {}): Record<str
     ownerMembershipId: MEMBERSHIP_ID,
     title: '',
     visibility: 'PRIVATE',
+    mode: 'standard',
     lastTurnAt: null,
     createdAt: new Date('2026-09-01T00:00:00.000Z'),
     updatedAt: new Date('2026-09-01T00:00:00.000Z'),

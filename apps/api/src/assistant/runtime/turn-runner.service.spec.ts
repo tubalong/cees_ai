@@ -88,6 +88,18 @@ describe('TurnRunnerService', () => {
         expect(harness.state.createTurn).not.toHaveBeenCalled();
     });
 
+    it('uses the conversation default mode when the request omits mode', async () => {
+        const harness = createHarness({ conversationMode: 'ultra' });
+
+        await harness.service.startTurn({
+            conversationId: CONVERSATION_ID,
+            idempotencyKey: 'key-inherit-mode',
+            content: '你好',
+        });
+
+        expect(harness.state.createTurn).toHaveBeenCalledWith(expect.objectContaining({ mode: 'ultra' }));
+    });
+
     it('reuses an idempotent turn only when the multimodal request hash matches', async () => {
         const harness = createHarness();
         const request = {
@@ -377,6 +389,7 @@ const REQUEST_ID = 'request-1';
 function createHarness(options: {
     allowedTools?: ReturnType<ToolRegistryService['listAllowed']>;
     toolTurnStreams?: Array<(signal?: AbortSignal) => AsyncGenerator<ToolTurnStreamEvent>>;
+    conversationMode?: 'standard' | 'ultra';
 } = {}) {
     const events: PublicTurnStreamEvent[] = [];
     const records = new Map<string, {
@@ -440,6 +453,7 @@ function createHarness(options: {
             tenantId: TENANT_ID,
             title: '',
             ownerMembershipId: MEMBERSHIP_ID,
+            mode: options.conversationMode ?? 'standard',
         }),
         setTitleFromFirstUserMessage: jest.fn().mockResolvedValue(undefined),
     };

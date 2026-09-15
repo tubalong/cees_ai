@@ -2,6 +2,7 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
+import type { ChatMode } from './ChatMode';
 import type { ConversationVisibility } from './ConversationVisibility';
 export type Conversation = {
     /**
@@ -13,6 +14,10 @@ export type Conversation = {
      */
     title: string;
     visibility: ConversationVisibility;
+    /**
+     * 会话默认对话执行模式；发起轮次未显式指定 mode 时使用
+     */
+    mode?: ChatMode;
     /**
      * 会话创建时间
      */
