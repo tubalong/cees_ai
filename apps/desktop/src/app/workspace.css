@@ -42,6 +42,7 @@
     gap: 11px;
     padding: 0 5px;
     white-space: nowrap;
+    cursor: pointer;
 }
 
 .workspace-brand-mark {
@@ -899,7 +900,7 @@
 }
 
 .chat-markdown {
-    max-height: 220px;
+    max-height: 1020px;
     margin: 8px 0 0;
     padding: 10px 12px;
     overflow: auto;
@@ -1653,4 +1654,70 @@
     50% {
         opacity: 1;
     }
+}
+
+.browser-page {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--workspace-bg);
+}
+
+.browser-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--line);
+    background: var(--surface);
+}
+
+.browser-nav-btn {
+    width: 30px;
+    height: 30px;
+    flex: 0 0 30px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    color: var(--muted);
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    cursor: pointer;
+    transition: color .15s ease, background .15s ease;
+}
+
+.browser-nav-btn:hover {
+    color: var(--primary);
+    background: var(--primary-soft);
+}
+
+.browser-nav-btn.browser-close:hover {
+    color: #fff;
+    background: #f0564a;
+}
+
+.browser-address {
+    flex: 1;
+    max-width: 720px;
+    margin: 0 auto;
+}
+
+.browser-address .ant-input-prefix {
+    color: var(--muted);
+}
+
+.browser-content {
+    flex: 1;
+    min-height: 0;
+    background: #fff;
+}
+
+.browser-webview {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    border: 0;
 }

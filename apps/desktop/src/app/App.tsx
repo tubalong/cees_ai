@@ -8,16 +8,16 @@ import {
     activateTenantInvitation, hasStoredSession, login, persistLogin, persistPlatformLogin, platformLogin,
     type ActivateTenantInvitationInput, type LoginInput, type LoginResult, type MeResult, type PlatformLoginInput,
     type PlatformLoginResult, type PlatformMeResult,
-} from './api';
-import PlatformWorkspace from './PlatformWorkspace';
+} from '../core/api';
+import PlatformWorkspace from '../features/platform/PlatformWorkspace';
 import Workspace from './Workspace';
-import { LanguageSwitcher, useI18n } from './i18n';
+import { LanguageSwitcher, useI18n } from '../core/i18n';
 
 function BrandLogo(): JSX.Element {
     const [imageAvailable, setImageAvailable] = useState(true);
     return <span className="brand-logo" aria-label="CEES AI">
         <span className="brand-logo-fallback">C</span>
-        {imageAvailable && <img src="/assests/logo.webp" alt="CEES AI" onError={() => setImageAvailable(false)} />}
+        {imageAvailable && <img src="./assests/logo.webp" alt="CEES AI" onError={() => setImageAvailable(false)} />}
     </span>;
 }
 

@@ -8,7 +8,7 @@ import {
 } from '@ant-design/icons';
 import { App as AntdApp, Avatar, Badge, Button, Empty, Image as AntImage, Input, Modal, Select, Spin, Tag, Tooltip, Dropdown } from 'antd';
 import { useQuery } from '@tanstack/react-query';
-import { BookOpen, Download, Eye, FileImage, FileText as FileTextIcon, Globe2, ImagePlus, Pencil, Send, Trash2, Upload } from 'lucide-react';
+import { ArrowLeft, ArrowRight, BookOpen, Download, ExternalLink, Eye, FileImage, FileText as FileTextIcon, Globe2, ImagePlus, Pencil, RotateCw, Send, Trash2, Upload, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -19,15 +19,22 @@ import {
     type Conversation, type ConversationMessage, type DashboardOverview, type DashboardTodoItem, type DashboardUpcomingMeeting, type ImageAccess,
     type TurnStreamEvent,
     type ManagedDocumentSummary, type MeResult, type TenantMember,
-} from './api';
-import MeetingManagement from './MeetingManagement';
-import NotificationCenter from './NotificationCenter';
-import OrganizationManagement from './OrganizationManagement';
-import ProjectManagement from './ProjectManagement';
-import WorkReportPage from './WorkReportPage';
-import ProfileSettings from './ProfileSettings';
-import RoleManagement from './RoleManagement';
-import { useDateFormatter, useI18n } from './i18n';
+} from '../core/api';
+import MeetingManagement from '../features/meetings/MeetingManagement';
+import NotificationCenter from '../features/notifications/NotificationCenter';
+import OrganizationManagement from '../features/organization/OrganizationManagement';
+import ProjectManagement from '../features/projects/ProjectManagement';
+import WorkReportPage from '../features/reports/WorkReportPage';
+import ProfileSettings from '../features/profile/ProfileSettings';
+import RoleManagement from '../features/roles/RoleManagement';
+import { useDateFormatter, useI18n } from '../core/i18n';
+
+interface WebviewElement extends HTMLWebViewElement {
+    goBack: () => void;
+    goForward: () => void;
+    reload: () => void;
+    getURL: () => string;
+}
 
 interface NavItem {
     path: string;
@@ -36,7 +43,7 @@ interface NavItem {
 }
 
 function CeesLogo({ className }: { className?: string }): JSX.Element {
-    return <img className={className} src="/assests/logo.webp" alt="CEES AI" />;
+    return <img className={className} src="./assests/logo.webp" alt="CEES AI" />;
 }
 
 const navItems: NavItem[] = [
@@ -81,9 +88,34 @@ function SideNavigation({ collapsed, permissions, unreadCount, onToggle, onLogou
     const navigate = useNavigate();
     const location = useLocation();
     const { t } = useI18n();
+    const { message } = AntdApp.useApp();
+    const [debugModalOpen, setDebugModalOpen] = useState(false);
+    const [debugPassword, setDebugPassword] = useState('');
+    const debugClickTimes = useRef<number[]>([]);
+
+    const handleBrandClick = (): void => {
+        const now = Date.now();
+        debugClickTimes.current = [...debugClickTimes.current.filter((time) => now - time < 2000), now];
+        if (debugClickTimes.current.length >= 5) {
+            debugClickTimes.current = [];
+            setDebugPassword('');
+            setDebugModalOpen(true);
+        }
+    };
+
+    const verifyDebugPassword = (): void => {
+        if (debugPassword === 'aa123456') {
+            window.cees?.openDevTools();
+            setDebugModalOpen(false);
+            setDebugPassword('');
+            message.success(t('已打开开发者工具'));
+        } else {
+            message.error(t('密码错误'));
+        }
+    };
 
     return <aside className={`side-navigation ${collapsed ? 'is-collapsed' : ''}`}>
-        <div className="workspace-brand">
+        <div className="workspace-brand" title={t('CEES AI')} onClick={handleBrandClick}>
             <span className="workspace-brand-mark"><CeesLogo /></span>
             {!collapsed && <span><strong>CEES AI</strong><small>{t('企业智能工作台')}</small></span>}
         </div>
@@ -99,6 +131,9 @@ function SideNavigation({ collapsed, permissions, unreadCount, onToggle, onLogou
             <Tooltip title={collapsed ? t('退出登录') : ''} placement="right"><button className="nav-item" type="button" onClick={onLogout}><LogoutOutlined />{!collapsed && <span>{t('退出登录')}</span>}</button></Tooltip>
             <Tooltip title={collapsed ? t('收起导航') : ''} placement="right"><button className="nav-item nav-toggle" type="button" onClick={onToggle}>{collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}{!collapsed && <span>{t('收起导航')}</span>}</button></Tooltip>
         </div>
+        <Modal open={debugModalOpen} title={t('开发者调试')} okText={t('确定')} cancelText={t('取消')} onOk={verifyDebugPassword} onCancel={() => setDebugModalOpen(false)}>
+            <Input.Password value={debugPassword} onChange={(event) => setDebugPassword(event.target.value)} onPressEnter={verifyDebugPassword} autoFocus placeholder={t('请输入调试密码')} />
+        </Modal>
     </aside>;
 }
 
@@ -407,6 +442,62 @@ function AssistantPage(): JSX.Element {
     </div>;
 }
 
+function BrowserPage(): JSX.Element {
+    const location = useLocation();
+    const navigate = useNavigate();
+    const { t } = useI18n();
+    const targetUrl = new URLSearchParams(location.search).get('url') ?? '';
+    const [address, setAddress] = useState(targetUrl);
+    const [currentUrl, setCurrentUrl] = useState(targetUrl);
+    const webviewRef = useRef<WebviewElement | null>(null);
+
+    useEffect(() => {
+        setAddress(targetUrl);
+        setCurrentUrl(targetUrl);
+    }, [targetUrl]);
+
+    useEffect(() => {
+        const webview = webviewRef.current;
+        if (!webview) return;
+        const syncUrl = (): void => {
+            const url = webview.getURL?.() ?? '';
+            if (url && url !== 'about:blank') { setAddress(url); setCurrentUrl(url); }
+        };
+        webview.addEventListener('did-navigate', syncUrl);
+        webview.addEventListener('did-navigate-in-page', syncUrl);
+        return () => {
+            webview.removeEventListener('did-navigate', syncUrl);
+            webview.removeEventListener('did-navigate-in-page', syncUrl);
+        };
+    }, []);
+
+    const navigateTo = (): void => {
+        const trimmed = address.trim();
+        if (!trimmed) return;
+        const url = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+        setAddress(url);
+        setCurrentUrl(url);
+    };
+
+    const openExternal = (): void => {
+        if (currentUrl) window.open(currentUrl, '_blank', 'noopener');
+    };
+
+    return <div className="browser-page">
+        <div className="browser-toolbar">
+            <Tooltip title={t('后退')}><button type="button" className="browser-nav-btn" onClick={() => webviewRef.current?.goBack()}><ArrowLeft size={16} /></button></Tooltip>
+            <Tooltip title={t('前进')}><button type="button" className="browser-nav-btn" onClick={() => webviewRef.current?.goForward()}><ArrowRight size={16} /></button></Tooltip>
+            <Tooltip title={t('刷新')}><button type="button" className="browser-nav-btn" onClick={() => webviewRef.current?.reload()}><RotateCw size={16} /></button></Tooltip>
+            <Input className="browser-address" value={address} onChange={(event) => setAddress(event.target.value)} onPressEnter={navigateTo} prefix={<Globe2 size={14} />} placeholder={t('输入网址，回车打开')} allowClear />
+            <Tooltip title={t('在系统浏览器打开')}><button type="button" className="browser-nav-btn" onClick={openExternal}><ExternalLink size={16} /></button></Tooltip>
+            <Tooltip title={t('关闭')}><button type="button" className="browser-nav-btn browser-close" onClick={() => navigate(-1)}><X size={16} /></button></Tooltip>
+        </div>
+        <div className="browser-content">
+            <webview ref={(element) => { webviewRef.current = element as WebviewElement | null; }} src={currentUrl || 'about:blank'} className="browser-webview" partition="persist:browser" />
+        </div>
+    </div>;
+}
+
 function ApplicationsPage(): JSX.Element {
     const { t } = useI18n();
     const [category, setCategory] = useState('全部');
@@ -454,6 +545,7 @@ function CurrentPage({ authContext, members, documents, membersLoading, document
     const unreadQuery = useQuery({ queryKey: ['notifications-unread'], queryFn: () => getUnreadNotificationCount(), enabled: hasPermission('notification.read'), refetchInterval: 60_000 });
 
     const location = useLocation();
+    if (location.pathname === '/browser') return <BrowserPage />;
     if (location.pathname === '/assistant') return <AssistantPage />;
     if (location.pathname === '/projects') return <ProjectManagement authContext={authContext} onSessionExpired={onSessionExpired} />;
     if (location.pathname === '/meetings') return <MeetingManagement authContext={authContext} onSessionExpired={onSessionExpired} />;
@@ -480,6 +572,7 @@ export default function Workspace({ authContext, onSessionExpired, onProfileUpda
     const [collapsed, setCollapsed] = useState(false);
     const { message } = AntdApp.useApp();
     const { t } = useI18n();
+    const navigate = useNavigate();
     const membersQuery = useQuery({ queryKey: ['tenant-members'], queryFn: () => listTenantMembers() });
     const documentsQuery = useQuery({ queryKey: ['documents'], queryFn: () => listDocuments() });
     const unreadQuery = useQuery({ queryKey: ['notifications-unread'], queryFn: () => getUnreadNotificationCount(), enabled: authContext.permissions.includes('notification.read'), refetchInterval: 60_000 });
@@ -487,6 +580,22 @@ export default function Workspace({ authContext, onSessionExpired, onProfileUpda
     useEffect(() => {
         if ((membersQuery.error || documentsQuery.error) && !hasStoredSession()) onSessionExpired();
     }, [documentsQuery.error, membersQuery.error, onSessionExpired]);
+
+    useEffect(() => {
+        const handleClick = (event: MouseEvent): void => {
+            if (event.defaultPrevented || event.button !== 0) return;
+            const target = event.target as HTMLElement | null;
+            const anchor = target?.closest?.('a[href]') as HTMLAnchorElement | null;
+            if (!anchor) return;
+            const href = anchor.getAttribute('href') ?? '';
+            if (!/^https?:\/\//i.test(href)) return;
+            event.preventDefault();
+            event.stopPropagation();
+            navigate(`/browser?url=${encodeURIComponent(href)}`);
+        };
+        document.addEventListener('click', handleClick, true);
+        return () => document.removeEventListener('click', handleClick, true);
+    }, [navigate]);
 
     const handleLogout = async (): Promise<void> => {
         await logout();

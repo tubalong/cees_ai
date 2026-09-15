@@ -10,10 +10,10 @@ import {
     type CreateMeetingInput, type MeResult, type Meeting, type MeetingAttendanceStatus,
     type MeetingMinutes, type MeetingMinutesContent, type MeetingParticipant, type MeetingParticipantRole,
     type MeetingResponseStatus, type MeetingStatus, type TenantMember,
-} from './api';
-import './project.css';
+} from '../../core/api';
+import '../../styles/shared.css';
 import './meeting.css';
-import { useDateFormatter, useI18n } from './i18n';
+import { useDateFormatter, useI18n } from '../../core/i18n';
 
 const meetingStatusLabels: Record<MeetingStatus, string> = {
     DRAFT: '草稿', SCHEDULED: '已安排', IN_PROGRESS: '进行中', COMPLETED: '已完成', CANCELLED: '已取消',

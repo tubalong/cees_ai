@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, Menu, shell } from 'electron';
 import path from 'node:path';
 
 function createWindow(): void {
@@ -13,6 +13,7 @@ function createWindow(): void {
             contextIsolation: true,
             nodeIntegration: false,
             sandbox: true,
+            webviewTag: true,
         },
     });
     window.webContents.setWindowOpenHandler(({ url }) => {
@@ -31,6 +32,9 @@ function createWindow(): void {
 
 app.whenReady().then(() => {
     Menu.setApplicationMenu(null);
+    ipcMain.on('cees:open-devtools', (event) => {
+        BrowserWindow.fromWebContents(event.sender)?.webContents.openDevTools({ mode: 'detach', activate: true });
+    });
     createWindow();
 });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });

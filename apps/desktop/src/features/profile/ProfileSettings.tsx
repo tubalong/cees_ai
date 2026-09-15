@@ -2,9 +2,9 @@ import { ApartmentOutlined, DesktopOutlined, FontSizeOutlined, KeyOutlined, Moon
 import { Alert, App as AntdApp, Avatar, Button, Form, Input, Modal, Segmented, Spin, Tag } from 'antd';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
-import { changePassword, getUserProfile, hasStoredSession, updateUserProfile, type ChangePasswordInput } from './api';
-import { usePreferences } from './preferences';
-import { LanguageSwitcher, useDateFormatter, useI18n } from './i18n';
+import { changePassword, getUserProfile, hasStoredSession, updateUserProfile, type ChangePasswordInput } from '../../core/api';
+import { usePreferences } from '../../app/preferences';
+import { LanguageSwitcher, useDateFormatter, useI18n } from '../../core/i18n';
 
 interface ProfileFormValues {
     displayName: string;

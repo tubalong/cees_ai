@@ -6,9 +6,9 @@ import {
     createWorkReport, deleteWorkReport, hasStoredSession, listWorkReports,
     reviewWorkReport, submitWorkReport, updateWorkReport, withdrawWorkReport,
     type MeResult, type WorkReport, type WorkReportStatus, type WorkReportType,
-} from './api';
-import './project.css';
-import { useDateFormatter, useI18n } from './i18n';
+} from '../../core/api';
+import '../../styles/shared.css';
+import { useDateFormatter, useI18n } from '../../core/i18n';
 
 const reportTypeLabels: Record<WorkReportType, string> = { DAILY: '日报', WEEKLY: '周报' };
 const reportStatusLabels: Record<WorkReportStatus, string> = { DRAFT: '草稿', SUBMITTED: '已提交', APPROVED: '已通过', REJECTED: '已驳回' };

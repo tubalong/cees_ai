@@ -9,9 +9,9 @@ import {
     type OrganizationImportRequest,
     type OrganizationImportResult, type OrganizationImportValidation,
     type TenantRole,
-} from './api';
-import './project.css';
-import { useI18n } from './i18n';
+} from '../../core/api';
+import '../../styles/shared.css';
+import { useI18n } from '../../core/i18n';
 
 /**
  * 组织导入 Excel 模板的 CDN 下载地址。

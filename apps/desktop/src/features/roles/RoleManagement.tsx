@@ -6,8 +6,8 @@ import {
     createTenantRole, deleteTenantRole, getTenantRole, hasStoredSession,
     listTenantPermissions, listTenantRoles, replaceTenantRolePermissions, updateTenantRole,
     type CreateRoleInput, type DataScope, type MeResult, type TenantPermission, type TenantRole,
-} from './api';
-import { useI18n } from './i18n';
+} from '../../core/api';
+import { useI18n } from '../../core/i18n';
 
 interface RoleFormValues extends CreateRoleInput {
     permissionIds: string[];

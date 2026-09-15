@@ -5,8 +5,8 @@ import { useState } from 'react';
 import {
     createTenantInvitation, listTenantInvitations, listTenantRoles, revokeTenantInvitation,
     suggestTenantAccount, type CreateTenantInvitationInput,
-} from './api';
-import { useDateFormatter, useI18n } from './i18n';
+} from '../../core/api';
+import { useDateFormatter, useI18n } from '../../core/i18n';
 
 interface InvitationCredential {
     tenantCode: string;

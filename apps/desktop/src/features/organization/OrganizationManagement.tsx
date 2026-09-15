@@ -9,10 +9,10 @@ import {
     assignMemberDepartment, createDepartment, deleteDepartment, hasStoredSession,
     listDepartmentMembers, listDepartments, updateDepartment,
     type DepartmentNode, type MeResult, type TenantMember,
-} from './api';
+} from '../../core/api';
 import InvitationManager from './InvitationManager';
 import OrganizationImportModal from './OrganizationImportModal';
-import { useDateFormatter, useI18n } from './i18n';
+import { useDateFormatter, useI18n } from '../../core/i18n';
 
 interface DepartmentFormValues {
     name: string;
