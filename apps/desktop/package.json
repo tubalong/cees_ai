@@ -4,17 +4,49 @@
     "private": true,
     "main": "dist-electron/main.js",
     "scripts": {
-        "dev": "tsc -p electron/tsconfig.json && concurrently -k \"vite\" \"wait-on http://localhost:5173 && electron .\"",
-        "build": "tsc -b && vite build && tsc -p electron/tsconfig.json"
+        "dev": "tsc -p electron/tsconfig.json && concurrently -k \"vite\" \"wait-on http://localhost:5173 && .\\node_modules\\electron\\dist\\electron.exe .\"",
+        "build": "tsc -b && vite build && tsc -p electron/tsconfig.json",
+        "dist:win": "pnpm build && electron-builder --win nsis zip --x64"
+    },
+    "build": {
+        "appId": "com.cees.ai.desktop",
+        "productName": "CEES AI",
+        "asar": true,
+        "directories": {
+            "output": "release"
+        },
+        "files": [
+            "dist/**/*",
+            "dist-electron/**/*",
+            "package.json"
+        ],
+        "artifactName": "CEES-AI-${version}-${arch}.${ext}",
+        "win": {
+            "executableName": "CEES-AI",
+            "target": [
+                "nsis",
+                "zip"
+            ]
+        },
+        "nsis": {
+            "oneClick": false,
+            "allowToChangeInstallationDirectory": true,
+            "createDesktopShortcut": true,
+            "createStartMenuShortcut": true
+        }
     },
     "dependencies": {
         "@ant-design/icons": "^5.5.2",
         "@tanstack/react-query": "^5.62.11",
         "antd": "^5.22.6",
         "echarts": "^5.5.1",
+        "lucide-react": "^1.45.0",
         "react": "^18.3.1",
         "react-dom": "^18.3.1",
+        "react-markdown": "^10.1.0",
         "react-router-dom": "^7.1.1",
+        "remark-gfm": "^4.0.1",
+        "xlsx": "^0.18.5",
         "zustand": "^5.0.2"
     },
     "devDependencies": {
@@ -23,7 +55,8 @@
         "@types/react-dom": "^18.3.5",
         "@vitejs/plugin-react": "^4.3.4",
         "concurrently": "^9.1.2",
-        "electron": "^33.2.1",
+        "electron": "^33.4.11",
+        "electron-builder": "^26.15.3",
         "typescript": "^5.7.2",
         "vite": "^6.0.7",
         "wait-on": "^8.0.1"

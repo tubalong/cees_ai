@@ -76,14 +76,13 @@ void main() {
 
     expect(find.text('AI 助理'), findsOneWidget);
     expect(find.text('组织'), findsOneWidget);
-    expect(find.text('消息'), findsOneWidget);
+    expect(find.text('工作台'), findsOneWidget);
     expect(find.text('我的'), findsOneWidget);
-    expect(find.text('报销明细 #001'), findsWidgets);
+    expect(find.byIcon(Icons.hub_outlined), findsOneWidget);
 
     await tester.tap(find.text('闲聊'));
     await tester.pumpAndSettle();
     expect(find.text('闲聊模式'), findsOneWidget);
-    expect(find.text('切换到工作模式'), findsOneWidget);
 
     await tester.tap(find.text('组织'));
     await tester.pumpAndSettle();

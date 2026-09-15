@@ -1,6 +1,6 @@
 import {
     BankOutlined, DeleteOutlined, EditOutlined, FolderOutlined, PlusOutlined,
-    ReloadOutlined, TeamOutlined, UserAddOutlined,
+    ReloadOutlined, TeamOutlined, UploadOutlined, UserAddOutlined,
 } from '@ant-design/icons';
 import { App as AntdApp, Avatar, Button, Empty, Form, Input, Modal, Select, Spin, Tag } from 'antd';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -11,6 +11,7 @@ import {
     type DepartmentNode, type MeResult, type TenantMember,
 } from './api';
 import InvitationManager from './InvitationManager';
+import OrganizationImportModal from './OrganizationImportModal';
 import { useDateFormatter, useI18n } from './i18n';
 
 interface DepartmentFormValues {
@@ -29,6 +30,7 @@ export default function OrganizationManagement({ authContext, fallbackMembers, m
     const [selectedMemberId, setSelectedMemberId] = useState<string>();
     const [keyword, setKeyword] = useState('');
     const [invitationsOpen, setInvitationsOpen] = useState(false);
+    const [importOpen, setImportOpen] = useState(false);
     const [dialog, setDialog] = useState<DepartmentDialogState>();
     const [form] = Form.useForm<DepartmentFormValues>();
     const { message, modal } = AntdApp.useApp();
@@ -37,6 +39,7 @@ export default function OrganizationManagement({ authContext, fallbackMembers, m
     const queryClient = useQueryClient();
     const permissions = new Set(authContext.permissions);
     const canReadDepartments = permissions.has('department.read');
+    const canImportOrganization = permissions.has('department.create') && permissions.has('member.invite') && permissions.has('role.assign');
 
     const departmentsQuery = useQuery({ queryKey: ['departments'], queryFn: () => listDepartments(), enabled: canReadDepartments });
     const departmentMembersQuery = useQuery({
@@ -106,7 +109,7 @@ export default function OrganizationManagement({ authContext, fallbackMembers, m
     };
 
     return <div className="workspace-page architecture-page">
-        <header className="workspace-page-header"><div><h1>{t('组织与部门')}</h1><p>{t('企业管理员维护当前企业的部门、成员归属和同事邀请')}</p></div><div className="header-actions"><Button icon={<ReloadOutlined />} onClick={() => void departmentsQuery.refetch()}>{t('刷新')}</Button><Button icon={<UserAddOutlined />} disabled={!permissions.has('member.invite')} onClick={() => setInvitationsOpen(true)}>{t('邀请同事')}</Button><Button type="primary" icon={<PlusOutlined />} disabled={!permissions.has('department.create')} onClick={() => openCreate()}>{t('新建部门')}</Button></div></header>
+        <header className="workspace-page-header"><div><h1>{t('组织与部门')}</h1><p>{t('企业管理员维护当前企业的部门、成员归属和同事邀请')}</p></div><div className="header-actions"><Button icon={<ReloadOutlined />} onClick={() => void departmentsQuery.refetch()}>{t('刷新')}</Button><Button icon={<UserAddOutlined />} disabled={!permissions.has('member.invite')} onClick={() => setInvitationsOpen(true)}>{t('邀请同事')}</Button>{canImportOrganization && <Button icon={<UploadOutlined />} onClick={() => setImportOpen(true)}>{t('批量导入')}</Button>}<Button type="primary" icon={<PlusOutlined />} disabled={!permissions.has('department.create')} onClick={() => openCreate()}>{t('新建部门')}</Button></div></header>
         <div className="architecture-layout">
             <aside className="organization-tree department-tree-panel surface-panel">
                 <div className="department-tree-heading"><h3>{t('组织架构')}</h3><Tag>{t('{count} 个部门', { count: flatDepartments.length })}</Tag></div>
@@ -124,6 +127,10 @@ export default function OrganizationManagement({ authContext, fallbackMembers, m
             </Form>
         </Modal>
         <InvitationManager open={invitationsOpen} tenantCode={authContext.tenant.code} onClose={() => setInvitationsOpen(false)} />
+        <OrganizationImportModal open={importOpen} tenantCode={authContext.tenant.code} onClose={() => setImportOpen(false)} onImported={() => {
+            void queryClient.invalidateQueries({ queryKey: ['departments'] });
+            void queryClient.invalidateQueries({ queryKey: ['tenant-members'] });
+        }} />
     </div>;
 }
 

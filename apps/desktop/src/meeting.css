@@ -1,0 +1,4 @@
+/* 会议管理页面在 project.css 通用布局基础上的补充样式 */
+.meeting-management-page .task-row-item small {
+    gap: 4px;
+}

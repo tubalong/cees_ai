@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, Menu, shell } from 'electron';
 import path from 'node:path';
 
 function createWindow(): void {
@@ -15,6 +15,10 @@ function createWindow(): void {
             sandbox: true,
         },
     });
+    window.webContents.setWindowOpenHandler(({ url }) => {
+        if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
+        return { action: 'deny' };
+    });
     if (!app.isPackaged) {
         window.webContents.once('did-finish-load', () => {
             window.webContents.openDevTools({ mode: 'detach', activate: true });
@@ -25,7 +29,10 @@ function createWindow(): void {
     }
 }
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+    Menu.setApplicationMenu(null);
+    createWindow();
+});
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 
 // TODO: Add a signed auto-update provider and staged rollout policy before production release.
