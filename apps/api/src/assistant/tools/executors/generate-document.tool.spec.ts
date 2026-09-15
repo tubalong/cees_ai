@@ -79,5 +79,9 @@ describe('GenerateDocumentTool', () => {
             summary: expect.stringContaining('项目周报') as unknown,
         });
         expect(result.summary).toContain('文档已生成');
+        expect(result.summary).toContain('共 1200 字');
+        // 回喂模型的摘要不携带系统内部信息：文档 ID 与模型名不得进入模型答复。
+        expect(result.summary).not.toContain('doc-1');
+        expect(result.summary).not.toContain('doc-model');
     });
 });
