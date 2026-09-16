@@ -72,7 +72,7 @@ NestJS API   = 业务事实、权限、状态与审计层（apps/api）
 
 - `DocumentChunk` 仍无读写代码：块 5 的引用明细直接由 ai-service 响应携带（citation 映射 document / version / chunk / page / bbox / text），暂不启用业务侧表读写
 - 知识库归属锚点管理 API 与自动授权（3.6 节权限边界已定，块 8 实现）；当前锚点字段只存在于数据库，公开契约与 API 均不暴露
-- MinerU 真机联调已在测试环境（192.168.5.29）完成端到端验收（块 6）；生产环境需部署 pip 端 MinerU 并换用大规模 GPU 硬件
+- MinerU 真机联调已在测试环境（192.168.5.29）完成端到端验收（块 6）；生产环境以 Docker 容器方式部署 MinerU 并换用大规模 GPU 硬件；
 
 ## 3. 关键决策
 
