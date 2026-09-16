@@ -1163,7 +1163,7 @@
         ],
         "operationId": "indexKnowledgeDocument",
         "summary": "Index a parsed knowledge document",
-        "description": "Builds TextNodes from a normalized ParsedDocument, chunks them,\nembeds them, and idempotently upserts the vectors into the vector\nstore. Re-submitting the same (document_version_id, chunking_version,\nembedding_profile, index_version) tuple replaces the previous nodes\ninstead of duplicating them. ai-service never writes the business\ndatabase and does not create formal resources.\n",
+        "description": "Builds TextNodes from a normalized ParsedDocument, chunks them,\nembeds them, and idempotently upserts the vectors into the vector\nstore. Replacement is keyed by the (tenant_id, document_version_id,\nindex_version) triple: re-submitting the same triple replaces the\nprevious nodes instead of duplicating them. chunking_version and\nembedding_profile are recorded as node metadata and define the index\nidentity; changing either requires a new index_version. ai-service\nnever writes the business database and does not create formal\nresources.\n",
         "security": [
           {
             "internalToken": []
@@ -3932,7 +3932,8 @@
               "type": "string",
               "minLength": 1,
               "maxLength": 128
-            }
+            },
+            "description": "Optional department allowlist computed by the caller. Only constrains nodes that carry a department_id; nodes without one pass through."
           },
           "project_ids": {
             "type": "array",
@@ -3941,7 +3942,8 @@
               "type": "string",
               "minLength": 1,
               "maxLength": 128
-            }
+            },
+            "description": "Optional project allowlist computed by the caller. Only constrains nodes that carry a project_id; nodes without one pass through."
           },
           "acl_version": {
             "type": "string",

@@ -13,8 +13,8 @@ class VectorStoreGateway(Protocol):
     """向量存储访问抽象。
 
     索引与检索只依赖本协议，具体后端（内存、pgvector 等）可替换。
-    后端差异不进契约：删除按 (document_version_id, index_version) 过滤，
-    检索必须支持租户与 scope 的 metadata 过滤。
+    后端差异不进契约：删除按 (tenant_id, document_version_id,
+    index_version) 三元组过滤，检索必须支持租户与 scope 的 metadata 过滤。
     """
 
     async def upsert_nodes(

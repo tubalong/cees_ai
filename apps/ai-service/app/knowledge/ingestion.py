@@ -20,10 +20,13 @@ async def index_document(
     store: VectorStoreGateway,
     embedding_router: EmbeddingRouter,
 ) -> KnowledgeIndexResponse:
-    """索引一个解析后的知识文档，幂等四元组为索引身份。
+    """索引一个解析后的知识文档。
 
     步骤：身份校验 -> 节点构建（切分 v1）-> Embedding -> 幂等写入。
-    同一四元组重复提交会替换旧节点，不会产生重复向量。
+    替换判定按 (tenant_id, document_version_id, index_version) 三元组
+    执行：同一三元组重复提交会替换旧节点，不会产生重复向量；
+    chunking_version / embedding_profile 作为索引身份写入节点 metadata，
+    变更 profile 或切分策略必须换新 index_version（见 knowledge-rag.md 3.4）。
     """
     started_at = time.monotonic()
     document = request.parsed_document

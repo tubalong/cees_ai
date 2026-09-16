@@ -1,7 +1,7 @@
 # 知识库 RAG（MinerU + LlamaIndex）
 
 > 状态：分块实施中。块 1（本文档与内部契约 `index`/`retrieve`）、块 2（ai-service 内存闭环 + HTTP 路由）、块 3（NestJS 文档状态机与上传触发索引）、块 4（真实 pgvector Gateway + `index/delete`）已落地，其余按第 8 节分块计划推进。
-> 最后同步：2026-09-15
+> 最后同步：2026-09-16
 > 内部契约版本：`0.4.0`
 > 公开契约版本：`0.23.0`（块 3 文档接口）
 
@@ -71,7 +71,7 @@ NestJS API   = 业务事实、权限、状态与审计层（apps/api）
 
 缺失：
 
-- `DocumentChunk` 仍无读写代码（业务侧引用定位事实源，块 4 后启用）
+- `DocumentChunk` 仍无读写代码（业务侧引用定位事实源，块 5 检索/引用链路上线时启用）
 - MinerU 真机服务（块 6）；解析产物到 `ParsedDocument` 的真实转换（块 3 为占位解析器，块 6 真机替换）；答案生成与引用校验（块 5）
 - 内部契约 `answer`
 
@@ -130,7 +130,7 @@ ai-service 不自行推断权限。NestJS 计算可信 scope 后随检索请求�
 }
 ```
 
-节点 metadata 至少携带 `tenant_id`、`knowledge_base_id`、`document_id`、`document_version_id`、`visibility_scope`、`department_id`、`project_id`、`acl_version`。检索查询缓存（如引入）的 key 必须包含 `tenant_id + 访问者 scope + knowledge_base_id + query + acl_version + index_version`，防止跨用户缓存泄漏。
+节点 metadata 至少携带 `tenant_id`、`knowledge_base_id`、`document_id`、`document_version_id`、`visibility_scope`、`department_id`、`project_id`、`acl_version`；其中 `visibility_scope` 目前只作记录与排查用途，检索过滤由 NestJS 把三层权限折叠成的 `scope` 完成（3.6），ai-service 不直接按 `visibility_scope` 过滤。检索查询缓存（如引入）的 key 必须包含 `tenant_id + 访问者 scope + knowledge_base_id + query + acl_version + index_version`，防止跨用户缓存泄漏。
 
 ### 3.6 知识库归属与权限颗粒
 
@@ -154,9 +154,9 @@ ai-service 不自行推断权限。NestJS 计算可信 scope 后随检索请求�
 
 **表设计现状与差距**：
 
-- `KnowledgeBaseMember` 已存在（`@@unique([tenantId, knowledgeBaseId, userId])`），跨部门共享同一知识库的余地已留；
+- `KnowledgeBaseMember` 已存在（`@@unique([tenantId, knowledgeBaseId, userId])`），跨部门共享同一知识库的余地已留；应用层已有 `READER` / `EDITOR` / `MANAGER` 枚举常量与 DTO 校验、权限排名（`knowledge.types.ts`），但数据库层 `permission` 仍是裸 String 无枚举约束；
 - `DocumentVersion` 已带 `visibilityScope` + `departmentId` / `projectId`；
-- `KnowledgeBase` 自身尚无 `departmentId` / `projectId` 锚点字段，且 `KnowledgeBaseMember.permission` 目前是裸 String：块 5 公开 Query API 前需补 migration，把归属锚点落到 `KnowledgeBase`，并把成员 permission 收敛为 `READ` / `WRITE` / `MANAGE` 枚举语义与校验逻辑。
+- `KnowledgeBase` 自身尚无 `departmentId` / `projectId` 锚点字段：块 5 公开 Query API 前需补 migration，把归属锚点落到 `KnowledgeBase`，并把 `KnowledgeBaseMember.permission` 在数据库层收敛为枚举（Prisma enum，对应应用层 `READER` / `EDITOR` / `MANAGER`）。
 
 ## 4. 索引流程与状态机
 
@@ -177,8 +177,8 @@ PENDING -> PARSING -> PARSED -> INDEXING -> READY
 - 可见范围（`visibilityScope`）是版本级属性，存储在 `DocumentVersion`，索引请求从当前处理版本读取；
 - `acl_version` 当前由版本 ID 派生（`acl-{version.id 前 8 位}`），块 5 引入真正的 ACL 版本机制；
 - 索引请求三元组可通过环境变量覆盖：`KNOWLEDGE_CHUNKING_VERSION`（默认 `knowledge-chunking-v1`）、`KNOWLEDGE_EMBEDDING_PROFILE`（默认 `deterministic`）、`KNOWLEDGE_INDEX_VERSION`（默认 `knowledge-index-v1`）；
-- 幂等键 = `(document_id, document_version_id, chunking_version, embedding_profile, index_version)`，同一幂等键重复提交不产生重复节点；ai-service 的 index 是幂等 upsert，块 4 起采用「先写新后删旧」语义：新节点先落地，再删除三元组内的旧行（含同 node_id 旧内容行），读请求只见全旧或全新，不存在先删后写的空桶窗口；add 失败时旧行原样保留，清理失败最坏出现重复行，幂等重试后收敛；
-- 文档删除或新版本上线时调用 `index/delete`（块 4）删除旧版本派生索引，不删除业务文档。
+- 幂等键 = `(document_id, document_version_id, chunking_version, embedding_profile, index_version)`，同一幂等键重复提交不产生重复节点；ai-service 的 index 是幂等 upsert，替换判定按 `(tenant_id, document_version_id, index_version)` 三元组执行，`chunking_version` / `embedding_profile` 作为索引身份写入节点 metadata，变更 profile 或切分策略必须换新 `index_version`（见 3.4）。块 4 起采用「先写新后删旧」语义：新节点先落地，再删除三元组内的旧行（含同 node_id 旧内容行），读请求只见全旧或全新，不存在先删后写的空桶窗口；add 失败时旧行原样保留，清理失败最坏出现重复行，幂等重试后收敛；
+- `index/delete` 契约与 ai-service 端已实现（块 4），删除指定三元组的派生索引；NestJS 接线（文档删除、新版本上线替换旧版本、知识库删除时清理派生索引）尚未完成，随块 5 公开 Query API 一起落地。
 
 ## 5. 检索与答案
 

@@ -671,7 +671,13 @@ export type KnowledgeRetrieveScope = {
      * Optional document-level allowlist computed by the caller. When omitted, all documents inside the given knowledge bases match.
      */
     allowed_document_ids?: Array<string>;
+    /**
+     * Optional department allowlist computed by the caller. Only constrains nodes that carry a department_id; nodes without one pass through.
+     */
     department_ids?: Array<string>;
+    /**
+     * Optional project allowlist computed by the caller. Only constrains nodes that carry a project_id; nodes without one pass through.
+     */
     project_ids?: Array<string>;
     acl_version: string;
 };

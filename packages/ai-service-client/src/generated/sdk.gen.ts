@@ -245,10 +245,13 @@ export const extractFile = <ThrowOnError extends boolean = false>(options: Optio
  *
  * Builds TextNodes from a normalized ParsedDocument, chunks them,
  * embeds them, and idempotently upserts the vectors into the vector
- * store. Re-submitting the same (document_version_id, chunking_version,
- * embedding_profile, index_version) tuple replaces the previous nodes
- * instead of duplicating them. ai-service never writes the business
- * database and does not create formal resources.
+ * store. Replacement is keyed by the (tenant_id, document_version_id,
+ * index_version) triple: re-submitting the same triple replaces the
+ * previous nodes instead of duplicating them. chunking_version and
+ * embedding_profile are recorded as node metadata and define the index
+ * identity; changing either requires a new index_version. ai-service
+ * never writes the business database and does not create formal
+ * resources.
  *
  */
 export const indexKnowledgeDocument = <ThrowOnError extends boolean = false>(options: Options<IndexKnowledgeDocumentData, ThrowOnError>): RequestResult<IndexKnowledgeDocumentResponses, IndexKnowledgeDocumentErrors, ThrowOnError> => (options.client ?? client).post<IndexKnowledgeDocumentResponses, IndexKnowledgeDocumentErrors, ThrowOnError>({

@@ -809,10 +809,14 @@ class KnowledgeRetrieveScope(BaseModel):
         max_length=10000,
     )
     department_ids: list[constr(min_length=1, max_length=128)] | None = Field(
-        None, max_length=256
+        None,
+        description='Optional department allowlist computed by the caller. Only constrains nodes that carry a department_id; nodes without one pass through.',
+        max_length=256,
     )
     project_ids: list[constr(min_length=1, max_length=128)] | None = Field(
-        None, max_length=256
+        None,
+        description='Optional project allowlist computed by the caller. Only constrains nodes that carry a project_id; nodes without one pass through.',
+        max_length=256,
     )
     acl_version: constr(min_length=1, max_length=128)
 
