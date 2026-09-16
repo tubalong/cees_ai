@@ -81,6 +81,7 @@ flowchart LR
 - [联网搜索（Tavily）](web-search.md)
 - [通用任务 tasks.scope 方案](task-scope-proposal.md)
 - [人财法数据契约](hr-finance-legal-data-contract.md)
+- [C 后端主体 P0 复检](backend-subject-p0-review.md)
 - [Image Generation](image-generation.md)
 - [通用文档生成](document-generation.md)
 - [文件上传与 COS 设计](file-upload.md)

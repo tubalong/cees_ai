@@ -20,6 +20,7 @@
 | [web-search](architecture/web-search.md) | Tavily 联网搜索工具、来源回填与安全边界 |
 | [task-scope-proposal](architecture/task-scope-proposal.md) | 通用任务 tasks.scope 的 C/D 协调基线、来源追溯与跨职能任务边界 |
 | [hr-finance-legal-data-contract](architecture/hr-finance-legal-data-contract.md) | C 人财法 OpenAPI 数据形状、状态机与老板经营概况聚合契约 |
+| [backend-subject-p0-review](architecture/backend-subject-p0-review.md) | C 后端主体 P0 复检：租户/部门/导入/RBAC 边界与新模块权限接入 |
 | [knowledge-rag](architecture/knowledge-rag.md) | 知识库 RAG：MinerU 解析、LlamaIndex 索引检索、权限过滤与分块计划 |
 | [image-generation](architecture/image-generation.md) | 图片生成 profile、ImageRouter、内部生成接口与边界 |
 | [document-generation](architecture/document-generation.md) | 领域无关的文档组合、DocumentSpec 与 DOCX 渲染 |
