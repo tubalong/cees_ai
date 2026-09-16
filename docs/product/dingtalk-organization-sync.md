@@ -170,3 +170,14 @@ POST /api/v1/auth/activate
 ## 8. 暂不包含
 
 当前仍不包含考勤、请假、审批、钉钉文档、聊天消息、日程、待办和 AI 派发；也不会根据钉钉管理员标记自动授予 CEES 管理员角色。
+
+## 9. Desktop 前端入口
+
+桌面端通过左侧导航的“钉钉管理”进入 `/dingtalk`，页面代码独立放在 `apps/desktop/src/features/dingtalk/`，不与 `features/organization/` 共享页面实现。页面包含企业绑定、组织同步、组织镜像和映射导入四个区域。
+
+- 企业绑定：配置或修改 `corpId`、`appKey`、`appSecret`，验证连接并查看集成状态；
+- 组织同步：发起全量同步、查看部门/人员数量和同步历史；
+- 组织镜像：查看钉钉部门、人员及其 CEES 映射状态，可切换显示已删除记录；
+- 映射导入：预览部门和人员动作，处理冲突，按角色批量分配并导出一次性激活凭证 Excel。
+
+导航入口按 `dingtalk.integration.read`、`dingtalk.organization.read` 或 `dingtalk.organization.mapping.preview` 任一权限显示；各页面操作仍由对应的后端权限控制。

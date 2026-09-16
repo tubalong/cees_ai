@@ -638,6 +638,146 @@ export async function deleteTenantRole(roleId: string, version: number): Promise
     return authorizedRequest<void>(`v1/roles/${encodeURIComponent(roleId)}?${query}`, { method: 'DELETE' });
 }
 
+export type DingTalkIntegrationStatus = 'ACTIVE' | 'DISABLED' | 'ERROR';
+export type DingTalkSyncJobStatus = 'RUNNING' | 'SUCCEEDED' | 'FAILED';
+
+export interface DingTalkIntegration {
+    id: string;
+    tenantId: string;
+    corpId: string;
+    appKey: string;
+    status: DingTalkIntegrationStatus;
+    lastVerifiedAt: string | null;
+    lastSyncedAt: string | null;
+    lastErrorCode: string | null;
+    lastErrorMessage: string | null;
+    version: number;
+    createdAt: string;
+    updatedAt: string;
+}
+
+export interface CreateDingTalkIntegrationInput {
+    corpId: string;
+    appKey: string;
+    appSecret: string;
+}
+
+export interface UpdateDingTalkIntegrationInput {
+    appKey?: string;
+    appSecret?: string;
+    status?: Exclude<DingTalkIntegrationStatus, 'ERROR'>;
+    version: number;
+}
+
+export interface DingTalkDepartment {
+    id: string;
+    externalDepartmentId: string;
+    parentExternalDepartmentId: string | null;
+    departmentId: string | null;
+    name: string;
+    displayOrder: number;
+    isDeleted: boolean;
+    lastSeenAt: string;
+    createdAt: string;
+    updatedAt: string;
+}
+
+export interface DingTalkUser {
+    id: string;
+    externalUserId: string;
+    unionId: string | null;
+    membershipId: string | null;
+    name: string;
+    title: string | null;
+    jobNumber: string | null;
+    departmentExternalIds: string[];
+    active: boolean;
+    admin: boolean;
+    boss: boolean;
+    isDeleted: boolean;
+    lastSeenAt: string;
+    createdAt: string;
+    updatedAt: string;
+}
+
+export interface DingTalkSyncJob {
+    id: string;
+    integrationId: string;
+    type: string;
+    status: DingTalkSyncJobStatus;
+    departmentCount: number;
+    userCount: number;
+    errorCode: string | null;
+    errorMessage: string | null;
+    startedAt: string;
+    completedAt: string | null;
+    createdAt: string;
+}
+
+export interface DingTalkCursorParams {
+    limit?: number;
+    cursor?: string;
+    includeDeleted?: boolean;
+}
+
+export async function getDingTalkIntegration(): Promise<DingTalkIntegration | null> {
+    try {
+        return await authorizedRequest<DingTalkIntegration>('v1/dingtalk/integration');
+    } catch (error) {
+        if (error instanceof Error && error.message.includes('尚未绑定钉钉企业')) return null;
+        throw error;
+    }
+}
+
+export async function createDingTalkIntegration(input: CreateDingTalkIntegrationInput): Promise<DingTalkIntegration> {
+    return authorizedRequest<DingTalkIntegration>('v1/dingtalk/integration', {
+        method: 'POST',
+        body: JSON.stringify({
+            corpId: input.corpId.trim(),
+            appKey: input.appKey.trim(),
+            appSecret: input.appSecret,
+        }),
+    });
+}
+
+export async function updateDingTalkIntegration(input: UpdateDingTalkIntegrationInput): Promise<DingTalkIntegration> {
+    return authorizedRequest<DingTalkIntegration>('v1/dingtalk/integration', {
+        method: 'PATCH',
+        body: JSON.stringify({
+            ...(input.appKey?.trim() ? { appKey: input.appKey.trim() } : {}),
+            ...(input.appSecret ? { appSecret: input.appSecret } : {}),
+            ...(input.status ? { status: input.status } : {}),
+            version: input.version,
+        }),
+    });
+}
+
+export async function verifyDingTalkIntegration(): Promise<DingTalkIntegration> {
+    return authorizedRequest<DingTalkIntegration>('v1/dingtalk/integration/verify', { method: 'POST' });
+}
+
+export async function syncDingTalkOrganization(): Promise<DingTalkSyncJob> {
+    return authorizedRequest<DingTalkSyncJob>('v1/dingtalk/organization/sync', { method: 'POST' });
+}
+
+export async function listDingTalkDepartments(input: DingTalkCursorParams = {}): Promise<{ items: DingTalkDepartment[]; nextCursor: string | null }> {
+    const query = new URLSearchParams({ limit: String(input.limit ?? 100), includeDeleted: String(input.includeDeleted ?? false) });
+    if (input.cursor) query.set('cursor', input.cursor);
+    return authorizedRequest<{ items: DingTalkDepartment[]; nextCursor: string | null }>(`v1/dingtalk/organization/departments?${query}`);
+}
+
+export async function listDingTalkUsers(input: DingTalkCursorParams = {}): Promise<{ items: DingTalkUser[]; nextCursor: string | null }> {
+    const query = new URLSearchParams({ limit: String(input.limit ?? 100), includeDeleted: String(input.includeDeleted ?? false) });
+    if (input.cursor) query.set('cursor', input.cursor);
+    return authorizedRequest<{ items: DingTalkUser[]; nextCursor: string | null }>(`v1/dingtalk/organization/users?${query}`);
+}
+
+export async function listDingTalkSyncJobs(input: { limit?: number; cursor?: string } = {}): Promise<{ items: DingTalkSyncJob[]; nextCursor: string | null }> {
+    const query = new URLSearchParams({ limit: String(input.limit ?? 20) });
+    if (input.cursor) query.set('cursor', input.cursor);
+    return authorizedRequest<{ items: DingTalkSyncJob[]; nextCursor: string | null }>(`v1/dingtalk/sync-jobs?${query}`);
+}
+
 export async function listTenantInvitations(): Promise<CursorPage<TenantInvitation>> {
     return authorizedRequest<CursorPage<TenantInvitation>>('v1/tenants/current/invitations?limit=100');
 }
