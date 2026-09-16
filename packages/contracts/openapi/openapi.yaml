@@ -5244,14 +5244,6 @@ components:
           type: string
         description:
           type: [string, 'null']
-        departmentId:
-          type: [string, 'null']
-          format: uuid
-          description: 归属部门；不填为公司级知识库，与 projectId 二选一
-        projectId:
-          type: [string, 'null']
-          format: uuid
-          description: 归属项目；不填为公司级知识库，与 departmentId 二选一
         memberCount:
           type: integer
           minimum: 0
@@ -5430,14 +5422,6 @@ components:
         description:
           type: [string, 'null']
           maxLength: 2000
-        departmentId:
-          type: [string, 'null']
-          format: uuid
-          description: 归属部门；与 projectId 二选一，都为空即公司级知识库
-        projectId:
-          type: [string, 'null']
-          format: uuid
-          description: 归属项目；与 departmentId 二选一，都为空即公司级知识库
 
     UpdateKnowledgeBaseRequest:
       type: object
@@ -5451,14 +5435,6 @@ components:
         description:
           type: [string, 'null']
           maxLength: 2000
-        departmentId:
-          type: [string, 'null']
-          format: uuid
-          description: 归属部门；与 projectId 二选一
-        projectId:
-          type: [string, 'null']
-          format: uuid
-          description: 归属项目；与 departmentId 二选一
         version:
           type: integer
           minimum: 1

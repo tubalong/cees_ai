@@ -1329,8 +1329,7 @@
                   ],
                   "allowed_document_ids": [
                     "doc-example"
-                  ],
-                  "acl_version": "acl-2026-09-15-42"
+                  ]
                 },
                 "top_k": 8,
                 "index_version": "idx-v1"
@@ -1398,8 +1397,7 @@
                   ],
                   "allowed_document_ids": [
                     "doc-example"
-                  ],
-                  "acl_version": "acl-2026-09-15-42"
+                  ]
                 },
                 "top_k": 8,
                 "index_version": "idx-v1"
