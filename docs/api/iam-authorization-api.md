@@ -243,6 +243,19 @@ Permission 是平台预置能力目录，不开放租户级写接口。角色 `c
 
 系统角色不允许修改、替换权限或删除；仍被成员或 ACL 使用的角色不得删除，应返回 `409 Conflict`。角色修改、权限替换和删除均使用 `version` 做乐观锁控制。
 
+### 7.1 DataScope 解析
+
+角色上的 `dataScope` 由后端统一解析为可执行的租户数据边界：
+
+- `SELF`：仅当前租户成员。
+- `DEPARTMENT`：当前成员所在部门。
+- `DEPARTMENT_TREE`：当前成员所在部门及下级部门。
+- `PROJECT`：当前成员参与的项目。
+- `TENANT`：当前租户全部数据。
+- `CUSTOM`：当前未实现具体约束，解析时返回 `DATA_SCOPE_CUSTOM_UNSUPPORTED`。
+
+实现入口为 `apps/api/src/rbac/data-scope-resolver.service.ts`。业务服务应基于解析结果自行构造 Prisma `where` 条件；RBAC 仍负责权限码，DataScope 负责数据行范围。
+
 ## 8. Document 受控资源 API
 
 Document 是第一种用于验证 RBAC、所有权、可见性和 ACL 的业务资源。
