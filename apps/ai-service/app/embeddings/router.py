@@ -31,6 +31,13 @@ class EmbeddingRouter:
     def resolve(self, profile_name: str | None) -> EmbeddingProvider:
         return self.profiles[self.resolve_name(profile_name)]
 
+    def is_deterministic(self, profile_name: str | None) -> bool:
+        """解析后的 profile 是否为内置确定性 provider（开发用哈希向量）。
+
+        未知名称抛 KeyError，与 resolve/resolve_name 语义一致。
+        """
+        return isinstance(self.resolve(profile_name), DeterministicEmbeddingProvider)
+
     async def embed_documents(
         self, profile_name: str | None, texts: list[str]
     ) -> list[list[float]]:

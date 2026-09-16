@@ -81,6 +81,9 @@ def test_build_embedding_router_registers_enabled_profiles(
 
     assert router.default_profile == "primary"
     assert set(router.profiles) == {"deterministic", "primary"}
+    assert router.is_deterministic(None) is False
+    assert router.is_deterministic("primary") is False
+    assert router.is_deterministic("deterministic") is True
 
 
 def test_build_embedding_router_skips_disabled_profiles() -> None:
@@ -116,3 +119,5 @@ def test_default_router_resolves_deterministic() -> None:
     router = build_default_embedding_router()
     assert router.resolve_name(None) == "deterministic"
     assert router.resolve_name("deterministic") == "deterministic"
+    assert router.is_deterministic(None) is True
+    assert router.is_deterministic("deterministic") is True

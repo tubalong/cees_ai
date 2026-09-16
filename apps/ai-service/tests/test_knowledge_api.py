@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from app.core.config import Settings
 from app.core.runtime import AppRuntime
 from app.embeddings.router import EmbeddingRouter, build_default_embedding_router
+from app.knowledge.pgvector_store import PGVectorStoreGateway
 from app.knowledge.stores import InMemoryVectorStore
 from app.main import create_app
 
@@ -210,6 +211,61 @@ def test_index_embedding_dimension_mismatch_returns_500() -> None:
         )
     assert response.status_code == 500
     assert response.json()["error"]["code"] == "INTERNAL_ERROR"
+
+
+def test_index_deterministic_profile_on_pgvector_returns_500() -> None:
+    # pgvector 表维度固定（KNOWLEDGE_VECTOR_DIMENSION），内置 deterministic
+    # profile 必须前置拒绝为配置错误（retryable=False），而不是拖到
+    # upsert 阶段才报维度不匹配。
+    settings = Settings(
+        node_env="test", ai_internal_token="secret", ai_docs_enabled=False
+    )
+    runtime = AppRuntime(
+        settings=settings,
+        catalog=None,
+        router=None,
+        readiness_errors=[],
+        embedding_router=build_default_embedding_router(),
+        knowledge_store=object.__new__(PGVectorStoreGateway),
+    )
+    client = TestClient(create_app(runtime=runtime), raise_server_exceptions=False)
+    with client:
+        response = client.post(
+            "/internal/v1/knowledge/index",
+            json=index_payload(),
+            headers=TOKEN_HEADERS,
+        )
+    assert response.status_code == 500
+    error = response.json()["error"]
+    assert error["code"] == "EMBEDDING_PROFILE_MISCONFIGURED"
+    assert error["retryable"] is False
+
+
+def test_retrieve_deterministic_profile_on_pgvector_returns_500() -> None:
+    # 检索侧同样前置拦截：一旦索引用真实 profile 写入，检索回落到
+    # deterministic 会造成向量空间错乱且不报错，必须显式拒绝。
+    settings = Settings(
+        node_env="test", ai_internal_token="secret", ai_docs_enabled=False
+    )
+    runtime = AppRuntime(
+        settings=settings,
+        catalog=None,
+        router=None,
+        readiness_errors=[],
+        embedding_router=build_default_embedding_router(),
+        knowledge_store=object.__new__(PGVectorStoreGateway),
+    )
+    client = TestClient(create_app(runtime=runtime), raise_server_exceptions=False)
+    with client:
+        response = client.post(
+            "/internal/v1/knowledge/retrieve",
+            json=retrieve_payload(),
+            headers=TOKEN_HEADERS,
+        )
+    assert response.status_code == 500
+    error = response.json()["error"]
+    assert error["code"] == "EMBEDDING_PROFILE_MISCONFIGURED"
+    assert error["retryable"] is False
 
 
 def test_delete_derived_index_over_http() -> None:

@@ -174,6 +174,8 @@ export class KnowledgeIndexingService implements OnModuleInit, OnModuleDestroy {
             const version = await this.requireCurrentVersion(document);
             const file = await this.requireFileObject(document);
             const parsed = await this.parser.parse({
+                documentId: document.id,
+                documentVersionId: version.id,
                 fileObjectId: file.id,
                 name: file.originalName,
                 mimeType: file.mimeType,

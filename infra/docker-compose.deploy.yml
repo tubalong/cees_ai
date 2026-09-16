@@ -41,7 +41,12 @@ services:
       VISION_LLM_API_KEY: ${VISION_LLM_API_KEY:-}
       IMAGE_GEN_API_KEY: ${IMAGE_GEN_API_KEY:-}
       IMAGE_GEN_BACKUP_API_KEY: ${IMAGE_GEN_BACKUP_API_KEY:-}
+      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      # 知识库向量库（pgvector 为独立数据库；memory 用于开发/测试）。
+      KNOWLEDGE_VECTOR_STORE: ${KNOWLEDGE_VECTOR_STORE:-memory}
+      KNOWLEDGE_VECTOR_DATABASE_URL: ${KNOWLEDGE_VECTOR_DATABASE_URL:-}
+      KNOWLEDGE_VECTOR_DIMENSION: ${KNOWLEDGE_VECTOR_DIMENSION:-512}
     volumes:
       - type: bind
         source: ${AI_MODEL_CONFIG_HOST_PATH}
@@ -86,6 +91,14 @@ services:
       DINGTALK_CREDENTIAL_ENCRYPTION_KEY: ${DINGTALK_CREDENTIAL_ENCRYPTION_KEY}
       AI_SERVICE_URL: http://ai-service:8000
       AI_INTERNAL_TOKEN: ${AI_INTERNAL_TOKEN}
+      # MinerU 文档解析服务（宿主机常驻 mineru-api；未配置时文档置 FAILED）。
+      MINERU_API_URL: ${MINERU_API_URL:-}
+      MINERU_API_TIMEOUT_MS: ${MINERU_API_TIMEOUT_MS:-1800000}
+      MINERU_API_LANG_LIST: ${MINERU_API_LANG_LIST:-ch}
+      # 知识库向量化：索引侧与查询侧必须使用同一 embedding profile。
+      # pgvector 部署下应指向 ai-service 模型目录中已启用的 profile（如 primary），
+      # 未配置时回落 deterministic（384 维哈希，仅适合本地内存向量库开发/测试）。
+      KNOWLEDGE_EMBEDDING_PROFILE: ${KNOWLEDGE_EMBEDDING_PROFILE:-}
       WEB_SEARCH_PROVIDER: ${WEB_SEARCH_PROVIDER:-tavily}
       WEB_SEARCH_API_KEY: ${WEB_SEARCH_API_KEY:?WEB_SEARCH_API_KEY must be configured}
       WEB_SEARCH_TIMEOUT_MS: ${WEB_SEARCH_TIMEOUT_MS:-10000}
