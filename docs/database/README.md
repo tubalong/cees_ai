@@ -8,7 +8,7 @@
 通知中心与后台任务见 [通知中心与后台任务](../product/notification-center.md)。
 工作台与数据看板见 [工作台与数据看板](../product/dashboard-workbench.md)。
 
-> 新环境使用 `prisma migrate deploy` 按 `0001_init` 到 `0016_dingtalk_organization_sync` 的目录顺序执行迁移；全部迁移完成后与当前 `schema.prisma` 保持一致。
+> 新环境使用 `prisma migrate deploy` 按 `0001_init` 到 `0030_c_assignment_policy` 的目录顺序执行迁移；全部迁移完成后与当前 `schema.prisma` 保持一致。
 
 - `apps/api/prisma/schema.prisma` 是数据模型唯一事实源，迁移提交 `prisma/migrations`。
 - 新建表和字段必须在同一迁移中使用 `COMMENT ON TABLE`、`COMMENT ON COLUMN` 添加 PostgreSQL 注释；`0003_organization_departments_and_database_comments` 已补齐此前全部业务表和字段注释。
@@ -215,6 +215,23 @@ Tenant
 - `0016_dingtalk_organization_sync` 创建上述枚举、表、索引、外键、钉钉权限和全部 PostgreSQL 中文表/字段注释；
 - 当前同步只处理组织架构和人员，不处理考勤、请假、文档、消息、日程和 AI 派发。
 
+## 13. 分配策略模型
+
+```text
+Tenant
+  └── AssignmentPolicy
+        └── Project?（项目覆盖策略时必填）
+```
+
+- `assignment_policies` 保存租户级或项目级分配策略，领域、层级、候选池、请假跳过、兜底模式和启停状态；
+- `domain` 枚举为 `TASK`、`MEETING`、`WORK_REPORT`、`PROJECT`、`DOCUMENT`；
+- `level` 枚举为 `TENANT`（租户默认）或 `PROJECT`（项目覆盖）；
+- `candidate_pool` 使用 JSONB 保存 `membershipIds`、`departmentIds`、`projectIds` 三类候选来源；
+- `fallback_mode` 枚举为 `NONE`、`PROJECT_MEMBERS`、`TENANT_MEMBERS`；
+- 同租户、同领域、同层级、同项目的活跃策略唯一；唯一索引使用 `WHERE deleted_at IS NULL`，软删除后允许重建；
+- `0030_c_assignment_policy` 创建上述枚举、表、索引、外键和 PostgreSQL 中文注释；
+- 分配解析不落表，结果只用于预览或由任务模块消费，正式分配结果仍写任务模块；
+- 详细业务规则见 `docs/product/assignment-and-hr-finance-legal.md` 和 `docs/api/assignment-and-hr-finance-legal-api.md`。
 ## AI 调用计量模型
 
 ```text

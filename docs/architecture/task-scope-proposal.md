@@ -1,6 +1,6 @@
 # 通用任务 tasks.scope 方案（C/D 协调草案）
 
-> 状态：设计草案，尚未落地
+> 状态：AssignmentPolicy 解析预览已实现；`tasks.scope` 仍未落地，待 D 实现
 > Owner：C（与 D 协调）
 > 关联：`apps/api/src/task/**`（D）、`apps/api/src/assignment/**`（C）
 
@@ -38,7 +38,7 @@ CROSS_FUNCTIONAL   项目外/跨职能任务，可指派给任意有效租户成
 
 ## 5. 审计与数据范围
 
-- 分配策略的创建、修改、删除与解析必须记录租户、操作者、请求、资源和扩展元数据。
+- 分配策略的创建、修改、删除与解析已实现，均记录租户、操作者、请求、资源和扩展元数据；`POST /assignment/policies/resolve` 已可供任务模块预览候选池。
 - 跨职能任务数据范围遵循现有租户成员体系，不绕过 `DataScopeResolverService`。
 - 通用任务的跨职能权限码使用 `task.cross_functional.*`，与项目任务权限隔离。
 
@@ -46,4 +46,4 @@ CROSS_FUNCTIONAL   项目外/跨职能任务，可指派给任意有效租户成
 
 - 项目外任务可创建并指派给任意有效租户成员。
 - 任务来源可追溯。
-- 分配解析结果与请假跳过逻辑有测试覆盖。
+- 分配解析结果已有测试覆盖；真实请假跳过逻辑待 P2 接入请假数据后补测。

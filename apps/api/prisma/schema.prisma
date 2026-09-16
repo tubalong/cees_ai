@@ -92,6 +92,25 @@ enum DataScope {
   TENANT
 }
 
+enum AssignmentPolicyDomain {
+  TASK
+  MEETING
+  WORK_REPORT
+  PROJECT
+  DOCUMENT
+}
+
+enum AssignmentPolicyLevel {
+  TENANT
+  PROJECT
+}
+
+enum AssignmentPolicyFallbackMode {
+  NONE
+  PROJECT_MEMBERS
+  TENANT_MEMBERS
+}
+
 enum TaskStatus {
   TODO
   IN_PROGRESS
@@ -293,6 +312,7 @@ model Tenant {
   resourceAcls           ResourceAcl[]
   invitations            TenantInvitation[]
   projects               Project[]
+  assignmentPolicies     AssignmentPolicy[]
   projectMembers         ProjectMember[]
   projectStatusHistory   ProjectStatusHistory[]
   tasks                  Task[]
@@ -726,6 +746,7 @@ model Project {
   tasks                   Task[]
   meetings                Meeting[]
   workReportLinks         WorkReportProject[]
+  assignmentPolicies      AssignmentPolicy[]
   createdAt               DateTime               @default(now()) @map("created_at")
   updatedAt               DateTime               @updatedAt @map("updated_at")
   createdBy               String?                @map("created_by") @db.Uuid
@@ -895,6 +916,34 @@ model TaskActivity {
   @@index([tenantId, taskId, createdAt])
   @@index([tenantId, actorMembershipId])
   @@map("task_activities")
+}
+model AssignmentPolicy {
+  id          String                        @id @default(uuid()) @db.Uuid
+  tenantId    String                        @map("tenant_id") @db.Uuid
+  tenant      Tenant                        @relation(fields: [tenantId], references: [id])
+  projectId   String?                       @map("project_id") @db.Uuid
+  project     Project?                      @relation(fields: [projectId], references: [id])
+
+  domain       AssignmentPolicyDomain
+  level        AssignmentPolicyLevel
+  name         String
+  description  String?
+
+  candidatePool Json                         @map("candidate_pool")
+  skipOnLeave   Boolean                      @default(false) @map("skip_on_leave")
+  fallbackMode  AssignmentPolicyFallbackMode @default(NONE) @map("fallback_mode")
+  enabled       Boolean                      @default(true)
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  createdBy String?   @map("created_by") @db.Uuid
+  updatedBy String?   @map("updated_by") @db.Uuid
+  deletedAt DateTime? @map("deleted_at")
+  version   Int       @default(1)
+
+  @@index([tenantId, level, projectId, enabled])
+  @@index([tenantId, domain, enabled])
+  @@map("assignment_policies")
 }
 
 model FileObject {

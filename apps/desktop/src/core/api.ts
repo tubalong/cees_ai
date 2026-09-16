@@ -2031,3 +2031,134 @@ export async function applyDingTalkMapping(input: DingTalkMappingRequest & {
         body: JSON.stringify(input),
     });
 }
+
+export type AssignmentPolicyDomain = 'TASK' | 'MEETING' | 'WORK_REPORT' | 'PROJECT' | 'DOCUMENT';
+export type AssignmentPolicyLevel = 'TENANT' | 'PROJECT';
+export type AssignmentPolicyFallbackMode = 'NONE' | 'PROJECT_MEMBERS' | 'TENANT_MEMBERS';
+
+export interface AssignmentCandidatePool {
+    membershipIds: string[];
+    departmentIds: string[];
+    projectIds: string[];
+}
+
+export interface AssignmentPolicy {
+    id: string;
+    tenantId: string;
+    projectId: string | null;
+    domain: AssignmentPolicyDomain;
+    level: AssignmentPolicyLevel;
+    name: string;
+    description: string | null;
+    candidatePool: AssignmentCandidatePool;
+    skipOnLeave: boolean;
+    fallbackMode: AssignmentPolicyFallbackMode;
+    enabled: boolean;
+    version: number;
+    createdAt: string;
+    updatedAt: string;
+}
+
+export interface AssignmentPolicyResolveInput {
+    domain: AssignmentPolicyDomain;
+    projectId?: string;
+    context?: { sourceType: string; sourceId: string };
+}
+
+export interface AssignmentPolicyResolveResult {
+    matchedPolicyId: string | null;
+    domain: AssignmentPolicyDomain;
+    level: AssignmentPolicyLevel;
+    candidates: string[];
+    skippedOnLeave: string[];
+    fallbackMode: AssignmentPolicyFallbackMode;
+    sourceTrace: {
+        policyId: string | null;
+        projectId: string | null;
+        domain: AssignmentPolicyDomain;
+        level: AssignmentPolicyLevel;
+    };
+    resolvedAt: string;
+}
+
+export interface CreateAssignmentPolicyInput {
+    domain: AssignmentPolicyDomain;
+    level: AssignmentPolicyLevel;
+    projectId?: string;
+    name: string;
+    description?: string | null;
+    candidatePool: AssignmentCandidatePool;
+    skipOnLeave: boolean;
+    fallbackMode: AssignmentPolicyFallbackMode;
+    enabled?: boolean;
+}
+
+export interface UpdateAssignmentPolicyInput {
+    name?: string;
+    description?: string | null;
+    candidatePool?: AssignmentCandidatePool;
+    skipOnLeave?: boolean;
+    fallbackMode?: AssignmentPolicyFallbackMode;
+    enabled?: boolean;
+    version: number;
+}
+
+export async function listAssignmentPolicies(domain?: AssignmentPolicyDomain, projectId?: string): Promise<CursorPage<AssignmentPolicy>> {
+    const query = new URLSearchParams({ limit: '100' });
+    if (domain) query.set('domain', domain);
+    if (projectId) query.set('projectId', projectId);
+    return authorizedRequest<CursorPage<AssignmentPolicy>>(`v1/assignment/policies?${query}`);
+}
+
+export async function getAssignmentPolicy(policyId: string): Promise<AssignmentPolicy> {
+    return authorizedRequest<AssignmentPolicy>(`v1/assignment/policies/${encodeURIComponent(policyId)}`);
+}
+
+export async function createAssignmentPolicy(input: CreateAssignmentPolicyInput): Promise<AssignmentPolicy> {
+    return authorizedRequest<AssignmentPolicy>('v1/assignment/policies', {
+        method: 'POST',
+        body: JSON.stringify({
+            ...input,
+            name: input.name.trim(),
+            description: input.description?.trim() || null,
+            candidatePool: {
+                membershipIds: [...new Set(input.candidatePool.membershipIds)],
+                departmentIds: [...new Set(input.candidatePool.departmentIds)],
+                projectIds: [...new Set(input.candidatePool.projectIds)],
+            },
+            enabled: input.enabled ?? true,
+        }),
+    });
+}
+
+export async function updateAssignmentPolicy(policyId: string, input: UpdateAssignmentPolicyInput): Promise<AssignmentPolicy> {
+    return authorizedRequest<AssignmentPolicy>(`v1/assignment/policies/${encodeURIComponent(policyId)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+            ...(input.name?.trim() ? { name: input.name.trim() } : {}),
+            ...(input.description !== undefined ? { description: input.description?.trim() || null } : {}),
+            ...(input.candidatePool ? {
+                candidatePool: {
+                    membershipIds: [...new Set(input.candidatePool.membershipIds)],
+                    departmentIds: [...new Set(input.candidatePool.departmentIds)],
+                    projectIds: [...new Set(input.candidatePool.projectIds)],
+                },
+            } : {}),
+            ...(input.skipOnLeave !== undefined ? { skipOnLeave: input.skipOnLeave } : {}),
+            ...(input.fallbackMode !== undefined ? { fallbackMode: input.fallbackMode } : {}),
+            ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),
+            version: input.version,
+        }),
+    });
+}
+
+export async function deleteAssignmentPolicy(policyId: string, version: number): Promise<void> {
+    return authorizedRequest<void>(`v1/assignment/policies/${encodeURIComponent(policyId)}?version=${version}`, { method: 'DELETE' });
+}
+
+export async function resolveAssignmentPolicy(input: AssignmentPolicyResolveInput): Promise<AssignmentPolicyResolveResult> {
+    return authorizedRequest<AssignmentPolicyResolveResult>('v1/assignment/policies/resolve', {
+        method: 'POST',
+        body: JSON.stringify(input),
+    });
+}
