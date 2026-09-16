@@ -9891,6 +9891,18 @@ components:
         membershipId: { type: [string, 'null'], format: uuid }
         account: { type: [string, 'null'], minLength: 3, maxLength: 32, pattern: '^[A-Za-z0-9]+$' }
 
+    DingTalkRoleAssignment:
+      type: object
+      additionalProperties: false
+      required: [roleId, dingtalkUserIds]
+      properties:
+        roleId: { type: string, format: uuid }
+        dingtalkUserIds:
+          type: array
+          uniqueItems: true
+          maxItems: 1000
+          items: { type: string, format: uuid }
+
     ApplyDingTalkMappingRequest:
       allOf:
         - $ref: '#/components/schemas/PreviewDingTalkMappingRequest'
@@ -9902,6 +9914,9 @@ components:
             userResolutions:
               type: array
               items: { $ref: '#/components/schemas/DingTalkUserMappingResolution' }
+            roleAssignments:
+              type: array
+              items: { $ref: '#/components/schemas/DingTalkRoleAssignment' }
 
     DingTalkDepartmentMappingPreview:
       type: object
@@ -9952,7 +9967,7 @@ components:
 
     DingTalkMappingCredential:
       type: object
-      required: [dingtalkUserId, membershipId, displayName, account, departmentId, tenantCode, activationToken, activationExpiresAt]
+      required: [dingtalkUserId, membershipId, displayName, account, departmentId, tenantCode, roleIds, roleCodes, activationToken, activationExpiresAt]
       properties:
         dingtalkUserId: { type: string, format: uuid }
         membershipId: { type: string, format: uuid }
@@ -9960,6 +9975,8 @@ components:
         account: { type: string, pattern: '^[A-Za-z0-9]+$' }
         departmentId: { type: [string, 'null'], format: uuid }
         tenantCode: { type: string }
+        roleIds: { type: array, uniqueItems: true, items: { type: string, format: uuid } }
+        roleCodes: { type: array, uniqueItems: true, items: { type: string } }
         activationToken: { type: string, format: password }
         activationExpiresAt: { type: string, format: date-time }
 

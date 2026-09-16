@@ -9,6 +9,8 @@ export type DingTalkMappingCredential = {
     account: string;
     departmentId: string | null;
     tenantCode: string;
+    roleIds: Array<string>;
+    roleCodes: Array<string>;
     activationToken: string;
     activationExpiresAt: string;
 };

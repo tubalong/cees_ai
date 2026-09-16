@@ -35,7 +35,7 @@ import {
 } from './dingtalk.types';
 
 const ROOT_EXTERNAL_DEPARTMENT_ID = '1';
-const EMPLOYEE_ROLE_CODE = 'employee';
+const TENANT_ADMIN_ROLE_CODE = 'tenant_admin';
 
 type DepartmentRecord = {
     id: string;
@@ -83,7 +83,6 @@ type MappingPlan = {
     departments: DepartmentRecord[];
     memberships: MembershipRecord[];
     tenantCode: string;
-    employeeRoleId: string | null;
 };
 
 @Injectable()
@@ -109,6 +108,8 @@ export class DingTalkMappingService {
             input.userResolutions.map((resolution) => [resolution.dingtalkUserId, resolution]),
         );
         this.assertKnownResolutions(input.userResolutions, plan.userPlans.map((item) => item.dingtalkUserId), '人员');
+        const roleIdsByUser = this.buildRoleAssignments(input.roleAssignments ?? []);
+        this.assertKnownRoleAssignments(roleIdsByUser, plan.userPlans.map((item) => item.dingtalkUserId));
         const unresolvedDepartments = plan.departmentPlans.filter((item) => item.action === 'CONFLICT')
             .filter((item) => !departmentResolutions.has(item.dingtalkDepartmentId));
         const unresolvedUsers = plan.userPlans.filter((item) => item.action === 'CONFLICT')
@@ -123,8 +124,44 @@ export class DingTalkMappingService {
                 },
             });
         }
-        if (input.createMissingMembers && plan.userPlans.some((item) => item.action === 'CREATE') && !plan.employeeRoleId) {
-            throw new BadRequestException({ code: 'DINGTALK_MAPPING_EMPLOYEE_ROLE_NOT_FOUND', message: '当前租户缺少 employee 默认角色' });
+        const usersToCreate = plan.userPlans.filter((item) => {
+            const resolution = userResolutions.get(item.dingtalkUserId);
+            const action = resolution?.action ?? item.action;
+            return action === 'CREATE' && (input.createMissingMembers || Boolean(resolution));
+        });
+        const usersWithoutRoles = usersToCreate
+            .filter((item) => (roleIdsByUser.get(item.dingtalkUserId) ?? []).length === 0)
+            .map((item) => item.dingtalkUserId);
+        if (usersWithoutRoles.length > 0) {
+            throw new BadRequestException({
+                code: 'DINGTALK_MAPPING_ROLE_REQUIRED',
+                message: '创建新成员前，请为每名成员至少分配一个角色',
+                details: { dingtalkUserIds: usersWithoutRoles },
+            });
+        }
+        const requestedRoleIds = [...new Set([...roleIdsByUser.values()].flat())];
+        const roles = requestedRoleIds.length === 0
+            ? []
+            : await this.prisma.role.findMany({
+                where: { tenantId: context.tenantId, id: { in: requestedRoleIds }, deletedAt: null },
+                select: { id: true, code: true },
+            });
+        const roleById = new Map(roles.map((role) => [role.id, role]));
+        const missingRoleIds = requestedRoleIds.filter((roleId) => !roleById.has(roleId));
+        if (missingRoleIds.length > 0) {
+            throw new BadRequestException({
+                code: 'DINGTALK_MAPPING_ROLE_NOT_FOUND',
+                message: '选择的角色不存在、已删除或不属于当前租户',
+                details: { roleIds: missingRoleIds },
+            });
+        }
+        const forbiddenRoleIds = requestedRoleIds.filter((roleId) => roleById.get(roleId)?.code === TENANT_ADMIN_ROLE_CODE);
+        if (forbiddenRoleIds.length > 0) {
+            throw new BadRequestException({
+                code: 'DINGTALK_MAPPING_TENANT_ADMIN_FORBIDDEN',
+                message: '钉钉组织映射不能分配租户管理员角色',
+                details: { roleIds: forbiddenRoleIds },
+            });
         }
 
         try {
@@ -184,6 +221,7 @@ export class DingTalkMappingService {
                 for (const item of plan.userPlans) {
                     const resolution = userResolutions.get(item.dingtalkUserId);
                     const action = resolution?.action ?? (item.action === 'MATCH_EXISTING' ? 'BIND_EXISTING' : item.action);
+                    const roleIds = roleIdsByUser.get(item.dingtalkUserId) ?? [];
                     if (action === 'SKIP') continue;
                     if (action === 'BIND_EXISTING') {
                         const membershipId = resolution?.membershipId ?? item.membershipId;
@@ -197,10 +235,12 @@ export class DingTalkMappingService {
                             where: { id: item.record.id, tenantId: context.tenantId },
                             data: { membershipId },
                         });
+                        await this.assignRoles(transaction, context.tenantId, membershipId, roleIds);
                         continue;
                     }
                     if (action !== 'CREATE') throw this.invalidResolution('人员映射动作无效');
                     if (!input.createMissingMembers && !resolution) continue;
+                    if (roleIds.length === 0) throw this.invalidResolution('创建新成员必须至少分配一个角色');
                     const account = this.allocateAccount(resolution?.account ?? item.suggestedAccount, occupiedAccounts);
                     const primaryDepartmentId = this.resolvePrimaryDepartment(item.record.departmentExternalIds, departmentIds);
                     const userId = randomUUID();
@@ -231,13 +271,7 @@ export class DingTalkMappingService {
                             updatedBy: context.userId,
                         },
                     });
-                    await transaction.membershipRole.create({
-                        data: {
-                            tenantId: context.tenantId,
-                            membershipId,
-                            roleId: plan.employeeRoleId!,
-                        },
-                    });
+                    await this.assignRoles(transaction, context.tenantId, membershipId, roleIds);
                     await transaction.tenantInvitation.create({
                         data: {
                             id: invitationId,
@@ -250,7 +284,7 @@ export class DingTalkMappingService {
                             status: TenantInvitationStatus.PENDING,
                             expiresAt: activationExpiresAt,
                             invitedByUserId: context.userId,
-                            roles: { create: [{ roleId: plan.employeeRoleId! }] },
+                            roles: { create: roleIds.map((roleId) => ({ roleId })) },
                         },
                     });
                     await transaction.dingTalkUser.updateMany({
@@ -266,6 +300,8 @@ export class DingTalkMappingService {
                         account,
                         departmentId: primaryDepartmentId,
                         tenantCode: plan.tenantCode,
+                        roleIds,
+                        roleCodes: roleIds.map((roleId) => roleById.get(roleId)!.code),
                         activationToken,
                         activationExpiresAt,
                     });
@@ -277,6 +313,7 @@ export class DingTalkMappingService {
                     userMatchedCount: plan.preview.summary.userMatchedCount,
                     userCreateCount: credentials.length,
                     credentialCount: credentials.length,
+                    roleAssignmentCount: [...roleIdsByUser.values()].reduce((total, roleIds) => total + roleIds.length, 0),
                 });
                 return {
                     preview: plan.preview,
@@ -304,14 +341,13 @@ export class DingTalkMappingService {
         const integration = await this.prisma.dingTalkIntegration.findUnique({ where: { tenantId: context.tenantId }, select: { id: true, status: true } });
         if (!integration) throw new NotFoundException({ code: 'DINGTALK_INTEGRATION_NOT_FOUND', message: '当前租户尚未绑定钉钉企业' });
         if (integration.status !== DingTalkIntegrationStatus.ACTIVE) throw new ConflictException({ code: 'DINGTALK_INTEGRATION_NOT_ACTIVE', message: '钉钉集成未启用或连接异常' });
-        const [tenant, dingtalkDepartments, dingtalkUsers, departments, memberships, pendingInvitations, employeeRole] = await Promise.all([
+        const [tenant, dingtalkDepartments, dingtalkUsers, departments, memberships, pendingInvitations] = await Promise.all([
             this.prisma.tenant.findUniqueOrThrow({ where: { id: context.tenantId }, select: { code: true } }),
             this.prisma.dingTalkDepartment.findMany({ where: { tenantId: context.tenantId, integrationId: integration.id, isDeleted: false }, orderBy: [{ name: 'asc' }, { id: 'asc' }] }),
             this.prisma.dingTalkUser.findMany({ where: { tenantId: context.tenantId, integrationId: integration.id, isDeleted: false }, orderBy: [{ name: 'asc' }, { id: 'asc' }] }),
             this.prisma.department.findMany({ where: { tenantId: context.tenantId, status: DepartmentStatus.ACTIVE, deletedAt: null }, select: { id: true, parentId: true, name: true, normalizedName: true } }),
             this.prisma.tenantMembership.findMany({ where: { tenantId: context.tenantId, deletedAt: null }, select: { id: true, departmentId: true, displayName: true, account: true, normalizedAccount: true, status: true, user: { select: { displayName: true } } } }),
             this.prisma.tenantInvitation.findMany({ where: { tenantId: context.tenantId, status: TenantInvitationStatus.PENDING, expiresAt: { gt: new Date() } }, select: { normalizedAccount: true } }),
-            this.prisma.role.findFirst({ where: { tenantId: context.tenantId, code: EMPLOYEE_ROLE_CODE, deletedAt: null }, select: { id: true } }),
         ]);
         const departmentRecords = departments as DepartmentRecord[];
         const membershipRecords = memberships as MembershipRecord[];
@@ -449,7 +485,6 @@ export class DingTalkMappingService {
             departments: departmentRecords,
             memberships: membershipRecords,
             tenantCode: tenant.code,
-            employeeRoleId: employeeRole?.id ?? null,
         };
     }
 
@@ -469,6 +504,43 @@ export class DingTalkMappingService {
     private async requireMembership(transaction: Prisma.TransactionClient, tenantId: string, membershipId: string): Promise<void> {
         const record = await transaction.tenantMembership.findFirst({ where: { id: membershipId, tenantId, deletedAt: null }, select: { id: true, status: true } });
         if (!record) throw new NotFoundException({ code: 'TENANT_MEMBER_NOT_FOUND', message: '目标 CEES 成员不存在或不可用' });
+    }
+
+    private buildRoleAssignments(assignments: NonNullable<ApplyDingTalkMappingDto['roleAssignments']>): Map<string, string[]> {
+        const roleIdsByUser = new Map<string, string[]>();
+        for (const assignment of assignments) {
+            for (const dingtalkUserId of assignment.dingtalkUserIds) {
+                const roleIds = roleIdsByUser.get(dingtalkUserId) ?? [];
+                if (!roleIds.includes(assignment.roleId)) roleIds.push(assignment.roleId);
+                roleIdsByUser.set(dingtalkUserId, roleIds);
+            }
+        }
+        return roleIdsByUser;
+    }
+
+    private assertKnownRoleAssignments(roleIdsByUser: Map<string, string[]>, knownIds: string[]): void {
+        const known = new Set(knownIds);
+        const unknown = [...roleIdsByUser.keys()].filter((id) => !known.has(id));
+        if (unknown.length > 0) {
+            throw new BadRequestException({
+                code: 'DINGTALK_MAPPING_ROLE_ASSIGNMENT_UNKNOWN',
+                message: '角色分配项不属于当前同步结果',
+                details: { dingtalkUserIds: unknown },
+            });
+        }
+    }
+
+    private async assignRoles(
+        transaction: Prisma.TransactionClient,
+        tenantId: string,
+        membershipId: string,
+        roleIds: string[],
+    ): Promise<void> {
+        if (roleIds.length === 0) return;
+        await transaction.membershipRole.createMany({
+            data: roleIds.map((roleId) => ({ tenantId, membershipId, roleId })),
+            skipDuplicates: true,
+        });
     }
 
     private allocateAccount(account: string, occupied: Set<string>): string {

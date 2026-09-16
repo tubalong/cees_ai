@@ -100,6 +100,7 @@ export type { DingTalkMappingPreviewResponseEnvelope } from './models/DingTalkMa
 export type { DingTalkMappingResponseEnvelope } from './models/DingTalkMappingResponseEnvelope';
 export type { DingTalkMappingResult } from './models/DingTalkMappingResult';
 export type { DingTalkMappingSummary } from './models/DingTalkMappingSummary';
+export type { DingTalkRoleAssignment } from './models/DingTalkRoleAssignment';
 export type { DingTalkSyncJob } from './models/DingTalkSyncJob';
 export type { DingTalkSyncJobList } from './models/DingTalkSyncJobList';
 export type { DingTalkSyncJobListResponseEnvelope } from './models/DingTalkSyncJobListResponseEnvelope';
