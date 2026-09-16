@@ -99,6 +99,8 @@ NestJS API   = 业务事实、权限、状态与审计层（apps/api）
 
 理由：ai-service 不访问 COS（遵守「COS 长期凭证只由 NestJS 持有」）；业务任务状态、重试、幂等由 NestJS 持久化，与 Assistant turn 的状态机模式一致。MinerU 任务本身不是业务事实源。
 
+**块 6 真机接入（192.168.5.29）**：MinerU 3.4.5 以 `mineru-api` FastAPI 服务常驻宿主机（端口 8002，与 ai-service 容器的 8000 错开），NestJS Worker 经 `MINERU_API_URL` 同步调用 `POST /file_parse`（multipart 上传原始文件，`backend=pipeline`、`return_content_list=true`、`return_md=true`）。解析产物在 NestJS 侧经 TS 版 `mineru-artifact-reader` 转为中间格式（语义与 ai-service 侧 Python reader 对齐，两侧各自测试），优先取 `content_list`，缺失时回退 Markdown。错误语义：网络错误/超时/5xx 与 COS 下载失败可重试（worker 已有 3 次上限），未配置 `MINERU_API_URL`、HTTP 4xx、`PARSE_RC≠0`、无可用产物直接置 FAILED。当前为单通道串行（不做多解析器并发），解析排队但不影响上传。配置项见 `.env.example`（`MINERU_API_URL`/`MINERU_API_TIMEOUT_MS`/`MINERU_API_LANG_LIST`）。
+
 ### 3.3 中间格式
 
 业务代码不直接依赖 MinerU 原始 JSON，中间格式在内部契约中定义（见第 6 节）：`ParsedDocument` 含 `document_id`、`document_version_id`、`parser_name`、`parser_version` 与有序 `blocks`；`ParsedBlock` 含 `block_id`、`type`、`text`、`page_index`、`bbox`、`heading_path`、`source_order`、`asset_ref`。
@@ -246,7 +248,7 @@ PENDING -> PARSING -> PARSED -> INDEXING -> READY
 | 3 | NestJS `KnowledgeDocument` 状态机 + `DocumentChunk` 迁移改造（删除 embedding 字段）+ 上传触发索引任务 | 块 1 | ✅ 已落地 |
 | 4 | 真实 pgvector Gateway（独立 `cees_ai_vectors` database）+ `index/delete` 契约 | 块 2 | ✅ 已落地 |
 | 5 | 公开 Query API + `answer` 契约（LLMRouter rag role）+ citation 校验 + 索引删除 NestJS 接线 | 块 2、4 | ✅ 已落地 |
-| 6 | MinerU 真机联调（192.168.5.29，MinerU 3.4.5 + pipeline 后端已部署验证） | 块 3 | 待开始 |
+| 6 | MinerU 真机联调（192.168.5.29，MinerU 3.4.5 + pipeline 后端已部署验证） | 块 3 | ✅ 已实现，待真机验收 |
 | 7 | Assistant RAG 工具接入（阶段 B） | 块 5 | 待开始 |
 | 8 | 知识库归属锚点管理与自动授权（3.6 节：项目/部门/公司级分类、锚点人群虚拟 READER、悬挂处理） | 块 5 | 待开始 |
 
@@ -271,5 +273,5 @@ PENDING -> PARSING -> PARSED -> INDEXING -> READY
 | 3 | jest：状态机迁移、上传触发、失败重试（32 用例通过）；Prisma 迁移检查 | ✅ 完成 |
 | 4 | pytest：Gateway upsert/delete/filter；幂等与部分失败；真实 embedding 归一化与缺失 key 拒绝 | ✅ 完成 |
 | 5 | jest 38 用例（scope 折叠、查询日志、失败审计、索引删除接线）+ pytest 全绿（answer 空结果短路、rag role、citation 校验、acl_version 可选、空白名单空数组保护）；契约校验与客户端重生成 | ✅ 完成 |
-| 6 | 真机解析样例 → 索引 → 检索端到端验收 | 待验证 |
+| 6 | jest 21 用例（TS 版转换器与真机 parser 错误映射）；真机解析样例 → 索引 → 检索端到端验收 | 待真机验收 |
 | 7 | jest：工具 approve/执行前二次校验/失败语义；契约兼容检查 | 待验证 |
