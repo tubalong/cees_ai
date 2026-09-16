@@ -1,9 +1,9 @@
 # 知识库 RAG（MinerU + LlamaIndex）
 
-> 状态：分块实施中。块 1（本文档与内部契约 `index`/`retrieve`）、块 2（ai-service 内存闭环 + HTTP 路由）、块 3（NestJS 文档状态机与上传触发索引）、块 4（真实 pgvector Gateway + `index/delete`）已落地，其余按第 8 节分块计划推进。
+> 状态：分块实施中。块 1（本文档与内部契约 `index`/`retrieve`）、块 2（ai-service 内存闭环 + HTTP 路由）、块 3（NestJS 文档状态机与上传触发索引）、块 4（真实 pgvector Gateway + `index/delete`）、块 5（公开 Query API + `answer` 契约与引用校验 + 索引删除 NestJS 接线）已落地，其余按第 8 节分块计划推进。
 > 最后同步：2026-09-16
-> 内部契约版本：`0.4.0`
-> 公开契约版本：`0.23.0`（块 3 文档接口）
+> 内部契约版本：`0.5.0`
+> 公开契约版本：`0.25.0`（公开知识库查询 API）
 
 ## 1. 目标与边界
 
@@ -33,8 +33,7 @@ NestJS API   = 业务事实、权限、状态与审计层（apps/api）
 ```text
 用户提问
   -> NestJS 验证身份、计算有效访问范围（scope）
-  -> ai-service /internal/v1/knowledge/retrieve 按 scope 过滤检索
-  -> （后续块）ai-service /internal/v1/knowledge/answer 用 LLMRouter 基于证据生成答案
+  -> ai-service /internal/v1/knowledge/answer 内部先按 scope 检索，再由 rag role 基于证据生成带引用校验的答案（块 5 落地）
   -> NestJS 记录 KnowledgeQueryLog 与审计，返回客户端
 ```
 
@@ -71,9 +70,8 @@ NestJS API   = 业务事实、权限、状态与审计层（apps/api）
 
 缺失：
 
-- `DocumentChunk` 仍无读写代码（业务侧引用定位事实源，块 5 检索/引用链路上线时启用）
-- MinerU 真机服务（块 6）；解析产物到 `ParsedDocument` 的真实转换（块 3 为占位解析器，块 6 真机替换）；答案生成与引用校验（块 5）
-- 内部契约 `answer`
+- `DocumentChunk` 仍无读写代码：块 5 的引用明细直接由 ai-service 响应携带（citation 映射 document / version / chunk / page / bbox / text），暂不启用业务侧表读写
+- MinerU 真机服务（块 6）；解析产物到 `ParsedDocument` 的真实转换（块 3 为占位解析器，块 6 真机替换）
 
 ## 3. 关键决策
 
@@ -124,11 +122,12 @@ ai-service 不自行推断权限。NestJS 计算可信 scope 后随检索请求�
     "knowledge_base_ids": ["kb-1"],
     "allowed_document_ids": ["doc-1"],
     "department_ids": ["dept-2"],
-    "project_ids": ["project-3"],
-    "acl_version": "acl-2026-09-15-42"
+    "project_ids": ["project-3"]
   }
 }
 ```
+
+块 5 检索不传 `acl_version`（无部门/项目时必须显式传空数组，空白名单只放行不带该属性的节点）；该可选字段预留给后续引入 ACL 版本机制与查询缓存时使用（见 4 节）。
 
 节点 metadata 至少携带 `tenant_id`、`knowledge_base_id`、`document_id`、`document_version_id`、`visibility_scope`、`department_id`、`project_id`、`acl_version`；其中 `visibility_scope` 目前只作记录与排查用途，检索过滤由 NestJS 把三层权限折叠成的 `scope` 完成（3.6），ai-service 不直接按 `visibility_scope` 过滤。检索查询缓存（如引入）的 key 必须包含 `tenant_id + 访问者 scope + knowledge_base_id + query + acl_version + index_version`，防止跨用户缓存泄漏。
 
@@ -154,9 +153,9 @@ ai-service 不自行推断权限。NestJS 计算可信 scope 后随检索请求�
 
 **表设计现状与差距**：
 
-- `KnowledgeBaseMember` 已存在（`@@unique([tenantId, knowledgeBaseId, userId])`），跨部门共享同一知识库的余地已留；应用层已有 `READER` / `EDITOR` / `MANAGER` 枚举常量与 DTO 校验、权限排名（`knowledge.types.ts`），但数据库层 `permission` 仍是裸 String 无枚举约束；
+- `KnowledgeBaseMember` 已存在（`@@unique([tenantId, knowledgeBaseId, userId])`），跨部门共享同一知识库的余地已留；块 5 迁移已把 `KnowledgeBaseMember.permission` 在数据库层收敛为枚举（Prisma enum，对应应用层 `READER` / `EDITOR` / `MANAGER`）；
 - `DocumentVersion` 已带 `visibilityScope` + `departmentId` / `projectId`；
-- `KnowledgeBase` 自身尚无 `departmentId` / `projectId` 锚点字段：块 5 公开 Query API 前需补 migration，把归属锚点落到 `KnowledgeBase`，并把 `KnowledgeBaseMember.permission` 在数据库层收敛为枚举（Prisma enum，对应应用层 `READER` / `EDITOR` / `MANAGER`）。
+- `KnowledgeBase` 的 `departmentId` / `projectId` 锚点字段已由块 5 迁移补上（可选，二选一，都空即公司级）；"项目成员自动获得项目知识库"的自动授权仍暂缓，当前以成员表逐个授权。
 
 ## 4. 索引流程与状态机
 
@@ -175,17 +174,17 @@ PENDING -> PARSING -> PARSED -> INDEXING -> READY
 - 解析器经 `KNOWLEDGE_DOCUMENT_PARSER` 抽象注入，块 3 为 MinerU 占位实现（抛 `MINERU_NOT_CONFIGURED`），块 6 真机替换；
 - 失败按 retryable 语义处理：可重试错误回 `PENDING` 并递增 `retryCount`，达到上限（默认 3，`KNOWLEDGE_INDEX_MAX_RETRIES`）置 `FAILED`；不可重试错误直接 `FAILED`；`FAILED` 可由用户手动重试；
 - 可见范围（`visibilityScope`）是版本级属性，存储在 `DocumentVersion`，索引请求从当前处理版本读取；
-- `acl_version` 当前由版本 ID 派生（`acl-{version.id 前 8 位}`），块 5 引入真正的 ACL 版本机制；
+- `acl_version` 仍由版本 ID 派生（`acl-{version.id 前 8 位}`）写入节点 metadata，但**不引入 ACL 版本机制**：检索 scope 的 `acl_version` 为可选字段，NestJS 检索时不传（权限由实时 scope 折叠保证），真正的 ACL 版本机制推迟到引入检索查询缓存时再设计；
 - 索引请求三元组可通过环境变量覆盖：`KNOWLEDGE_CHUNKING_VERSION`（默认 `knowledge-chunking-v1`）、`KNOWLEDGE_EMBEDDING_PROFILE`（默认 `deterministic`）、`KNOWLEDGE_INDEX_VERSION`（默认 `knowledge-index-v1`）；
 - 幂等键 = `(document_id, document_version_id, chunking_version, embedding_profile, index_version)`，同一幂等键重复提交不产生重复节点；ai-service 的 index 是幂等 upsert，替换判定按 `(tenant_id, document_version_id, index_version)` 三元组执行，`chunking_version` / `embedding_profile` 作为索引身份写入节点 metadata，变更 profile 或切分策略必须换新 `index_version`（见 3.4）。块 4 起采用「先写新后删旧」语义：新节点先落地，再删除三元组内的旧行（含同 node_id 旧内容行），读请求只见全旧或全新，不存在先删后写的空桶窗口；add 失败时旧行原样保留，清理失败最坏出现重复行，幂等重试后收敛；
-- `index/delete` 契约与 ai-service 端已实现（块 4），删除指定三元组的派生索引；NestJS 接线（文档删除、新版本上线替换旧版本、知识库删除时清理派生索引）尚未完成，随块 5 公开 Query API 一起落地。
+- `index/delete` 契约与 ai-service 端已实现（块 4），删除指定三元组的派生索引；NestJS 接线随块 5 落地：新版本上线后 fire-and-forget 清理旧版本索引、知识库删除后批量清理其全部文档版本索引，清理失败只记日志不阻塞业务，幂等重试后收敛（文档删除功能本身尚未提供，上线后走同一入口）。
 
 ## 5. 检索与答案
 
 `retrieve` 与 `answer` 分开：
 
 - `retrieve` 只检索、只返回节点/分数/来源 metadata，不调用 LLM；
-- `answer`（后续块）内部先 retrieve，再用 `LLMRouter`（`rag` role）基于证据生成结构化答案：
+- `answer`（块 5 已落地）内部先 retrieve，再用 `LLMRouter`（`rag` role）基于证据生成结构化答案：
 
 ```json
 {
@@ -196,8 +195,8 @@ PENDING -> PARSING -> PARSED -> INDEXING -> READY
 ```
 
 - 模型只输出 `citation_ids`，服务端把 ID 映射回真实来源（document / version / chunk / page / bbox / text），不允许模型编造文档 ID、页码或 URL；
-- 证据不足时返回 `grounded=false`、`insufficient_evidence=true`，不自由发挥；
-- `KnowledgeQueryLog` 由 NestJS 记录，属于业务审计事实。
+- 证据不足时返回 `grounded=false`、`insufficient_evidence=true`，不自由发挥；检索无结果时短路不调用模型；基于分数阈值的拒答延后到块 6；
+- 公开侧为同步 REST：`POST /knowledge-bases/{id}/query`（流式留到块 7 评估）；NestJS 折叠三层权限为 scope、调用 `answer`，成功写入 `KnowledgeQueryLog`（含知识库、grounded、耗时与 Token 用量）与审计，ai-service 不可用时统一映射 `503 KNOWLEDGE_QUERY_SERVICE_UNAVAILABLE` 并写失败审计；
 
 ## 6. 内部契约
 
@@ -208,14 +207,14 @@ PENDING -> PARSING -> PARSED -> INDEXING -> READY
 | `POST /internal/v1/knowledge/index` | 接收 ParsedDocument，切分、Embedding、幂等写入向量库 | 已实现（块 2） |
 | `POST /internal/v1/knowledge/retrieve` | 按可信 scope 检索，返回节点与来源 metadata | 已实现（块 2） |
 | `POST /internal/v1/knowledge/index/delete` | 删除指定文档版本 + 索引版本的派生索引 | 已实现（块 4） |
-| `POST /internal/v1/knowledge/answer` | retrieve + LLMRouter 生成带引用校验的答案 | 块 5 定义 |
+| `POST /internal/v1/knowledge/answer` | retrieve + LLMRouter 生成带引用校验的答案 | 已实现（块 5） |
 
 ## 7. 与后续公开 API 的关系
 
-公开知识库问答 API（如 `POST /knowledge-bases/{id}/query`）与 Assistant RAG 工具都属于 NestJS 公开侧，共用上述内部契约：
+公开知识库问答 API（`POST /knowledge-bases/{id}/query`，块 5 已落地）与 Assistant RAG 工具都属于 NestJS 公开侧，共用上述内部契约：
 
-- 阶段 A：先做独立公开 Query API，跑通「解析产物 → 索引 → 检索 → 引用」闭环；
-- 阶段 B：把 RAG 检索注册为 Assistant 工具（`knowledge_base.query` 权限码已存在），复用工具执行前二次校验、幂等与脱敏链路。
+- 阶段 A：独立公开 Query API 已跑通「解析产物 → 索引 → 检索 → 引用」闭环（块 5 落地）；
+- 阶段 B：把 RAG 检索注册为 Assistant 工具（`knowledge_base.query` 权限码已存在），复用工具执行前二次校验、幂等与脱敏链路（块 7）。
 
 ## 8. 分块实施计划
 
@@ -225,7 +224,7 @@ PENDING -> PARSING -> PARSED -> INDEXING -> READY
 | 2 | ai-service 内存闭环（`parsed_models`、`mineru_artifact_reader`、`node_builder`、`EmbeddingRouter`、内存 VectorStore、`ingestion`/`retrieval`、HTTP 路由 `index`/`retrieve`），pytest 覆盖 | 块 1 | ✅ 已落地 |
 | 3 | NestJS `KnowledgeDocument` 状态机 + `DocumentChunk` 迁移改造（删除 embedding 字段）+ 上传触发索引任务 | 块 1 | ✅ 已落地 |
 | 4 | 真实 pgvector Gateway（独立 `cees_ai_vectors` database）+ `index/delete` 契约 | 块 2 | ✅ 已落地 |
-| 5 | 公开 Query API + `answer` 契约（LLMRouter rag role）+ citation 校验 | 块 2、4 | 待开始 |
+| 5 | 公开 Query API + `answer` 契约（LLMRouter rag role）+ citation 校验 + 索引删除 NestJS 接线 | 块 2、4 | ✅ 已落地 |
 | 6 | MinerU 真机联调（192.168.5.29，pip 版部署中） | 块 3 | 待开始 |
 | 7 | Assistant RAG 工具接入（阶段 B） | 块 5 | 待开始 |
 
@@ -249,6 +248,6 @@ PENDING -> PARSING -> PARSED -> INDEXING -> READY
 | 2 | ✅ pytest 全绿：解析产物转换、切分稳定性、重复索引幂等、租户与 scope 过滤、index_version 隔离、文档版本删除；ruff 与契约漂移测试通过 | ✅ 完成 |
 | 3 | jest：状态机迁移、上传触发、失败重试（32 用例通过）；Prisma 迁移检查 | ✅ 完成 |
 | 4 | pytest：Gateway upsert/delete/filter；幂等与部分失败；真实 embedding 归一化与缺失 key 拒绝 | ✅ 完成 |
-| 5 | jest + pytest：citation ID 校验、无证据拒答、查询日志写入 | 待验证 |
+| 5 | jest 38 用例（scope 折叠、查询日志、失败审计、索引删除接线）+ pytest 全绿（answer 空结果短路、rag role、citation 校验、acl_version 可选、空白名单空数组保护）；契约校验与客户端重生成 | ✅ 完成 |
 | 6 | 真机解析样例 → 索引 → 检索端到端验收 | 待验证 |
 | 7 | jest：工具 approve/执行前二次校验/失败语义；契约兼容检查 | 待验证 |

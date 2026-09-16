@@ -1,6 +1,6 @@
 # 知识库管理 API
 
-公开契约版本：`0.23.0`。所有接口使用租户 Access Token，路径基于 `/api/v1`。
+公开契约版本：`0.25.0`。所有接口使用租户 Access Token，路径基于 `/api/v1`。
 
 ## 知识库
 
@@ -10,6 +10,7 @@ POST   /knowledge-bases
 GET    /knowledge-bases/{knowledgeBaseId}
 PATCH  /knowledge-bases/{knowledgeBaseId}
 DELETE /knowledge-bases/{knowledgeBaseId}?version={version}
+POST   /knowledge-bases/{knowledgeBaseId}/query
 ```
 
 创建知识库时，当前登录用户自动获得 `MANAGER`。列表普通成员只返回自己加入的知识库；`knowledge_base.manage_all` 可以查询当前租户全部知识库。
@@ -58,6 +59,50 @@ POST /knowledge-bases/{knowledgeBaseId}/documents/{documentId}/retry
 
 文档创建后立即进入后台处理队列，状态机为 `PENDING -> PARSING -> PARSED -> INDEXING -> READY`，失败置 `FAILED`。可重试错误自动回 `PENDING` 重试，达到上限（默认 3 次）后置 `FAILED`，此时可调用 retry 接口手动重试。文档列表返回当前版本的可见范围、版本号与最新处理状态。
 
+## 知识库查询
+
+```text
+POST /knowledge-bases/{knowledgeBaseId}/query
+```
+
+需要 `knowledge_base.query` 权限，请求示例：
+
+```json
+{
+  "query": "项目延期怎么处理？",
+  "indexVersion": "knowledge-index-v1"
+}
+```
+
+`query` 必填（1 到 4096 字符）；`indexVersion` 可选，不传时使用服务端默认索引版本（与索引写入侧一致）。
+
+返回 `Envelope`（`{ success, data, requestId }`），`data` 为：
+
+```json
+{
+  "answer": "延期超过两周需要升级到项目委员会。",
+  "grounded": true,
+  "insufficientEvidence": false,
+  "citations": [
+    {
+      "citationId": "S1",
+      "documentId": "40000000-0000-0000-0000-000000000001",
+      "documentVersionId": "50000000-0000-0000-0000-000000000001",
+      "chunkId": "chunk-1",
+      "text": "项目延期超过两周时需要升级到项目委员会。",
+      "score": 0.92,
+      "pageIndex": 3,
+      "bbox": [10.2, 30.5, 200.0, 45.1]
+    }
+  ]
+}
+```
+
+- 答案只依据知识库内检索到的证据生成；检索无结果或证据不足时 `answer` 为空、`grounded=false`、`insufficientEvidence=true`，模型不会凭空作答；
+- `citations` 是被答案引用的证据片段来源，`citationId` 对应答案正文中的引用编号；
+- 服务端同步写入 `KnowledgeQueryLog`（问题、答案、grounded、耗时与 Token 用量）与审计记录；
+- ai-service 暂不可用时返回 `503 KNOWLEDGE_QUERY_SERVICE_UNAVAILABLE`，本次提问记入失败审计，可稍后重试。
+
 ## 请求字段
 
 | 字段 | 适用接口 | 说明 |
@@ -73,6 +118,8 @@ POST /knowledge-bases/{knowledgeBaseId}/documents/{documentId}/retry
 | `visibilityScope` | 文档创建、新版本 | `PRIVATE`、`DEPARTMENT`、`PROJECT` 或 `TENANT` |
 | `departmentId` | 文档创建、新版本 | `DEPARTMENT` 时必填，服务端校验属于当前租户 |
 | `projectId` | 文档创建、新版本 | `PROJECT` 时必填，服务端校验属于当前租户 |
+| `query` | 知识库查询 | 提问内容，1 到 4096 字符 |
+| `indexVersion` | 知识库查询 | 可选，指定检索的索引版本，不传时用服务端默认版本 |
 
 ## 返回字段
 
@@ -82,7 +129,7 @@ POST /knowledge-bases/{knowledgeBaseId}/documents/{documentId}/retry
 
 `KnowledgeDocument` 包含 `id`、`tenantId`、`knowledgeBaseId`、`fileObjectId`、`name`、`status`（`PENDING`/`PARSING`/`PARSED`/`INDEXING`/`READY`/`FAILED`）、`currentVersionId`、`versionNumber`、`retryCount`、`lastError`、`visibilityScope`、`departmentId`、`projectId`、`createdBy`、`updatedBy`、`version`、`createdAt` 和 `updatedAt`；`versionNumber` 与可见范围来自当前处理版本。
 
-所有列表返回 `{ items, nextCursor }`；没有下一页时 `nextCursor` 为 `null`。删除成功返回 HTTP `204`，不返回 JSON 数据。
+所有列表返回 `{ items, nextCursor }`；没有下一页时 `nextCursor` 为 `null`。删除成功返回 HTTP `204`，不返回 JSON 数据。查询接口返回 `Envelope`，`data` 为 `KnowledgeQuery`：`answer`、`grounded`、`insufficientEvidence` 与 `citations`（`citationId`/`documentId`/`documentVersionId`/`chunkId`/`text` 必填，`score`/`pageIndex`/`bbox` 可选）。
 
 ## 权限和常见错误
 
@@ -100,6 +147,7 @@ POST /knowledge-bases/{knowledgeBaseId}/documents/{documentId}/retry
 | `KNOWLEDGE_DOCUMENT_SCOPE_INVALID` | 可见范围缺少部门/项目，或部门/项目不属于当前租户 |
 | `KNOWLEDGE_FILE_OBJECT_NOT_FOUND` | 文件不存在、非当前租户或已删除 |
 | `KNOWLEDGE_FILE_OBJECT_IN_USE` | 文件已作为其他文档版本的内容源 |
+| `KNOWLEDGE_QUERY_SERVICE_UNAVAILABLE` | AI 服务暂不可用，本次查询已记入失败审计，可稍后重试 |
 | `PAGINATION_CURSOR_INVALID` | 游标无效或超出当前可见范围 |
 
 详细业务边界见 [知识库管理](../product/knowledge-base-management.md)，完整字段约束以 `packages/contracts/openapi/openapi.yaml` 为准。

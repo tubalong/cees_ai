@@ -384,6 +384,17 @@ GET    /api/v1/projects/{projectId}/tasks/{taskId}/activities
 - Prisma 新增 `0023_document_docx_export` 迁移：`managed_documents` 增加 `document_spec` JSONB 列，保存 ai-service compose 返回的结构化 DocumentSpec 作为导出事实源；
 - 内部链路：NestJS 网关 `renderDocumentDocx` 调用 `POST /internal/v1/documents/render-docx` 确定性渲染（不调用 LLM）；`generateDocumentDocx`（compose+render）仅透传保留，业务不调用以避免重复 LLM 生成；
 
+## 知识库查询 API 说明（2026-09-16，契约 0.25.0）
+
+- 公开契约版本由 `0.24.0` 提升为 `0.25.0`，兼容新增 `POST /knowledge-bases/{knowledgeBaseId}/query`；
+- 请求 `query`（1 到 4096 字符）必填，`indexVersion` 可选（不传时用服务端默认索引版本，与写入侧一致）；
+- 权限要求 `knowledge_base.query`（权限目录已存在）；响应 `Envelope.data` 为 `KnowledgeQuery`（`answer`/`grounded`/`insufficientEvidence`/`citations`，citation 含文档/版本/块/页码/位置与文本）；
+- 答案只依据知识库证据生成，证据不足明确拒答（`grounded=false`、`insufficientEvidence=true`）；ai-service 暂不可用时返回 `503 KNOWLEDGE_QUERY_SERVICE_UNAVAILABLE`；
+- 每次提问同步写入 `KnowledgeQueryLog`（问题、答案、grounded、耗时与 Token 用量）与审计记录；
+- ai-service 内部契约兼容新增 `POST /internal/v1/knowledge/answer`（retrieve + rag role 答案生成，citation ID 校验，空结果短路）；检索 scope 的 `acl_version` 改为可选，NestJS 检索不传（权限由实时 scope 折叠保证），ACL 版本机制推迟到引入查询缓存时；
+- Prisma 新增 `0028_knowledge_query_api` 迁移：知识库锚点字段、成员权限枚举、`KnowledgeQueryLog` 扩展；TypeScript 客户端已重新生成；
+- 详细业务边界见 [知识库管理 API](knowledge-base-api.md)，架构说明见 [知识库 RAG](../architecture/knowledge-rag.md)。
+
 ## 契约事实源
 
 - `packages/contracts/openapi/openapi.yaml` 是 NestJS 公开 API 的事实源。

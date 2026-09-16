@@ -1,8 +1,8 @@
 # 知识库管理
 
-> 状态：第二阶段（文档上传与处理状态机）已落地
-> 最后同步：2026-09-15
-> 公开契约版本：`0.23.0`
+> 状态：第二阶段（文档上传与处理状态机）、第三阶段（公开知识库查询）已落地
+> 最后同步：2026-09-16
+> 公开契约版本：`0.25.0`
 
 ## 1. 阶段范围
 
@@ -25,7 +25,14 @@
 - 失败自动重试（默认上限 3 次）与手动重试；
 - 后台索引任务由 NestJS Worker 轮询推进，上传/新版本/重试后即时触发。
 
-文档解析真机接入、Embedding、向量检索和 RAG 仍在后续阶段；`DocumentChunk`、`KnowledgeQueryLog` 只是后续阶段的数据库基础，不能据此认为对应接口已经可用。
+第三阶段落地公开知识库查询：
+
+- 同步 REST 接口按知识库内容回答问题（`knowledge_base.query` 权限）；
+- 服务端把组织数据范围、知识库成员、文档可见范围折叠成检索 scope，过滤在向量检索阶段完成；
+- 答案只依据知识库内证据生成，证据不足明确拒答；引用明细（文档/版本/块/页码/位置）随响应返回；
+- 每次提问写入 `KnowledgeQueryLog` 与审计；ai-service 暂不可用时返回 `503` 并记入失败审计。
+
+文档解析真机接入（MinerU）仍在后续阶段；`DocumentChunk` 表读写尚未启用，当前引用明细直接由 ai-service 响应携带。
 
 ## 2. 知识库可见范围
 
@@ -67,6 +74,7 @@
 | `POST /knowledge-bases/{knowledgeBaseId}/documents` | 关联文件对象创建文档，进入处理队列 | `knowledge_base.document.manage` + EDITOR |
 | `POST /knowledge-bases/{knowledgeBaseId}/documents/{documentId}/versions` | 上传新版本，重新进入处理队列 | `knowledge_base.document.manage` + EDITOR |
 | `POST /knowledge-bases/{knowledgeBaseId}/documents/{documentId}/retry` | 重试处理失败的文档 | `knowledge_base.document.manage` + EDITOR |
+| `POST /knowledge-bases/{knowledgeBaseId}/query` | 按知识库内容回答问题，返回带引用的答案 | `knowledge_base.query` + 知识库可见范围 |
 
 ### 4.1 创建示例
 
@@ -114,6 +122,7 @@
 | `400` | `KNOWLEDGE_DOCUMENT_SCOPE_INVALID` | 可见范围缺少部门/项目，或部门/项目不属于当前租户 |
 | `404` | `KNOWLEDGE_FILE_OBJECT_NOT_FOUND` | 文件不存在、非当前租户或已删除 |
 | `409` | `KNOWLEDGE_FILE_OBJECT_IN_USE` | 文件已作为其他文档版本的内容源 |
+| `503` | `KNOWLEDGE_QUERY_SERVICE_UNAVAILABLE` | AI 服务暂不可用，本次查询已记入失败审计，可稍后重试 |
 
 ## 6. 审计与数据模型
 
@@ -132,7 +141,8 @@
 - `KNOWLEDGE_DOCUMENT_VERSION_CREATED`；
 - `KNOWLEDGE_DOCUMENT_RETRY_REQUESTED`；
 - `KNOWLEDGE_DOCUMENT_INDEXED`（后台任务，无操作者）；
-- `KNOWLEDGE_DOCUMENT_PROCESS_FAILED`（后台任务，无操作者）。
+- `KNOWLEDGE_DOCUMENT_PROCESS_FAILED`（后台任务，无操作者）；
+- `KNOWLEDGE_BASE_QUERIED`（知识库查询成功；失败时 outcome 为 `FAILURE` 并携带错误码）。
 
 当前阶段使用以下模型：
 
@@ -145,7 +155,7 @@ KnowledgeBase
 
 `KnowledgeBaseMember` 以 `tenantId + knowledgeBaseId + userId` 保证成员关系唯一。知识库删除采用软删除；成员关系当前没有 `deletedAt` 字段，移除采用硬删除。
 
-数据库迁移为 `apps/api/prisma/migrations/0015_knowledge_base_management/migration.sql`（第一阶段）与 `0026_knowledge_document_indexing/migration.sql`（第二阶段：处理状态机字段、可见范围下沉 `DocumentVersion`、删除 `DocumentChunk.embedding`）。
+数据库迁移为 `apps/api/prisma/migrations/0015_knowledge_base_management/migration.sql`（第一阶段）、`0026_knowledge_document_indexing/migration.sql`（第二阶段：处理状态机字段、可见范围下沉 `DocumentVersion`、删除 `DocumentChunk.embedding`）与 `0028_knowledge_query_api/migration.sql`（第三阶段：知识库锚点字段、成员权限枚举、`KnowledgeQueryLog` 扩展）。
 
 ## 7. 后续阶段
 
@@ -153,6 +163,6 @@ KnowledgeBase
 
 1. 文档解析真机接入（MinerU，替换占位实现）；
 2. 文档切片与解析产物转换；
-3. Embedding、向量索引和权限过滤后的 RAG 查询；
-4. 文档删除、配额、病毒扫描与后台任务监控。
+3. 文档删除、配额、病毒扫描与后台任务监控；
+4. 检索分数阈值拒答（块 6）、Assistant RAG 工具接入（块 7）。
 
