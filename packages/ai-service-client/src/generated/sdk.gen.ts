@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, ServerSentEventsResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { CompactChatData, CompactChatErrors, CompactChatResponses, ComposeDocumentData, ComposeDocumentErrors, ComposeDocumentResponses, DeleteKnowledgeIndexData, DeleteKnowledgeIndexErrors, DeleteKnowledgeIndexResponses, EditImageData, EditImageErrors, EditImageResponses, ExtractFileData, ExtractFileErrors, ExtractFileResponses, GenerateDocumentDocxData, GenerateDocumentDocxErrors, GenerateDocumentDocxResponses, GenerateImageData, GenerateImageErrors, GenerateImageResponses, GetHealthData, GetHealthResponses, GetReadinessData, GetReadinessErrors, GetReadinessResponses, IndexKnowledgeDocumentData, IndexKnowledgeDocumentErrors, IndexKnowledgeDocumentResponses, InvokeChatData, InvokeChatErrors, InvokeChatResponses, InvokeLlmData, InvokeLlmErrors, InvokeLlmResponses, PreviewImageData, PreviewImageErrors, PreviewImageResponses, RenderDocumentDocxData, RenderDocumentDocxErrors, RenderDocumentDocxResponses, RetrieveKnowledgeData, RetrieveKnowledgeErrors, RetrieveKnowledgeResponses, StreamChatData, StreamChatErrors, StreamChatResponse, StreamChatResponses, StreamChatToolTurnData, StreamChatToolTurnErrors, StreamChatToolTurnResponse, StreamChatToolTurnResponses, StreamLlmData, StreamLlmErrors, StreamLlmResponse, StreamLlmResponses } from './types.gen';
+import type { AnswerKnowledgeData, AnswerKnowledgeErrors, AnswerKnowledgeResponses, CompactChatData, CompactChatErrors, CompactChatResponses, ComposeDocumentData, ComposeDocumentErrors, ComposeDocumentResponses, DeleteKnowledgeIndexData, DeleteKnowledgeIndexErrors, DeleteKnowledgeIndexResponses, EditImageData, EditImageErrors, EditImageResponses, ExtractFileData, ExtractFileErrors, ExtractFileResponses, GenerateDocumentDocxData, GenerateDocumentDocxErrors, GenerateDocumentDocxResponses, GenerateImageData, GenerateImageErrors, GenerateImageResponses, GetHealthData, GetHealthResponses, GetReadinessData, GetReadinessErrors, GetReadinessResponses, IndexKnowledgeDocumentData, IndexKnowledgeDocumentErrors, IndexKnowledgeDocumentResponses, InvokeChatData, InvokeChatErrors, InvokeChatResponses, InvokeLlmData, InvokeLlmErrors, InvokeLlmResponses, PreviewImageData, PreviewImageErrors, PreviewImageResponses, RenderDocumentDocxData, RenderDocumentDocxErrors, RenderDocumentDocxResponses, RetrieveKnowledgeData, RetrieveKnowledgeErrors, RetrieveKnowledgeResponses, StreamChatData, StreamChatErrors, StreamChatResponse, StreamChatResponses, StreamChatToolTurnData, StreamChatToolTurnErrors, StreamChatToolTurnResponse, StreamChatToolTurnResponses, StreamLlmData, StreamLlmErrors, StreamLlmResponse, StreamLlmResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -296,6 +296,27 @@ export const deleteKnowledgeIndex = <ThrowOnError extends boolean = false>(optio
 export const retrieveKnowledge = <ThrowOnError extends boolean = false>(options: Options<RetrieveKnowledgeData, ThrowOnError>): RequestResult<RetrieveKnowledgeResponses, RetrieveKnowledgeErrors, ThrowOnError> => (options.client ?? client).post<RetrieveKnowledgeResponses, RetrieveKnowledgeErrors, ThrowOnError>({
     security: [{ name: 'X-AI-Internal-Token', type: 'apiKey' }],
     url: '/internal/v1/knowledge/retrieve',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Answer a question grounded in retrieved knowledge chunks
+ *
+ * Retrieves chunks within the trusted scope, then generates a grounded
+ * answer with the rag role. An empty retrieval short-circuits without an
+ * LLM call and returns insufficient_evidence=true. The model only outputs
+ * citation ids (S1..Sn assigned to the retrieved chunks in order); the
+ * service maps them back to real chunk origins, so the model can never
+ * fabricate document ids, page numbers or urls.
+ *
+ */
+export const answerKnowledge = <ThrowOnError extends boolean = false>(options: Options<AnswerKnowledgeData, ThrowOnError>): RequestResult<AnswerKnowledgeResponses, AnswerKnowledgeErrors, ThrowOnError> => (options.client ?? client).post<AnswerKnowledgeResponses, AnswerKnowledgeErrors, ThrowOnError>({
+    security: [{ name: 'X-AI-Internal-Token', type: 'apiKey' }],
+    url: '/internal/v1/knowledge/answer',
     ...options,
     headers: {
         'Content-Type': 'application/json',

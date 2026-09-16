@@ -139,6 +139,10 @@ export type { KnowledgeDocumentListResponseEnvelope } from './models/KnowledgeDo
 export type { KnowledgeDocumentResponseEnvelope } from './models/KnowledgeDocumentResponseEnvelope';
 export { KnowledgeDocumentStatus } from './models/KnowledgeDocumentStatus';
 export { KnowledgeDocumentVisibilityScope } from './models/KnowledgeDocumentVisibilityScope';
+export type { KnowledgeQueryCitation } from './models/KnowledgeQueryCitation';
+export type { KnowledgeQueryRequest } from './models/KnowledgeQueryRequest';
+export type { KnowledgeQueryResponse } from './models/KnowledgeQueryResponse';
+export type { KnowledgeQueryResponseEnvelope } from './models/KnowledgeQueryResponseEnvelope';
 export type { LoginRequest } from './models/LoginRequest';
 export type { LoginResponse } from './models/LoginResponse';
 export type { LoginResponseEnvelope } from './models/LoginResponseEnvelope';
