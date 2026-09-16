@@ -283,6 +283,7 @@ export type { PlatformTenantProvisioningResponse } from './models/PlatformTenant
 export type { PlatformTenantProvisioningResponseEnvelope } from './models/PlatformTenantProvisioningResponseEnvelope';
 export type { PlatformTenantResponseEnvelope } from './models/PlatformTenantResponseEnvelope';
 export type { PreviewDingTalkMappingRequest } from './models/PreviewDingTalkMappingRequest';
+export type { ProjectCode } from './models/ProjectCode';
 export type { ProjectList } from './models/ProjectList';
 export type { ProjectListResponseEnvelope } from './models/ProjectListResponseEnvelope';
 export type { ProjectMemberList } from './models/ProjectMemberList';

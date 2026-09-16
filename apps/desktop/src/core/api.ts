@@ -1288,19 +1288,22 @@ export type ProjectMemberRole = 'OWNER' | 'MANAGER' | 'MEMBER';
 
 export interface ProjectSummary {
     id: string;
+    /** 服务端按企业时区年份自动分配，格式 PRJ-<年>-<序号>；创建后不可修改。 */
     code: string;
     name: string;
     description?: string | null;
     departmentId?: string | null;
     status: ProjectStatus;
-    ownerMembershipId?: string | null;
     owner?: { membershipId?: string; account?: string; displayName?: string } | null;
-    myRole?: ProjectMemberRole | null;
+    /** project.manage_all 跨项目访问时可能为 null。 */
+    currentMemberRole?: ProjectMemberRole | null;
     memberCount?: number;
     taskCount?: number;
-    startsAt?: string | null;
-    endsAt?: string | null;
+    /** 首次启动时间：系统在项目从 PLANNING 转为 ACTIVE 时写入。 */
+    startedAt?: string | null;
     completedAt?: string | null;
+    /** 关闭时间：项目被取消或归档时系统写入。 */
+    closedAt?: string | null;
     completionSummary?: string | null;
     createdAt?: string;
     updatedAt?: string;
@@ -1308,16 +1311,18 @@ export interface ProjectSummary {
 }
 
 export interface CreateProjectInput {
-    code: string;
     name: string;
     description?: string;
     departmentId?: string | null;
     ownerMembershipId?: string;
-    startsAt?: string | null;
-    endsAt?: string | null;
+    /** 初始项目成员；负责人由服务端自动加入，需要 project.member.manage 权限。 */
+    memberMembershipIds?: string[];
 }
 
-export interface UpdateProjectInput extends Partial<CreateProjectInput> {
+export interface UpdateProjectInput {
+    name?: string;
+    description?: string | null;
+    departmentId?: string | null;
     version: number;
 }
 
@@ -1353,13 +1358,11 @@ export async function createProject(input: CreateProjectInput): Promise<ProjectS
     return authorizedRequest<ProjectSummary>('v1/projects', {
         method: 'POST',
         body: JSON.stringify({
-            code: input.code.trim(),
             name: input.name.trim(),
             ...(input.description?.trim() ? { description: input.description.trim() } : {}),
             ...(input.departmentId ? { departmentId: input.departmentId } : {}),
             ...(input.ownerMembershipId ? { ownerMembershipId: input.ownerMembershipId } : {}),
-            ...(input.startsAt ? { startsAt: input.startsAt } : {}),
-            ...(input.endsAt ? { endsAt: input.endsAt } : {}),
+            ...(input.memberMembershipIds?.length ? { memberMembershipIds: input.memberMembershipIds } : {}),
         }),
     });
 }
@@ -1372,12 +1375,9 @@ export async function updateProject(projectId: string, input: UpdateProjectInput
     return authorizedRequest<ProjectSummary>(`v1/projects/${encodeURIComponent(projectId)}`, {
         method: 'PATCH',
         body: JSON.stringify({
-            ...(input.code?.trim() ? { code: input.code.trim() } : {}),
             ...(input.name?.trim() ? { name: input.name.trim() } : {}),
             ...(input.description !== undefined ? { description: input.description?.trim() || null } : {}),
             ...(input.departmentId !== undefined ? { departmentId: input.departmentId } : {}),
-            ...(input.startsAt !== undefined ? { startsAt: input.startsAt } : {}),
-            ...(input.endsAt !== undefined ? { endsAt: input.endsAt } : {}),
             version: input.version,
         }),
     });

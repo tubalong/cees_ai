@@ -7,6 +7,8 @@ import {
     ProjectStatus,
     TaskStatus,
 } from '@prisma/client';
+import { randomUUID } from 'node:crypto';
+import { calendarYear, DEFAULT_TENANT_TIMEZONE } from '../common/tenant-time';
 import { PrismaService } from '../database/prisma.service';
 import { RequestTenantContext, TenantContext } from '../tenant/tenant-context';
 import { lockProjectForUpdate } from './project-transaction-lock';
@@ -59,9 +61,9 @@ const projectSelect = {
     name: true,
     description: true,
     status: true,
-    startsAt: true,
-    endsAt: true,
+    startedAt: true,
     completedAt: true,
+    closedAt: true,
     completedByMembershipId: true,
     completionSummary: true,
     createdAt: true,
@@ -152,15 +154,25 @@ export class ProjectService {
         if (ownerMembershipId !== context.membershipId && !this.canManageAll(context)) {
             throw new ForbiddenException({ code: 'PROJECT_OWNER_ASSIGN_DENIED', message: '只有项目全局管理员可以指定其他负责人' });
         }
+        const memberMembershipIds = [...new Set(input.memberMembershipIds ?? [])]
+            .filter((membershipId) => membershipId !== ownerMembershipId);
+        if (memberMembershipIds.length > 0 && !context.permissions.includes('project.member.manage')) {
+            throw new ForbiddenException({
+                code: 'PROJECT_MEMBER_MANAGE_DENIED',
+                message: '创建项目时指定初始成员需要 project.member.manage 权限',
+            });
+        }
         await Promise.all([
             this.requireActiveMembership(context.tenantId, ownerMembershipId),
             this.requireDepartment(context.tenantId, input.departmentId),
         ]);
-        const dates = normalizeAndValidateDates(input.startsAt, input.endsAt);
-        const code = normalizeCode(input.code);
+        await Promise.all(memberMembershipIds.map((membershipId) =>
+            this.requireActiveMembership(context.tenantId, membershipId)));
+        const name = normalizeRequiredText(input.name);
         let projectId: string;
         try {
             projectId = await this.prisma.$transaction(async (transaction) => {
+                const code = await this.allocateProjectCode(context.tenantId, transaction);
                 const project = await transaction.project.create({
                     data: {
                         tenantId: context.tenantId,
@@ -168,31 +180,30 @@ export class ProjectService {
                         normalizedCode: code.toLocaleLowerCase(),
                         departmentId: input.departmentId ?? null,
                         ownerMembershipId,
-                        name: normalizeRequiredText(input.name),
+                        name,
                         description: normalizeOptionalText(input.description),
-                        startsAt: dates.startsAt,
-                        endsAt: dates.endsAt,
                         createdBy: context.userId,
                         updatedBy: context.userId,
                     },
                     select: { id: true },
                 });
-                await transaction.projectMember.create({
-                    data: {
+                await transaction.projectMember.createMany({
+                    data: [ownerMembershipId, ...memberMembershipIds].map((membershipId) => ({
                         tenantId: context.tenantId,
                         projectId: project.id,
-                        membershipId: ownerMembershipId,
-                        role: ProjectMemberRole.OWNER,
+                        membershipId,
+                        role: membershipId === ownerMembershipId ? ProjectMemberRole.OWNER : ProjectMemberRole.MEMBER,
                         createdBy: context.userId,
                         updatedBy: context.userId,
-                    },
+                    })),
                 });
                 await transaction.auditLog.create({
                     data: auditData(context, 'PROJECT_CREATED', project.id, {
                         code,
-                        name: normalizeRequiredText(input.name),
+                        name,
                         ownerMembershipId,
                         departmentId: input.departmentId ?? null,
+                        memberMembershipIds,
                     }),
                 });
                 return project.id;
@@ -209,47 +220,31 @@ export class ProjectService {
         if (!hasProjectChanges(input)) {
             throw new BadRequestException({ code: 'PROJECT_UPDATE_EMPTY', message: '至少提供一个需要修改的字段' });
         }
-        try {
-            await this.prisma.$transaction(async (transaction) => {
-                await lockProjectForUpdate(transaction, context.tenantId, projectId);
-                const project = await this.requireProject(context, projectId, transaction);
-                this.assertManager(context, project);
-                this.assertEditable(project);
-                await this.requireDepartment(context.tenantId, input.departmentId, transaction);
-                const dates = normalizeAndValidateDates(
-                    input.startsAt === undefined ? project.startsAt : input.startsAt,
-                    input.endsAt === undefined ? project.endsAt : input.endsAt,
-                );
-                const data: Prisma.ProjectUncheckedUpdateManyInput = {
-                    version: { increment: 1 },
-                    updatedBy: context.userId,
-                };
-                if (input.code !== undefined) {
-                    const code = normalizeCode(input.code);
-                    data.code = code;
-                    data.normalizedCode = code.toLocaleLowerCase();
-                }
-                if (input.name !== undefined) data.name = normalizeRequiredText(input.name);
-                if (input.description !== undefined) data.description = normalizeOptionalText(input.description);
-                if (input.departmentId !== undefined) data.departmentId = input.departmentId;
-                if (input.startsAt !== undefined) data.startsAt = dates.startsAt;
-                if (input.endsAt !== undefined) data.endsAt = dates.endsAt;
-                const updated = await transaction.project.updateMany({
-                    where: { id: projectId, tenantId: context.tenantId, version: input.version, deletedAt: null },
-                    data,
-                });
-                if (updated.count !== 1) throw this.versionConflict();
-                await transaction.auditLog.create({
-                    data: auditData(context, 'PROJECT_UPDATED', projectId, {
-                        before: projectSnapshot(project),
-                        version: input.version,
-                    }),
-                });
+        await this.prisma.$transaction(async (transaction) => {
+            await lockProjectForUpdate(transaction, context.tenantId, projectId);
+            const project = await this.requireProject(context, projectId, transaction);
+            this.assertManager(context, project);
+            this.assertEditable(project);
+            await this.requireDepartment(context.tenantId, input.departmentId, transaction);
+            const data: Prisma.ProjectUncheckedUpdateManyInput = {
+                version: { increment: 1 },
+                updatedBy: context.userId,
+            };
+            if (input.name !== undefined) data.name = normalizeRequiredText(input.name);
+            if (input.description !== undefined) data.description = normalizeOptionalText(input.description);
+            if (input.departmentId !== undefined) data.departmentId = input.departmentId;
+            const updated = await transaction.project.updateMany({
+                where: { id: projectId, tenantId: context.tenantId, version: input.version, deletedAt: null },
+                data,
             });
-        } catch (error) {
-            if (isPrismaError(error, 'P2002')) throw this.codeConflict();
-            throw error;
-        }
+            if (updated.count !== 1) throw this.versionConflict();
+            await transaction.auditLog.create({
+                data: auditData(context, 'PROJECT_UPDATED', projectId, {
+                    before: projectSnapshot(project),
+                    version: input.version,
+                }),
+            });
+        });
         return this.getProject(projectId);
     }
 
@@ -558,18 +553,25 @@ export class ProjectService {
                 updatedBy: context.userId,
                 version: { increment: 1 },
             };
-            if (options.to === ProjectStatus.ACTIVE && project.status === ProjectStatus.PLANNING && !project.startsAt) {
-                data.startsAt = new Date();
+            if (options.to === ProjectStatus.ACTIVE && project.status === ProjectStatus.PLANNING && !project.startedAt) {
+                data.startedAt = new Date();
             }
             if (options.to === ProjectStatus.COMPLETED && project.status !== ProjectStatus.ARCHIVED) {
                 data.completedAt = new Date();
                 data.completedByMembershipId = context.membershipId;
                 data.completionSummary = options.completionSummary ?? null;
             }
+            if (options.to === ProjectStatus.CANCELLED || options.to === ProjectStatus.ARCHIVED) {
+                data.closedAt = new Date();
+            }
             if (project.status === ProjectStatus.COMPLETED && options.to === ProjectStatus.ACTIVE) {
                 data.completedAt = null;
                 data.completedByMembershipId = null;
                 data.completionSummary = null;
+                data.closedAt = null;
+            }
+            if (project.status === ProjectStatus.ARCHIVED && options.to === ProjectStatus.COMPLETED) {
+                data.closedAt = null;
             }
             const updated = await transaction.project.updateMany({
                 where: {
@@ -714,6 +716,32 @@ export class ProjectService {
         return context.permissions.includes('project.manage_all');
     }
 
+    /**
+     * 按“租户 + 租户时区年份”分配下一个项目编码 `PRJ-<年>-<序号>`。
+     *
+     * 取号与项目写入在同一事务内完成，`ON CONFLICT DO UPDATE` 持有流水号行锁，
+     * 并发创建不会重号；序号只增不减，软删除的项目不回收编号。
+     */
+    private async allocateProjectCode(tenantId: string, transaction: Prisma.TransactionClient): Promise<string> {
+        const tenant = await transaction.tenant.findFirst({
+            where: { id: tenantId, deletedAt: null },
+            select: { timezone: true },
+        });
+        const year = calendarYear(tenant?.timezone || DEFAULT_TENANT_TIMEZONE, new Date());
+        const rows = await transaction.$queryRaw<Array<{ last_number: number | bigint }>>(Prisma.sql`
+            INSERT INTO "project_code_sequences" ("id", "tenant_id", "year", "last_number", "created_at", "updated_at")
+            VALUES (CAST(${randomUUID()} AS uuid), CAST(${tenantId} AS uuid), ${year}, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ON CONFLICT ("tenant_id", "year")
+            DO UPDATE SET
+                "last_number" = "project_code_sequences"."last_number" + 1,
+                "updated_at" = CURRENT_TIMESTAMP
+            RETURNING "last_number"
+        `);
+        const lastNumber = Number(rows[0]?.last_number ?? 0);
+        if (lastNumber < 1) throw new Error('项目编码取号失败');
+        return `PRJ-${year}-${lastNumber}`;
+    }
+
     private projectNotFound(): NotFoundException {
         return new NotFoundException({ code: 'PROJECT_NOT_FOUND', message: '项目不存在或当前成员无权访问' });
     }
@@ -756,9 +784,9 @@ function toProjectResult(project: ProjectRecord, currentMembershipId: string, ta
         departmentId: project.departmentId,
         owner,
         currentMemberRole: project.members.find((member) => member.membershipId === currentMembershipId)?.role ?? null,
-        startsAt: project.startsAt,
-        endsAt: project.endsAt,
+        startedAt: project.startedAt,
         completedAt: project.completedAt,
+        closedAt: project.closedAt,
         completedByMembershipId: project.completedByMembershipId,
         completionSummary: project.completionSummary,
         memberCount: project._count.members,
@@ -783,12 +811,9 @@ function toProjectMemberResult(member: ProjectMemberRecord): ProjectMemberResult
 }
 
 function hasProjectChanges(input: UpdateProjectDto): boolean {
-    return input.code !== undefined
-        || input.name !== undefined
+    return input.name !== undefined
         || input.description !== undefined
-        || input.departmentId !== undefined
-        || input.startsAt !== undefined
-        || input.endsAt !== undefined;
+        || input.departmentId !== undefined;
 }
 
 function assertEditableMemberRole(role: ProjectMemberRole): void {
@@ -798,27 +823,6 @@ function assertEditableMemberRole(role: ProjectMemberRole): void {
             message: '负责人只能通过负责人转移接口变更',
         });
     }
-}
-
-function normalizeAndValidateDates(
-    startsAt: string | Date | null | undefined,
-    endsAt: string | Date | null | undefined,
-): { startsAt: Date | null; endsAt: Date | null } {
-    const normalizedStartsAt = toNullableDate(startsAt);
-    const normalizedEndsAt = toNullableDate(endsAt);
-    if (normalizedStartsAt && normalizedEndsAt && normalizedEndsAt < normalizedStartsAt) {
-        throw new BadRequestException({ code: 'PROJECT_DATE_RANGE_INVALID', message: '项目结束时间不能早于开始时间' });
-    }
-    return { startsAt: normalizedStartsAt, endsAt: normalizedEndsAt };
-}
-
-function toNullableDate(value: string | Date | null | undefined): Date | null {
-    if (value === undefined || value === null) return null;
-    return value instanceof Date ? value : new Date(value);
-}
-
-function normalizeCode(code: string): string {
-    return code.trim();
 }
 
 function normalizeRequiredText(value: string): string {
@@ -857,8 +861,9 @@ function projectSnapshot(project: ProjectRecord): Prisma.InputJsonObject {
         departmentId: project.departmentId,
         ownerMembershipId: project.ownerMembershipId,
         status: project.status,
-        startsAt: project.startsAt?.toISOString() ?? null,
-        endsAt: project.endsAt?.toISOString() ?? null,
+        startedAt: project.startedAt?.toISOString() ?? null,
+        completedAt: project.completedAt?.toISOString() ?? null,
+        closedAt: project.closedAt?.toISOString() ?? null,
         version: project.version,
     };
 }

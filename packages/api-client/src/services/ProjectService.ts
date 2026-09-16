@@ -74,8 +74,8 @@ export class ProjectService {
             body: requestBody,
             mediaType: 'application/json',
             errors: {
-                403: `缺少 project.create 权限或无权指定其他负责人`,
-                409: `项目编码已存在`,
+                403: `缺少 project.create 权限、无权指定其他负责人，或提交初始成员但缺少 project.member.manage`,
+                409: `项目编码冲突（服务端自动分配失败时的兜底）`,
             },
         });
     }
