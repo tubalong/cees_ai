@@ -69,3 +69,21 @@ export interface KnowledgeDocumentListResult {
     items: KnowledgeDocumentResult[];
     nextCursor: string | null;
 }
+
+export interface KnowledgeQueryCitationResult {
+    citationId: string;
+    documentId: string;
+    documentVersionId: string;
+    chunkId: string;
+    text: string;
+    score?: number;
+    pageIndex?: number | null;
+    bbox?: [number, number, number, number] | null;
+}
+
+export interface KnowledgeQueryResult {
+    answer: string;
+    grounded: boolean;
+    insufficientEvidence: boolean;
+    citations: KnowledgeQueryCitationResult[];
+}

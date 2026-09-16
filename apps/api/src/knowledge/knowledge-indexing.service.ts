@@ -54,11 +54,7 @@ export class KnowledgeIndexingService implements OnModuleInit, OnModuleDestroy {
         DEFAULT_MAX_RETRIES,
     );
     // 索引三元组在构造时读取，允许按环境覆盖（chunking / embedding profile / index 版本）。
-    private readonly indexVersions = {
-        chunkingVersion: readEnv('KNOWLEDGE_CHUNKING_VERSION', 'knowledge-chunking-v1'),
-        embeddingProfile: readEnv('KNOWLEDGE_EMBEDDING_PROFILE', 'deterministic'),
-        indexVersion: readEnv('KNOWLEDGE_INDEX_VERSION', 'knowledge-index-v1'),
-    };
+    private readonly indexVersions = readIndexVersions();
 
     constructor(
         private readonly prisma: PrismaService,
@@ -304,6 +300,19 @@ export class KnowledgeIndexingService implements OnModuleInit, OnModuleDestroy {
 function readEnv(name: string, fallback: string): string {
     const value = process.env[name]?.trim();
     return value || fallback;
+}
+
+/**
+ * 读取索引三元组的当前环境配置。索引侧与查询侧共用，保证检索请求
+ * 默认的 index_version 与写入侧一致；切换 embedding 或切分策略必须换新
+ * index_version（见 knowledge-rag.md 3.4）。
+ */
+export function readIndexVersions() {
+    return {
+        chunkingVersion: readEnv('KNOWLEDGE_CHUNKING_VERSION', 'knowledge-chunking-v1'),
+        embeddingProfile: readEnv('KNOWLEDGE_EMBEDDING_PROFILE', 'deterministic'),
+        indexVersion: readEnv('KNOWLEDGE_INDEX_VERSION', 'knowledge-index-v1'),
+    };
 }
 
 function readPositiveInteger(value: string | undefined, fallback: number): number {

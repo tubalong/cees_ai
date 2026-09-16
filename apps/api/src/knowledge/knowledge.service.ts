@@ -4,8 +4,11 @@ import {
     ForbiddenException,
     Injectable,
     NotFoundException,
+    ServiceUnavailableException,
 } from '@nestjs/common';
 import { AuditOutcome, MembershipStatus, Prisma, UserStatus } from '@prisma/client';
+import type { KnowledgeAnswerResponse, KnowledgeRetrieveScope } from '@cees/ai-service-client';
+import { AiServiceGateway, AiServiceInvocationError } from '../ai-orchestration/ai-service-gateway.service';
 import { PrismaService } from '../database/prisma.service';
 import { TenantContext } from '../tenant/tenant-context';
 import {
@@ -14,9 +17,11 @@ import {
     DeleteKnowledgeBaseQueryDto,
     ListKnowledgeBaseMembersQueryDto,
     ListKnowledgeBasesQueryDto,
+    QueryKnowledgeBaseDto,
     UpdateKnowledgeBaseDto,
     UpdateKnowledgeBaseMemberDto,
 } from './dto';
+import { readIndexVersions } from './knowledge-indexing.service';
 import {
     KNOWLEDGE_BASE_MEMBER_PERMISSIONS,
     KnowledgeBaseMemberListResult,
@@ -24,6 +29,7 @@ import {
     KnowledgeBaseMemberResult,
     KnowledgeBaseListResult,
     KnowledgeBaseResult,
+    KnowledgeQueryResult,
 } from './knowledge.types';
 
 const knowledgeBaseSelect = {
@@ -72,6 +78,7 @@ export class KnowledgeService {
     constructor(
         private readonly prisma: PrismaService,
         private readonly tenantContext: TenantContext,
+        private readonly gateway: AiServiceGateway,
     ) { }
 
     async listKnowledgeBases(query: ListKnowledgeBasesQueryDto): Promise<KnowledgeBaseListResult> {
@@ -363,6 +370,148 @@ export class KnowledgeService {
         return knowledgeBase;
     }
 
+    /**
+     * 基于知识库内容回答提问：实时折叠三层权限为可信 scope 后调 ai-service
+     * answer（内部先检索再生成带引用的答案），成功写入 KnowledgeQueryLog 与审计。
+     */
+    async queryKnowledgeBase(knowledgeBaseId: string, input: QueryKnowledgeBaseDto): Promise<KnowledgeQueryResult> {
+        const context = this.tenantContext.require();
+        await this.requireKnowledgeBaseAccess(knowledgeBaseId, 'READER');
+        const scope = await this.buildQueryScope(context.tenantId, context.membershipId, knowledgeBaseId);
+        let response: KnowledgeAnswerResponse;
+        try {
+            response = await this.gateway.answerKnowledge({
+                request_id: context.requestId,
+                tenant_id: context.tenantId,
+                user_id: context.userId,
+                query: input.query,
+                scope,
+                index_version: input.indexVersion?.trim() || readIndexVersions().indexVersion,
+                embedding_profile: null,
+            });
+        } catch (error) {
+            await this.writeQueryFailureAudit(context, knowledgeBaseId, error);
+            throw this.queryServiceUnavailable();
+        }
+        const result = toKnowledgeQueryResult(response);
+        await this.prisma.$transaction(async (transaction) => {
+            await transaction.knowledgeQueryLog.create({
+                data: {
+                    tenantId: context.tenantId,
+                    knowledgeBaseId,
+                    userId: context.userId,
+                    query: input.query,
+                    answer: response.answer || null,
+                    grounded: response.grounded,
+                    citations: result.citations as unknown as Prisma.InputJsonValue,
+                    latencyMs: response.execution?.latency_ms ?? null,
+                    inputTokens: response.execution?.token_usage?.input_tokens ?? null,
+                    outputTokens: response.execution?.token_usage?.output_tokens ?? null,
+                    totalTokens: response.execution?.token_usage?.total_tokens ?? null,
+                    requestId: context.requestId,
+                },
+            });
+            await this.writeAudit(transaction, context, 'KNOWLEDGE_BASE_QUERIED', 'KNOWLEDGE_BASE', knowledgeBaseId, {
+                grounded: response.grounded,
+                insufficientEvidence: response.insufficient_evidence,
+                citationCount: result.citations.length,
+                indexVersion: response.index_version,
+            });
+        });
+        return result;
+    }
+
+    /**
+     * 把三层权限实时折叠成可信检索 scope：
+     * - knowledge_base_ids 固定为当前知识库（租户隔离由 ai-service 按 tenant_id 强制）；
+     * - department_ids 为当前成员所在部门的子树（DEPARTMENT 文档仅本部门及子部门可见）；
+     * - project_ids 为当前成员参与的项目（PROJECT 文档仅项目成员可见）；
+     * - TENANT/PRIVATE 文档不携带部门/项目属性，白名单不约束它们（PRIVATE 的可见性
+     *   由“查询者必须是知识库成员”在入口处保证）；
+     * - 空白名单显式传空数组，表示没有任何可授权的部门/项目，只放行不携带该属性的文档。
+     */
+    private async buildQueryScope(
+        tenantId: string,
+        membershipId: string,
+        knowledgeBaseId: string,
+    ): Promise<KnowledgeRetrieveScope> {
+        const [departmentIds, projectIds] = await Promise.all([
+            this.resolveDepartmentTreeIds(tenantId, membershipId),
+            this.resolveVisibleProjectIds(tenantId, membershipId),
+        ]);
+        return {
+            knowledge_base_ids: [knowledgeBaseId],
+            department_ids: departmentIds,
+            project_ids: projectIds,
+        };
+    }
+
+    /** 当前成员所在部门及其全部子部门的 ID 列表；未归属任何部门时为空。 */
+    private async resolveDepartmentTreeIds(tenantId: string, membershipId: string): Promise<string[]> {
+        const membership = await this.prisma.tenantMembership.findFirst({
+            where: { id: membershipId, tenantId, deletedAt: null },
+            select: { departmentId: true },
+        });
+        const rootId = membership?.departmentId;
+        if (!rootId) return [];
+        const departments = await this.prisma.department.findMany({
+            where: { tenantId, deletedAt: null },
+            select: { id: true, parentId: true },
+        });
+        const childrenByParent = new Map<string | null, string[]>();
+        for (const department of departments) {
+            const siblings = childrenByParent.get(department.parentId) ?? [];
+            siblings.push(department.id);
+            childrenByParent.set(department.parentId, siblings);
+        }
+        const ids: string[] = [];
+        const queue = [rootId];
+        while (queue.length > 0) {
+            const current = queue.shift() as string;
+            ids.push(current);
+            queue.push(...(childrenByParent.get(current) ?? []));
+        }
+        return ids;
+    }
+
+    /** 当前成员参与的项目 ID 列表。 */
+    private async resolveVisibleProjectIds(tenantId: string, membershipId: string): Promise<string[]> {
+        const memberships = await this.prisma.projectMember.findMany({
+            where: { tenantId, membershipId, deletedAt: null },
+            select: { projectId: true },
+        });
+        return memberships.map((membership) => membership.projectId);
+    }
+
+    private async writeQueryFailureAudit(
+        context: ReturnType<TenantContext['require']>,
+        knowledgeBaseId: string,
+        error: unknown,
+    ): Promise<void> {
+        await this.prisma.auditLog.create({
+            data: {
+                tenantId: context.tenantId,
+                actorUserId: context.userId,
+                actorMembershipId: context.membershipId,
+                action: 'KNOWLEDGE_BASE_QUERIED',
+                outcome: AuditOutcome.FAILURE,
+                resourceType: 'KNOWLEDGE_BASE',
+                resourceId: knowledgeBaseId,
+                requestId: context.requestId,
+                metadata: {
+                    errorCode: error instanceof AiServiceInvocationError ? error.code : 'UNKNOWN',
+                } as Prisma.InputJsonValue,
+            },
+        });
+    }
+
+    private queryServiceUnavailable(): ServiceUnavailableException {
+        return new ServiceUnavailableException({
+            code: 'KNOWLEDGE_QUERY_SERVICE_UNAVAILABLE',
+            message: 'AI 服务暂不可用，请稍后重试',
+        });
+    }
+
     private async listVisibleKnowledgeBaseIds(tenantId: string, userId: string): Promise<string[]> {
         const memberships = await this.prisma.knowledgeBaseMember.findMany({
             where: { tenantId, userId },
@@ -518,6 +667,25 @@ function normalizeDescription(description: string | null | undefined): string | 
     if (description === undefined || description === null) return null;
     const normalized = description.trim();
     return normalized || null;
+}
+
+/** 把 ai-service 响应映射为公开 Query 响应形状（snake_case -> camelCase，丢弃 heading_path）。 */
+function toKnowledgeQueryResult(response: KnowledgeAnswerResponse): KnowledgeQueryResult {
+    return {
+        answer: response.answer,
+        grounded: response.grounded,
+        insufficientEvidence: response.insufficient_evidence,
+        citations: response.citations.map((citation) => ({
+            citationId: citation.citation_id,
+            documentId: citation.document_id,
+            documentVersionId: citation.document_version_id,
+            chunkId: citation.chunk_id,
+            text: citation.text,
+            score: citation.score,
+            pageIndex: citation.page_index,
+            bbox: citation.bbox,
+        })),
+    };
 }
 
 function isKnowledgeBaseMemberPermission(value: string): value is KnowledgeBaseMemberPermission {

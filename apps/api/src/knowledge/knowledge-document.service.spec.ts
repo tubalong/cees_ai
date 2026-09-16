@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { AiServiceGateway } from '../ai-orchestration/ai-service-gateway.service';
 import { KnowledgeDocumentService } from './knowledge-document.service';
 import { KnowledgeIndexingService } from './knowledge-indexing.service';
 import { KnowledgeService } from './knowledge.service';
@@ -350,6 +351,7 @@ function createService(prisma: Record<string, any>): KnowledgeDocumentService {
     const knowledgeService = new KnowledgeService(
         prisma as unknown as PrismaService,
         tenantContext,
+        { answerKnowledge: jest.fn() } as unknown as AiServiceGateway,
     );
     const indexingService = {
         kick: kickSpy,

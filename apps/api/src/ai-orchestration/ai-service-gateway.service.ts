@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import {
+  answerKnowledge as requestKnowledgeAnswer,
   compactChat as requestChatCompaction,
   composeDocument as requestComposeDocument,
   createClient,
@@ -28,6 +29,8 @@ import {
   type ImageGenerationMetadata,
   type InvokeRequest,
   type InvokeResponse,
+  type KnowledgeAnswerRequest,
+  type KnowledgeAnswerResponse,
   type KnowledgeIndexRequest,
   type KnowledgeIndexResponse,
   type RenderDocxRequest,
@@ -391,6 +394,18 @@ export class AiServiceGateway {
    */
   async indexKnowledge(input: KnowledgeIndexRequest): Promise<KnowledgeIndexResponse> {
     const result = await indexKnowledgeDocument({ client: this.getClient(), body: input });
+    if (result.error) throw this.toInvocationError(result.error, result.response?.status);
+    if (!result.data) throw this.emptyResponseError();
+    return result.data;
+  }
+
+  /**
+   * 调用 ai-service 知识问答路由：内部先按可信 scope 检索，再由 rag role
+   * 基于证据生成带引用校验的答案。模型只输出引用编号，服务端映射回真实
+   * chunk 来源；检索无结果时短路不调用模型。查询日志与审计由 knowledge 模块负责。
+   */
+  async answerKnowledge(input: KnowledgeAnswerRequest): Promise<KnowledgeAnswerResponse> {
+    const result = await requestKnowledgeAnswer({ client: this.getClient(), body: input });
     if (result.error) throw this.toInvocationError(result.error, result.response?.status);
     if (!result.data) throw this.emptyResponseError();
     return result.data;
