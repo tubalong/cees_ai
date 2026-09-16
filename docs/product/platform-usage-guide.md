@@ -647,8 +647,8 @@ POST /platform/auth/change-password
 
 | 请求 | 关键字段 | 说明 |
 | --- | --- | --- |
-| `CreateProjectRequest` | `code/name`，可选 `description/departmentId/ownerMembershipId/startsAt/endsAt` | 编码 2～32 位，只允许英文、数字、`_`、`-` |
-| `UpdateProjectRequest` | 可修改创建字段中的项目资料，必填 `version` | 不允许直接修改状态和负责人 |
+| `CreateProjectRequest` | 必填 `name`，可选 `description/departmentId/ownerMembershipId/memberMembershipIds` | 项目编码由服务端按租户时区年份自动分配，请求不接受 `code` 和时间字段 |
+| `UpdateProjectRequest` | 可修改 `name/description/departmentId`，必填 `version` | 不能修改编码、时间字段、状态和负责人 |
 | `AddProjectMemberRequest` | `membershipId`，可选 `role` | role 仅 `MANAGER/MEMBER`，默认 `MEMBER` |
 | `UpdateProjectMemberRequest` | `role/version` | 负责人不能通过该接口修改 |
 | `TransferProjectOwnerRequest` | `membershipId/version` | 目标必须是当前项目的有效成员 |
@@ -2710,16 +2710,14 @@ TenantInvitationRole
 
 ```json
 {
-  "code": "PRJ-2026-001",
   "name": "AI 工作台",
   "description": "企业内部 AI 协作平台",
   "departmentId": null,
-  "startsAt": "2026-09-08T00:00:00.000Z",
-  "endsAt": "2026-12-31T00:00:00.000Z"
+  "memberMembershipIds": []
 }
 ```
 
-不传 `ownerMembershipId` 时当前成员自动成为 `OWNER`。建议按以下顺序验证：
+创建成功后响应里的 `code` 才是真实编号（例如 `PRJ-2026-1`），编号按租户时区年份递增且创建后不可修改；不传 `ownerMembershipId` 时当前成员自动成为 `OWNER`，`memberMembershipIds` 需要 `project.member.manage` 权限。项目时间字段（`startedAt`/`completedAt`/`closedAt`）全部由状态命令写入，创建与修改请求都不接受。建议按以下顺序验证：
 
 ```text
 POST /api/v1/projects

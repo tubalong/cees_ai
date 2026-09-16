@@ -5,6 +5,8 @@ import { TenantContext } from '../tenant/tenant-context';
 import { ProjectService } from './project.service';
 
 describe('ProjectService', () => {
+    afterEach(() => jest.useRealTimers());
+
     it('limits ordinary members to projects they joined', async () => {
         const prisma = createPrismaMock();
         prisma.project.findMany.mockResolvedValue([]);
@@ -47,31 +49,149 @@ describe('ProjectService', () => {
     });
 
     it('creates the current membership as project owner by default', async () => {
+        useFixedNow();
         const prisma = createPrismaMock();
         prisma.tenantMembership.findFirst.mockResolvedValue({ id: CURRENT_MEMBERSHIP_ID });
         prisma.project.create.mockResolvedValue({ id: PROJECT_ID });
-        prisma.projectMember.create.mockResolvedValue({ id: PROJECT_MEMBER_ID });
-        prisma.project.findFirst.mockResolvedValue(projectRecord());
+        prisma.projectMember.createMany.mockResolvedValue({ count: 1 });
+        prisma.project.findFirst.mockResolvedValue(projectRecord({ code: 'PRJ-2026-1' }));
         prisma.task.count.mockResolvedValue(0);
+        prisma.$queryRaw.mockResolvedValue([{ last_number: 1 }]);
         const service = createService(prisma);
 
-        await service.createProject({ code: 'PRJ-001', name: '项目一' });
+        await service.createProject({ name: '项目一' });
 
         expect(prisma.project.create).toHaveBeenCalledWith(expect.objectContaining({
             data: expect.objectContaining({
                 tenantId: TENANT_ID,
                 ownerMembershipId: CURRENT_MEMBERSHIP_ID,
-                normalizedCode: 'prj-001',
+                code: 'PRJ-2026-1',
+                normalizedCode: 'prj-2026-1',
             }),
         }));
-        expect(prisma.projectMember.create).toHaveBeenCalledWith(expect.objectContaining({
-            data: expect.objectContaining({
+        expect(prisma.projectMember.createMany).toHaveBeenCalledWith(expect.objectContaining({
+            data: [expect.objectContaining({
                 membershipId: CURRENT_MEMBERSHIP_ID,
                 role: ProjectMemberRole.OWNER,
-            }),
+            })],
         }));
         expect(prisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
             data: expect.objectContaining({ action: 'PROJECT_CREATED', resourceType: 'PROJECT' }),
+        }));
+    });
+
+    it('allocates the project code from the tenant time zone year', async () => {
+        jest.useFakeTimers();
+        // 2026-12-31T16:30Z 在东八区已经是 2027 年，UTC 仍是 2026 年。
+        jest.setSystemTime(new Date('2026-12-31T16:30:00.000Z'));
+        const prisma = createPrismaMock();
+        prisma.tenantMembership.findFirst.mockResolvedValue({ id: CURRENT_MEMBERSHIP_ID });
+        prisma.project.create.mockResolvedValue({ id: PROJECT_ID });
+        prisma.projectMember.createMany.mockResolvedValue({ count: 1 });
+        prisma.project.findFirst.mockResolvedValue(projectRecord({ code: 'PRJ-2027-4' }));
+        prisma.task.count.mockResolvedValue(0);
+        prisma.$queryRaw.mockResolvedValue([{ last_number: 4 }]);
+
+        await createService(prisma).createProject({ name: '跨年项目' });
+
+        expect(prisma.project.create).toHaveBeenCalledWith(expect.objectContaining({
+            data: expect.objectContaining({ code: 'PRJ-2027-4', normalizedCode: 'prj-2027-4' }),
+        }));
+
+        prisma.tenant.findFirst.mockResolvedValue({ timezone: 'UTC' });
+        prisma.project.create.mockClear();
+        prisma.$queryRaw.mockResolvedValue([{ last_number: 1 }]);
+
+        await createService(prisma).createProject({ name: '跨年项目' });
+
+        expect(prisma.project.create).toHaveBeenCalledWith(expect.objectContaining({
+            data: expect.objectContaining({ code: 'PRJ-2026-1' }),
+        }));
+    });
+
+    it('adds initial members without duplicating the owner', async () => {
+        useFixedNow();
+        const prisma = createPrismaMock();
+        prisma.tenantMembership.findFirst.mockResolvedValue({ id: CURRENT_MEMBERSHIP_ID });
+        prisma.project.create.mockResolvedValue({ id: PROJECT_ID });
+        prisma.projectMember.createMany.mockResolvedValue({ count: 2 });
+        prisma.project.findFirst.mockResolvedValue(projectRecord());
+        prisma.task.count.mockResolvedValue(0);
+        prisma.$queryRaw.mockResolvedValue([{ last_number: 2 }]);
+        const service = createService(prisma, ['project.member.manage']);
+
+        await service.createProject({
+            name: '带初始成员的项目',
+            memberMembershipIds: [CURRENT_MEMBERSHIP_ID, OTHER_MEMBERSHIP_ID, OTHER_MEMBERSHIP_ID],
+        });
+
+        expect(prisma.projectMember.createMany).toHaveBeenCalledWith(expect.objectContaining({
+            data: [
+                expect.objectContaining({ membershipId: CURRENT_MEMBERSHIP_ID, role: ProjectMemberRole.OWNER }),
+                expect.objectContaining({ membershipId: OTHER_MEMBERSHIP_ID, role: ProjectMemberRole.MEMBER }),
+            ],
+        }));
+    });
+
+    it('requires project.member.manage to add initial members', async () => {
+        const prisma = createPrismaMock();
+        const service = createService(prisma);
+
+        await expect(service.createProject({
+            name: '无权限',
+            memberMembershipIds: [OTHER_MEMBERSHIP_ID],
+        })).rejects.toMatchObject({ response: expect.objectContaining({ code: 'PROJECT_MEMBER_MANAGE_DENIED' }) });
+        expect(prisma.project.create).not.toHaveBeenCalled();
+    });
+
+    it('records startedAt on the first start only', async () => {
+        const prisma = createPrismaMock();
+        prisma.project.findFirst
+            .mockResolvedValueOnce(projectRecord({ status: ProjectStatus.PLANNING }))
+            .mockResolvedValueOnce(projectRecord({ status: ProjectStatus.ACTIVE, startedAt: new Date('2026-09-11T00:00:00.000Z') }));
+        prisma.project.updateMany.mockResolvedValue({ count: 1 });
+
+        await createService(prisma).start(PROJECT_ID, { version: 1 });
+
+        expect(prisma.project.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+            data: expect.objectContaining({ status: ProjectStatus.ACTIVE, startedAt: expect.any(Date) }),
+        }));
+
+        prisma.project.findFirst.mockReset();
+        prisma.project.updateMany.mockClear();
+        prisma.project.findFirst
+            .mockResolvedValueOnce(projectRecord({ status: ProjectStatus.PAUSED, startedAt: new Date('2026-09-01T00:00:00.000Z') }))
+            .mockResolvedValueOnce(projectRecord({ status: ProjectStatus.ACTIVE, startedAt: new Date('2026-09-01T00:00:00.000Z') }));
+
+        await createService(prisma).resume(PROJECT_ID, { version: 1 });
+
+        const resumeData = prisma.project.updateMany.mock.calls[0][0].data as Record<string, unknown>;
+        expect(resumeData.startedAt).toBeUndefined();
+    });
+
+    it('records closedAt when cancelling and clears it when restoring the archive', async () => {
+        const prisma = createPrismaMock();
+        prisma.project.findFirst
+            .mockResolvedValueOnce(projectRecord({ status: ProjectStatus.ACTIVE }))
+            .mockResolvedValueOnce(projectRecord({ status: ProjectStatus.CANCELLED, closedAt: new Date('2026-09-11T00:00:00.000Z') }));
+        prisma.project.updateMany.mockResolvedValue({ count: 1 });
+
+        await createService(prisma).cancel(PROJECT_ID, { reason: '业务调整', version: 1 });
+
+        expect(prisma.project.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+            data: expect.objectContaining({ status: ProjectStatus.CANCELLED, closedAt: expect.any(Date) }),
+        }));
+
+        prisma.project.findFirst.mockReset();
+        prisma.project.updateMany.mockClear();
+        prisma.project.findFirst
+            .mockResolvedValueOnce(projectRecord({ status: ProjectStatus.ARCHIVED, closedAt: new Date('2026-09-11T00:00:00.000Z') }))
+            .mockResolvedValueOnce(projectRecord({ status: ProjectStatus.COMPLETED }));
+
+        await createService(prisma).restore(PROJECT_ID, { version: 1 });
+
+        expect(prisma.project.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+            data: expect.objectContaining({ status: ProjectStatus.COMPLETED, closedAt: null }),
         }));
     });
 
@@ -276,17 +396,24 @@ function createService(prisma: Record<string, any>, permissions: string[] = []):
     return new ProjectService(prisma as unknown as PrismaService, tenantContext);
 }
 
+function useFixedNow(): void {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-09-11T08:00:00.000Z'));
+}
+
 function createPrismaMock(): Record<string, any> {
     const prisma: Record<string, any> = {
         project: { findMany: jest.fn(), findFirst: jest.fn(), create: jest.fn(), updateMany: jest.fn() },
         projectMember: {
             findFirst: jest.fn(),
             create: jest.fn(),
+            createMany: jest.fn(),
             update: jest.fn(),
             updateMany: jest.fn(),
         },
         projectStatusHistory: { create: jest.fn() },
         tenantMembership: { findFirst: jest.fn() },
+        tenant: { findFirst: jest.fn().mockResolvedValue({ timezone: 'Asia/Shanghai' }) },
         department: { findFirst: jest.fn() },
         task: { count: jest.fn(), groupBy: jest.fn() },
         taskAssignee: { findFirst: jest.fn() },
@@ -310,9 +437,9 @@ function projectRecord(overrides: Record<string, unknown> = {}): Record<string, 
         name: '项目一',
         description: null,
         status: ProjectStatus.PLANNING,
-        startsAt: null,
-        endsAt: null,
+        startedAt: null,
         completedAt: null,
+        closedAt: null,
         completedByMembershipId: null,
         completionSummary: null,
         createdAt: new Date('2026-09-08T00:00:00.000Z'),
