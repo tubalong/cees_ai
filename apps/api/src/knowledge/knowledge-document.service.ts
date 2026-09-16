@@ -223,6 +223,9 @@ export class KnowledgeDocumentService {
             }
             return this.requireDocument(knowledgeBaseId, documentId);
         } catch (error) {
+            // 并发创建版本时 versionNumber 唯一约束冲突与文件占用冲突要分开报：
+            // 前者是并发编辑冲突，后者是文件已被其他文档使用。
+            if (isVersionNumberConflict(error)) throw this.versionConflict();
             if (isUniqueConstraintError(error)) throw this.fileObjectInUse();
             throw error;
         }
@@ -388,6 +391,13 @@ export class KnowledgeDocumentService {
     private scopeInvalid(message: string): BadRequestException {
         return new BadRequestException({ code: 'KNOWLEDGE_DOCUMENT_SCOPE_INVALID', message });
     }
+
+    private versionConflict(): ConflictException {
+        return new ConflictException({
+            code: 'KNOWLEDGE_DOCUMENT_VERSION_CONFLICT',
+            message: '文档已被其他操作修改，请刷新后重试',
+        });
+    }
 }
 
 function toPublicVisibilityScope(value: VisibilityScope | null): KnowledgeDocumentVisibilityScope {
@@ -399,4 +409,11 @@ function toPublicVisibilityScope(value: VisibilityScope | null): KnowledgeDocume
 
 function isUniqueConstraintError(error: unknown): boolean {
     return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
+}
+
+/** P2002 且冲突在 (tenantId, documentId, versionNumber) 唯一约束上：并发创建版本。 */
+function isVersionNumberConflict(error: unknown): boolean {
+    if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002') return false;
+    const target = error.meta?.target;
+    return Array.isArray(target) && target.includes('version_number');
 }

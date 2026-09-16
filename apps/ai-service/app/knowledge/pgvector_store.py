@@ -131,6 +131,11 @@ class PGVectorStoreGateway:
         document_version_id: str,
         index_version: str,
     ) -> int:
+        # 边界说明：node_id 不含 index_version（见 node_builder._chunk_id），若同一
+        # 文档版本曾在多个 index_version 下索引（切换 KNOWLEDGE_INDEX_VERSION 后重索引），
+        # 删除其中一个 index_version 时同 node_id 的行会被一并删除。实际运行中 index_version
+        # 是环境级固定值，同一文档版本只会在一个 index_version 下索引；切环境后旧 index_version
+        # 的行因三元组不匹配而不会被命中，表现为残留垃圾而非误删，且检索按 index_version 隔离。
         filters = _version_filters(tenant_id, document_version_id, index_version)
         existing = await self._store.aget_nodes(filters=filters)
         if not existing:

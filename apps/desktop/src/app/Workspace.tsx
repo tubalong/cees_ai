@@ -450,7 +450,7 @@ function AssistantPage(): JSX.Element {
                         <div className="chat-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}>{item.content}</ReactMarkdown></div>
                         {item.resources?.map((resource) => <ChatResourceCard key={`${resource.type}-${resource.id}`} resource={resource} onPreviewDocument={setPreviewDocument} />)}
                         {item.sources?.length ? <div className="chat-sources">{item.sources.map((source) => <ChatSourceCard key={source.id} source={source} />)}</div> : null}
-                        {item.citations?.length ? <div className="chat-sources">{item.citations.map((citation) => <KnowledgeCitationCard key={citation.id} citation={citation} />)}</div> : null}
+                        {item.citations?.length ? <div className="chat-sources">{item.citations.map((citation, index) => <KnowledgeCitationCard key={`${citation.id}-${index}`} citation={citation} />)}</div> : null}
                         <button className="chat-copy" type="button" onClick={() => void copyText(item.content)}><CopyOutlined />{t('复制')}</button>
                     </div>
                 </div>)}

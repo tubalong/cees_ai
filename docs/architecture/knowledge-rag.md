@@ -264,6 +264,7 @@ PENDING -> PARSING -> PARSED -> INDEXING -> READY
 - 上传/新版本/重试后调用 `kick()` 即时触发，与轮询共用同一把锁，不会重复处理同一文档；
 - 解析器经 `KNOWLEDGE_DOCUMENT_PARSER` 抽象注入，块 3 为 MinerU 占位实现（抛 `MINERU_NOT_CONFIGURED`），块 6 真机替换；
 - 失败按 retryable 语义处理：可重试错误回 `PENDING` 并递增 `retryCount`，达到上限（默认 3，`KNOWLEDGE_INDEX_MAX_RETRIES`）置 `FAILED`；不可重试错误直接 `FAILED`；`FAILED` 可由用户手动重试；
+- 孤儿状态回收：超过解析最长耗时 2 倍（`MINERU_API_TIMEOUT_MS` × 2，默认 60 分钟）仍停留在 `PARSING`/`INDEXING` 的文档视为处理进程已丢失（崩溃/重启），轮询时自动回 `PENDING` 重新排队（按原状态条件更新声明所有权，每轮至多 10 个），`lastError` 记录回收原因并写审计（`KNOWLEDGE_DOCUMENT_PROCESS_RECOVERED`，含原状态）；
 - 可见范围（`visibilityScope`）是版本级属性，存储在 `DocumentVersion`，索引请求从当前处理版本读取；
 - `acl_version` 仍由版本 ID 派生（`acl-{version.id 前 8 位}`）写入节点 metadata，但**不引入 ACL 版本机制**：检索 scope 的 `acl_version` 为可选字段，NestJS 检索时不传（权限由实时 scope 折叠保证），真正的 ACL 版本机制推迟到引入检索查询缓存时再设计；
 - 索引请求三元组可通过环境变量覆盖：`KNOWLEDGE_CHUNKING_VERSION`（默认 `knowledge-chunking-v1`）、`KNOWLEDGE_EMBEDDING_PROFILE`（默认 `deterministic`）、`KNOWLEDGE_INDEX_VERSION`（默认 `knowledge-index-v1`）；

@@ -60,6 +60,12 @@ export class KnowledgeIndexingService implements OnModuleInit, OnModuleDestroy {
     );
     // 索引三元组在构造时读取，允许按环境覆盖（chunking / embedding profile / index 版本）。
     private readonly indexVersions = readIndexVersions();
+    // 孤儿状态回收阈值：解析最长耗时（MinerU 超时）的 2 倍。超过该时长仍停留在
+    // PARSING/INDEXING 的文档视为处理进程已丢失（崩溃/重启），自动回 PENDING 重新排队。
+    private readonly stallRecoveryAfterMs = 2 * readPositiveInteger(
+        process.env.MINERU_API_TIMEOUT_MS,
+        30 * 60 * 1000,
+    );
 
     constructor(
         private readonly prisma: PrismaService,
@@ -134,6 +140,8 @@ export class KnowledgeIndexingService implements OnModuleInit, OnModuleDestroy {
         const acquired = await this.redis.setIfAbsent(LOCK_KEY, lockToken, Math.max(this.intervalSeconds * 2, 30));
         if (!acquired) return { skipped: true, processed: 0 };
         try {
+            // 先回收孤儿状态（进程崩溃时卡在 PARSING/INDEXING 的文档），再处理 PENDING 队列。
+            await this.recoverStalledDocuments();
             const pending = await this.prisma.knowledgeDocument.findMany({
                 where: { status: KnowledgeDocumentStatus.PENDING, deletedAt: null },
                 select: {
@@ -159,6 +167,41 @@ export class KnowledgeIndexingService implements OnModuleInit, OnModuleDestroy {
         } finally {
             await this.redis.deleteIfValue(LOCK_KEY, lockToken);
         }
+    }
+
+    /**
+     * 回收超时滞留的孤儿文档：超过阈值仍停留在 PARSING/INDEXING（正常流程已推进到
+     * READY/FAILED），说明处理进程已丢失（崩溃/重启），回 PENDING 重新排队。
+     * 条件更新按原状态声明所有权，与并发处理实例互不干扰；恢复时审计记录原状态。
+     */
+    private async recoverStalledDocuments(): Promise<number> {
+        const cutoff = new Date(Date.now() - this.stallRecoveryAfterMs);
+        const stalled = await this.prisma.knowledgeDocument.findMany({
+            where: {
+                status: { in: [KnowledgeDocumentStatus.PARSING, KnowledgeDocumentStatus.INDEXING] },
+                lastProcessedAt: { lt: cutoff },
+                deletedAt: null,
+            },
+            select: { id: true, tenantId: true, knowledgeBaseId: true, status: true },
+            orderBy: { lastProcessedAt: 'asc' },
+            take: BATCH_SIZE,
+        });
+        let recovered = 0;
+        for (const document of stalled) {
+            const updated = await this.prisma.knowledgeDocument.updateMany({
+                where: { id: document.id, status: document.status, deletedAt: null },
+                data: {
+                    status: KnowledgeDocumentStatus.PENDING,
+                    lastError: '处理超时，已自动回收重新排队',
+                },
+            });
+            if (updated.count !== 1) continue;
+            recovered += 1;
+            await this.writeAudit(document, 'KNOWLEDGE_DOCUMENT_PROCESS_RECOVERED', AuditOutcome.SUCCESS, {
+                priorStatus: document.status,
+            });
+        }
+        return recovered;
     }
 
     /** 推进单个文档的状态机；返回是否由本实例完成了一次迁移。 */
@@ -313,7 +356,7 @@ export class KnowledgeIndexingService implements OnModuleInit, OnModuleDestroy {
     }
 
     private async writeAudit(
-        document: PendingDocumentRow,
+        document: Pick<PendingDocumentRow, 'id' | 'tenantId' | 'knowledgeBaseId'>,
         action: string,
         outcome: AuditOutcome,
         metadata: Record<string, unknown>,
