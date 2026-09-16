@@ -35,7 +35,7 @@
 - [公开 AI 对话链路与 Token 计量](../architecture/public-chat-api-and-token-metering.md)
 - [用户个人资料管理](../product/user-profile-management.md)
 - [钉钉组织架构与人员同步 API](dingtalk-organization-sync-api.md)
-- [分配策略与人财法 API（设计草案）](assignment-and-hr-finance-legal-api.md)
+- [分配策略与人财法 API（C 契约草案）](assignment-and-hr-finance-legal-api.md)
 - [密码修改与凭证安全](../security/password-management.md)
 - [平台使用、接口与数据库字典](../product/platform-usage-guide.md)：按当前 OpenAPI 汇总全部接口、请求参数和验证顺序。
 

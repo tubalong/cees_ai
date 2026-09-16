@@ -79,6 +79,8 @@ flowchart LR
 - [AI 助手工具循环](assistant-tool-loop.md)
 - [AI Tool Calling](ai-tool-calling.md)
 - [联网搜索（Tavily）](web-search.md)
+- [通用任务 tasks.scope 方案](task-scope-proposal.md)
+- [人财法数据契约](hr-finance-legal-data-contract.md)
 - [Image Generation](image-generation.md)
 - [通用文档生成](document-generation.md)
 - [文件上传与 COS 设计](file-upload.md)

@@ -1,8 +1,8 @@
 # 分配策略与人财法 MVP（C 后端主体与分配）
 
-> 状态：设计草案，尚未落地
+> 状态：OpenAPI 契约草案已落地，服务端和桌面端尚未实现
 > Owner：C
-> 当前版本：仅完成目录与文档入口，未新增 API、数据库表或桌面页面。
+> 当前版本：已完成目录骨架、RBAC 数据范围基础与 C 对外契约草案；API、数据库表和桌面页面待实现。
 
 ## 1. 目标
 
@@ -45,11 +45,11 @@
 
 ## 5. 待确认设计点
 
-- `DataScope` 的统一解析与过滤规则。
+- `DataScope` 已新增解析器与权限基础；过滤规则待服务端落地。
 - 存量租户新增权限的同步方式。
-- `AssignmentPolicy` 的领域枚举、候选池模型和项目覆盖语义。
-- `tasks.scope` 的枚举、通用任务接口和并发控制。
-- HR/Finance/Legal 的状态机、数据范围和审批边界。
+- `AssignmentPolicy` 的领域枚举、候选池模型与项目覆盖语义已写入 OpenAPI 草案。
+- `tasks.scope` 的枚举、通用任务接口和并发控制已形成 C/D 协调草案，见 [通用任务 tasks.scope 方案](../architecture/task-scope-proposal.md)。
+- HR/Finance/Legal 的状态机、数据范围与审批边界已写入 OpenAPI 草案，见 [人财法数据契约](../architecture/hr-finance-legal-data-contract.md)。
 
 ## 6. 验收基线
 
