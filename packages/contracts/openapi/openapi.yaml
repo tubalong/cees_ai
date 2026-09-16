@@ -5203,6 +5203,621 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
 
+  /assignment/policies:
+    get:
+      summary: 查询分配策略
+      operationId: listAssignmentPolicies
+      tags: [Assignment]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: domain
+          in: query
+          schema: { type: string }
+        - name: projectId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - name: cursor
+          in: query
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: 分配策略列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AssignmentPolicyListResponseEnvelope' }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 assignment.policy.read 权限 }
+    post:
+      summary: 创建分配策略
+      operationId: createAssignmentPolicy
+      tags: [Assignment]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateAssignmentPolicyRequest' }
+      responses:
+        '201':
+          description: 分配策略已创建
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AssignmentPolicyResponseEnvelope' }
+        '400': { description: 请求字段校验失败 }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 assignment.policy.manage 权限 }
+        '409': { description: 同一领域下已存在同层策略 }
+
+  /assignment/policies/{policyId}:
+    parameters:
+      - name: policyId
+        in: path
+        required: true
+        description: 分配策略 ID
+        schema: { type: string, format: uuid }
+    get:
+      summary: 查询分配策略详情
+      operationId: getAssignmentPolicy
+      tags: [Assignment]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: 分配策略详情
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AssignmentPolicyResponseEnvelope' }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 assignment.policy.read 权限 }
+        '404': { description: 分配策略不存在或不属于当前租户 }
+    patch:
+      summary: 修改分配策略
+      operationId: updateAssignmentPolicy
+      tags: [Assignment]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateAssignmentPolicyRequest' }
+      responses:
+        '200':
+          description: 修改后的分配策略
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AssignmentPolicyResponseEnvelope' }
+        '400': { description: 请求字段校验失败 }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 assignment.policy.manage 权限 }
+        '404': { description: 分配策略不存在或不属于当前租户 }
+        '409': { description: 乐观锁版本冲突 }
+    delete:
+      summary: 删除分配策略
+      operationId: deleteAssignmentPolicy
+      tags: [Assignment]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: version
+          in: query
+          required: true
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '204': { description: 分配策略已删除 }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 assignment.policy.manage 权限 }
+        '404': { description: 分配策略不存在或不属于当前租户 }
+        '409': { description: 乐观锁版本冲突 }
+
+  /assignment/policies/resolve:
+    post:
+      summary: 预览分配策略命中结果
+      operationId: resolveAssignmentPolicy
+      tags: [Assignment]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AssignmentPolicyResolveRequest' }
+      responses:
+        '200':
+          description: 策略解析结果
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AssignmentPolicyResolveResponseEnvelope' }
+        '400': { description: 请求字段校验失败 }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 assignment.policy.read 权限 }
+
+  /hr/profiles:
+    get:
+      summary: 查询员工档案
+      operationId: listHrProfiles
+      tags: [HR]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: keyword
+          in: query
+          schema: { type: string, maxLength: 100 }
+        - name: departmentId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - name: cursor
+          in: query
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: 员工档案列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HrProfileListResponseEnvelope' }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 hr.profile.read 权限 }
+    post:
+      summary: 创建员工档案
+      operationId: createHrProfile
+      tags: [HR]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateHrProfileRequest' }
+      responses:
+        '201':
+          description: 员工档案已创建
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HrProfileResponseEnvelope' }
+        '400': { description: 请求字段校验失败 }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 hr.profile.manage 权限 }
+        '409': { description: 该成员已有员工档案 }
+
+  /hr/profiles/{membershipId}:
+    parameters:
+      - name: membershipId
+        in: path
+        required: true
+        description: 租户成员 ID
+        schema: { type: string, format: uuid }
+    get:
+      summary: 查询员工档案详情
+      operationId: getHrProfile
+      tags: [HR]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: 员工档案详情
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HrProfileResponseEnvelope' }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 hr.profile.read 权限或数据范围不足 }
+        '404': { description: 员工档案不存在 }
+    patch:
+      summary: 修改员工档案
+      operationId: updateHrProfile
+      tags: [HR]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateHrProfileRequest' }
+      responses:
+        '200':
+          description: 修改后的员工档案
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HrProfileResponseEnvelope' }
+        '400': { description: 请求字段校验失败 }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 hr.profile.manage 权限或数据范围不足 }
+        '404': { description: 员工档案不存在 }
+        '409': { description: 乐观锁版本冲突 }
+
+  /hr/leave-types:
+    get:
+      summary: 查询请假类型
+      operationId: listHrLeaveTypes
+      tags: [HR]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: 请假类型列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HrLeaveTypeListResponseEnvelope' }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 hr.leave.read 权限 }
+    post:
+      summary: 创建请假类型
+      operationId: createHrLeaveType
+      tags: [HR]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateHrLeaveTypeRequest' }
+      responses:
+        '201':
+          description: 请假类型已创建
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HrLeaveTypeResponseEnvelope' }
+        '400': { description: 请求字段校验失败 }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 hr.leave.manage_all 权限 }
+        '409': { description: 请假类型编码已存在 }
+
+  /hr/leave-balances:
+    get:
+      summary: 查询请假余额
+      operationId: listHrLeaveBalances
+      tags: [HR]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: membershipId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: year
+          in: query
+          schema: { type: integer, minimum: 2024, maximum: 2100 }
+      responses:
+        '200':
+          description: 请假余额列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HrLeaveBalanceListResponseEnvelope' }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 hr.leave.read 权限或数据范围不足 }
+
+  /hr/leave-requests:
+    get:
+      summary: 查询请假申请
+      operationId: listHrLeaveRequests
+      tags: [HR]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/HrLeaveRequestStatus' }
+        - name: membershipId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - name: cursor
+          in: query
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: 请假申请列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HrLeaveRequestListResponseEnvelope' }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 hr.leave.read 权限或数据范围不足 }
+    post:
+      summary: 创建请假申请
+      operationId: createHrLeaveRequest
+      tags: [HR]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateHrLeaveRequestRequest' }
+      responses:
+        '201':
+          description: 请假申请已创建
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HrLeaveRequestResponseEnvelope' }
+        '400': { description: 请求字段校验失败 }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 hr.leave.request 权限 }
+
+  /hr/leave-requests/{leaveRequestId}/review:
+    parameters:
+      - name: leaveRequestId
+        in: path
+        required: true
+        description: 请假申请 ID
+        schema: { type: string, format: uuid }
+    post:
+      summary: 审批请假申请
+      operationId: reviewHrLeaveRequest
+      tags: [HR]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReviewHrLeaveRequestRequest' }
+      responses:
+        '200':
+          description: 审批后的请假申请
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HrLeaveRequestResponseEnvelope' }
+        '400': { description: 请求字段校验失败 }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 hr.leave.approve 权限或数据范围不足 }
+        '404': { description: 请假申请不存在 }
+        '409': { description: 请假申请状态或版本冲突 }
+
+  /finance/expense-categories:
+    get:
+      summary: 查询报销类别
+      operationId: listFinanceExpenseCategories
+      tags: [Finance]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: 报销类别列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FinanceExpenseCategoryListResponseEnvelope' }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 finance.expense.read 权限 }
+    post:
+      summary: 创建报销类别
+      operationId: createFinanceExpenseCategory
+      tags: [Finance]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateFinanceExpenseCategoryRequest' }
+      responses:
+        '201':
+          description: 报销类别已创建
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FinanceExpenseCategoryResponseEnvelope' }
+        '400': { description: 请求字段校验失败 }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 finance.expense.manage_all 权限 }
+        '409': { description: 报销类别编码已存在 }
+
+  /finance/expense-reports:
+    get:
+      summary: 查询报销单
+      operationId: listFinanceExpenseReports
+      tags: [Finance]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/FinanceExpenseStatus' }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - name: cursor
+          in: query
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: 报销单列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FinanceExpenseReportListResponseEnvelope' }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 finance.expense.read 权限或数据范围不足 }
+    post:
+      summary: 创建报销单
+      operationId: createFinanceExpenseReport
+      tags: [Finance]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateFinanceExpenseReportRequest' }
+      responses:
+        '201':
+          description: 报销单已创建
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FinanceExpenseReportResponseEnvelope' }
+        '400': { description: 请求字段校验失败 }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 finance.expense.request 权限 }
+
+  /finance/expense-reports/{reportId}/review:
+    parameters:
+      - name: reportId
+        in: path
+        required: true
+        description: 报销单 ID
+        schema: { type: string, format: uuid }
+    post:
+      summary: 审批报销单
+      operationId: reviewFinanceExpenseReport
+      tags: [Finance]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReviewFinanceExpenseReportRequest' }
+      responses:
+        '200':
+          description: 审批后的报销单
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FinanceExpenseReportResponseEnvelope' }
+        '400': { description: 请求字段校验失败 }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 finance.expense.approve 权限或数据范围不足 }
+        '404': { description: 报销单不存在 }
+        '409': { description: 报销单状态或版本冲突 }
+
+  /legal/contracts:
+    get:
+      summary: 查询合同台账
+      operationId: listLegalContracts
+      tags: [Legal]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: keyword
+          in: query
+          schema: { type: string, maxLength: 100 }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/LegalContractStatus' }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - name: cursor
+          in: query
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: 合同台账列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LegalContractListResponseEnvelope' }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 legal.contract.read 权限或数据范围不足 }
+    post:
+      summary: 创建合同台账
+      operationId: createLegalContract
+      tags: [Legal]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateLegalContractRequest' }
+      responses:
+        '201':
+          description: 合同台账已创建
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LegalContractResponseEnvelope' }
+        '400': { description: 请求字段校验失败 }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 legal.contract.create 权限 }
+
+  /legal/contracts/{contractId}:
+    parameters:
+      - name: contractId
+        in: path
+        required: true
+        description: 合同 ID
+        schema: { type: string, format: uuid }
+    get:
+      summary: 查询合同详情
+      operationId: getLegalContract
+      tags: [Legal]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: 合同详情
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LegalContractResponseEnvelope' }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 legal.contract.read 权限或数据范围不足 }
+        '404': { description: 合同不存在或不属于当前租户 }
+    patch:
+      summary: 修改合同台账
+      operationId: updateLegalContract
+      tags: [Legal]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateLegalContractRequest' }
+      responses:
+        '200':
+          description: 修改后的合同台账
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LegalContractResponseEnvelope' }
+        '400': { description: 请求字段校验失败 }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 legal.contract.update 权限或数据范围不足 }
+        '404': { description: 合同不存在或不属于当前租户 }
+        '409': { description: 乐观锁版本冲突 }
+    delete:
+      summary: 删除合同台账
+      operationId: deleteLegalContract
+      tags: [Legal]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: version
+          in: query
+          required: true
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '204': { description: 合同台账已删除 }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 legal.contract.delete 权限或数据范围不足 }
+        '404': { description: 合同不存在或不属于当前租户 }
+        '409': { description: 乐观锁版本冲突 }
+
+  /boss-overview:
+    get:
+      summary: 生成老板经营概况草稿
+      operationId: getBossOverview
+      tags: [BossOverview]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: 老板经营概况
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BossOverviewResponseEnvelope' }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 dashboard.read 权限 }
+
+  /tenants/current/search-policy:
+    get:
+      summary: 查询租户联网检索策略
+      operationId: getTenantSearchPolicy
+      tags: [Tenant]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: 租户联网检索策略
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TenantSearchPolicyResponseEnvelope' }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 tenant.read 权限 }
+    patch:
+      summary: 修改租户联网检索策略
+      operationId: updateTenantSearchPolicy
+      tags: [Tenant]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateTenantSearchPolicyRequest' }
+      responses:
+        '200':
+          description: 修改后的租户联网检索策略
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TenantSearchPolicyResponseEnvelope' }
+        '400': { description: 请求字段校验失败 }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 tenant.update 权限 }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -5215,6 +5830,837 @@ components:
       bearerFormat: JWT
 
   schemas:
+    AssignmentPolicyDomain:
+      type: string
+      enum: [TASK, MEETING, WORK_REPORT, PROJECT, DOCUMENT]
+      description: 分配策略适用的业务领域
+
+    AssignmentPolicyLevel:
+      type: string
+      enum: [TENANT, PROJECT]
+      description: 策略层级；TENANT 为租户默认，PROJECT 为项目覆盖
+
+    AssignmentPolicyFallbackMode:
+      type: string
+      enum: [NONE, PROJECT_MEMBERS, TENANT_MEMBERS]
+      description: 候选池不可用时的兜底范围
+
+    AssignmentCandidatePool:
+      type: object
+      additionalProperties: false
+      required: [membershipIds, departmentIds, projectIds]
+      properties:
+        membershipIds:
+          type: array
+          uniqueItems: true
+          items: { type: string, format: uuid }
+        departmentIds:
+          type: array
+          uniqueItems: true
+          items: { type: string, format: uuid }
+        projectIds:
+          type: array
+          uniqueItems: true
+          items: { type: string, format: uuid }
+
+    AssignmentPolicy:
+      type: object
+      required:
+        - id
+        - tenantId
+        - domain
+        - level
+        - name
+        - candidatePool
+        - skipOnLeave
+        - fallbackMode
+        - enabled
+        - version
+        - createdBy
+        - updatedBy
+        - createdAt
+        - updatedAt
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        domain: { $ref: '#/components/schemas/AssignmentPolicyDomain' }
+        level: { $ref: '#/components/schemas/AssignmentPolicyLevel' }
+        projectId: { type: [string, 'null'], format: uuid }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        description: { type: [string, 'null'], maxLength: 2000 }
+        candidatePool: { $ref: '#/components/schemas/AssignmentCandidatePool' }
+        skipOnLeave: { type: boolean }
+        fallbackMode: { $ref: '#/components/schemas/AssignmentPolicyFallbackMode' }
+        enabled: { type: boolean }
+        version: { type: integer, minimum: 1 }
+        createdBy: { type: [string, 'null'], format: uuid }
+        updatedBy: { type: [string, 'null'], format: uuid }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    AssignmentPolicyList:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/AssignmentPolicy' }
+        nextCursor: { type: [string, 'null'], format: uuid }
+
+    CreateAssignmentPolicyRequest:
+      type: object
+      additionalProperties: false
+      required: [domain, level, name, candidatePool, skipOnLeave, fallbackMode]
+      properties:
+        domain: { $ref: '#/components/schemas/AssignmentPolicyDomain' }
+        level: { $ref: '#/components/schemas/AssignmentPolicyLevel' }
+        projectId: { type: [string, 'null'], format: uuid }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        description: { type: [string, 'null'], maxLength: 2000 }
+        candidatePool: { $ref: '#/components/schemas/AssignmentCandidatePool' }
+        skipOnLeave: { type: boolean }
+        fallbackMode: { $ref: '#/components/schemas/AssignmentPolicyFallbackMode' }
+        enabled: { type: boolean, default: true }
+
+    UpdateAssignmentPolicyRequest:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        description: { type: [string, 'null'], maxLength: 2000 }
+        candidatePool: { $ref: '#/components/schemas/AssignmentCandidatePool' }
+        skipOnLeave: { type: boolean }
+        fallbackMode: { $ref: '#/components/schemas/AssignmentPolicyFallbackMode' }
+        enabled: { type: boolean }
+        version: { type: integer, minimum: 1 }
+
+    AssignmentPolicyResolveContext:
+      type: object
+      additionalProperties: false
+      required: [sourceType, sourceId]
+      properties:
+        sourceType: { type: string, minLength: 1, maxLength: 64 }
+        sourceId: { type: string, format: uuid }
+
+    AssignmentPolicyResolveRequest:
+      type: object
+      additionalProperties: false
+      required: [domain]
+      properties:
+        domain: { $ref: '#/components/schemas/AssignmentPolicyDomain' }
+        projectId: { type: [string, 'null'], format: uuid }
+        context: { $ref: '#/components/schemas/AssignmentPolicyResolveContext' }
+
+    AssignmentPolicySourceTrace:
+      type: object
+      required: [policyId, projectId, domain, level]
+      properties:
+        policyId: { type: [string, 'null'], format: uuid }
+        projectId: { type: [string, 'null'], format: uuid }
+        domain: { $ref: '#/components/schemas/AssignmentPolicyDomain' }
+        level: { $ref: '#/components/schemas/AssignmentPolicyLevel' }
+
+    AssignmentPolicyResolveResult:
+      type: object
+      required:
+        - matchedPolicyId
+        - domain
+        - level
+        - candidates
+        - skippedOnLeave
+        - fallbackMode
+        - sourceTrace
+        - resolvedAt
+      properties:
+        matchedPolicyId: { type: [string, 'null'], format: uuid }
+        domain: { $ref: '#/components/schemas/AssignmentPolicyDomain' }
+        level: { $ref: '#/components/schemas/AssignmentPolicyLevel' }
+        candidates:
+          type: array
+          uniqueItems: true
+          items: { type: string, format: uuid }
+        skippedOnLeave:
+          type: array
+          uniqueItems: true
+          items: { type: string, format: uuid }
+        fallbackMode: { $ref: '#/components/schemas/AssignmentPolicyFallbackMode' }
+        sourceTrace: { $ref: '#/components/schemas/AssignmentPolicySourceTrace' }
+        resolvedAt: { type: string, format: date-time }
+
+    HrProfileStatus:
+      type: string
+      enum: [ACTIVE, SUSPENDED, TERMINATED, ON_LEAVE]
+
+    HrProfile:
+      type: object
+      required:
+        - id
+        - tenantId
+        - membershipId
+        - displayName
+        - status
+        - version
+        - createdAt
+        - updatedAt
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        membershipId: { type: string, format: uuid }
+        employeeNo: { type: [string, 'null'], maxLength: 64 }
+        displayName: { type: string, minLength: 1, maxLength: 120 }
+        departmentId: { type: [string, 'null'], format: uuid }
+        position: { type: [string, 'null'], maxLength: 120 }
+        employmentType: { type: [string, 'null'], maxLength: 32 }
+        managerMembershipId: { type: [string, 'null'], format: uuid }
+        entryDate: { type: [string, 'null'], format: date }
+        leaveDate: { type: [string, 'null'], format: date }
+        status: { $ref: '#/components/schemas/HrProfileStatus' }
+        version: { type: integer, minimum: 1 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    HrProfileList:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/HrProfile' }
+        nextCursor: { type: [string, 'null'], format: uuid }
+
+    CreateHrProfileRequest:
+      type: object
+      additionalProperties: false
+      required: [membershipId]
+      properties:
+        membershipId: { type: string, format: uuid }
+        employeeNo: { type: [string, 'null'], maxLength: 64 }
+        departmentId: { type: [string, 'null'], format: uuid }
+        position: { type: [string, 'null'], maxLength: 120 }
+        employmentType: { type: [string, 'null'], maxLength: 32 }
+        managerMembershipId: { type: [string, 'null'], format: uuid }
+        entryDate: { type: [string, 'null'], format: date }
+        leaveDate: { type: [string, 'null'], format: date }
+
+    UpdateHrProfileRequest:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        employeeNo: { type: [string, 'null'], maxLength: 64 }
+        departmentId: { type: [string, 'null'], format: uuid }
+        position: { type: [string, 'null'], maxLength: 120 }
+        employmentType: { type: [string, 'null'], maxLength: 32 }
+        managerMembershipId: { type: [string, 'null'], format: uuid }
+        entryDate: { type: [string, 'null'], format: date }
+        leaveDate: { type: [string, 'null'], format: date }
+        status: { $ref: '#/components/schemas/HrProfileStatus' }
+        version: { type: integer, minimum: 1 }
+
+    HrLeaveUnit:
+      type: string
+      enum: [DAY, HALF_DAY, HOUR]
+
+    HrLeaveType:
+      type: object
+      required:
+        - id
+        - tenantId
+        - code
+        - name
+        - unit
+        - paid
+        - enabled
+        - version
+        - createdAt
+        - updatedAt
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        code: { type: string, minLength: 1, maxLength: 64 }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        unit: { $ref: '#/components/schemas/HrLeaveUnit' }
+        paid: { type: boolean }
+        defaultDays: { type: [number, 'null'], minimum: 0 }
+        enabled: { type: boolean }
+        version: { type: integer, minimum: 1 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    HrLeaveTypeList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/HrLeaveType' }
+
+    CreateHrLeaveTypeRequest:
+      type: object
+      additionalProperties: false
+      required: [code, name, unit, paid]
+      properties:
+        code: { type: string, minLength: 1, maxLength: 64 }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        unit: { $ref: '#/components/schemas/HrLeaveUnit' }
+        paid: { type: boolean }
+        defaultDays: { type: [number, 'null'], minimum: 0 }
+        enabled: { type: boolean, default: true }
+
+    HrLeaveBalance:
+      type: object
+      required:
+        - id
+        - tenantId
+        - membershipId
+        - leaveTypeId
+        - year
+        - totalDays
+        - usedDays
+        - pendingDays
+        - remainingDays
+        - unit
+        - version
+        - createdAt
+        - updatedAt
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        membershipId: { type: string, format: uuid }
+        leaveTypeId: { type: string, format: uuid }
+        year: { type: integer, minimum: 2024, maximum: 2100 }
+        totalDays: { type: number, minimum: 0 }
+        usedDays: { type: number, minimum: 0 }
+        pendingDays: { type: number, minimum: 0 }
+        remainingDays: { type: number, minimum: 0 }
+        unit: { $ref: '#/components/schemas/HrLeaveUnit' }
+        version: { type: integer, minimum: 1 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    HrLeaveBalanceList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/HrLeaveBalance' }
+
+    HrLeaveRequestStatus:
+      type: string
+      enum: [DRAFT, SUBMITTED, APPROVED, REJECTED, CANCELLED]
+
+    HrLeaveRequest:
+      type: object
+      required:
+        - id
+        - tenantId
+        - membershipId
+        - leaveTypeId
+        - startAt
+        - endAt
+        - durationDays
+        - status
+        - version
+        - createdAt
+        - updatedAt
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        membershipId: { type: string, format: uuid }
+        leaveTypeId: { type: string, format: uuid }
+        startAt: { type: string, format: date-time }
+        endAt: { type: string, format: date-time }
+        durationDays: { type: number, minimum: 0 }
+        reason: { type: [string, 'null'], maxLength: 2000 }
+        status: { $ref: '#/components/schemas/HrLeaveRequestStatus' }
+        reviewedBy: { type: [string, 'null'], format: uuid }
+        reviewedAt: { type: [string, 'null'], format: date-time }
+        reviewComment: { type: [string, 'null'], maxLength: 2000 }
+        version: { type: integer, minimum: 1 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    HrLeaveRequestList:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/HrLeaveRequest' }
+        nextCursor: { type: [string, 'null'], format: uuid }
+
+    CreateHrLeaveRequestRequest:
+      type: object
+      additionalProperties: false
+      required: [leaveTypeId, startAt, endAt, durationDays]
+      properties:
+        leaveTypeId: { type: string, format: uuid }
+        startAt: { type: string, format: date-time }
+        endAt: { type: string, format: date-time }
+        durationDays: { type: number, minimum: 0 }
+        reason: { type: [string, 'null'], maxLength: 2000 }
+
+    ReviewHrLeaveRequestRequest:
+      type: object
+      additionalProperties: false
+      required: [decision, version]
+      properties:
+        decision: { type: string, enum: [APPROVE, REJECT] }
+        comment: { type: [string, 'null'], maxLength: 2000 }
+        version: { type: integer, minimum: 1 }
+
+    FinanceExpenseCategory:
+      type: object
+      required:
+        - id
+        - tenantId
+        - code
+        - name
+        - enabled
+        - version
+        - createdAt
+        - updatedAt
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        code: { type: string, minLength: 1, maxLength: 64 }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        description: { type: [string, 'null'], maxLength: 2000 }
+        enabled: { type: boolean }
+        version: { type: integer, minimum: 1 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    FinanceExpenseCategoryList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/FinanceExpenseCategory' }
+
+    CreateFinanceExpenseCategoryRequest:
+      type: object
+      additionalProperties: false
+      required: [code, name]
+      properties:
+        code: { type: string, minLength: 1, maxLength: 64 }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        description: { type: [string, 'null'], maxLength: 2000 }
+        enabled: { type: boolean, default: true }
+
+    FinanceExpenseStatus:
+      type: string
+      enum: [DRAFT, SUBMITTED, APPROVED, REJECTED, PAID]
+
+    FinanceExpenseItemInput:
+      type: object
+      additionalProperties: false
+      required: [categoryId, description, amount, occurredAt]
+      properties:
+        categoryId: { type: string, format: uuid }
+        description: { type: string, minLength: 1, maxLength: 500 }
+        amount: { type: number, exclusiveMinimum: 0 }
+        occurredAt: { type: string, format: date }
+
+    FinanceExpenseItem:
+      type: object
+      required: [id, reportId, categoryId, description, amount, occurredAt, version, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        reportId: { type: string, format: uuid }
+        categoryId: { type: string, format: uuid }
+        description: { type: string, minLength: 1, maxLength: 500 }
+        amount: { type: number, exclusiveMinimum: 0 }
+        occurredAt: { type: string, format: date }
+        version: { type: integer, minimum: 1 }
+        createdAt: { type: string, format: date-time }
+
+    FinanceExpenseReport:
+      type: object
+      required:
+        - id
+        - tenantId
+        - requesterMembershipId
+        - title
+        - currency
+        - totalAmount
+        - status
+        - items
+        - version
+        - createdAt
+        - updatedAt
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        requesterMembershipId: { type: string, format: uuid }
+        title: { type: string, minLength: 1, maxLength: 120 }
+        description: { type: [string, 'null'], maxLength: 2000 }
+        currency: { type: string, minLength: 3, maxLength: 3 }
+        totalAmount: { type: number, exclusiveMinimum: 0 }
+        status: { $ref: '#/components/schemas/FinanceExpenseStatus' }
+        submittedAt: { type: [string, 'null'], format: date-time }
+        reviewedBy: { type: [string, 'null'], format: uuid }
+        reviewedAt: { type: [string, 'null'], format: date-time }
+        reviewComment: { type: [string, 'null'], maxLength: 2000 }
+        items:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/FinanceExpenseItem' }
+        version: { type: integer, minimum: 1 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    FinanceExpenseReportList:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/FinanceExpenseReport' }
+        nextCursor: { type: [string, 'null'], format: uuid }
+
+    CreateFinanceExpenseReportRequest:
+      type: object
+      additionalProperties: false
+      required: [title, currency, totalAmount, items]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 120 }
+        description: { type: [string, 'null'], maxLength: 2000 }
+        currency: { type: string, minLength: 3, maxLength: 3 }
+        totalAmount: { type: number, exclusiveMinimum: 0 }
+        items:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/FinanceExpenseItemInput' }
+
+    ReviewFinanceExpenseReportRequest:
+      type: object
+      additionalProperties: false
+      required: [decision, version]
+      properties:
+        decision: { type: string, enum: [APPROVE, REJECT] }
+        comment: { type: [string, 'null'], maxLength: 2000 }
+        version: { type: integer, minimum: 1 }
+
+    LegalContractStatus:
+      type: string
+      enum: [DRAFT, ACTIVE, PENDING_RENEWAL, EXPIRED, TERMINATED, ARCHIVED]
+
+    LegalContractType:
+      type: string
+      enum: [PURCHASE, SALES, SERVICE, EMPLOYMENT, NDA, LEASE, OTHER]
+
+    LegalContract:
+      type: object
+      required:
+        - id
+        - tenantId
+        - contractNo
+        - name
+        - counterparty
+        - type
+        - currency
+        - startDate
+        - endDate
+        - status
+        - version
+        - createdAt
+        - updatedAt
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        contractNo: { type: string, minLength: 1, maxLength: 64 }
+        name: { type: string, minLength: 1, maxLength: 160 }
+        counterparty: { type: string, minLength: 1, maxLength: 160 }
+        type: { $ref: '#/components/schemas/LegalContractType' }
+        amount: { type: [number, 'null'] }
+        currency: { type: string, minLength: 3, maxLength: 3 }
+        startDate: { type: string, format: date }
+        endDate: { type: string, format: date }
+        signedAt: { type: [string, 'null'], format: date }
+        status: { $ref: '#/components/schemas/LegalContractStatus' }
+        description: { type: [string, 'null'], maxLength: 2000 }
+        ownerMembershipId: { type: [string, 'null'], format: uuid }
+        version: { type: integer, minimum: 1 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    LegalContractList:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/LegalContract' }
+        nextCursor: { type: [string, 'null'], format: uuid }
+
+    CreateLegalContractRequest:
+      type: object
+      additionalProperties: false
+      required: [name, counterparty, startDate, endDate]
+      properties:
+        contractNo: { type: string, minLength: 1, maxLength: 64 }
+        name: { type: string, minLength: 1, maxLength: 160 }
+        counterparty: { type: string, minLength: 1, maxLength: 160 }
+        type: { $ref: '#/components/schemas/LegalContractType' }
+        amount: { type: [number, 'null'] }
+        currency: { type: string, minLength: 3, maxLength: 3 }
+        startDate: { type: string, format: date }
+        endDate: { type: string, format: date }
+        signedAt: { type: [string, 'null'], format: date }
+        status: { $ref: '#/components/schemas/LegalContractStatus' }
+        description: { type: [string, 'null'], maxLength: 2000 }
+        ownerMembershipId: { type: [string, 'null'], format: uuid }
+
+    UpdateLegalContractRequest:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        contractNo: { type: string, minLength: 1, maxLength: 64 }
+        name: { type: string, minLength: 1, maxLength: 160 }
+        counterparty: { type: string, minLength: 1, maxLength: 160 }
+        type: { $ref: '#/components/schemas/LegalContractType' }
+        amount: { type: [number, 'null'] }
+        currency: { type: string, minLength: 3, maxLength: 3 }
+        startDate: { type: string, format: date }
+        endDate: { type: string, format: date }
+        signedAt: { type: [string, 'null'], format: date }
+        status: { $ref: '#/components/schemas/LegalContractStatus' }
+        description: { type: [string, 'null'], maxLength: 2000 }
+        ownerMembershipId: { type: [string, 'null'], format: uuid }
+        version: { type: integer, minimum: 1 }
+
+    BossOverviewHr:
+      type: object
+      required: [headcount, onLeaveCount, pendingLeaveRequestCount]
+      properties:
+        headcount: { type: integer, minimum: 0 }
+        onLeaveCount: { type: integer, minimum: 0 }
+        pendingLeaveRequestCount: { type: integer, minimum: 0 }
+
+    BossOverviewFinance:
+      type: object
+      required: [pendingExpenseReportCount, pendingExpenseAmount]
+      properties:
+        pendingExpenseReportCount: { type: integer, minimum: 0 }
+        pendingExpenseAmount: { type: number, minimum: 0 }
+
+    BossOverviewLegal:
+      type: object
+      required: [activeContractCount, expiringContractCount]
+      properties:
+        activeContractCount: { type: integer, minimum: 0 }
+        expiringContractCount: { type: integer, minimum: 0 }
+
+    BossOverviewTask:
+      type: object
+      required: [pendingTaskCount, overdueTaskCount]
+      properties:
+        pendingTaskCount: { type: integer, minimum: 0 }
+        overdueTaskCount: { type: integer, minimum: 0 }
+
+    BossOverview:
+      type: object
+      required: [generatedAt, periodStart, periodEnd, hr, finance, legal, task]
+      properties:
+        generatedAt: { type: string, format: date-time }
+        periodStart: { type: string, format: date }
+        periodEnd: { type: string, format: date }
+        hr: { $ref: '#/components/schemas/BossOverviewHr' }
+        finance: { $ref: '#/components/schemas/BossOverviewFinance' }
+        legal: { $ref: '#/components/schemas/BossOverviewLegal' }
+        task: { $ref: '#/components/schemas/BossOverviewTask' }
+
+    TenantSearchPolicy:
+      type: object
+      required:
+        - enabled
+        - allowedDomains
+        - disallowedDomains
+        - maxResults
+        - version
+        - updatedBy
+        - updatedAt
+      properties:
+        enabled: { type: boolean }
+        allowedDomains:
+          type: array
+          uniqueItems: true
+          items: { type: string, minLength: 1, maxLength: 255 }
+        disallowedDomains:
+          type: array
+          uniqueItems: true
+          items: { type: string, minLength: 1, maxLength: 255 }
+        maxResults: { type: integer, minimum: 1, maximum: 20 }
+        version: { type: integer, minimum: 1 }
+        updatedBy: { type: [string, 'null'], format: uuid }
+        updatedAt: { type: string, format: date-time }
+
+    UpdateTenantSearchPolicyRequest:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        enabled: { type: boolean }
+        allowedDomains:
+          type: array
+          uniqueItems: true
+          items: { type: string, minLength: 1, maxLength: 255 }
+        disallowedDomains:
+          type: array
+          uniqueItems: true
+          items: { type: string, minLength: 1, maxLength: 255 }
+        maxResults: { type: integer, minimum: 1, maximum: 20 }
+        version: { type: integer, minimum: 1 }
+
+    AssignmentPolicyResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/AssignmentPolicy' }
+        requestId: { type: [string, 'null'] }
+
+    AssignmentPolicyListResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/AssignmentPolicyList' }
+        requestId: { type: [string, 'null'] }
+
+    AssignmentPolicyResolveResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/AssignmentPolicyResolveResult' }
+        requestId: { type: [string, 'null'] }
+
+    HrProfileResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/HrProfile' }
+        requestId: { type: [string, 'null'] }
+
+    HrProfileListResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/HrProfileList' }
+        requestId: { type: [string, 'null'] }
+
+    HrLeaveTypeResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/HrLeaveType' }
+        requestId: { type: [string, 'null'] }
+
+    HrLeaveTypeListResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/HrLeaveTypeList' }
+        requestId: { type: [string, 'null'] }
+
+    HrLeaveBalanceListResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/HrLeaveBalanceList' }
+        requestId: { type: [string, 'null'] }
+
+    HrLeaveRequestResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/HrLeaveRequest' }
+        requestId: { type: [string, 'null'] }
+
+    HrLeaveRequestListResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/HrLeaveRequestList' }
+        requestId: { type: [string, 'null'] }
+
+    FinanceExpenseCategoryResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/FinanceExpenseCategory' }
+        requestId: { type: [string, 'null'] }
+
+    FinanceExpenseCategoryListResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/FinanceExpenseCategoryList' }
+        requestId: { type: [string, 'null'] }
+
+    FinanceExpenseReportResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/FinanceExpenseReport' }
+        requestId: { type: [string, 'null'] }
+
+    FinanceExpenseReportListResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/FinanceExpenseReportList' }
+        requestId: { type: [string, 'null'] }
+
+    LegalContractResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/LegalContract' }
+        requestId: { type: [string, 'null'] }
+
+    LegalContractListResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/LegalContractList' }
+        requestId: { type: [string, 'null'] }
+
+    BossOverviewResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/BossOverview' }
+        requestId: { type: [string, 'null'] }
+
+    TenantSearchPolicyResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/TenantSearchPolicy' }
+        requestId: { type: [string, 'null'] }
+
     KnowledgeBaseMemberPermission:
       type: string
       enum: [READER, EDITOR, MANAGER]
