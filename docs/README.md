@@ -9,6 +9,7 @@
 | [工作台与数据看板](product/dashboard-workbench.md) | 工作台概览、待办、任务统计和近期会议 |
 | [知识库管理](product/knowledge-base-management.md) | 知识库 CRUD、成员授权、文档上传与处理状态机、公开知识库查询 |
 | [钉钉组织架构与人员同步](product/dingtalk-organization-sync.md) | 一个租户绑定一个钉钉企业、凭证验证、部门和人员外部镜像同步 |
+| [分配策略与人财法 MVP（设计草案）](product/assignment-and-hr-finance-legal.md) | C 负责的分配策略、通用任务范围、人财法 MVP 与 P2 请假跳过设计草案 |
 | [用户个人资料管理](product/user-profile-management.md) | 当前租户成员查询和修改自己的展示资料 |
 | [密码修改与凭证安全](security/password-management.md) | 租户成员和平台管理员修改自己的密码及会话安全规则 |
 | [architecture](architecture/overview.md) | 总体架构、目录树、边界与数据流 |
@@ -26,6 +27,7 @@
 | [项目管理 API](api/project-management-api.md) | 项目、成员、负责人和状态命令接口 |
 | [知识库管理 API](api/knowledge-base-api.md) | 知识库 CRUD、成员权限、文档上传和公开查询接口 |
 | [钉钉组织架构与人员同步 API](api/dingtalk-organization-sync-api.md) | 钉钉绑定、组织人员同步和同步任务查询 |
+| [分配策略与人财法 API（设计草案）](api/assignment-and-hr-finance-legal-api.md) | C 负责的 assignment/hr/finance/legal 契约草案 |
 | [database](database/README.md) | 数据模型与迁移约定 |
 | [security](security/README.md) | 安全模型、租户隔离与审计 |
 | [基础设施](../infra/README.md) | 应用/数据库分离部署、环境隔离与服务器运维入口 |
