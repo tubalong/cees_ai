@@ -71,6 +71,7 @@ NestJS API   = 业务事实、权限、状态与审计层（apps/api）
 缺失：
 
 - `DocumentChunk` 仍无读写代码：块 5 的引用明细直接由 ai-service 响应携带（citation 映射 document / version / chunk / page / bbox / text），暂不启用业务侧表读写
+- 知识库归属锚点管理 API 与自动授权（3.6 节权限边界已定，块 8 实现）；当前锚点字段只存在于数据库，公开契约与 API 均不暴露
 - MinerU 真机服务（块 6）；解析产物到 `ParsedDocument` 的真实转换（块 3 为占位解析器，块 6 真机替换）
 
 ## 3. 关键决策
@@ -135,6 +136,26 @@ ai-service 不自行推断权限。NestJS 计算可信 scope 后随检索请求�
 
 **归属锚点单一**：一个知识库只属于一个租户，`tenantId` 是企业隔离底线，不做"多租户字段存储"；租户内按锚点分类——挂项目为项目知识库（一个项目一个知识库，最常见形态）、挂部门为部门知识库、不挂锚点为公司级知识库。跨部门协作不靠锚点，靠成员授权（见下）。
 
+**锚点的两层含义**：
+
+1. 分类与展示：锚点决定知识库的归属类型（项目/部门/公司级），前端据此展示归属标签；
+2. 默认访问人群（自动授权）：锚点定义"谁天然是这个知识库的 READER"——项目知识库的项目成员、部门知识库的部门及全部子部门成员（组织树递归，与 `DataScope.DEPARTMENT_TREE` 同口径）、公司级知识库无自动授权人群。
+
+**锚点自动授权的权限边界**（实现锚点管理块时生效，当前暂缓）：
+
+- 自动授权是**动态计算的虚拟 READER**，不物化 `KnowledgeBaseMember` 行；访问判定 = 成员表显式授权 ∪ 锚点自动授权，自动授权恒为 `READER` 级、不升级为 `EDITOR`/`MANAGER`；
+- 显式成员授权独立于锚点：锚点人群之外可通过成员表加入（跨部门/跨项目协作），锚点人群之内可通过成员表升级为 `EDITOR`/`MANAGER`；成员退出项目/部门后，其显式授权**不自动删除**（显式授权显式撤销）；
+- RBAC 权限码仍是门槛：`knowledge_base.*` 权限由角色授予，锚点只解决资源归属判定（谁能读这个知识库），不替代权限码（能做什么）；
+- 锚点人群变化即时生效（虚拟计算，无同步任务），项目/部门成员增删不需要批处理。
+
+**锚点约束与生命周期**（实现锚点管理块时生效）：
+
+- 二选一互斥：`departmentId` 与 `projectId` 不能同时设置，都空即公司级；创建/修改时校验指向的部门/项目属于当前租户且未删除；
+- 修改规则：`MANAGER`（或 `knowledge_base.manage_all`）可修改锚点，走乐观锁 `version`，审计记录 before/after；
+- 悬挂处理：锚点指向的项目/部门被删除后，锚点保留（历史归属可追溯）但自动授权自然失效（人群动态计算天然处理）；管理界面提示锚点已失效，`MANAGER` 可重新挂接或清空为公司级。
+
+**与查询链路的关系**：锚点不改变 ai-service 检索过滤——scope 折叠仍按文档版本可见范围（见下与 3.5），过滤在向量检索阶段完成；锚点影响的是 NestJS 侧的知识库成员判定（`requireKnowledgeBasePermission`）与列表可见范围（`listVisibleKnowledgeBaseIds`），把锚点人群并入。锚点人群进入知识库后仍受文档版本可见范围收窄。
+
 **可见性分层**（版本级，`DocumentVersion.visibilityScope`）：
 
 | 层级 | 谁能看到 |
@@ -155,7 +176,7 @@ ai-service 不自行推断权限。NestJS 计算可信 scope 后随检索请求�
 
 - `KnowledgeBaseMember` 已存在（`@@unique([tenantId, knowledgeBaseId, userId])`），跨部门共享同一知识库的余地已留；块 5 迁移已把 `KnowledgeBaseMember.permission` 在数据库层收敛为枚举（Prisma enum，对应应用层 `READER` / `EDITOR` / `MANAGER`）；
 - `DocumentVersion` 已带 `visibilityScope` + `departmentId` / `projectId`；
-- `KnowledgeBase` 的 `departmentId` / `projectId` 锚点字段已由块 5 迁移补上（可选，二选一，都空即公司级）；"项目成员自动获得项目知识库"的自动授权仍暂缓，当前以成员表逐个授权。
+- `KnowledgeBase` 的 `departmentId` / `projectId` 锚点字段已由块 5 迁移补上（可选，二选一，都空即公司级）；公开契约 0.25.0 暂不暴露锚点字段，API 不接收/不返回锚点，自动授权未实现——当前所有知识库锚点为空，实际行为等同公司级知识库。锚点管理与自动授权在独立块（见第 8 节）实现，落地时契约、API、校验、自动授权判定与本文档同步变更。
 
 ## 4. 索引流程与状态机
 
@@ -225,8 +246,9 @@ PENDING -> PARSING -> PARSED -> INDEXING -> READY
 | 3 | NestJS `KnowledgeDocument` 状态机 + `DocumentChunk` 迁移改造（删除 embedding 字段）+ 上传触发索引任务 | 块 1 | ✅ 已落地 |
 | 4 | 真实 pgvector Gateway（独立 `cees_ai_vectors` database）+ `index/delete` 契约 | 块 2 | ✅ 已落地 |
 | 5 | 公开 Query API + `answer` 契约（LLMRouter rag role）+ citation 校验 + 索引删除 NestJS 接线 | 块 2、4 | ✅ 已落地 |
-| 6 | MinerU 真机联调（192.168.5.29，pip 版部署中） | 块 3 | 待开始 |
+| 6 | MinerU 真机联调（192.168.5.29，MinerU 3.4.5 + pipeline 后端已部署验证） | 块 3 | 待开始 |
 | 7 | Assistant RAG 工具接入（阶段 B） | 块 5 | 待开始 |
+| 8 | 知识库归属锚点管理与自动授权（3.6 节：项目/部门/公司级分类、锚点人群虚拟 READER、悬挂处理） | 块 5 | 待开始 |
 
 每块独立可验证、可提交；块 2 使用内存向量库与假解析产物，不依赖 GPU 服务器。
 
