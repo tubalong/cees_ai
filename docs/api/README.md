@@ -35,7 +35,7 @@
 - [公开 AI 对话链路与 Token 计量](../architecture/public-chat-api-and-token-metering.md)
 - [用户个人资料管理](../product/user-profile-management.md)
 - [钉钉组织架构与人员同步 API](dingtalk-organization-sync-api.md)
-- [分配策略与人财法 API（C 契约草案）](assignment-and-hr-finance-legal-api.md)
+- [分配策略与人财法 API（AssignmentPolicy 已实现；HR/Finance/Legal 契约草案）](assignment-and-hr-finance-legal-api.md)
 - [密码修改与凭证安全](../security/password-management.md)
 - [平台使用、接口与数据库字典](../product/platform-usage-guide.md)：按当前 OpenAPI 汇总全部接口、请求参数和验证顺序。
 
@@ -86,6 +86,13 @@ GET    /api/v1/roles/{roleId}
 PATCH  /api/v1/roles/{roleId}
 DELETE /api/v1/roles/{roleId}?version={version}
 PUT    /api/v1/roles/{roleId}/permissions
+
+GET    /api/v1/assignment/policies
+POST   /api/v1/assignment/policies
+GET    /api/v1/assignment/policies/{policyId}
+PATCH  /api/v1/assignment/policies/{policyId}
+DELETE /api/v1/assignment/policies/{policyId}?version={version}
+POST   /api/v1/assignment/policies/resolve
 
 GET    /api/v1/documents
 POST   /api/v1/documents
@@ -203,7 +210,7 @@ DELETE /api/v1/projects/{projectId}/tasks/{taskId}/attachments/{attachmentId}?ve
 GET    /api/v1/projects/{projectId}/tasks/{taskId}/activities
 ```
 
-截至 2026-09-11，身份、本人密码修改、用户个人资料、租户、组织部门、项目、任务、会议、日报周报、通知中心、工作台、RBAC、ACL、审计、平台租户管理、租户账号激活、COS 基础上传和公开 AI 对话接口均已实现。
+截至 2026-09-16，身份、本人密码修改、用户个人资料、租户、组织部门、项目、任务、会议、日报周报、通知中心、工作台、RBAC、ACL、审计、平台租户管理、租户账号激活、COS 基础上传、公开 AI 对话接口和分配策略均已实现。
 
 - `refresh` 每次成功后都会轮换 Refresh Token，旧 Token 立即失效；
 - `logout` 撤销当前 Access Token 对应的 Session；

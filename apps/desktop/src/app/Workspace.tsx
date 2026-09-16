@@ -2,7 +2,7 @@ import {
     AppstoreOutlined, BankOutlined, BellOutlined, BookOutlined, CheckCircleOutlined,
     CloudSyncOutlined, CodeOutlined, CopyOutlined, DatabaseOutlined, FileTextOutlined, FolderOutlined,
     HomeOutlined, LogoutOutlined, MenuFoldOutlined, MenuUnfoldOutlined, MessageOutlined, MoreOutlined,
-    PlusOutlined, ProjectOutlined, SafetyCertificateOutlined, SearchOutlined, SettingOutlined,
+    PartitionOutlined, PlusOutlined, ProjectOutlined, SafetyCertificateOutlined, SearchOutlined, SettingOutlined,
     CalendarOutlined, NotificationOutlined, ProfileOutlined,
     StarOutlined, TeamOutlined, UserOutlined,
 } from '@ant-design/icons';
@@ -28,6 +28,7 @@ import ProjectManagement from '../features/projects/ProjectManagement';
 import WorkReportPage from '../features/reports/WorkReportPage';
 import ProfileSettings from '../features/profile/ProfileSettings';
 import RoleManagement from '../features/roles/RoleManagement';
+import AssignmentPolicyManagement from '../features/assignment/AssignmentPolicyManagement';
 import { useDateFormatter, useI18n } from '../core/i18n';
 
 interface WebviewElement extends HTMLWebViewElement {
@@ -56,6 +57,7 @@ const navItems: NavItem[] = [
     { path: '/applications', label: '应用中心', icon: <AppstoreOutlined /> },
     { path: '/architecture', label: '架构管理', icon: <TeamOutlined /> },
     { path: '/roles', label: '角色权限', icon: <SafetyCertificateOutlined /> },
+    { path: '/assignment', label: '分配策略', icon: <PartitionOutlined /> },
     { path: '/dingtalk', label: '钉钉管理', icon: <CloudSyncOutlined /> },
     { path: '/knowledge', label: '知识管理', icon: <BookOutlined /> },
     { path: '/notifications', label: '通知中心', icon: <NotificationOutlined /> },
@@ -73,6 +75,7 @@ const appItems = [
 ];
 
 const navPermissionByPath: Record<string, string> = {
+    '/assignment': 'assignment.policy.read',
     '/roles': 'role.read',
     '/projects': 'project.read',
     '/meetings': 'meeting.read',
@@ -562,6 +565,7 @@ function CurrentPage({ authContext, members, documents, membersLoading, document
     if (location.pathname === '/reports') return <WorkReportPage authContext={authContext} onSessionExpired={onSessionExpired} />;
     if (location.pathname === '/applications') return <ApplicationsPage />;
     if (location.pathname === '/architecture') return <OrganizationManagement authContext={authContext} fallbackMembers={members} membersLoading={membersLoading} onSessionExpired={onSessionExpired} />;
+    if (location.pathname === '/assignment') return <AssignmentPolicyManagement authContext={authContext} onSessionExpired={onSessionExpired} />;
     if (location.pathname === '/roles') return <RoleManagement authContext={authContext} onSessionExpired={onSessionExpired} />;
     if (location.pathname === '/dingtalk') return <DingTalkOrganizationPage authContext={authContext} onSessionExpired={onSessionExpired} />;
     if (location.pathname === '/knowledge') return <KnowledgePage documents={documents} loading={documentsLoading} />;
