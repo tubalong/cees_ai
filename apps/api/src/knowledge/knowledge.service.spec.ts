@@ -2,6 +2,7 @@ import { NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { AiServiceGateway, AiServiceInvocationError } from '../ai-orchestration/ai-service-gateway.service';
 import { KnowledgeService } from './knowledge.service';
+import { KnowledgeIndexingService } from './knowledge-indexing.service';
 import { PrismaService } from '../database/prisma.service';
 import { TenantContext } from '../tenant/tenant-context';
 
@@ -136,7 +137,13 @@ describe('KnowledgeService', () => {
         prisma.knowledgeBase.findFirst.mockResolvedValue(knowledgeBaseRecord());
         prisma.knowledgeBaseMember.findUnique.mockResolvedValue({ permission: 'MANAGER' });
         prisma.knowledgeBase.updateMany.mockResolvedValue({ count: 1 });
-        const service = createService(prisma, ['knowledge_base.delete']);
+        const deleteIndexesSpy = jest.fn().mockResolvedValue(undefined);
+        const service = createService(
+            prisma,
+            ['knowledge_base.delete'],
+            undefined,
+            { deleteKnowledgeBaseIndexes: deleteIndexesSpy },
+        );
 
         await service.deleteKnowledgeBase(KNOWLEDGE_BASE_ID, { version: 1 });
 
@@ -147,6 +154,7 @@ describe('KnowledgeService', () => {
         expect(prisma.auditLog.create).toHaveBeenCalledWith({
             data: expect.objectContaining({ action: 'KNOWLEDGE_BASE_DELETED' }),
         });
+        expect(deleteIndexesSpy).toHaveBeenCalledWith(TENANT_ID, USER_ID, KNOWLEDGE_BASE_ID);
     });
 
     it('queries a knowledge base with folded scope and records the query log', async () => {
@@ -270,6 +278,7 @@ function createService(
     prisma: Record<string, any>,
     permissions: string[],
     gateway?: Record<string, any>,
+    indexingService?: Record<string, any>,
 ): KnowledgeService {
     const tenantContext = {
         require: jest.fn().mockReturnValue({
@@ -282,7 +291,15 @@ function createService(
         }),
     } as unknown as TenantContext;
     const effectiveGateway = (gateway ?? { answerKnowledge: jest.fn() }) as unknown as AiServiceGateway;
-    return new KnowledgeService(prisma as unknown as PrismaService, tenantContext, effectiveGateway);
+    const effectiveIndexingService = (
+        indexingService ?? { deleteKnowledgeBaseIndexes: jest.fn() }
+    ) as unknown as KnowledgeIndexingService;
+    return new KnowledgeService(
+        prisma as unknown as PrismaService,
+        tenantContext,
+        effectiveGateway,
+        effectiveIndexingService,
+    );
 }
 
 function createPrismaMock(): Record<string, any> {

@@ -4,6 +4,7 @@ import {
   compactChat as requestChatCompaction,
   composeDocument as requestComposeDocument,
   createClient,
+  deleteKnowledgeIndex as requestKnowledgeIndexDelete,
   generateDocumentDocx as requestGenerateDocumentDocx,
   generateImage as requestImageGeneration,
   getReadiness,
@@ -31,6 +32,8 @@ import {
   type InvokeResponse,
   type KnowledgeAnswerRequest,
   type KnowledgeAnswerResponse,
+  type KnowledgeIndexDeleteRequest,
+  type KnowledgeIndexDeleteResponse,
   type KnowledgeIndexRequest,
   type KnowledgeIndexResponse,
   type RenderDocxRequest,
@@ -406,6 +409,18 @@ export class AiServiceGateway {
    */
   async answerKnowledge(input: KnowledgeAnswerRequest): Promise<KnowledgeAnswerResponse> {
     const result = await requestKnowledgeAnswer({ client: this.getClient(), body: input });
+    if (result.error) throw this.toInvocationError(result.error, result.response?.status);
+    if (!result.data) throw this.emptyResponseError();
+    return result.data;
+  }
+
+  /**
+   * 调用 ai-service 索引删除路由：移除指定文档版本在当前 index_version 下的
+   * 派生向量节点。删除不调用 LLM、不产生 Token 指标；失败语义由 knowledge
+   * 模块决定（当前：记日志不阻塞业务，幂等重试后收敛）。
+   */
+  async deleteKnowledgeIndex(input: KnowledgeIndexDeleteRequest): Promise<KnowledgeIndexDeleteResponse> {
+    const result = await requestKnowledgeIndexDelete({ client: this.getClient(), body: input });
     if (result.error) throw this.toInvocationError(result.error, result.response?.status);
     if (!result.data) throw this.emptyResponseError();
     return result.data;

@@ -3,6 +3,7 @@ import {
     ConflictException,
     ForbiddenException,
     Injectable,
+    Logger,
     NotFoundException,
     ServiceUnavailableException,
 } from '@nestjs/common';
@@ -21,7 +22,7 @@ import {
     UpdateKnowledgeBaseDto,
     UpdateKnowledgeBaseMemberDto,
 } from './dto';
-import { readIndexVersions } from './knowledge-indexing.service';
+import { KnowledgeIndexingService, readIndexVersions } from './knowledge-indexing.service';
 import {
     KNOWLEDGE_BASE_MEMBER_PERMISSIONS,
     KnowledgeBaseMemberListResult,
@@ -75,10 +76,13 @@ const permissionRank: Record<KnowledgeBaseMemberPermission, number> = {
 
 @Injectable()
 export class KnowledgeService {
+    private readonly logger = new Logger(KnowledgeService.name);
+
     constructor(
         private readonly prisma: PrismaService,
         private readonly tenantContext: TenantContext,
         private readonly gateway: AiServiceGateway,
+        private readonly indexingService: KnowledgeIndexingService,
     ) { }
 
     async listKnowledgeBases(query: ListKnowledgeBasesQueryDto): Promise<KnowledgeBaseListResult> {
@@ -223,6 +227,14 @@ export class KnowledgeService {
             await this.writeAudit(transaction, context, 'KNOWLEDGE_BASE_DELETED', 'KNOWLEDGE_BASE', knowledgeBaseId, {
                 version: input.version,
             });
+        });
+        void this.indexingService.deleteKnowledgeBaseIndexes(
+            context.tenantId,
+            context.userId,
+            knowledgeBaseId,
+        ).catch((error: unknown) => {
+            const message = error instanceof Error ? error.message : 'unknown error';
+            this.logger.warn(`清理知识库派生索引失败（知识库 ${knowledgeBaseId}）：${message}`);
         });
     }
 

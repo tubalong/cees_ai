@@ -1,6 +1,11 @@
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { AuditOutcome, KnowledgeDocumentStatus, Prisma, VisibilityScope } from '@prisma/client';
-import type { KnowledgeIndexRequest, KnowledgeVisibilityScope, ParsedDocument } from '@cees/ai-service-client';
+import type {
+    KnowledgeIndexDeleteResponse,
+    KnowledgeIndexRequest,
+    KnowledgeVisibilityScope,
+    ParsedDocument,
+} from '@cees/ai-service-client';
 import { randomUUID } from 'node:crypto';
 import { AiServiceGateway, AiServiceInvocationError } from '../ai-orchestration/ai-service-gateway.service';
 import { PrismaService } from '../database/prisma.service';
@@ -79,6 +84,49 @@ export class KnowledgeIndexingService implements OnModuleInit, OnModuleDestroy {
     /** 上传完成后的即时触发；与定时轮询共用 Redis 锁，不会重复处理同一文档。 */
     async kick(): Promise<void> {
         void this.runOnce().catch((error: unknown) => this.logger.error(error));
+    }
+
+    /**
+     * 删除指定文档版本的派生索引。失败抛 AiServiceInvocationError，由调用方
+     * 决定降级策略（当前：fire-and-forget 记日志，不阻塞业务写入）。
+     */
+    async deleteDocumentVersionIndex(
+        tenantId: string,
+        userId: string,
+        documentVersionId: string,
+    ): Promise<KnowledgeIndexDeleteResponse> {
+        return this.gateway.deleteKnowledgeIndex({
+            request_id: randomUUID(),
+            tenant_id: tenantId,
+            user_id: userId,
+            document_version_id: documentVersionId,
+            index_version: this.indexVersions.indexVersion,
+        });
+    }
+
+    /**
+     * 清理知识库下全部文档版本的派生索引（知识库删除后的卫生清理）。
+     * 单个版本删除失败只记日志并继续清理其余版本，最坏遗留向量垃圾，
+     * 幂等重试后收敛。
+     */
+    async deleteKnowledgeBaseIndexes(tenantId: string, userId: string, knowledgeBaseId: string): Promise<void> {
+        const documents = await this.prisma.knowledgeDocument.findMany({
+            where: { tenantId, knowledgeBaseId },
+            select: { id: true },
+        });
+        if (documents.length === 0) return;
+        const versions = await this.prisma.documentVersion.findMany({
+            where: { tenantId, documentId: { in: documents.map((document) => document.id) } },
+            select: { id: true },
+        });
+        for (const version of versions) {
+            try {
+                await this.deleteDocumentVersionIndex(tenantId, userId, version.id);
+            } catch (error) {
+                const message = error instanceof Error ? error.message : 'unknown error';
+                this.logger.warn(`清理知识库派生索引失败（版本 ${version.id}）：${message}`);
+            }
+        }
     }
 
     async runOnce(): Promise<{ skipped: boolean; processed: number }> {

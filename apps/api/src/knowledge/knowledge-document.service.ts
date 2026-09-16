@@ -2,6 +2,7 @@ import {
     BadRequestException,
     ConflictException,
     Injectable,
+    Logger,
     NotFoundException,
 } from '@nestjs/common';
 import { AuditOutcome, Prisma, VisibilityScope } from '@prisma/client';
@@ -48,6 +49,8 @@ interface ResolvedVisibilityScope {
 
 @Injectable()
 export class KnowledgeDocumentService {
+    private readonly logger = new Logger(KnowledgeDocumentService.name);
+
     constructor(
         private readonly prisma: PrismaService,
         private readonly tenantContext: TenantContext,
@@ -158,7 +161,8 @@ export class KnowledgeDocumentService {
     ): Promise<KnowledgeDocumentResult> {
         const context = this.tenantContext.require();
         await this.knowledgeService.requireKnowledgeBaseAccess(knowledgeBaseId, 'EDITOR');
-        await this.requireDocumentRecord(context.tenantId, knowledgeBaseId, documentId);
+        const document = await this.requireDocumentRecord(context.tenantId, knowledgeBaseId, documentId);
+        const previousVersionId = document.currentVersionId;
         const scope = await this.resolveVisibilityScope(
             context.tenantId,
             input.visibilityScope,
@@ -207,6 +211,16 @@ export class KnowledgeDocumentService {
                 });
             });
             void this.indexingService.kick();
+            if (previousVersionId) {
+                void this.indexingService.deleteDocumentVersionIndex(
+                    context.tenantId,
+                    context.userId,
+                    previousVersionId,
+                ).catch((error: unknown) => {
+                    const message = error instanceof Error ? error.message : 'unknown error';
+                    this.logger.warn(`清理旧文档版本派生索引失败（版本 ${previousVersionId}）：${message}`);
+                });
+            }
             return this.requireDocument(knowledgeBaseId, documentId);
         } catch (error) {
             if (isUniqueConstraintError(error)) throw this.fileObjectInUse();
