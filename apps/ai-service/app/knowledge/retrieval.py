@@ -7,6 +7,7 @@ from app.api.generated.models import (
 )
 from app.embeddings.router import EmbeddingRouter
 from app.knowledge.stores import ScoredNode, VectorStoreGateway
+from app.knowledge.vector_space import assert_compatible_vector_space
 
 
 async def retrieve_chunks(
@@ -20,6 +21,12 @@ async def retrieve_chunks(
     scope 由调用方（NestJS）基于身份与权限计算，ai-service 不推断
     权限，只在向量检索阶段应用过滤。检索不调用 LLM。
     """
+    assert_compatible_vector_space(
+        store,
+        embedding_router=embedding_router,
+        profile_name=request.embedding_profile,
+        request_id=request.request_id,
+    )
     query_embedding = await embedding_router.embed_query(
         request.embedding_profile, request.query
     )

@@ -13,6 +13,7 @@ from app.embeddings.router import EmbeddingRouter
 from app.knowledge.node_builder import IndexContext, build_nodes
 from app.knowledge.parsed_models import assert_identity_matches
 from app.knowledge.stores import VectorStoreGateway
+from app.knowledge.vector_space import assert_compatible_vector_space
 
 
 async def index_document(
@@ -35,6 +36,14 @@ async def index_document(
         document,
         document_id=request.document_id,
         document_version_id=request.document_version_id,
+    )
+    # pgvector 表维度固定，先于构建节点拦截 profile 与向量空间不一致
+    # 的配置错误，避免做完切分/embedding 后才在写入阶段失败。
+    assert_compatible_vector_space(
+        store,
+        embedding_router=embedding_router,
+        profile_name=request.embedding_profile,
+        request_id=request.request_id,
     )
 
     context = IndexContext(

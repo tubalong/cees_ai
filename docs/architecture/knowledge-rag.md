@@ -119,6 +119,8 @@ NestJS API   = 业务事实、权限、状态与审计层（apps/api）
 - 索引请求必须声明三元组，检索请求必须声明 `index_version`；
 - 向量库中每个节点携带该三元组，删除按 `(tenant_id, document_version_id, index_version)` 过滤。
 
+pgvector 表维度在建表时固定（`KNOWLEDGE_VECTOR_DIMENSION`），而内置 `deterministic` 是 384 维开发用哈希向量：pgvector 模式下索引与检索若解析到 `deterministic`，ai-service 前置拒绝为配置错误 `EMBEDDING_PROFILE_MISCONFIGURED`（500，`retryable=false`），不会拖到写入阶段才报维度不匹配，也不会在维度碰巧一致时造成向量空间静默错乱；内存向量库不受此约束（开发/测试仍可用 deterministic）。
+
 ### 3.5 权限过滤
 
 ai-service 不自行推断权限。NestJS 计算可信 scope 后随检索请求传入，过滤必须在**向量检索阶段**完成（metadata filter），不是先取全局 top-k 再过滤：
@@ -277,5 +279,5 @@ PENDING -> PARSING -> PARSED -> INDEXING -> READY
 | 3 | jest：状态机迁移、上传触发、失败重试（32 用例通过）；Prisma 迁移检查 | ✅ 完成 |
 | 4 | pytest：Gateway upsert/delete/filter；幂等与部分失败；真实 embedding 归一化与缺失 key 拒绝 | ✅ 完成 |
 | 5 | jest 38 用例（scope 折叠、查询日志、失败审计、索引删除接线）+ pytest 全绿（answer 空结果短路、rag role、citation 校验、acl_version 可选、空白名单空数组保护）；契约校验与客户端重生成 | ✅ 完成 |
-| 6 | jest 23 用例（TS 版转换器与真机 parser 错误映射、3.4.5 服务模式响应结构）+ pytest 全绿（embedding router/维度校验）；29 真机端到端验收通过：上传 PDF → MinerU 解析 → pgvector 索引 → READY → 查询 grounded=true 带 citations | ✅ 完成 |
+| 6 | jest 23 用例（TS 版转换器与真机 parser 错误映射、3.4.5 服务模式响应结构）+ pytest 全绿（embedding router/维度校验、pgvector 拒绝 deterministic 前置拦截）；29 真机端到端验收通过：上传 PDF → MinerU 解析 → pgvector 索引 → READY → 查询 grounded=true 带 citations | ✅ 完成 |
 | 7 | jest：工具 approve/执行前二次校验/失败语义；契约兼容检查 | 待验证 |
