@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { AuditOutcome, DepartmentStatus, MembershipStatus, Prisma } from '@prisma/client';
 import { normalizeAccount } from '../auth/account';
+import { isValidTimeZone } from '../common/tenant-time';
 import { PrismaService } from '../database/prisma.service';
 import { TENANT_ADMIN_ROLE_CODE } from '../rbac/permission-catalog';
 import {
@@ -41,15 +42,30 @@ export class TenantService {
 
     async updateCurrentTenant(input: UpdateTenantDto): Promise<TenantResult> {
         const context = this.tenantContext.require();
+        const name = input.name?.trim();
+        const timezone = input.timezone?.trim();
+        if (!name && !timezone) {
+            throw new BadRequestException({ code: 'TENANT_UPDATE_EMPTY', message: '至少提供一个需要修改的字段' });
+        }
+        if (timezone && !isValidTimeZone(timezone)) {
+            throw new BadRequestException({
+                code: 'TENANT_TIMEZONE_INVALID',
+                message: '企业时区不是有效的 IANA 时区标识',
+            });
+        }
         const current = await this.prisma.tenant.findFirst({
             where: { id: context.tenantId, deletedAt: null },
         });
         if (!current) throw this.tenantNotFound();
 
+        const data: Prisma.TenantUpdateManyMutationInput = { version: { increment: 1 } };
+        if (name) data.name = name;
+        if (timezone) data.timezone = timezone;
+
         await this.prisma.$transaction(async (transaction) => {
             const updated = await transaction.tenant.updateMany({
                 where: { id: context.tenantId, version: input.version, deletedAt: null },
-                data: { name: input.name.trim(), version: { increment: 1 } },
+                data,
             });
             if (updated.count !== 1) throw this.versionConflict();
             await transaction.auditLog.create({
@@ -57,15 +73,19 @@ export class TenantService {
                     tenantId: context.tenantId,
                     actorUserId: context.userId,
                     actorMembershipId: context.membershipId,
-                    action: 'TENANT_UPDATED',
+                    action: !name && timezone ? 'TENANT_TIMEZONE_CHANGED' : 'TENANT_UPDATED',
                     outcome: AuditOutcome.SUCCESS,
                     resourceType: 'TENANT',
                     resourceId: context.tenantId,
                     requestId: context.requestId,
                     metadata: {
                         actorMembershipId: context.membershipId,
-                        before: { name: current.name, version: current.version },
-                        after: { name: input.name.trim(), version: current.version + 1 },
+                        before: { name: current.name, timezone: current.timezone, version: current.version },
+                        after: {
+                            name: name ?? current.name,
+                            timezone: timezone ?? current.timezone,
+                            version: current.version + 1,
+                        },
                     },
                 },
             });
@@ -427,6 +447,7 @@ function toTenantResult(tenant: {
     id: string;
     code: string;
     name: string;
+    timezone: string;
     status: TenantResult['status'];
     version: number;
     createdAt: Date;
@@ -436,6 +457,7 @@ function toTenantResult(tenant: {
         id: tenant.id,
         code: tenant.code,
         name: tenant.name,
+        timezone: tenant.timezone,
         status: tenant.status,
         version: tenant.version,
         createdAt: tenant.createdAt,

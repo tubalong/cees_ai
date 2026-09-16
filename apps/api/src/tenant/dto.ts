@@ -19,10 +19,17 @@ import { MembershipStatus } from '@prisma/client';
 import { ACCOUNT_MAX_LENGTH, ACCOUNT_MIN_LENGTH, ACCOUNT_PATTERN } from '../auth/account';
 
 export class UpdateTenantDto {
+    @IsOptional()
     @IsString()
     @MinLength(1)
     @MaxLength(120)
-    name!: string;
+    name?: string;
+
+    @IsOptional()
+    @IsString()
+    @MinLength(1)
+    @MaxLength(64)
+    timezone?: string;
 
     @IsInt()
     @Min(1)

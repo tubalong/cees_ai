@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CEES AI API
-  version: 0.25.0
+  version: 0.26.0
   description: 以本文件为唯一事实源的公开 API 契约。资源与操作按 docs/api 约定补充。
 
 servers:
@@ -9610,6 +9610,7 @@ components:
         - id
         - code
         - name
+        - timezone
         - status
         - version
         - createdAt
@@ -9622,6 +9623,11 @@ components:
           type: string
         name:
           type: string
+        timezone:
+          type: string
+          description: 租户时区，IANA 标识；用于业务日界线（工作台“今日”、日报提醒所属日期）与项目编码年份
+          examples:
+            - Asia/Shanghai
         status:
           $ref: "#/components/schemas/TenantStatus"
         version:
@@ -9638,13 +9644,19 @@ components:
       type: object
       additionalProperties: false
       required:
-        - name
         - version
       properties:
         name:
           type: string
           minLength: 1
           maxLength: 120
+        timezone:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: IANA 时区标识；与 name 至少提供一个，非法标识返回 400 TENANT_TIMEZONE_INVALID
+          examples:
+            - Asia/Shanghai
         version:
           type: integer
           minimum: 1

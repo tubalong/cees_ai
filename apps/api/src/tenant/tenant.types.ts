@@ -4,6 +4,7 @@ export interface TenantResult {
     id: string;
     code: string;
     name: string;
+    timezone: string;
     status: TenantStatus;
     version: number;
     createdAt: Date;

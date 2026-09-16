@@ -87,6 +87,54 @@ describe('BackgroundJobsService', () => {
         await expect(service.runOnce(NOW)).resolves.toEqual(expect.objectContaining({ workReportReminderNotifications: 0 }));
         expect(notifications.createForUsers).not.toHaveBeenCalled();
     });
+
+    it('resolves the reminder day boundary per tenant time zone', async () => {
+        const otherTenantId = '20000000-0000-0000-0000-000000000009';
+        const otherMembershipId = '20000000-0000-0000-0000-000000000010';
+        const otherUserId = '20000000-0000-0000-0000-000000000011';
+        const prisma = createPrismaMock();
+        prisma.tenantMembership.findMany.mockResolvedValue([
+            { id: MEMBERSHIP_ID, tenantId: TENANT_ID, userId: USER_ID },
+            { id: otherMembershipId, tenantId: otherTenantId, userId: otherUserId },
+        ]);
+        prisma.tenant.findMany.mockResolvedValue([
+            { id: TENANT_ID, timezone: 'Asia/Shanghai' },
+            { id: otherTenantId, timezone: 'UTC' },
+        ]);
+        const notifications = createNotificationMock();
+        const service = new BackgroundJobsService(prisma as unknown as PrismaService, createRedisMock() as unknown as RedisService, notifications as unknown as NotificationService);
+
+        // 2026-09-11T23:30Z 在东八区已经是 9 月 12 日 07:30，因此“昨天”分别是 09-11 与 09-10。
+        const result = await service.runOnce(new Date('2026-09-11T23:30:00.000Z'));
+
+        expect(result.workReportReminderNotifications).toBe(2);
+        expect(notifications.createForUsers).toHaveBeenCalledWith(expect.objectContaining({
+            tenantId: TENANT_ID,
+            dedupKey: 'WORK_REPORT_DAILY_REMINDER:2026-09-11',
+        }));
+        expect(notifications.createForUsers).toHaveBeenCalledWith(expect.objectContaining({
+            tenantId: otherTenantId,
+            dedupKey: 'WORK_REPORT_DAILY_REMINDER:2026-09-10',
+        }));
+        expect(prisma.workReport.findMany).toHaveBeenCalledWith(expect.objectContaining({
+            where: expect.objectContaining({
+                OR: expect.arrayContaining([
+                    expect.objectContaining({
+                        periodStart: {
+                            gte: new Date('2026-09-11T00:00:00.000Z'),
+                            lt: new Date('2026-09-12T00:00:00.000Z'),
+                        },
+                    }),
+                    expect.objectContaining({
+                        periodStart: {
+                            gte: new Date('2026-09-10T00:00:00.000Z'),
+                            lt: new Date('2026-09-11T00:00:00.000Z'),
+                        },
+                    }),
+                ]),
+            }),
+        }));
+    });
 });
 
 function createPrismaMock(): Record<string, any> {
@@ -94,6 +142,7 @@ function createPrismaMock(): Record<string, any> {
         uploadSession: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
         aIActionDraft: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
         tenantMembership: { findMany: jest.fn().mockResolvedValue([]) },
+        tenant: { findMany: jest.fn().mockResolvedValue([{ id: TENANT_ID, timezone: 'Asia/Shanghai' }]) },
         workReport: { findMany: jest.fn().mockResolvedValue([]) },
     };
 }

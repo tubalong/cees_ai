@@ -280,6 +280,7 @@ model Tenant {
   id                     String                  @id @default(uuid()) @db.Uuid
   code                   String                  @unique
   name                   String
+  timezone               String                  @default("Asia/Shanghai")
   status                 TenantStatus            @default(ACTIVE)
   memberships            TenantMembership[]
   authSessions           AuthSession[]
