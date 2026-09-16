@@ -145,6 +145,8 @@ export interface DingTalkMappingCredential {
     account: string;
     departmentId: string | null;
     tenantCode: string;
+    roleIds: string[];
+    roleCodes: string[];
     activationToken: string;
     activationExpiresAt: Date;
 }

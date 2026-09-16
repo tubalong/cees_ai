@@ -1,6 +1,6 @@
 # 钉钉组织架构与人员同步 API
 
-公开契约版本：`0.24.0`。完整定义以 `packages/contracts/openapi/openapi.yaml` 为准，修改契约后必须重新生成 `packages/api-client`。
+公开契约版本：`0.25.0`。完整定义以 `packages/contracts/openapi/openapi.yaml` 为准，修改契约后必须重新生成 `packages/api-client`。
 
 ## 接口清单
 
@@ -85,6 +85,21 @@ POST /api/v1/dingtalk/organization/mapping/apply
   "createMissingDepartments": true,
   "createMissingMembers": true,
   "activationExpiresInDays": 7,
+  "roleAssignments": [
+    {
+      "roleId": "普通员工角色UUID",
+      "dingtalkUserIds": [
+        "钉钉用户镜像记录UUID-张三",
+        "钉钉用户镜像记录UUID-王五"
+      ]
+    },
+    {
+      "roleId": "技术人员角色UUID",
+      "dingtalkUserIds": [
+        "钉钉用户镜像记录UUID-李四"
+      ]
+    }
+  ],
   "userResolutions": [
     {
       "dingtalkUserId": "钉钉用户镜像记录UUID",
@@ -95,7 +110,11 @@ POST /api/v1/dingtalk/organization/mapping/apply
 }
 ```
 
-找不到已有成员时，服务端按姓名生成小写拼音账号；租户内账号冲突时依次使用 `zhangsan2`、`zhangsan3` 等后缀。新成员状态为 `PENDING_ACTIVATION`，密码为空，响应中的 `credentials` 返回一次性激活令牌。管理员应立即保存或由前端生成 Excel，服务端不保存明文令牌。
+`roleAssignments` 是应用映射时的批量角色分配：一个角色可以分配给多人，一个人也可以出现在多个角色的 `dingtalkUserIds` 中。角色必须是当前租户未删除的角色，`tenant_admin` 不允许通过该接口分配。角色不会自动创建，租户管理员应先在角色管理中创建并配置角色。
+
+当本次会创建新成员时，每个新成员至少需要一个角色；缺少角色会返回 `DINGTALK_MAPPING_ROLE_REQUIRED`，不会创建该批次的新成员。已匹配的已有成员默认保留已有角色；如果在 `roleAssignments` 中再次指定，服务端追加角色而不是覆盖原有角色。部门映射和已有成员绑定不因未分配角色而阻塞。
+
+找不到已有成员时，服务端按姓名生成小写拼音账号；租户内账号冲突时依次使用 `zhangsan2`、`zhangsan3` 等后缀。新成员状态为 `PENDING_ACTIVATION`，密码为空，响应中的 `credentials` 返回一次性激活令牌以及实际写入的 `roleIds`、`roleCodes`。管理员应立即保存或由前端生成 Excel，服务端不保存明文令牌。
 
 用户使用 `POST /api/v1/auth/activate` 设置自己的密码，之后使用普通租户登录接口登录。重复应用已经完成映射的钉钉人员不会重复创建账号或激活凭证。
 

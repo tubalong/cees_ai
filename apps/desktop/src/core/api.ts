@@ -1,5 +1,5 @@
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://132.232.159.186:3000/api/';
-// export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://192.168.5.29:3000/api/';
+// export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://132.232.159.186:3000/api/';
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://192.168.5.29:3000/api/';
 // http://192.168.5.29:3000/api/
 // http://132.232.159.186:3000/api/
 const ACCESS_TOKEN_KEY = 'cees.accessToken';
@@ -1791,5 +1791,103 @@ export async function reviewWorkReport(reportId: string, approved: boolean, comm
             ...(comment.trim() ? { comment: comment.trim() } : {}),
             version,
         }),
+    });
+}
+
+export interface DingTalkMappingRequest {
+    activationExpiresInDays?: number;
+    createMissingDepartments?: boolean;
+    createMissingMembers?: boolean;
+}
+
+export interface DingTalkMappingDepartmentPreview {
+    dingtalkDepartmentId: string;
+    externalDepartmentId: string;
+    name: string;
+    path: string;
+    action: 'MATCH_EXISTING' | 'CREATE' | 'CONFLICT' | 'SKIP';
+    departmentId: string | null;
+    candidateDepartmentIds: string[];
+    reason: string;
+}
+
+export interface DingTalkMappingUserPreview {
+    dingtalkUserId: string;
+    externalUserId: string;
+    name: string;
+    departmentPaths: string[];
+    action: 'MATCH_EXISTING' | 'CREATE' | 'CONFLICT' | 'SKIP';
+    membershipId: string | null;
+    candidateMembershipIds: string[];
+    suggestedAccount: string;
+    reason: string;
+}
+
+export interface DingTalkMappingPreview {
+    activationExpiresInDays: number;
+    departments: DingTalkMappingDepartmentPreview[];
+    users: DingTalkMappingUserPreview[];
+    summary: {
+        departmentMatchedCount: number;
+        departmentCreateCount: number;
+        departmentConflictCount: number;
+        userMatchedCount: number;
+        userCreateCount: number;
+        userConflictCount: number;
+    };
+}
+
+export interface DingTalkRoleAssignment {
+    roleId: string;
+    dingtalkUserIds: string[];
+}
+
+export interface DingTalkMappingDepartmentResolution {
+    dingtalkDepartmentId: string;
+    action: 'BIND_EXISTING' | 'CREATE' | 'SKIP';
+    departmentId?: string | null;
+}
+
+export interface DingTalkMappingUserResolution {
+    dingtalkUserId: string;
+    action: 'BIND_EXISTING' | 'CREATE' | 'SKIP';
+    membershipId?: string | null;
+    account?: string | null;
+}
+
+export interface DingTalkMappingCredential {
+    dingtalkUserId: string;
+    membershipId: string;
+    displayName: string;
+    account: string;
+    departmentId: string | null;
+    tenantCode: string;
+    roleIds: string[];
+    roleCodes: string[];
+    activationToken: string;
+    activationExpiresAt: string;
+}
+
+export interface DingTalkMappingResult {
+    preview: DingTalkMappingPreview;
+    credentials: DingTalkMappingCredential[];
+    summary: DingTalkMappingPreview['summary'] & { departmentSkippedCount: number; userSkippedCount: number };
+}
+
+export async function previewDingTalkMapping(input: DingTalkMappingRequest = {}): Promise<DingTalkMappingPreview> {
+    return authorizedRequest<DingTalkMappingPreview>('v1/dingtalk/organization/mapping/preview', {
+        method: 'POST',
+        body: JSON.stringify(input),
+    });
+}
+
+export async function applyDingTalkMapping(input: DingTalkMappingRequest & {
+    departmentResolutions?: DingTalkMappingDepartmentResolution[];
+    userResolutions?: DingTalkMappingUserResolution[];
+    roleAssignments: DingTalkRoleAssignment[];
+}): Promise<DingTalkMappingResult> {
+    return authorizedRequest<DingTalkMappingResult>('v1/dingtalk/organization/mapping/apply', {
+        method: 'POST',
+        body: JSON.stringify(input),
     });
 }

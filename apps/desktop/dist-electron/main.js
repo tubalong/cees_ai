@@ -17,14 +17,31 @@ function createWindow() {
             contextIsolation: true,
             nodeIntegration: false,
             sandbox: true,
+            webviewTag: true,
         },
     });
-    if (process.env.VITE_DEV_SERVER_URL)
-        void window.loadURL(process.env.VITE_DEV_SERVER_URL);
-    else
+    window.webContents.setWindowOpenHandler(({ url }) => {
+        if (/^https?:\/\//i.test(url))
+            void electron_1.shell.openExternal(url);
+        return { action: 'deny' };
+    });
+    if (!electron_1.app.isPackaged) {
+        window.webContents.once('did-finish-load', () => {
+            window.webContents.openDevTools({ mode: 'detach', activate: true });
+        });
+        void window.loadURL(process.env.VITE_DEV_SERVER_URL ?? 'http://localhost:5173');
+    }
+    else {
         void window.loadFile(node_path_1.default.join(__dirname, '../dist/index.html'));
+    }
 }
-electron_1.app.whenReady().then(createWindow);
+electron_1.app.whenReady().then(() => {
+    electron_1.Menu.setApplicationMenu(null);
+    electron_1.ipcMain.on('cees:open-devtools', (event) => {
+        electron_1.BrowserWindow.fromWebContents(event.sender)?.webContents.openDevTools({ mode: 'detach', activate: true });
+    });
+    createWindow();
+});
 electron_1.app.on('window-all-closed', () => { if (process.platform !== 'darwin')
     electron_1.app.quit(); });
 // TODO: Add a signed auto-update provider and staged rollout policy before production release.
