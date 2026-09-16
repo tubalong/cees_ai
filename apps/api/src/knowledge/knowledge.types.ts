@@ -87,3 +87,17 @@ export interface KnowledgeQueryResult {
     insufficientEvidence: boolean;
     citations: KnowledgeQueryCitationResult[];
 }
+
+/** 助手工具检索结果：citation 只含业务内容（文档 ID、标题、片段、页码），不含内部 chunk 标识。 */
+export interface AssistantKnowledgeSearchResult {
+    answer: string;
+    grounded: boolean;
+    insufficientEvidence: boolean;
+    citations: {
+        id: string;
+        title: string;
+        snippet: string;
+        pageIndex: number | null;
+    }[];
+    searchedKnowledgeBaseIds: string[];
+}

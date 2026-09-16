@@ -130,6 +130,7 @@ export class AssistantController {
         content: input.content,
         imageFileIds: input.imageFileIds,
         mode: input.mode,
+        knowledgeBaseEnabled: input.knowledgeBaseEnabled,
       });
       const events = await this.turnRunner.subscribeTurn(
         { conversationId, turnId: started.turnId, afterSeq: 0 },

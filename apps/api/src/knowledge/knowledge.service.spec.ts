@@ -264,6 +264,124 @@ describe('KnowledgeService', () => {
         });
         expect(prisma.knowledgeQueryLog.create).not.toHaveBeenCalled();
     });
+
+    it('searches all visible knowledge bases for the assistant with folded scope and backfills document titles', async () => {
+        const prisma = createPrismaMock();
+        prisma.knowledgeBaseMember.findMany.mockResolvedValue([
+            { knowledgeBaseId: KNOWLEDGE_BASE_ID },
+            { knowledgeBaseId: OTHER_KNOWLEDGE_BASE_ID },
+        ]);
+        prisma.tenantMembership.findFirst.mockResolvedValue({ departmentId: 'dept-root' });
+        prisma.department.findMany.mockResolvedValue([
+            { id: 'dept-root', parentId: null },
+            { id: 'dept-child', parentId: 'dept-root' },
+        ]);
+        prisma.projectMember.findMany.mockResolvedValue([{ projectId: 'project-1' }]);
+        prisma.knowledgeDocument.findMany.mockResolvedValue([{ id: 'doc-1', name: '项目延期管理制度' }]);
+        const gateway = { answerKnowledge: jest.fn().mockResolvedValue(answerResponse()) };
+        const service = createService(prisma, ['knowledge_base.query'], gateway);
+
+        const result = await service.searchKnowledgeForAssistant({
+            tenantId: TENANT_ID,
+            userId: USER_ID,
+            membershipId: CURRENT_MEMBERSHIP_ID,
+            permissions: ['knowledge_base.query'],
+            requestId: 'request-id',
+            query: '项目延期怎么处理',
+        });
+
+        expect(result).toEqual({
+            answer: '延期超过两周需要升级到项目委员会。',
+            grounded: true,
+            insufficientEvidence: false,
+            citations: [{
+                id: 'doc-1',
+                title: '项目延期管理制度',
+                snippet: '项目延期超过两周时需要升级到项目委员会。',
+                pageIndex: 3,
+            }],
+            searchedKnowledgeBaseIds: [KNOWLEDGE_BASE_ID, OTHER_KNOWLEDGE_BASE_ID],
+        });
+        expect(gateway.answerKnowledge).toHaveBeenCalledWith(expect.objectContaining({
+            scope: {
+                knowledge_base_ids: [KNOWLEDGE_BASE_ID, OTHER_KNOWLEDGE_BASE_ID],
+                department_ids: ['dept-root', 'dept-child'],
+                project_ids: ['project-1'],
+            },
+        }));
+        // 多库检索日志的知识库 ID 为空，审计记录实际检索范围。
+        expect(prisma.knowledgeQueryLog.create).toHaveBeenCalledWith({
+            data: expect.objectContaining({
+                knowledgeBaseId: null,
+                query: '项目延期怎么处理',
+            }),
+        });
+        expect(prisma.auditLog.create).toHaveBeenCalledWith({
+            data: expect.objectContaining({
+                action: 'KNOWLEDGE_BASE_QUERIED',
+                resourceId: null,
+                metadata: expect.objectContaining({
+                    knowledgeBaseIds: [KNOWLEDGE_BASE_ID, OTHER_KNOWLEDGE_BASE_ID],
+                }),
+            }),
+        });
+    });
+
+    it('short-circuits to all tenant knowledge bases for manage_all members', async () => {
+        const prisma = createPrismaMock();
+        prisma.knowledgeBase.findMany.mockResolvedValue([
+            knowledgeBaseRecord(),
+            knowledgeBaseRecord({ id: OTHER_KNOWLEDGE_BASE_ID }),
+        ]);
+        prisma.tenantMembership.findFirst.mockResolvedValue({ departmentId: null });
+        prisma.projectMember.findMany.mockResolvedValue([]);
+        prisma.knowledgeDocument.findMany.mockResolvedValue([]);
+        const gateway = { answerKnowledge: jest.fn().mockResolvedValue(answerResponse({ citations: [] })) };
+        const service = createService(prisma, ['knowledge_base.manage_all'], gateway);
+
+        const result = await service.searchKnowledgeForAssistant({
+            tenantId: TENANT_ID,
+            userId: USER_ID,
+            membershipId: CURRENT_MEMBERSHIP_ID,
+            permissions: ['knowledge_base.manage_all'],
+            requestId: 'request-id',
+            query: '问题',
+        });
+
+        expect(prisma.knowledgeBaseMember.findMany).not.toHaveBeenCalled();
+        expect(gateway.answerKnowledge).toHaveBeenCalledWith(expect.objectContaining({
+            scope: expect.objectContaining({
+                knowledge_base_ids: [KNOWLEDGE_BASE_ID, OTHER_KNOWLEDGE_BASE_ID],
+            }),
+        }));
+        expect(result.citations).toEqual([]);
+    });
+
+    it('returns an empty evidence result without calling ai-service when no knowledge base is visible', async () => {
+        const prisma = createPrismaMock();
+        prisma.knowledgeBaseMember.findMany.mockResolvedValue([]);
+        const gateway = { answerKnowledge: jest.fn() };
+        const service = createService(prisma, ['knowledge_base.query'], gateway);
+
+        const result = await service.searchKnowledgeForAssistant({
+            tenantId: TENANT_ID,
+            userId: USER_ID,
+            membershipId: CURRENT_MEMBERSHIP_ID,
+            permissions: ['knowledge_base.query'],
+            requestId: 'request-id',
+            query: '问题',
+        });
+
+        expect(result).toEqual({
+            answer: '',
+            grounded: false,
+            insufficientEvidence: true,
+            citations: [],
+            searchedKnowledgeBaseIds: [],
+        });
+        expect(gateway.answerKnowledge).not.toHaveBeenCalled();
+        expect(prisma.knowledgeQueryLog.create).not.toHaveBeenCalled();
+    });
 });
 
 const TENANT_ID = '10000000-0000-0000-0000-000000000001';
@@ -272,6 +390,7 @@ const OTHER_USER_ID = '10000000-0000-0000-0000-000000000003';
 const CURRENT_MEMBERSHIP_ID = '20000000-0000-0000-0000-000000000001';
 const OTHER_MEMBERSHIP_ID = '20000000-0000-0000-0000-000000000002';
 const KNOWLEDGE_BASE_ID = '30000000-0000-0000-0000-000000000001';
+const OTHER_KNOWLEDGE_BASE_ID = '30000000-0000-0000-0000-000000000002';
 const KNOWLEDGE_BASE_MEMBER_ID = '40000000-0000-0000-0000-000000000001';
 
 function createService(
@@ -322,6 +441,7 @@ function createPrismaMock(): Record<string, any> {
         tenantMembership: { findFirst: jest.fn(), findMany: jest.fn() },
         department: { findMany: jest.fn() },
         projectMember: { findMany: jest.fn() },
+        knowledgeDocument: { findMany: jest.fn() },
         knowledgeQueryLog: { create: jest.fn() },
         auditLog: { create: jest.fn() },
     };

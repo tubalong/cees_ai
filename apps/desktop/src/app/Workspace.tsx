@@ -229,6 +229,7 @@ interface LocalChatMessage {
     content: string;
     resources?: ChatResource[];
     sources?: ChatSource[];
+    citations?: ChatCitation[];
 }
 
 interface ChatResource {
@@ -244,6 +245,13 @@ interface ChatSource {
     domain: string;
     snippet: string;
     publishedAt?: string | null;
+}
+
+interface ChatCitation {
+    id: string;
+    title: string;
+    snippet: string;
+    pageIndex?: number | null;
 }
 
 function ChatResourceCard({ resource, onPreviewDocument }: { resource: ChatResource; onPreviewDocument: (document: { id: string; title: string; content: string }) => void }): JSX.Element {
@@ -282,6 +290,14 @@ function ChatSourceCard({ source }: { source: ChatSource }): JSX.Element {
         <span className="chat-source-domain">{source.domain}</span>
         {source.snippet && <span className="chat-source-snippet">{source.snippet}</span>}
     </a>;
+}
+
+function KnowledgeCitationCard({ citation }: { citation: ChatCitation }): JSX.Element {
+    const { t } = useI18n();
+    return <div className="chat-source chat-citation">
+        <span className="chat-source-heading"><BookOpen size={15} /><strong>{citation.title}</strong>{citation.pageIndex !== null && citation.pageIndex !== undefined && <em className="chat-citation-page">{t('第 {page} 页', { page: citation.pageIndex + 1 })}</em>}</span>
+        {citation.snippet && <span className="chat-source-snippet">{citation.snippet}</span>}
+    </div>;
 }
 
 function AssistantPage(): JSX.Element {
@@ -344,6 +360,7 @@ function AssistantPage(): JSX.Element {
         const detail = await getConversation(conversation.id);
         if (activeConversationId && activeConversationId !== conversation.id) return;
         const cachedSources = JSON.parse(localStorage.getItem(`cees.chat.sources.${conversation.id}`) ?? '[]') as ChatSource[];
+        const cachedCitations = JSON.parse(localStorage.getItem(`cees.chat.citations.${conversation.id}`) ?? '[]') as ChatCitation[];
         const resourcesByTurn = new Map<string, ChatResource[]>();
         for (const item of detail.messages) {
             const resources = item.resources?.map((resource): ChatResource => ({ id: resource.id || resource.resourceId || '', type: resource.type, url: resource.url ?? resource.resourceUrl })) ?? [];
@@ -356,13 +373,17 @@ function AssistantPage(): JSX.Element {
             const lastAssistantMessage = [...restored].reverse().find((item) => item.role === 'assistant');
             if (lastAssistantMessage) lastAssistantMessage.sources = cachedSources;
         }
+        if (cachedCitations.length) {
+            const lastAssistantMessage = [...restored].reverse().find((item) => item.role === 'assistant');
+            if (lastAssistantMessage) lastAssistantMessage.citations = cachedCitations;
+        }
         setMessages(restored);
     };
 
     const sendMessage = async (): Promise<void> => {
         const text = input.trim();
         const imageFileIds = attachment?.isImage ? [attachment.id] : [];
-        const options = [networkSearch && '使用联网搜索', knowledgeBase && '使用知识库', attachment && !attachment.isImage && `参考附件：${attachment.name}（${attachment.id}）`].filter(Boolean);
+        const options = [networkSearch && '使用联网搜索', attachment && !attachment.isImage && `参考附件：${attachment.name}（${attachment.id}）`].filter(Boolean);
         const content = [selectedPrompt, ...options, text].filter(Boolean).join('\n') || (imageFileIds.length ? t('请分析这张图片') : '');
         if ((!content && !imageFileIds.length) || sending) return;
         setInput('');
@@ -378,8 +399,8 @@ function AssistantPage(): JSX.Element {
             const conversationId = activeConversationId ?? (await createConversation()).id;
             setActiveConversationId(conversationId);
             if (!conversations.some((item) => item.id === conversationId)) setConversations((items) => [{ id: conversationId, title: t('新对话'), mode, visibility: 'PRIVATE', version: 1, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }, ...items]);
-            let turnId = ''; let seq = 0; let answer = ''; let terminal = false; const streamingMessageId = `streaming-${Date.now()}`; const resources: ChatResource[] = []; const sources: ChatSource[] = []; const toolTypes = new Map<string, ChatResource['type']>();
-            const updateStreamingMessage = (): void => setMessages((items) => [...items.filter((item) => item.id !== streamingMessageId), { id: streamingMessageId, role: 'assistant', content: answer, resources: [...resources], sources: [...sources] }]);
+            let turnId = ''; let seq = 0; let answer = ''; let terminal = false; const streamingMessageId = `streaming-${Date.now()}`; const resources: ChatResource[] = []; const sources: ChatSource[] = []; const citations: ChatCitation[] = []; const toolTypes = new Map<string, ChatResource['type']>();
+            const updateStreamingMessage = (): void => setMessages((items) => [...items.filter((item) => item.id !== streamingMessageId), { id: streamingMessageId, role: 'assistant', content: answer, resources: [...resources], sources: [...sources], citations: [...citations] }]);
             const handle = (event: TurnStreamEvent): void => {
                 if (event.seq <= seq) return;
                 seq = event.seq;
@@ -388,19 +409,20 @@ function AssistantPage(): JSX.Element {
                 if (event.type === 'tool_call') { if (event.name === 'generate_document') toolTypes.set(event.toolCallId, 'DOCUMENT'); else if (event.name === 'generate_image') { toolTypes.set(event.toolCallId, 'IMAGE'); setImageGenerating(true); } }
                 if (event.type === 'tool_result' && event.status === 'completed') {
                     if (event.sources?.length) { sources.push(...event.sources); updateStreamingMessage(); }
+                    if (event.citations?.length) { citations.push(...event.citations); updateStreamingMessage(); }
                     const resourceId = event.resource?.id ?? event.resourceId;
                     const resourceType = event.resource?.type ?? toolTypes.get(event.toolCallId);
                     if (resourceId && resourceType) { resources.push({ id: resourceId, type: resourceType, url: event.resourceUrl }); if (resourceType === 'IMAGE') setImageGenerating(false); updateStreamingMessage(); }
                 }
                 if (event.type === 'error') { terminal = true; setImageGenerating(false); throw new Error(event.error.message); }
-                if (event.type === 'completed') { terminal = true; setImageGenerating(false); if (sources.length) localStorage.setItem(`cees.chat.sources.${conversationId}`, JSON.stringify(sources)); if (event.finishReason === 'length') message.warning(t('回答达到长度上限，内容可能不完整')); }
+                if (event.type === 'completed') { terminal = true; setImageGenerating(false); if (sources.length) localStorage.setItem(`cees.chat.sources.${conversationId}`, JSON.stringify(sources)); if (citations.length) localStorage.setItem(`cees.chat.citations.${conversationId}`, JSON.stringify(citations)); if (event.finishReason === 'length') message.warning(t('回答达到长度上限，内容可能不完整')); }
             };
             const replay = async (): Promise<void> => {
                 for (let attempt = 0; attempt < 3 && !terminal; attempt += 1) await replayTurnEvents(conversationId, turnId, seq, handle, controller.signal);
                 if (!terminal) throw new Error(t('连接已断开，请稍后重试'));
             };
             try {
-                await createTurn(conversationId, { content, mode, imageFileIds }, crypto.randomUUID(), handle, controller.signal);
+                await createTurn(conversationId, { content, mode, imageFileIds, knowledgeBaseEnabled: knowledgeBase }, crypto.randomUUID(), handle, controller.signal);
             } catch (error) {
                 if (!turnId || controller.signal.aborted || terminal) throw error;
                 await replay();
@@ -428,6 +450,7 @@ function AssistantPage(): JSX.Element {
                         <div className="chat-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}>{item.content}</ReactMarkdown></div>
                         {item.resources?.map((resource) => <ChatResourceCard key={`${resource.type}-${resource.id}`} resource={resource} onPreviewDocument={setPreviewDocument} />)}
                         {item.sources?.length ? <div className="chat-sources">{item.sources.map((source) => <ChatSourceCard key={source.id} source={source} />)}</div> : null}
+                        {item.citations?.length ? <div className="chat-sources">{item.citations.map((citation) => <KnowledgeCitationCard key={citation.id} citation={citation} />)}</div> : null}
                         <button className="chat-copy" type="button" onClick={() => void copyText(item.content)}><CopyOutlined />{t('复制')}</button>
                     </div>
                 </div>)}

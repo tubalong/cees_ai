@@ -234,6 +234,7 @@ export type { KnowledgeQueryCitation } from './models/KnowledgeQueryCitation';
 export type { KnowledgeQueryRequest } from './models/KnowledgeQueryRequest';
 export type { KnowledgeQueryResponse } from './models/KnowledgeQueryResponse';
 export type { KnowledgeQueryResponseEnvelope } from './models/KnowledgeQueryResponseEnvelope';
+export type { KnowledgeToolCitation } from './models/KnowledgeToolCitation';
 export type { LegalContract } from './models/LegalContract';
 export type { LegalContractList } from './models/LegalContractList';
 export type { LegalContractListResponseEnvelope } from './models/LegalContractListResponseEnvelope';

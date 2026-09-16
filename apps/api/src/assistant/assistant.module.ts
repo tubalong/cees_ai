@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { AiOrchestrationModule } from '../ai-orchestration/ai-orchestration.module';
 import { DocumentModule } from '../document/document.module';
 import { ImageModule } from '../image/image.module';
+import { KnowledgeModule } from '../knowledge/knowledge.module';
 import { StorageModule } from '../storage/storage.module';
 import { WebSearchModule } from '../web-search/web-search.module';
 import { AssistantController } from './api/assistant.controller';
@@ -16,6 +17,7 @@ import { ToolRegistryService } from './tools/tool-registry';
 import { ToolPolicyService } from './tools/tool-policy.service';
 import { GenerateDocumentTool } from './tools/executors/generate-document.tool';
 import { GenerateImageTool } from './tools/executors/generate-image.tool';
+import { KnowledgeSearchTool } from './tools/executors/knowledge-search.tool';
 import { WebSearchTool } from './tools/executors/web-search.tool';
 
 /**
@@ -25,7 +27,7 @@ import { WebSearchTool } from './tools/executors/web-search.tool';
  * 执行器在 onModuleInit 自注册，新增工具只需新增 provider。
  */
 @Module({
-  imports: [AiOrchestrationModule, DocumentModule, ImageModule, StorageModule, WebSearchModule],
+  imports: [AiOrchestrationModule, DocumentModule, ImageModule, KnowledgeModule, StorageModule, WebSearchModule],
   controllers: [AssistantController],
   providers: [
     ConversationService,
@@ -39,6 +41,7 @@ import { WebSearchTool } from './tools/executors/web-search.tool';
     TurnRecoveryService,
     GenerateDocumentTool,
     GenerateImageTool,
+    KnowledgeSearchTool,
     WebSearchTool,
   ],
 })

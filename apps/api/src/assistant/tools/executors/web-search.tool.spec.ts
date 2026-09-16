@@ -17,6 +17,7 @@ describe('WebSearchTool', () => {
     executionOwner: 'api:test',
     executionToken: 'execution-token',
     permissions: ['ai.web.search'],
+    knowledgeBaseEnabled: false,
   };
 
   beforeEach(() => {

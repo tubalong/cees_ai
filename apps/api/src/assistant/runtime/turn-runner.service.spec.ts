@@ -101,6 +101,52 @@ describe('TurnRunnerService', () => {
         expect(harness.state.createTurn).toHaveBeenCalledWith(expect.objectContaining({ mode: 'ultra' }));
     });
 
+    it('hides the knowledge_search tool from the model when the turn-level switch is off', async () => {
+        const harness = createHarness({ allowedTools: [chatTool('knowledge_search')] });
+
+        await harness.service.startTurn({
+            conversationId: CONVERSATION_ID,
+            idempotencyKey: 'key-kb-off',
+            content: '内部文档里怎么写的？',
+            mode: 'standard',
+        });
+        await consumeAll(await harness.service.subscribeTurn({
+            conversationId: CONVERSATION_ID,
+            turnId: TURN_ID,
+            afterSeq: 0,
+        }));
+
+        // 开关关闭：过滤后无可用工具，走纯文本轮次；模型从未拿到知识库工具。
+        expect(harness.gateway.streamChat).toHaveBeenCalled();
+        expect(harness.gateway.streamToolTurn).not.toHaveBeenCalled();
+        expect(harness.state.createTurn).toHaveBeenCalledWith(expect.objectContaining({
+            knowledgeBaseEnabled: false,
+        }));
+    });
+
+    it('exposes knowledge_search to the model when the turn-level switch is on', async () => {
+        const harness = createHarness({ allowedTools: [chatTool('knowledge_search')] });
+
+        await harness.service.startTurn({
+            conversationId: CONVERSATION_ID,
+            idempotencyKey: 'key-kb-on',
+            content: '内部文档里怎么写的？',
+            mode: 'standard',
+            knowledgeBaseEnabled: true,
+        });
+        await consumeAll(await harness.service.subscribeTurn({
+            conversationId: CONVERSATION_ID,
+            turnId: TURN_ID,
+            afterSeq: 0,
+        }));
+
+        expect(harness.gateway.streamToolTurn).toHaveBeenCalledWith(
+            expect.objectContaining({ tools: [chatTool('knowledge_search')] }),
+            expect.anything(),
+            expect.any(AbortSignal),
+        );
+    });
+
     it('reuses an idempotent turn only when the multimodal request hash matches', async () => {
         const harness = createHarness();
         const request = {
@@ -823,10 +869,11 @@ function hashTurnRequestForTest(
     mode: string,
     content: string,
     imageFileIds: string[] = [],
+    knowledgeBaseEnabled = false,
 ): string {
     const { createHash } = require('node:crypto') as typeof import('node:crypto');
     return createHash('sha256')
-        .update(JSON.stringify({ conversationId, mode, content, imageFileIds }))
+        .update(JSON.stringify({ conversationId, mode, content, imageFileIds, knowledgeBaseEnabled }))
         .digest('hex');
 }
 

@@ -1496,7 +1496,8 @@ model DocumentChunk {
 model KnowledgeQueryLog {
   id              String   @id @default(uuid()) @db.Uuid
   tenantId        String   @map("tenant_id") @db.Uuid
-  knowledgeBaseId String   @map("knowledge_base_id") @db.Uuid
+  /// 助手多库检索时为空；单库问答查询必填。
+  knowledgeBaseId String?  @map("knowledge_base_id") @db.Uuid
   userId          String   @map("user_id") @db.Uuid
   query           String
   answer          String?
@@ -1780,6 +1781,8 @@ model AssistantTurn {
   status          AssistantTurnStatus @default(RECEIVED)
   stage           AssistantTurnStage  @default(QUEUED)
   mode            String              @default("standard")
+  /// 本轮是否允许检索知识库；开启后模型可获得知识库检索工具，范围按用户权限折叠。
+  knowledgeBaseEnabled Boolean       @default(false) @map("knowledge_base_enabled")
   userId          String              @map("user_id") @db.Uuid
   membershipId    String              @map("membership_id") @db.Uuid
   requestId       String              @map("request_id")

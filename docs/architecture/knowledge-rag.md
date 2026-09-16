@@ -1,6 +1,6 @@
 # 知识库 RAG（MinerU + LlamaIndex）
 
-> 状态：分块实施中。块 1（本文档与内部契约 `index`/`retrieve`）、块 2（ai-service 内存闭环 + HTTP 路由）、块 3（NestJS 文档状态机与上传触发索引）、块 4（真实 pgvector Gateway + `index/delete`）、块 5（公开 Query API + `answer` 契约与引用校验 + 索引删除 NestJS 接线）已落地，其余按第 8 节分块计划推进。
+> 状态：分块实施中。块 1（本文档与内部契约 `index`/`retrieve`）、块 2（ai-service 内存闭环 + HTTP 路由）、块 3（NestJS 文档状态机与上传触发索引）、块 4（真实 pgvector Gateway + `index/delete`）、块 5（公开 Query API + `answer` 契约与引用校验 + 索引删除 NestJS 接线）、块 7a（解析器格式分流 + pgvector HNSW 索引）、块 7b（Assistant RAG 工具接入：`knowledge_search` 工具 + 对话级知识库开关 + 权限折叠检索）已落地，其余按第 8 节分块计划推进。
 > 最后同步：2026-09-16
 > 内部契约版本：`0.5.0`
 > 公开契约版本：`0.25.0`（公开知识库查询 API）
@@ -70,7 +70,7 @@ NestJS API   = 业务事实、权限、状态与审计层（apps/api）
 | 解析器格式分流：文本原生（md/txt/csv/json/docx/pptx/xlsx）走 ai-service 本地提取，pdf/图片走 MinerU，统一 `ParsedDocument` 中间格式（块 7a） | `apps/api/src/knowledge/knowledge-document-parser.ts`、`text-artifact-reader.ts` |
 | pgvector HNSW 索引（m=16 / ef_construction=64 / ef_search=64 / cosine，块 7a） | `apps/ai-service/app/knowledge/pgvector_store.py` |
 
-预留未启用（不影响规格 A 验收，非缺口）：
+预留未启用（不影响验收，非缺口）：
 
 - `DocumentChunk` 表为预留的引用定位事实源，当前无读写代码：引用明细随 ai-service 检索响应携带（citation 映射 document / version / chunk / page / bbox / text），业务侧无需查表；如未来要求从业务库独立恢复/审计引用内容，再启用读写
 
@@ -78,7 +78,7 @@ NestJS API   = 业务事实、权限、状态与审计层（apps/api）
 
 - 知识库归属锚点管理 API 与自动授权（3.6 节权限边界已定，块 8 实现）；当前锚点字段只存在于数据库，公开契约与 API 均不暴露
 - MinerU 真机联调已在测试环境（192.168.5.29）完成端到端验收（块 6）；生产环境以 Docker 容器方式部署 MinerU 并换用大规模 GPU 硬件
-- Assistant RAG 工具未接入：desktop composer 已有"知识库"勾选，但当前只是把"使用知识库"拼进消息文本，后端无结构化处理（块 7）
+- Assistant RAG 工具已接入（块 7b 落地，见第 7 节）：desktop composer 的"知识库"勾选结构化传参 `knowledgeBaseEnabled`，后端据此暴露/放行 `knowledge_search` 工具
 - 对话数据转知识库未实现（块 7）
 - 助手人设未包含知识库功能告知与交流层边界（3.9 节，块 7d）
 
@@ -210,7 +210,7 @@ ai-service 不自行推断权限。NestJS 计算可信 scope 后随检索请求�
 - 文本类提取产物无页码/bbox，包装为 `ParsedDocument` 时按段落切 block、`page_index`/`bbox` 为 null，与 MinerU 产物同构（citation 的定位信息缺失时前端不展示）；
 - 错误语义：本地提取失败不可重试（文件损坏/不支持/超过接口上限 10 MiB 直接 FAILED）；提取服务不可用（网络/5xx）可重试；MinerU 的网络错误/超时/5xx 可重试（与块 6 语义一致）；
 - **PDF 双态**：当前阶段 pdf 一律走 MinerU（块 6 已端到端验收，质量有保证）；文本型 pdf 的 pymupdf 快速路径作为可选优化延后评估；
-- docx/pptx 内嵌图片：本地提取只拿文本，内嵌视觉内容不在当前阶段解析（规格验收为"可抽取为文本"）；后续需要时把内嵌图片单独抽出走 MinerU OCR；
+- docx/pptx 内嵌图片：本地提取只拿文本，内嵌视觉内容不在当前阶段解析（验收标准为"可抽取为文本"）；后续需要时把内嵌图片单独抽出走 MinerU OCR；
 - 落点：ai-service extraction 已具备文本类能力（附件注入在用）；知识库侧接入点为 NestJS 组合解析器 `RoutedKnowledgeDocumentParser`（块 7a 已落地），文本类走 `/internal/v1/files/extract`（`FileExtractionRequest`，上限 10 MiB，提取引擎记入 `parser_version`），提取文本经 `text-artifact-reader.ts` 按段落包装为 `ParsedDocument`。
 
 ### 3.8 对话数据转知识库（块 7c）
@@ -304,8 +304,14 @@ PENDING -> PARSING -> PARSED -> INDEXING -> READY
 
 公开知识库问答 API（`POST /knowledge-bases/{id}/query`，块 5 已落地）与 Assistant RAG 工具都属于 NestJS 公开侧，共用上述内部契约：
 
-- 阶段 A：独立公开 Query API 已跑通「解析产物 → 索引 → 检索 → 引用」闭环（块 5 落地）；
-- 阶段 B：把 RAG 检索注册为 Assistant 工具（`knowledge_base.query` 权限码已存在），复用工具执行前二次校验、幂等与脱敏链路（块 7）。
+- 独立公开 Query API 已跑通「解析产物 → 索引 → 检索 → 引用」闭环（块 5 落地）；
+- 把 RAG 检索注册为 Assistant 工具（块 7b 已落地）：
+  - `knowledge_search` 工具（版本 1.0.0，`knowledge_base.query` 权限，READ 风险级）注册进 Assistant 工具链；
+  - 对话级开关：`CreateTurnRequest.knowledgeBaseEnabled`（可选，默认 false）决定本轮是否暴露/允许 `knowledge_search`；关闭时工具列表被过滤，且工具执行前二次校验兼底（拒绝时 `ToolPolicyError` 告知用户「未在本轮启用」）；
+  - 检索走 `KnowledgeService.searchKnowledgeForAssistant`：显式传 tenantId/userId/membershipId/permissions（后台执行不依赖 AsyncLocalStorage），`manage_all` 短路为全租户库，否则按成员可见库折叠三层 scope；ai-service 不返回标题时按 `document_id` 查 `KnowledgeDocument` 补标题；
+  - 回喂模型的 summary 只含业务内容（S1 标签/标题/snippet/pageIndex），不含 document_id/chunk_id/知识库 ID 等内部标识；
+  - 公开侧 `TurnStreamToolResultEvent` 新增可选 `citations`（兼容新增，老客户端忽略），desktop 渲染知识库引用卡片（标题+摘录+页码），并按会话 localStorage 恢复；
+  - 多库检索时 `KnowledgeQueryLog.knowledgeBaseId` 记 null，审计 `resourceId` 为 null、`metadata.knowledgeBaseIds` 记录实际范围（块 7b 落地）。
 
 ## 8. 分块实施计划
 
@@ -318,7 +324,7 @@ PENDING -> PARSING -> PARSED -> INDEXING -> READY
 | 5 | 公开 Query API + `answer` 契约（LLMRouter rag role）+ citation 校验 + 索引删除 NestJS 接线 | 块 2、4 | ✅ 已落地 |
 | 6 | MinerU 真机联调（192.168.5.29，MinerU 3.4.5 + pipeline 后端已部署验证） | 块 3 | ✅ 已验收 |
 | 7a | 解析器格式分流（3.7 节）+ pgvector HNSW 索引（3.1 节） | 块 3、6 | ✅ 已落地（真机待部署验收） |
-| 7b | Assistant RAG 工具接入（阶段 B）：`knowledge_search` 工具注册 + 对话级知识库开关 + 权限折叠检索 | 块 5 | 待开始 |
+| 7b | Assistant RAG 工具接入：`knowledge_search` 工具注册 + 对话级知识库开关 + 权限折叠检索 | 块 5 | ✅ 已落地 |
 | 7c | 对话数据转知识库（3.8 节：双层入口 + 三条红线；附件/AI 生成文档/对话消息） | 块 3、7b | 待开始 |
 | 7d | 助手人设功能告知与交流层边界（3.9 节） | 块 7b | 待开始 |
 | 8 | 知识库归属锚点管理与自动授权（3.6 节：项目/部门/公司级分类、锚点人群虚拟 READER、悬挂处理） | 块 5 | 待开始 |
@@ -346,6 +352,6 @@ PENDING -> PARSING -> PARSED -> INDEXING -> READY
 | 5 | jest 38 用例（scope 折叠、查询日志、失败审计、索引删除接线）+ pytest 全绿（answer 空结果短路、rag role、citation 校验、acl_version 可选、空白名单空数组保护）；契约校验与客户端重生成 | ✅ 完成 |
 | 6 | jest 23 用例（TS 版转换器与真机 parser 错误映射、3.4.5 服务模式响应结构）+ pytest 全绿（embedding router/维度校验、pgvector 拒绝 deterministic 前置拦截）；29 真机端到端验收通过：上传 PDF → MinerU 解析 → pgvector 索引 → READY → 查询 grounded=true 带 citations | ✅ 完成 |
 | 7a | jest 73 用例（mimeType 分流、提取错误语义、文本产物包装）+ pytest 16 用例（HNSW 索引落在 `data_knowledge_chunks`、hnsw_kwargs 每实例完整）+ ruff/tsc 全绿；29 真机 docx 上传经本地提取 READY 待部署后验收 | ✅ 本地完成 |
-| 7b | jest：工具 approve/执行前二次校验/失败语义、权限折叠检索（成员+manage_all）、summary 脱敏；契约兼容检查；desktop 联调 | 待验证 |
+| 7b | jest 34 用例（开关关闭过滤工具并二次校验拒绝、权限折叠检索（成员+manage_all）、summary 脱敏、标题补全、多库日志与审计范围）；tsc 全绿；契约兼容检查（redocly lint + api-client 重新生成）；desktop tsc + 生产构建通过（开关结构化传参、citations 卡片渲染与恢复） | ✅ 完成 |
 | 7c | jest：save_to_knowledge 工具审批/EDITOR 校验/无意图不转存/引用不存在资源拒绝；幂等重复转存不重复建文档；desktop 联调 | 待验证 |
 | 7d | jest/真机：介绍性问题带知识库功能告知；诱导提问不泄露系统层信息（抽样对抗用例） | 待验证 |

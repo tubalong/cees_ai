@@ -140,7 +140,7 @@ const zhTW: Dictionary = {
     '对话': '對話', '新对话': '新對話', '帮我总结这份季度报告': '幫我摘要這份季度報告',
     '代码性能优化建议': '程式碼效能最佳化建議', '翻译技术文档': '翻譯技術文件', 'CEES AI 助手': 'CEES AI 助手',
     '总结文档要点': '摘要文件要點', '翻译内容': '翻譯內容', '生成代码': '生成程式碼',
-    '输入消息，Enter 发送': '輸入訊息，Enter 傳送', '发送': '傳送',
+    '输入消息，Enter 发送': '輸入訊息，Enter 傳送', '发送': '傳送', '第 {page} 页': '第 {page} 頁',
     // 应用中心
     'AI 应用中心': 'AI 應用中心', '选择适合团队场景的智能应用': '選擇適合團隊場景的智慧應用',
     '平台推荐': '平台推薦', '查看详情': '查看詳情',
@@ -402,7 +402,7 @@ const enUS: Dictionary = {
     '对话': 'Conversations', '新对话': 'New chat', '帮我总结这份季度报告': 'Summarize this quarterly report',
     '代码性能优化建议': 'Code performance suggestions', '翻译技术文档': 'Translate technical docs', 'CEES AI 助手': 'CEES AI Assistant',
     '总结文档要点': 'Summarize document', '翻译内容': 'Translate content', '生成代码': 'Generate code',
-    '输入消息，Enter 发送': 'Type a message and press Enter', '发送': 'Send',
+    '输入消息，Enter 发送': 'Type a message and press Enter', '发送': 'Send', '第 {page} 页': 'Page {page}',
     // App center
     'AI 应用中心': 'AI App Center', '选择适合团队场景的智能应用': 'Pick smart apps for your team’s scenarios',
     '平台推荐': 'Recommended', '查看详情': 'Details',
@@ -664,7 +664,7 @@ const jaJP: Dictionary = {
     '对话': '会話', '新对话': '新しいチャット', '帮我总结这份季度报告': 'この四半期報告書をまとめて',
     '代码性能优化建议': 'コードのパフォーマンス改善案', '翻译技术文档': '技術ドキュメントを翻訳', 'CEES AI 助手': 'CEES AI アシスタント',
     '总结文档要点': 'ドキュメントを要約', '翻译内容': '内容を翻訳', '生成代码': 'コードを生成',
-    '输入消息，Enter 发送': 'メッセージを入力して Enter で送信', '发送': '送信',
+    '输入消息，Enter 发送': 'メッセージを入力して Enter で送信', '发送': '送信', '第 {page} 页': '{page} ページ目',
     // アプリセンター
     'AI 应用中心': 'AI アプリセンター', '选择适合团队场景的智能应用': 'チームの用途に合った AI アプリを選択',
     '平台推荐': 'おすすめ', '查看详情': '詳細を見る',
