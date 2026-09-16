@@ -259,6 +259,34 @@ async def test_retrieve_without_acl_version_serves_nodes() -> None:
     assert len(response.chunks) == 1
 
 
+async def test_empty_department_allowlist_blocks_department_nodes() -> None:
+    # 空白名单表示调用方没有任何可授权的部门：只放行不携带 department_id 的节点。
+    store = InMemoryVectorStore()
+    router = build_default_embedding_router()
+    scoped = KnowledgeVisibilityScope(
+        visibility_scope=VisibilityScope.DEPARTMENT,
+        department_id="dept-2",
+        acl_version="acl-1",
+    )
+    await index_document(
+        make_index_request(visibility_scope=scoped),
+        store=store,
+        embedding_router=router,
+    )
+    await index_document(
+        make_index_request(document_id="doc-tenant", document_version_id="docv-tenant"),
+        store=store,
+        embedding_router=router,
+    )
+    response = await retrieve_chunks(
+        make_retrieve_request(query="项目延期", department_ids=[]),
+        store=store,
+        embedding_router=router,
+    )
+    assert len(response.chunks) == 1
+    assert response.chunks[0].document_id == "doc-tenant"
+
+
 async def test_retrieve_only_sees_declared_index_version() -> None:
     store = InMemoryVectorStore()
     router = build_default_embedding_router()

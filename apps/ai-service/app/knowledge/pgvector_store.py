@@ -225,11 +225,14 @@ def _retrieve_filters(
 
 
 def _nullable_in_filter(key: str, allowed: list[str]) -> MetadataFilters:
-    """department/project 等可空属性：值为空或命中允许列表都通过。"""
-    return MetadataFilters(
-        condition=FilterCondition.OR,
-        filters=[
-            MetadataFilter(key=key, value=None, operator=FilterOperator.IS_EMPTY),
-            MetadataFilter(key=key, value=allowed, operator=FilterOperator.IN),
-        ],
-    )
+    """department/project 等可空属性：值为空或命中允许列表都通过。
+
+    空允许列表表示调用方没有任何可授权的该属性，只放行不携带该
+    属性的节点，避免空列表进入 IN 过滤。
+    """
+    filters: list[MetadataFilters | MetadataFilter] = [
+        MetadataFilter(key=key, value=None, operator=FilterOperator.IS_EMPTY),
+    ]
+    if allowed:
+        filters.append(MetadataFilter(key=key, value=allowed, operator=FilterOperator.IN))
+    return MetadataFilters(condition=FilterCondition.OR, filters=filters)
