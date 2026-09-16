@@ -66,6 +66,10 @@ class OpenAICompatibleEmbeddingProvider:
             base_url=profile.base_url,
             timeout=profile.timeout_seconds,
             max_retries=profile.max_retries,
+            # 关闭 langchain 的上下文长度检查：开启时会把文本转成 token ID
+            # 再发给 /embeddings，OpenAI 兼容的自建服务（如 BGE）只接受
+            # 原始字符串输入，会以 422 拒绝。
+            check_embedding_ctx_length=False,
         )
 
     async def embed_documents(self, texts: list[str]) -> list[list[float]]:
