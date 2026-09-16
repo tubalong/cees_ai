@@ -4,7 +4,7 @@
     "private": true,
     "main": "dist-electron/main.js",
     "scripts": {
-        "dev": "tsc -p electron/tsconfig.json && concurrently -k \"vite\" \"wait-on http://localhost:5173 && .\\node_modules\\electron\\dist\\electron.exe .\"",
+        "dev": "tsc -p electron/tsconfig.json && concurrently -k \"vite\" \"wait-on http://localhost:5173 && electron .\"",
         "build": "tsc -b && vite build && tsc -p electron/tsconfig.json",
         "dist:win": "pnpm build && electron-builder --win nsis zip --x64"
     },
