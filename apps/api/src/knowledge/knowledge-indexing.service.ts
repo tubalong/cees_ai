@@ -138,7 +138,9 @@ export class KnowledgeIndexingService implements OnModuleInit, OnModuleDestroy {
             });
             await this.markStatus(document.id, KnowledgeDocumentStatus.PARSED);
             await this.markStatus(document.id, KnowledgeDocumentStatus.INDEXING);
-            await this.gateway.indexKnowledge(this.buildIndexRequest(document, version, parsed));
+            const indexResult = await this.gateway.indexKnowledge(
+                this.buildIndexRequest(document, version, parsed),
+            );
             await this.prisma.knowledgeDocument.update({
                 where: { id: document.id },
                 data: {
@@ -150,7 +152,7 @@ export class KnowledgeIndexingService implements OnModuleInit, OnModuleDestroy {
             });
             await this.writeAudit(document, 'KNOWLEDGE_DOCUMENT_INDEXED', AuditOutcome.SUCCESS, {
                 documentVersionId: version.id,
-                indexedChunks: parsed.blocks.length,
+                indexedChunks: indexResult.indexed_chunks,
                 ...this.indexVersions,
             });
             return true;
