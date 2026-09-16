@@ -43,8 +43,10 @@
 - `DEPARTMENT`：本部门。
 - `DEPARTMENT_TREE`：本部门及下级。
 - `PROJECT`：参与项目。
-- `CUSTOM`：自定义范围。
+- `CUSTOM`：自定义范围，当前解析器尚未支持具体约束配置。
 - `TENANT`：当前企业全部数据。
+
+后端 `DataScopeResolverService` 将角色的 `dataScope` 解析为租户级、成员级、部门级或项目级过滤条件。未配置角色的成员默认按 `SELF` 处理；遇到 `CUSTOM` 时返回 `DATA_SCOPE_CUSTOM_UNSUPPORTED`，避免出现“已配置但不生效”的静默越权。
 
 ## 邀请联动
 
