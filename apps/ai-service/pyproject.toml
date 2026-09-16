@@ -3,6 +3,7 @@ name = "cees-ai-service"
 version = "0.1.0"
 requires-python = ">=3.14,<3.15"
 dependencies = [
+    "asyncpg",
     "fastapi",
     "jsonschema",
     "langchain",
@@ -11,10 +12,13 @@ dependencies = [
     "llama-index-core",
     "llama-index-embeddings-langchain",
     "llama-index-llms-langchain",
+    "llama-index-vector-stores-postgres",
     "openai",
+    "pgvector",
     "pydantic-settings",
     "pymupdf>=1.28.2",
     "python-docx",
+    "sqlalchemy",
     "uvicorn[standard]",
 ]
 

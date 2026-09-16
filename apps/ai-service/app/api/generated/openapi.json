@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CEES AI Service Internal API",
-    "version": "0.3.0",
+    "version": "0.4.0",
     "description": "Internal infrastructure API used only by trusted CEES services.\nDesktop, mobile, and third-party clients must call the NestJS public API instead.\n"
   },
   "servers": [
@@ -1163,7 +1163,7 @@
         ],
         "operationId": "indexKnowledgeDocument",
         "summary": "Index a parsed knowledge document",
-        "description": "Builds TextNodes from a normalized ParsedDocument, chunks them,\nembeds them, and idempotently upserts the vectors into the vector\nstore. Re-submitting the same (document_version_id, chunking_version,\nembedding_profile, index_version) tuple replaces the previous nodes\ninstead of duplicating them. ai-service never writes the business\ndatabase and does not create formal resources.\n",
+        "description": "Builds TextNodes from a normalized ParsedDocument, chunks them,\nembeds them, and idempotently upserts the vectors into the vector\nstore. Replacement is keyed by the (tenant_id, document_version_id,\nindex_version) triple: re-submitting the same triple replaces the\nprevious nodes instead of duplicating them. chunking_version and\nembedding_profile are recorded as node metadata and define the index\nidentity; changing either requires a new index_version. ai-service\nnever writes the business database and does not create formal\nresources.\n",
         "security": [
           {
             "internalToken": []
@@ -1217,6 +1217,65 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/KnowledgeIndexResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/internal/v1/knowledge/index/delete": {
+      "post": {
+        "tags": [
+          "knowledge"
+        ],
+        "operationId": "deleteKnowledgeIndex",
+        "summary": "Delete derived index of a document version",
+        "description": "Deletes all derived vectors of the given (document_version_id,\nindex_version) tuple for the tenant. NestJS calls this when a\ndocument is deleted or when a new document version supersedes the\nold one. Never touches business data; deleting the derived index\ndoes not delete the business document.\n",
+        "security": [
+          {
+            "internalToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KnowledgeIndexDeleteRequest"
+              },
+              "example": {
+                "request_id": "req-knowledge-delete-001",
+                "tenant_id": "tenant-example",
+                "user_id": "user-example",
+                "document_version_id": "version-example",
+                "index_version": "idx-v1"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Derived index deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeIndexDeleteResponse"
                 }
               }
             }
@@ -3773,6 +3832,71 @@
           }
         }
       },
+      "KnowledgeIndexDeleteRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "request_id",
+          "tenant_id",
+          "user_id",
+          "document_version_id",
+          "index_version"
+        ],
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "tenant_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "user_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "document_version_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "description": "Identity of the document version whose derived index should be removed. Deleting the derived index never deletes the business document."
+          },
+          "index_version": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        }
+      },
+      "KnowledgeIndexDeleteResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "request_id",
+          "deleted_chunks",
+          "document_version_id",
+          "index_version"
+        ],
+        "properties": {
+          "request_id": {
+            "type": "string"
+          },
+          "deleted_chunks": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Number of derived nodes removed from the vector store."
+          },
+          "document_version_id": {
+            "type": "string"
+          },
+          "index_version": {
+            "type": "string"
+          }
+        }
+      },
       "KnowledgeRetrieveScope": {
         "type": "object",
         "additionalProperties": false,
@@ -3808,7 +3932,8 @@
               "type": "string",
               "minLength": 1,
               "maxLength": 128
-            }
+            },
+            "description": "Optional department allowlist computed by the caller. Only constrains nodes that carry a department_id; nodes without one pass through."
           },
           "project_ids": {
             "type": "array",
@@ -3817,7 +3942,8 @@
               "type": "string",
               "minLength": 1,
               "maxLength": 128
-            }
+            },
+            "description": "Optional project allowlist computed by the caller. Only constrains nodes that carry a project_id; nodes without one pass through."
           },
           "acl_version": {
             "type": "string",

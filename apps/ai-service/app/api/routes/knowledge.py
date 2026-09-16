@@ -4,6 +4,8 @@ from fastapi import APIRouter, Depends, Request
 
 from app.api.generated.models import (
     ErrorResponse,
+    KnowledgeIndexDeleteRequest,
+    KnowledgeIndexDeleteResponse,
     KnowledgeIndexRequest,
     KnowledgeIndexResponse,
     KnowledgeRetrieveRequest,
@@ -12,6 +14,7 @@ from app.api.generated.models import (
 from app.core.errors import AIServiceError
 from app.core.runtime import AppRuntime
 from app.core.security import require_internal_token
+from app.knowledge.deletion import delete_document_index
 from app.knowledge.ingestion import index_document
 from app.knowledge.retrieval import retrieve_chunks
 
@@ -119,3 +122,27 @@ async def retrieve_knowledge(
             retryable=False,
             request_id=payload.request_id,
         ) from exc
+
+
+@router.post(
+    "/index/delete",
+    response_model=KnowledgeIndexDeleteResponse,
+    operation_id="deleteKnowledgeIndex",
+    summary="Delete derived index of a document version",
+    response_description="Derived index deleted",
+    responses=_responses(),
+)
+async def delete_knowledge_index(
+    payload: KnowledgeIndexDeleteRequest, request: Request
+) -> KnowledgeIndexDeleteResponse:
+    runtime: AppRuntime = request.app.state.runtime
+    store = runtime.knowledge_store
+    if store is None:
+        raise AIServiceError(
+            "KNOWLEDGE_NOT_READY",
+            "Knowledge index and retrieval are not ready",
+            status_code=503,
+            retryable=True,
+            request_id=payload.request_id,
+        )
+    return await delete_document_index(payload, store=store)

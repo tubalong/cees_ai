@@ -644,13 +644,40 @@ export type KnowledgeIndexResponse = {
     latency_ms?: number;
 };
 
+export type KnowledgeIndexDeleteRequest = {
+    request_id: string;
+    tenant_id: string;
+    user_id: string;
+    /**
+     * Identity of the document version whose derived index should be removed. Deleting the derived index never deletes the business document.
+     */
+    document_version_id: string;
+    index_version: string;
+};
+
+export type KnowledgeIndexDeleteResponse = {
+    request_id: string;
+    /**
+     * Number of derived nodes removed from the vector store.
+     */
+    deleted_chunks: number;
+    document_version_id: string;
+    index_version: string;
+};
+
 export type KnowledgeRetrieveScope = {
     knowledge_base_ids: Array<string>;
     /**
      * Optional document-level allowlist computed by the caller. When omitted, all documents inside the given knowledge bases match.
      */
     allowed_document_ids?: Array<string>;
+    /**
+     * Optional department allowlist computed by the caller. Only constrains nodes that carry a department_id; nodes without one pass through.
+     */
     department_ids?: Array<string>;
+    /**
+     * Optional project allowlist computed by the caller. Only constrains nodes that carry a project_id; nodes without one pass through.
+     */
     project_ids?: Array<string>;
     acl_version: string;
 };
@@ -1358,6 +1385,47 @@ export type IndexKnowledgeDocumentResponses = {
 };
 
 export type IndexKnowledgeDocumentResponse = IndexKnowledgeDocumentResponses[keyof IndexKnowledgeDocumentResponses];
+
+export type DeleteKnowledgeIndexData = {
+    body: KnowledgeIndexDeleteRequest;
+    path?: never;
+    query?: never;
+    url: '/internal/v1/knowledge/index/delete';
+};
+
+export type DeleteKnowledgeIndexErrors = {
+    /**
+     * Invalid profile or unsupported output mode
+     */
+    400: ErrorResponse;
+    /**
+     * Internal authentication failed
+     */
+    401: ErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ErrorResponse;
+    /**
+     * Unexpected internal service error
+     */
+    500: ErrorResponse;
+    /**
+     * Service or configured providers unavailable
+     */
+    503: ErrorResponse;
+};
+
+export type DeleteKnowledgeIndexError = DeleteKnowledgeIndexErrors[keyof DeleteKnowledgeIndexErrors];
+
+export type DeleteKnowledgeIndexResponses = {
+    /**
+     * Derived index deleted
+     */
+    200: KnowledgeIndexDeleteResponse;
+};
+
+export type DeleteKnowledgeIndexResponse = DeleteKnowledgeIndexResponses[keyof DeleteKnowledgeIndexResponses];
 
 export type RetrieveKnowledgeData = {
     body: KnowledgeRetrieveRequest;

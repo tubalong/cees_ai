@@ -23,10 +23,10 @@ ai-service 只提供：
 
 - LangChain 负责 OpenAI-compatible 模型调用、消息转换和 JSON Schema 结构化输出。
 - LangGraph 不封装业务注册中心，只提供 request-scoped `WorkflowRuntimeContext`；冒烟测试验证异步 Graph 能从 context 获取模型路由器。
-- LlamaIndex 不使用全局 `Settings`；LangChain LLM 和 embedding 通过薄适配按索引或调用显式传入。当前只验证内存索引和检索。
+- LlamaIndex 不使用全局 `Settings`；LangChain LLM 和 embedding 通过薄适配按索引或调用显式传入。知识库 RAG 已落地真实 `PGVectorStore`（独立 `cees_ai_vectors` database）与 OpenAI-compatible embedding（L2 归一化），见 [知识库 RAG](knowledge-rag.md)。
 - python-docx 将受控 `DocumentSpec` 确定性渲染为 DOCX，不执行模型生成的 XML 或模板路径。
 
-本阶段不接入 pgvector、Qdrant、Milvus、外部 embedding 服务或完整业务 Agent。Tool Calling 只负责“模型选择工具并解析 Tool Call”，业务工具执行、权限、额度和正式资源写入仍由 NestJS 负责；LangGraph 不承载业务 Tool Loop。流式接口只传输最终正文、统一 Tool Call 和执行元数据，不传输 Provider 原始推理内容。
+知识库 RAG 已接入 pgvector 与外部 embedding 服务（块 4），见 [知识库 RAG](knowledge-rag.md)；Qdrant、Milvus 或完整业务 Agent 不在当前范围。Tool Calling 只负责“模型选择工具并解析 Tool Call”，业务工具执行、权限、额度和正式资源写入仍由 NestJS 负责；LangGraph 不承载业务 Tool Loop。流式接口只传输最终正文、统一 Tool Call 和执行元数据，不传输 Provider 原始推理内容。
 
 ## 3. 多模型配置
 

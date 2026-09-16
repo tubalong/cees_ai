@@ -5,13 +5,14 @@ set -Eeuo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  ./manage-db.sh <staging|production> [up|down|logs|ps|validate] [service...]
+  ./manage-db.sh <staging|production> [up|down|logs|ps|validate|create-vector-db] [service...]
 
 Examples:
   ./manage-db.sh staging validate
   ./manage-db.sh staging logs postgres
   ./manage-db.sh staging ps
   ./manage-db.sh production down
+  ./manage-db.sh staging create-vector-db
 
 Use deploy-db.sh for deployment. The default action remains "up" for operational
 compatibility, but it only uses images already prepared locally and never pulls.
@@ -143,7 +144,7 @@ case "$ENVIRONMENT" in
 esac
 
 case "$ACTION" in
-  up | down | logs | ps | validate)
+  up | down | logs | ps | validate | create-vector-db)
     ;;
   -h | --help | help)
     usage
@@ -199,5 +200,23 @@ case "$ACTION" in
     validate_inputs
     "${COMPOSE[@]}" config --quiet
     echo "$ENVIRONMENT database configuration is valid."
+    ;;
+  create-vector-db)
+    validate_inputs
+    local postgres_user
+    local postgres_container
+    postgres_user="$(read_env_value POSTGRES_USER)"
+    postgres_container="$("${COMPOSE[@]}" ps -q postgres)"
+    if [[ -z "$postgres_container" ]]; then
+      echo "Error: postgres container is not running; start it with 'up' first." >&2
+      exit 1
+    fi
+    echo "Ensuring the cees_ai_vectors database exists on $ENVIRONMENT..."
+    docker exec -i "$postgres_container" \
+      psql -U "$postgres_user" -d postgres -v ON_ERROR_STOP=1 <<'SQL'
+SELECT 'CREATE DATABASE cees_ai_vectors'
+WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'cees_ai_vectors')\gexec
+SQL
+    echo "cees_ai_vectors database is ready."
     ;;
 esac

@@ -36,6 +36,8 @@ SCHEMAS_TO_COMPARE = {
     "FileExtractionMetadata",
     "KnowledgeIndexRequest",
     "KnowledgeIndexResponse",
+    "KnowledgeIndexDeleteRequest",
+    "KnowledgeIndexDeleteResponse",
     "KnowledgeRetrieveScope",
     "KnowledgeRetrieveRequest",
     "KnowledgeRetrieveResponse",

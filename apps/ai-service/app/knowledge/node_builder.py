@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 
-from llama_index.core.schema import TextNode
+from llama_index.core.schema import NodeRelationship, RelatedNodeInfo, TextNode
 
 from app.api.generated.models import KnowledgeVisibilityScope, ParsedBlock, ParsedDocument
 from app.knowledge.parsed_models import block_text
@@ -70,8 +70,13 @@ def _build_node(
     chunk_index = _next_chunk_index(blocks)
     chunk_id = _chunk_id(context.document_version_id, chunk_index, context.chunking_version)
     first = blocks[0]
+    # PGVectorStore 写入时把顶层 metadata 的 document_id/doc_id/
+    # ref_doc_id 覆盖为 node.ref_doc_id（从 relationships 的 SOURCE
+    # 读取，构造参数 ref_doc_id 在 0.12.x 已被忽略）。显式设置 SOURCE
+    # 关系，SQL 按 document_id 过滤才可靠。
     return TextNode(
         id_=chunk_id,
+        relationships={NodeRelationship.SOURCE: RelatedNodeInfo(node_id=context.document_id)},
         text="\n\n".join(block_text(block) for block in blocks),
         metadata={
             "tenant_id": context.tenant_id,

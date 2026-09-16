@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.embeddings.providers import DeterministicEmbeddingProvider
+from app.core.config import ModelCatalog
+from app.embeddings.providers import (
+    DeterministicEmbeddingProvider,
+    OpenAICompatibleEmbeddingProvider,
+)
 from app.embeddings.types import EmbeddingProvider
 
 
@@ -49,6 +53,30 @@ def build_default_embedding_router() -> EmbeddingRouter:
         profiles={"deterministic": deterministic},
         default_profile="deterministic",
     )
+
+
+def build_embedding_router(catalog: ModelCatalog | None) -> EmbeddingRouter:
+    """按模型目录构建路由器：确定性 provider 始终可用，外部 provider 按配置注册。
+
+    默认 profile 取第一个启用的外部 provider，未配置任何外部 provider 时
+    回落到 deterministic。外部 provider 构造失败（如 API key 缺失）时跳过，
+    相应错误由 readiness 校验上报，不阻塞启动。
+    """
+    profiles: dict[str, EmbeddingProvider] = {
+        "deterministic": DeterministicEmbeddingProvider()
+    }
+    default_profile = "deterministic"
+    if catalog is not None:
+        for name, profile in catalog.embedding_profiles.items():
+            if not profile.enabled:
+                continue
+            try:
+                profiles[name] = OpenAICompatibleEmbeddingProvider(profile)
+            except ValueError:
+                continue
+            if default_profile == "deterministic":
+                default_profile = name
+    return EmbeddingRouter(profiles=profiles, default_profile=default_profile)
 
 
 def _assert_dimension(
