@@ -127,11 +127,16 @@ export class MinerUDocumentParser implements KnowledgeDocumentParser {
     }
 
     private buildParsedDocument(input: KnowledgeDocumentFileInput, payload: unknown): ParsedDocument {
+        // MinerU 3.4.5 服务模式：顶层 status 标记任务状态（completed/failed），
+        // 失败时 error 携带原因；部分部署仍返回 PARSE_RC 兼容字段，一并容忍。
         const parseRc = findNumericField(payload, 'parse_rc') ?? findNumericField(payload, 'PARSE_RC');
-        if (parseRc !== null && parseRc !== undefined && parseRc !== 0) {
+        const status = findStringField(payload, ['status']);
+        if ((parseRc !== null && parseRc !== undefined && parseRc !== 0)
+            || (parseRc === null && status && status !== 'completed' && status !== 'success')) {
+            const detail = findStringField(payload, ['error']) ?? '';
             throw new KnowledgeDocumentParserError(
                 MINERU_PARSE_FAILED,
-                `MinerU 解析失败（PARSE_RC=${parseRc}）`,
+                `MinerU 解析失败（${detail || `status=${status}`}）`,
                 false,
             );
         }
@@ -172,13 +177,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 /** 宽松读取响应中的数值字段（如 PARSE_RC），容忍 results 包装。 */
 function findNumericField(payload: unknown, key: string): number | null {
-    const candidates: unknown[] = [payload];
-    if (Array.isArray(payload)) candidates.push(...payload);
-    if (isRecord(payload)) {
-        if (Array.isArray(payload['results'])) candidates.push(...payload['results']);
-        if (isRecord(payload['result'])) candidates.push(payload['result']);
-    }
-    for (const candidate of candidates) {
+    for (const candidate of responseCandidates(payload)) {
         if (isRecord(candidate) && typeof candidate[key] === 'number') {
             return candidate[key] as number;
         }
@@ -188,13 +187,7 @@ function findNumericField(payload: unknown, key: string): number | null {
 
 /** 宽松读取响应中的字符串字段，按候选键顺序。 */
 function findStringField(payload: unknown, keys: string[]): string | null {
-    const candidates: unknown[] = [payload];
-    if (Array.isArray(payload)) candidates.push(...payload);
-    if (isRecord(payload)) {
-        if (Array.isArray(payload['results'])) candidates.push(...payload['results']);
-        if (isRecord(payload['result'])) candidates.push(payload['result']);
-    }
-    for (const candidate of candidates) {
+    for (const candidate of responseCandidates(payload)) {
         if (!isRecord(candidate)) continue;
         for (const key of keys) {
             const value = candidate[key];
@@ -205,22 +198,44 @@ function findStringField(payload: unknown, keys: string[]): string | null {
 }
 
 /**
- * 宽松定位 content_list：优先从 results[0].content_list 提取；
- * MinerU 单文件响应常见形态为顶层 content_list 数组或 pdf_info.content_list 包装。
+ * 展开 MinerU 响应的候选容器：顶层、顶层数组、results（数组或按文件名索引的
+ * 对象）、result 对象。3.4.5 服务模式下 results 为 {文件名: {...}} 形态。
  */
-function findContentList(payload: unknown): unknown | null {
+function responseCandidates(payload: unknown): unknown[] {
     const candidates: unknown[] = [payload];
     if (Array.isArray(payload)) candidates.push(...payload);
     if (isRecord(payload)) {
-        if (Array.isArray(payload['results'])) candidates.push(...payload['results']);
+        const results = payload['results'];
+        if (Array.isArray(results)) {
+            candidates.push(...results);
+        } else if (isRecord(results)) {
+            candidates.push(...Object.values(results));
+        }
         if (isRecord(payload['result'])) candidates.push(payload['result']);
     }
-    for (const candidate of candidates) {
+    return candidates;
+}
+
+/**
+ * 宽松定位 content_list：优先从 results 各候选的 content_list 提取，容忍
+ * results 数组、按文件名索引的对象与 pdf_info.content_list 包装；
+ * content_list 可能是数组，也可能是 JSON 字符串（3.4.5 服务模式）。
+ */
+function findContentList(payload: unknown): unknown | null {
+    for (const candidate of responseCandidates(payload)) {
         if (!isRecord(candidate)) continue;
         for (const key of ['content_list', 'pdf_info']) {
-            const value = candidate[key];
+            let value = candidate[key];
+            if (isRecord(value) && Array.isArray(value['content_list'])) value = value['content_list'];
+            if (typeof value === 'string') {
+                try {
+                    const parsed = JSON.parse(value);
+                    if (Array.isArray(parsed)) return parsed;
+                } catch {
+                    // 非 JSON 字符串，继续尝试下一候选
+                }
+            }
             if (Array.isArray(value)) return value;
-            if (isRecord(value) && Array.isArray(value['content_list'])) return value['content_list'];
         }
     }
     return null;

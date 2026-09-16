@@ -87,6 +87,40 @@ describe('MinerUDocumentParser', () => {
         expect(global.fetch).toHaveBeenCalledTimes(2);
     });
 
+    it('兼容 MinerU 3.4.5 服务模式响应（results 按文件名索引 + content_list JSON 字符串）', async () => {
+        process.env.MINERU_API_URL = 'http://192.168.5.29:8002';
+        mockFetchSequence(200, {
+            task_id: 'task-1',
+            status: 'completed',
+            version: '3.4.5',
+            results: {
+                'smoke-test': {
+                    content_list: JSON.stringify([
+                        { type: 'text', text: 'MinerU pipeline smoke test', bbox: [0, 0, 100, 20], page_idx: 0 },
+                    ]),
+                },
+            },
+        });
+        const parser = new MinerUDocumentParser(makeStorage());
+        const parsed = await parser.parse(input);
+        expect(parsed.parser_name).toBe('mineru');
+        expect(parsed.parser_version).toBe('3.4.5');
+        expect(parsed.blocks).toHaveLength(1);
+        expect(parsed.blocks[0].text).toBe('MinerU pipeline smoke test');
+        expect(parsed.blocks[0].page_index).toBe(0);
+        expect(parsed.blocks[0].bbox).toEqual([0, 0, 100, 20]);
+    });
+
+    it('status=failed 且带 error 时抛非重试解析失败', async () => {
+        process.env.MINERU_API_URL = 'http://192.168.5.29:8002';
+        mockFetchSequence(200, { status: 'failed', error: 'backend crashed' });
+        const parser = new MinerUDocumentParser(makeStorage());
+        await expect(parser.parse(input)).rejects.toMatchObject({
+            code: 'MINERU_PARSE_FAILED',
+            retryable: false,
+        });
+    });
+
     it('无 content_list 时回退 md_content 走 Markdown 解析', async () => {
         process.env.MINERU_API_URL = 'http://192.168.5.29:8002';
         mockFetchSequence(200, { md_content: '# 标题\n\n正文' });
