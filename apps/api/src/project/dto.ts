@@ -1,14 +1,15 @@
 import { Transform, Type } from 'class-transformer';
 import {
+    ArrayMaxSize,
+    ArrayUnique,
     IsBoolean,
-    IsDateString,
+    IsArray,
     IsEnum,
     IsIn,
     IsInt,
     IsOptional,
     IsString,
     IsUUID,
-    Matches,
     Max,
     MaxLength,
     Min,
@@ -17,7 +18,6 @@ import {
 } from 'class-validator';
 import { ProjectMemberRole, ProjectStatus } from '@prisma/client';
 
-const PROJECT_CODE_PATTERN = /^[A-Za-z0-9_-]+$/;
 const EDITABLE_MEMBER_ROLES = [ProjectMemberRole.MANAGER, ProjectMemberRole.MEMBER] as const;
 
 export class ListProjectsQueryDto {
@@ -57,12 +57,6 @@ export class ListProjectsQueryDto {
 
 export class CreateProjectDto {
     @IsString()
-    @MinLength(2)
-    @MaxLength(32)
-    @Matches(PROJECT_CODE_PATTERN)
-    code!: string;
-
-    @IsString()
     @MinLength(1)
     @MaxLength(120)
     name!: string;
@@ -82,25 +76,16 @@ export class CreateProjectDto {
     @IsUUID()
     ownerMembershipId?: string;
 
+    /** 初始项目成员；负责人由服务端自动加入，无需重复传入。 */
     @IsOptional()
-    @ValidateIf((_, value) => value !== null)
-    @IsDateString()
-    startsAt?: string | null;
-
-    @IsOptional()
-    @ValidateIf((_, value) => value !== null)
-    @IsDateString()
-    endsAt?: string | null;
+    @IsArray()
+    @ArrayUnique()
+    @ArrayMaxSize(100)
+    @IsUUID('all', { each: true })
+    memberMembershipIds?: string[];
 }
 
 export class UpdateProjectDto {
-    @IsOptional()
-    @IsString()
-    @MinLength(2)
-    @MaxLength(32)
-    @Matches(PROJECT_CODE_PATTERN)
-    code?: string;
-
     @IsOptional()
     @IsString()
     @MinLength(1)
@@ -117,16 +102,6 @@ export class UpdateProjectDto {
     @ValidateIf((_, value) => value !== null)
     @IsUUID()
     departmentId?: string | null;
-
-    @IsOptional()
-    @ValidateIf((_, value) => value !== null)
-    @IsDateString()
-    startsAt?: string | null;
-
-    @IsOptional()
-    @ValidateIf((_, value) => value !== null)
-    @IsDateString()
-    endsAt?: string | null;
 
     @IsInt()
     @Min(1)

@@ -202,7 +202,7 @@ pnpm --filter @cees/api dev
 | 方法与路径 | 用途 | 参数/请求体 | 返回 | 权限 |
 | --- | --- | --- | --- | --- |
 | `GET /tenants/current` | 获取当前 Token 对应租户 | 无 | `TenantDetail` | `tenant.read` |
-| `PATCH /tenants/current` | 修改当前租户名称 | `UpdateTenantRequest` | 修改后的租户 | `tenant.update` |
+| `PATCH /tenants/current` | 修改当前租户名称或时区 | `UpdateTenantRequest` | 修改后的租户 | `tenant.update` |
 | `GET /tenants/current/members` | 分页查询成员 | `keyword/status/roleId/limit/cursor` | 成员列表 | `member.read` |
 | `GET /tenants/current/members/{membershipId}` | 查询单个成员 | `membershipId` | 成员详情 | `member.read` |
 | `PATCH /tenants/current/members/{membershipId}` | 修改展示名、部门或成员状态 | 路径 ID + `UpdateTenantMemberRequest` | 修改后的成员 | `member.update`；修改部门还需 `department.member.assign` |
@@ -571,8 +571,11 @@ POST /platform/auth/change-password
 
 | 字段 | 必填 | 含义 |
 | --- | --- | --- |
-| `name` | 是 | 新租户名称，1～120 位 |
+| `name` | 否 | 新租户名称，1～120 位 |
+| `timezone` | 否 | IANA 时区标识，1～64 位；非法标识返回 `400 TENANT_TIMEZONE_INVALID` |
 | `version` | 是 | 当前租户版本 |
+
+`name` 与 `timezone` 至少提供一个，都不提供时返回 `400 TENANT_UPDATE_EMPTY`。时区影响工作台“今日/明日”、后台日报提醒所属日期和项目编码年份；本期不提供配置界面，只能直接调用该接口修改。
 
 #### `UpdateTenantMemberRequest`
 
@@ -644,8 +647,8 @@ POST /platform/auth/change-password
 
 | 请求 | 关键字段 | 说明 |
 | --- | --- | --- |
-| `CreateProjectRequest` | `code/name`，可选 `description/departmentId/ownerMembershipId/startsAt/endsAt` | 编码 2～32 位，只允许英文、数字、`_`、`-` |
-| `UpdateProjectRequest` | 可修改创建字段中的项目资料，必填 `version` | 不允许直接修改状态和负责人 |
+| `CreateProjectRequest` | 必填 `name`，可选 `description/departmentId/ownerMembershipId/memberMembershipIds` | 项目编码由服务端按租户时区年份自动分配，请求不接受 `code` 和时间字段 |
+| `UpdateProjectRequest` | 可修改 `name/description/departmentId`，必填 `version` | 不能修改编码、时间字段、状态和负责人 |
 | `AddProjectMemberRequest` | `membershipId`，可选 `role` | role 仅 `MANAGER/MEMBER`，默认 `MEMBER` |
 | `UpdateProjectMemberRequest` | `role/version` | 负责人不能通过该接口修改 |
 | `TransferProjectOwnerRequest` | `membershipId/version` | 目标必须是当前项目的有效成员 |
@@ -896,7 +899,7 @@ POST /platform/auth/change-password
 | `AuthMembership` | 当前成员的 `id/account/status/roles` |
 | `LoginResponse` | Access/Refresh Token、各自有效秒数以及用户、租户、成员上下文 |
 | `MeResponse` | 当前用户、租户、成员及实时权限编码数组 |
-| `TenantDetail` | 租户 UUID、编码、名称、状态、版本和时间 |
+| `TenantDetail` | 租户 UUID、编码、名称、时区、状态、版本和时间 |
 | `TenantMember` | Membership UUID、账号、User、部门、状态、角色、加入时间和版本 |
 | `DepartmentSummary` | 部门 UUID、父部门、名称、说明、排序、状态、成员数、子部门数和版本 |
 | `DepartmentTreeNode` | `DepartmentSummary` 的全部字段以及递归 `children` 子部门数组 |
@@ -2707,16 +2710,14 @@ TenantInvitationRole
 
 ```json
 {
-  "code": "PRJ-2026-001",
   "name": "AI 工作台",
   "description": "企业内部 AI 协作平台",
   "departmentId": null,
-  "startsAt": "2026-09-08T00:00:00.000Z",
-  "endsAt": "2026-12-31T00:00:00.000Z"
+  "memberMembershipIds": []
 }
 ```
 
-不传 `ownerMembershipId` 时当前成员自动成为 `OWNER`。建议按以下顺序验证：
+创建成功后响应里的 `code` 才是真实编号（例如 `PRJ-2026-1`），编号按租户时区年份递增且创建后不可修改；不传 `ownerMembershipId` 时当前成员自动成为 `OWNER`，`memberMembershipIds` 需要 `project.member.manage` 权限。项目时间字段（`startedAt`/`completedAt`/`closedAt`）全部由状态命令写入，创建与修改请求都不接受。建议按以下顺序验证：
 
 ```text
 POST /api/v1/projects

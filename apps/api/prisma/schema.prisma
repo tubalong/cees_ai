@@ -299,6 +299,7 @@ model Tenant {
   id                     String                  @id @default(uuid()) @db.Uuid
   code                   String                  @unique
   name                   String
+  timezone               String                  @default("Asia/Shanghai")
   status                 TenantStatus            @default(ACTIVE)
   memberships            TenantMembership[]
   authSessions           AuthSession[]
@@ -313,6 +314,7 @@ model Tenant {
   invitations            TenantInvitation[]
   projects               Project[]
   assignmentPolicies     AssignmentPolicy[]
+  projectCodeSequences   ProjectCodeSequence[]
   projectMembers         ProjectMember[]
   projectStatusHistory   ProjectStatusHistory[]
   tasks                  Task[]
@@ -735,9 +737,9 @@ model Project {
   name                    String
   description             String?
   status                  ProjectStatus          @default(PLANNING)
-  startsAt                DateTime?              @map("starts_at")
-  endsAt                  DateTime?              @map("ends_at")
+  startedAt               DateTime?              @map("started_at")
   completedAt             DateTime?              @map("completed_at")
+  closedAt                DateTime?              @map("closed_at")
   completedByMembershipId String?                @map("completed_by_membership_id") @db.Uuid
   completedByMembership   TenantMembership?      @relation("ProjectCompleter", fields: [completedByMembershipId], references: [id])
   completionSummary       String?                @map("completion_summary") @db.Text
@@ -759,6 +761,19 @@ model Project {
   @@index([tenantId, ownerMembershipId])
   @@index([tenantId, status, updatedAt])
   @@map("projects")
+}
+
+model ProjectCodeSequence {
+  id         String   @id @default(uuid()) @db.Uuid
+  tenantId   String   @map("tenant_id") @db.Uuid
+  tenant     Tenant   @relation(fields: [tenantId], references: [id])
+  year       Int
+  lastNumber Int      @default(0) @map("last_number")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@unique([tenantId, year])
+  @@map("project_code_sequences")
 }
 
 model ProjectMember {

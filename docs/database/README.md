@@ -9,6 +9,7 @@
 工作台与数据看板见 [工作台与数据看板](../product/dashboard-workbench.md)。
 
 > 新环境使用 `prisma migrate deploy` 按 `0001_init` 到 `0030_c_assignment_policy` 的目录顺序执行迁移；全部迁移完成后与当前 `schema.prisma` 保持一致。
+> 新环境使用 `prisma migrate deploy` 按 `0001_init` 到 `0031_project_code_sequence_and_timestamps` 的目录顺序执行迁移；全部迁移完成后与当前 `schema.prisma` 保持一致。
 
 - `apps/api/prisma/schema.prisma` 是数据模型唯一事实源，迁移提交 `prisma/migrations`。
 - 新建表和字段必须在同一迁移中使用 `COMMENT ON TABLE`、`COMMENT ON COLUMN` 添加 PostgreSQL 注释；`0003_organization_departments_and_database_comments` 已补齐此前全部业务表和字段注释。
@@ -55,6 +56,7 @@ User
 - User 是内部人员资料，使用 UUID 作为技术主键，邮箱字段暂时保留为可空兼容字段；
 - TenantMembership 表示用户在特定租户中的账号、凭证、成员身份和状态；
 - 租户账号业务唯一约束为 `tenantId + normalizedAccount`，登录时使用 `tenantCode + account`；
+- `tenants.timezone` 保存租户时区（IANA 标识，默认 `Asia/Shanghai`），用于业务日界线与项目编码年份；`0030_tenant_timezone` 新增该字段并回填存量租户；
 - AuthSession 必须同时绑定 User、Tenant 和 TenantMembership；
 - MembershipRole 负责成员与租户角色的关联。
 
@@ -122,11 +124,13 @@ UploadSession --COS HEAD 校验通过--> FileObject
 Project
   ├── ownerMembership -> TenantMembership
   ├── members -> ProjectMember[] -> TenantMembership
+  ├── codeSequence -> ProjectCodeSequence（tenantId + year）
   └── statusHistory -> ProjectStatusHistory[]
 ```
 
 - 项目成员外键指向 `TenantMembership`，不直接使用全局 User；
 - 项目编码使用 `tenantId + normalizedCode` 唯一约束；
+- `project_code_sequences` 按 `tenantId + year` 保存自动编码序号，`0031_project_code_sequence_and_timestamps` 同时把 `starts_at` 重命名为 `started_at`、删除 `ends_at` 并新增 `closed_at`；
 - `ownerMembershipId` 保存唯一当前负责人，项目成员角色同步为 `OWNER`；
 - `project_status_history` 保存每次状态变化及操作者 Membership；
 - `0005_project_management` 迁移旧成员关系、项目状态和编码，并为新增结构添加 PostgreSQL 中文注释。

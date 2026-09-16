@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CEES AI API
-  version: 0.25.0
+  version: 0.27.0
   description: 以本文件为唯一事实源的公开 API 契约。资源与操作按 docs/api 约定补充。
 
 servers:
@@ -3113,12 +3113,12 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ProjectResponseEnvelope' }
         '403':
-          description: 缺少 project.create 权限或无权指定其他负责人
+          description: 缺少 project.create 权限、无权指定其他负责人，或提交初始成员但缺少 project.member.manage
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
         '409':
-          description: 项目编码已存在
+          description: 项目编码冲突（服务端自动分配失败时的兜底）
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
@@ -8736,13 +8736,8 @@ components:
     CreateProjectRequest:
       type: object
       additionalProperties: false
-      required: [code, name]
+      required: [name]
       properties:
-        code:
-          type: string
-          pattern: '^[A-Za-z0-9_-]+$'
-          minLength: 2
-          maxLength: 32
         name:
           type: string
           minLength: 1
@@ -8753,27 +8748,32 @@ components:
         departmentId:
           type: [string, 'null']
           format: uuid
+          description: 归属部门，仅用于归属、筛选和统计，不授予任何访问权限
         ownerMembershipId:
           type: string
           format: uuid
           description: 不传时默认当前租户成员；指定其他成员需要 project.manage_all
-        startsAt:
-          type: [string, 'null']
-          format: date-time
-        endsAt:
-          type: [string, 'null']
-          format: date-time
+        memberMembershipIds:
+          type: array
+          maxItems: 100
+          uniqueItems: true
+          default: []
+          description: 初始项目成员；负责人由服务端自动加入，可不传或由服务端去重；需要 project.member.manage
+          items:
+            type: string
+            format: uuid
+
+    ProjectCode:
+      type: string
+      description: 服务端按“租户时区年份”自动分配的编码，格式 `PRJ-<年>-<序号>`；创建时不由客户端提供，创建后不可修改
+      examples:
+        - PRJ-2026-1
 
     UpdateProjectRequest:
       type: object
       additionalProperties: false
       required: [version]
       properties:
-        code:
-          type: string
-          pattern: '^[A-Za-z0-9_-]+$'
-          minLength: 2
-          maxLength: 32
         name:
           type: string
           minLength: 1
@@ -8784,12 +8784,7 @@ components:
         departmentId:
           type: [string, 'null']
           format: uuid
-        startsAt:
-          type: [string, 'null']
-          format: date-time
-        endsAt:
-          type: [string, 'null']
-          format: date-time
+          description: 归属部门，仅用于归属、筛选和统计，不授予任何访问权限
         version:
           type: integer
           minimum: 1
@@ -8896,7 +8891,8 @@ components:
         - version
       properties:
         id: { type: string, format: uuid }
-        code: { type: string }
+        code:
+          $ref: '#/components/schemas/ProjectCode'
         name: { type: string }
         description: { type: [string, 'null'] }
         status: { $ref: '#/components/schemas/ProjectStatus' }
@@ -8913,15 +8909,18 @@ components:
             - $ref: '#/components/schemas/ProjectMemberRole'
             - type: 'null'
           description: project.manage_all 跨项目访问时可能为空
-        startsAt:
+        startedAt:
           type: [string, 'null']
           format: date-time
-        endsAt:
-          type: [string, 'null']
-          format: date-time
+          description: 首次启动时间；项目从 PLANNING 流转为 ACTIVE 时由系统写入，此后不再变更
         completedAt:
           type: [string, 'null']
           format: date-time
+          description: 完成时间；reopen 时清空
+        closedAt:
+          type: [string, 'null']
+          format: date-time
+          description: 关闭时间；项目进入 CANCELLED 或 ARCHIVED 时由系统写入，归档恢复时清空
         completedByMembershipId:
           type: [string, 'null']
           format: uuid
@@ -9610,6 +9609,7 @@ components:
         - id
         - code
         - name
+        - timezone
         - status
         - version
         - createdAt
@@ -9622,6 +9622,11 @@ components:
           type: string
         name:
           type: string
+        timezone:
+          type: string
+          description: 租户时区，IANA 标识；用于业务日界线（工作台“今日”、日报提醒所属日期）与项目编码年份
+          examples:
+            - Asia/Shanghai
         status:
           $ref: "#/components/schemas/TenantStatus"
         version:
@@ -9638,13 +9643,19 @@ components:
       type: object
       additionalProperties: false
       required:
-        - name
         - version
       properties:
         name:
           type: string
           minLength: 1
           maxLength: 120
+        timezone:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: IANA 时区标识；与 name 至少提供一个，非法标识返回 400 TENANT_TIMEZONE_INVALID
+          examples:
+            - Asia/Shanghai
         version:
           type: integer
           minimum: 1

@@ -3,12 +3,12 @@
 /* tslint:disable */
 /* eslint-disable */
 export type UpdateProjectRequest = {
-    code?: string;
     name?: string;
     description?: string | null;
+    /**
+     * 归属部门，仅用于归属、筛选和统计，不授予任何访问权限
+     */
     departmentId?: string | null;
-    startsAt?: string | null;
-    endsAt?: string | null;
     version: number;
 };
 

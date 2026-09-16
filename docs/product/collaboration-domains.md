@@ -70,3 +70,4 @@
 2. **上传会话响应字段名**：文档未给出确切字段，当前做宽松解析（见第 4 节），联调时如 404/字段不匹配请与后端核对响应结构。
 3. **工作台响应结构**：`DashboardOverview` 等按 `projects/tasks/reports/meetings/notifications` 五段宽松读取，UI 对缺失字段显示 `-`。
 4. 知识库（无公开 API）与 AI 草稿/额度体系（部分基础）未对接，等待后端开放契约。
+5. **移动端项目创建待跟进**：契约 `0.27.0` 起 `POST /projects` 不再接受 `code`/`startsAt`/`endsAt`，新增 `memberMembershipIds`，响应把 `startsAt`/`endsAt` 替换为 `startedAt`/`closedAt`。桌面端已按新契约重构，移动端项目页仍使用旧字段，需在后续迭代对齐后才能新建项目。
