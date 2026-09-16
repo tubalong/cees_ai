@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { AiServiceGateway } from '../ai-orchestration/ai-service-gateway.service';
 import { KnowledgeDocumentService } from './knowledge-document.service';
 import { KnowledgeIndexingService } from './knowledge-indexing.service';
 import { KnowledgeService } from './knowledge.service';
@@ -152,6 +153,12 @@ describe('KnowledgeDocumentService', () => {
         prisma.documentVersion.create.mockResolvedValue({ id: NEW_VERSION_ID });
         prisma.knowledgeDocument.update.mockResolvedValue(undefined);
         prisma.project.findFirst.mockResolvedValue({ id: PROJECT_ID });
+        deleteVersionIndexSpy.mockResolvedValue({
+            request_id: 'request-id',
+            deleted_chunks: 5,
+            document_version_id: VERSION_ID,
+            index_version: 'knowledge-index-v1',
+        });
         const service = createService(prisma);
 
         const result = await service.createDocumentVersion(KNOWLEDGE_BASE_ID, DOCUMENT_ID, {
@@ -184,6 +191,40 @@ describe('KnowledgeDocumentService', () => {
             data: expect.objectContaining({ action: 'KNOWLEDGE_DOCUMENT_VERSION_CREATED' }),
         });
         expect(kickSpy).toHaveBeenCalled();
+        expect(deleteVersionIndexSpy).toHaveBeenCalledWith(TENANT_ID, USER_ID, VERSION_ID);
+    });
+
+    it('keeps the new version when the replaced index cleanup fails', async () => {
+        const prisma = createPrismaMock();
+        prisma.knowledgeBase.findFirst.mockResolvedValue(knowledgeBaseRecord());
+        prisma.knowledgeBaseMember.findUnique.mockResolvedValue({ permission: 'EDITOR' });
+        prisma.knowledgeDocument.findFirst
+            .mockResolvedValueOnce(documentRecord())
+            .mockResolvedValueOnce(documentRecord({
+                fileObjectId: NEW_FILE_OBJECT_ID,
+                currentVersionId: NEW_VERSION_ID,
+            }));
+        prisma.fileObject.findFirst.mockResolvedValue(fileObjectRecord({ id: NEW_FILE_OBJECT_ID }));
+        prisma.documentVersion.findFirst
+            .mockResolvedValueOnce({ versionNumber: 1 })
+            .mockResolvedValueOnce({ versionNumber: 2, visibilityScope: 'TENANT', departmentId: null, projectId: null });
+        prisma.documentVersion.create.mockResolvedValue({ id: NEW_VERSION_ID });
+        prisma.knowledgeDocument.update.mockResolvedValue(undefined);
+        deleteVersionIndexSpy.mockReset();
+        deleteVersionIndexSpy.mockRejectedValue(new Error('ai-service down'));
+        const service = createService(prisma);
+
+        const result = await service.createDocumentVersion(KNOWLEDGE_BASE_ID, DOCUMENT_ID, {
+            fileObjectId: NEW_FILE_OBJECT_ID,
+            visibilityScope: 'TENANT',
+        });
+
+        expect(result).toEqual(expect.objectContaining({ status: 'READY', versionNumber: 2 }));
+        expect(prisma.auditLog.create).toHaveBeenCalledWith({
+            data: expect.objectContaining({ action: 'KNOWLEDGE_DOCUMENT_VERSION_CREATED' }),
+        });
+        await new Promise((resolve) => setImmediate(resolve));
+        expect(deleteVersionIndexSpy).toHaveBeenCalledWith(TENANT_ID, USER_ID, VERSION_ID);
     });
 
     it('lists documents only within the knowledge base', async () => {
@@ -335,6 +376,7 @@ const DEPARTMENT_ID = '70000000-0000-0000-0000-000000000001';
 const PROJECT_ID = '80000000-0000-0000-0000-000000000001';
 
 const kickSpy = jest.fn();
+const deleteVersionIndexSpy = jest.fn();
 
 function createService(prisma: Record<string, any>): KnowledgeDocumentService {
     const tenantContext = {
@@ -350,9 +392,12 @@ function createService(prisma: Record<string, any>): KnowledgeDocumentService {
     const knowledgeService = new KnowledgeService(
         prisma as unknown as PrismaService,
         tenantContext,
+        { answerKnowledge: jest.fn() } as unknown as AiServiceGateway,
+        { deleteKnowledgeBaseIndexes: jest.fn() } as unknown as KnowledgeIndexingService,
     );
     const indexingService = {
         kick: kickSpy,
+        deleteDocumentVersionIndex: deleteVersionIndexSpy,
     } as unknown as KnowledgeIndexingService;
     return new KnowledgeDocumentService(
         prisma as unknown as PrismaService,

@@ -1053,28 +1053,36 @@ model DingTalkSyncJob {
 }
 
 model KnowledgeBase {
-  id          String    @id @default(uuid()) @db.Uuid
-  tenantId    String    @map("tenant_id") @db.Uuid
-  name        String
-  description String?
-  createdAt   DateTime  @default(now()) @map("created_at")
-  updatedAt   DateTime  @updatedAt @map("updated_at")
-  createdBy   String?   @map("created_by") @db.Uuid
-  updatedBy   String?   @map("updated_by") @db.Uuid
-  deletedAt   DateTime? @map("deleted_at")
-  version     Int       @default(1)
+  id           String    @id @default(uuid()) @db.Uuid
+  tenantId     String    @map("tenant_id") @db.Uuid
+  name         String
+  description  String?
+  departmentId String?   @map("department_id") @db.Uuid
+  projectId    String?   @map("project_id") @db.Uuid
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+  createdBy    String?   @map("created_by") @db.Uuid
+  updatedBy    String?   @map("updated_by") @db.Uuid
+  deletedAt    DateTime? @map("deleted_at")
+  version      Int       @default(1)
 
   @@index([tenantId])
   @@map("knowledge_bases")
 }
 
+enum KnowledgeBaseMemberPermission {
+  READER
+  EDITOR
+  MANAGER
+}
+
 model KnowledgeBaseMember {
-  id              String   @id @default(uuid()) @db.Uuid
-  tenantId        String   @map("tenant_id") @db.Uuid
-  knowledgeBaseId String   @map("knowledge_base_id") @db.Uuid
-  userId          String   @map("user_id") @db.Uuid
-  permission      String
-  createdAt       DateTime @default(now()) @map("created_at")
+  id              String                       @id @default(uuid()) @db.Uuid
+  tenantId        String                       @map("tenant_id") @db.Uuid
+  knowledgeBaseId String                       @map("knowledge_base_id") @db.Uuid
+  userId          String                       @map("user_id") @db.Uuid
+  permission      KnowledgeBaseMemberPermission
+  createdAt       DateTime                     @default(now()) @map("created_at")
 
   @@unique([tenantId, knowledgeBaseId, userId])
   @@map("knowledge_base_members")
@@ -1141,15 +1149,22 @@ model DocumentChunk {
 }
 
 model KnowledgeQueryLog {
-  id        String   @id @default(uuid()) @db.Uuid
-  tenantId  String   @map("tenant_id") @db.Uuid
-  userId    String   @map("user_id") @db.Uuid
-  query     String
-  answer    String?
-  citations Json?
-  requestId String   @map("request_id")
-  createdAt DateTime @default(now()) @map("created_at")
+  id              String   @id @default(uuid()) @db.Uuid
+  tenantId        String   @map("tenant_id") @db.Uuid
+  knowledgeBaseId String   @map("knowledge_base_id") @db.Uuid
+  userId          String   @map("user_id") @db.Uuid
+  query           String
+  answer          String?
+  grounded        Boolean  @default(false) @map("grounded")
+  citations       Json?
+  latencyMs       Int?     @map("latency_ms")
+  inputTokens     Int?     @map("input_tokens")
+  outputTokens    Int?     @map("output_tokens")
+  totalTokens     Int?     @map("total_tokens")
+  requestId       String   @map("request_id")
+  createdAt       DateTime @default(now()) @map("created_at")
 
+  @@index([tenantId, knowledgeBaseId, createdAt])
   @@index([tenantId, userId, createdAt])
   @@map("knowledge_query_logs")
 }

@@ -7,6 +7,7 @@ import pytest
 from app.core.config import (
     SERVICE_ROOT,
     ChatMode,
+    EmbeddingProfile,
     ExtractionConfig,
     ModelProfile,
     ModelRole,
@@ -171,3 +172,28 @@ def test_extraction_config_loads_from_catalog() -> None:
     assert catalog.extraction is not None
     assert catalog.extraction.max_bytes == 1234
     assert catalog.extraction.max_part_text_chars == 100
+
+
+def test_knowledge_readiness_cross_checks_embedding_dimension() -> None:
+    # 观察项修复：pgvector 维度与启用 embedding profile 声明维度不一致
+    # 时 readiness 直接报错，而不是等到索引请求才暴露。
+    catalog = load_model_catalog(MODEL_FIXTURE)
+    catalog.embedding_profiles["embed-768"] = EmbeddingProfile(
+        provider="openai_compatible",
+        model="embed-model",
+        base_url="https://example.invalid/v1",
+        api_key_env="EMBEDDING_KEY",
+        dimension=768,
+        enabled=True,
+    )
+    errors = validate_readiness(
+        Settings(
+            node_env="test",
+            ai_internal_token="secret",
+            knowledge_vector_store="pgvector",
+            knowledge_vector_database_url="postgresql://example.invalid/vectors",
+            knowledge_vector_dimension=1024,
+        ),
+        catalog,
+    )
+    assert any("dimension 768" in error for error in errors)

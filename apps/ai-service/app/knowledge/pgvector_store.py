@@ -194,7 +194,7 @@ def _retrieve_filters(
     语义与内存实现的 `_matches_scope` 一致：租户与 index_version 必须
     匹配；knowledge_base 必须在列表内；allowed_document_ids 提供时文档
     必须在其内；department/project 过滤只约束携带该属性的节点（IS NULL
-    视为通过），ACL 版本必须一致。过滤全部下推到 SQL WHERE。
+    视为通过）；ACL 版本仅在调用方提供时过滤。过滤全部下推到 SQL WHERE。
     """
     filters: list[MetadataFilters | MetadataFilter] = [
         MetadataFilter(key="tenant_id", value=tenant_id, operator=FilterOperator.EQ),
@@ -217,18 +217,22 @@ def _retrieve_filters(
         filters.append(_nullable_in_filter("department_id", scope.department_ids))
     if scope.project_ids is not None:
         filters.append(_nullable_in_filter("project_id", scope.project_ids))
-    filters.append(
-        MetadataFilter(key="acl_version", value=scope.acl_version, operator=FilterOperator.EQ)
-    )
+    if scope.acl_version is not None:
+        filters.append(
+            MetadataFilter(key="acl_version", value=scope.acl_version, operator=FilterOperator.EQ)
+        )
     return MetadataFilters(filters=filters)
 
 
 def _nullable_in_filter(key: str, allowed: list[str]) -> MetadataFilters:
-    """department/project 等可空属性：值为空或命中允许列表都通过。"""
-    return MetadataFilters(
-        condition=FilterCondition.OR,
-        filters=[
-            MetadataFilter(key=key, value=None, operator=FilterOperator.IS_EMPTY),
-            MetadataFilter(key=key, value=allowed, operator=FilterOperator.IN),
-        ],
-    )
+    """department/project 等可空属性：值为空或命中允许列表都通过。
+
+    空允许列表表示调用方没有任何可授权的该属性，只放行不携带该
+    属性的节点，避免空列表进入 IN 过滤。
+    """
+    filters: list[MetadataFilters | MetadataFilter] = [
+        MetadataFilter(key=key, value=None, operator=FilterOperator.IS_EMPTY),
+    ]
+    if allowed:
+        filters.append(MetadataFilter(key=key, value=allowed, operator=FilterOperator.IN))
+    return MetadataFilters(condition=FilterCondition.OR, filters=filters)

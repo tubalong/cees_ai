@@ -12,6 +12,8 @@ import type { KnowledgeBaseMemberResponseEnvelope } from '../models/KnowledgeBas
 import type { KnowledgeBaseResponseEnvelope } from '../models/KnowledgeBaseResponseEnvelope';
 import type { KnowledgeDocumentListResponseEnvelope } from '../models/KnowledgeDocumentListResponseEnvelope';
 import type { KnowledgeDocumentResponseEnvelope } from '../models/KnowledgeDocumentResponseEnvelope';
+import type { KnowledgeQueryRequest } from '../models/KnowledgeQueryRequest';
+import type { KnowledgeQueryResponseEnvelope } from '../models/KnowledgeQueryResponseEnvelope';
 import type { UpdateKnowledgeBaseMemberRequest } from '../models/UpdateKnowledgeBaseMemberRequest';
 import type { UpdateKnowledgeBaseRequest } from '../models/UpdateKnowledgeBaseRequest';
 import type { CancelablePromise } from '../core/CancelablePromise';
@@ -171,6 +173,42 @@ export class KnowledgeBaseService {
                 403: `缺少知识库 MANAGER 权限`,
                 404: `知识库不存在或当前成员无权访问`,
                 409: `version 与服务端当前版本不一致`,
+            },
+        });
+    }
+    /**
+     * 基于知识库内容回答提问
+     * 检索知识库内当前成员可见的文档内容，由 ai-service 基于证据生成带引用的答案。
+     * 检索无结果时直接返回 insufficientEvidence=true 不调用模型；
+     * 答案只引用真实检索到的 chunk，不允许模型编造文档、页码或链接。
+     *
+     * @returns KnowledgeQueryResponseEnvelope 基于知识库证据的答案与引用列表
+     * @throws ApiError
+     */
+    public static queryKnowledgeBase({
+        knowledgeBaseId,
+        requestBody,
+    }: {
+        /**
+         * 知识库 ID
+         */
+        knowledgeBaseId: string,
+        requestBody: KnowledgeQueryRequest,
+    }): CancelablePromise<KnowledgeQueryResponseEnvelope> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/knowledge-bases/{knowledgeBaseId}/query',
+            path: {
+                'knowledgeBaseId': knowledgeBaseId,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                400: `请求字段校验失败`,
+                401: `登录状态无效或缺少有效租户成员身份`,
+                403: `缺少 knowledge_base.query 权限或不是该知识库成员`,
+                404: `知识库不存在或当前成员无权访问`,
+                503: `AI 服务暂不可用，可稍后重试`,
             },
         });
     }

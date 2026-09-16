@@ -1,8 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import {
+  answerKnowledge as requestKnowledgeAnswer,
   compactChat as requestChatCompaction,
   composeDocument as requestComposeDocument,
   createClient,
+  deleteKnowledgeIndex as requestKnowledgeIndexDelete,
   generateDocumentDocx as requestGenerateDocumentDocx,
   generateImage as requestImageGeneration,
   getReadiness,
@@ -28,6 +30,10 @@ import {
   type ImageGenerationMetadata,
   type InvokeRequest,
   type InvokeResponse,
+  type KnowledgeAnswerRequest,
+  type KnowledgeAnswerResponse,
+  type KnowledgeIndexDeleteRequest,
+  type KnowledgeIndexDeleteResponse,
   type KnowledgeIndexRequest,
   type KnowledgeIndexResponse,
   type RenderDocxRequest,
@@ -391,6 +397,30 @@ export class AiServiceGateway {
    */
   async indexKnowledge(input: KnowledgeIndexRequest): Promise<KnowledgeIndexResponse> {
     const result = await indexKnowledgeDocument({ client: this.getClient(), body: input });
+    if (result.error) throw this.toInvocationError(result.error, result.response?.status);
+    if (!result.data) throw this.emptyResponseError();
+    return result.data;
+  }
+
+  /**
+   * 调用 ai-service 知识问答路由：内部先按可信 scope 检索，再由 rag role
+   * 基于证据生成带引用校验的答案。模型只输出引用编号，服务端映射回真实
+   * chunk 来源；检索无结果时短路不调用模型。查询日志与审计由 knowledge 模块负责。
+   */
+  async answerKnowledge(input: KnowledgeAnswerRequest): Promise<KnowledgeAnswerResponse> {
+    const result = await requestKnowledgeAnswer({ client: this.getClient(), body: input });
+    if (result.error) throw this.toInvocationError(result.error, result.response?.status);
+    if (!result.data) throw this.emptyResponseError();
+    return result.data;
+  }
+
+  /**
+   * 调用 ai-service 索引删除路由：移除指定文档版本在当前 index_version 下的
+   * 派生向量节点。删除不调用 LLM、不产生 Token 指标；失败语义由 knowledge
+   * 模块决定（当前：记日志不阻塞业务，幂等重试后收敛）。
+   */
+  async deleteKnowledgeIndex(input: KnowledgeIndexDeleteRequest): Promise<KnowledgeIndexDeleteResponse> {
+    const result = await requestKnowledgeIndexDelete({ client: this.getClient(), body: input });
     if (result.error) throw this.toInvocationError(result.error, result.response?.status);
     if (!result.data) throw this.emptyResponseError();
     return result.data;

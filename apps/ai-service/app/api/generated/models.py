@@ -818,7 +818,10 @@ class KnowledgeRetrieveScope(BaseModel):
         description='Optional project allowlist computed by the caller. Only constrains nodes that carry a project_id; nodes without one pass through.',
         max_length=256,
     )
-    acl_version: constr(min_length=1, max_length=128)
+    acl_version: constr(min_length=1, max_length=128) | None = Field(
+        None,
+        description='Optional ACL snapshot identifier of the indexed nodes. When omitted, retrieval does not filter on ACL version. Callers that fold permissions in real time on every request may omit it until ACL versioning or retrieval caching is introduced.',
+    )
 
 
 class KnowledgeRetrieveRequest(BaseModel):
@@ -860,6 +863,71 @@ class KnowledgeRetrieveResponse(BaseModel):
     )
     request_id: str
     chunks: list[RetrievedChunk] = Field(..., max_length=32)
+    index_version: str
+    embedding_profile: str
+
+
+class KnowledgeAnswerRequest(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    request_id: constr(min_length=1, max_length=128)
+    tenant_id: constr(min_length=1, max_length=128)
+    user_id: constr(min_length=1, max_length=128)
+    query: constr(min_length=1, max_length=4096)
+    scope: KnowledgeRetrieveScope
+    top_k: conint(ge=1, le=32) | None = 8
+    index_version: constr(min_length=1, max_length=64)
+    embedding_profile: constr(min_length=1, max_length=64) | None = Field(
+        None,
+        description='Embedding profile for the query. Null selects the configured default; the effective profile is returned in the response.',
+    )
+    max_answer_tokens: conint(ge=64, le=4096) | None = Field(
+        1024, description='Output token budget for the grounded answer.'
+    )
+
+
+class KnowledgeAnswerCitation(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    citation_id: constr(min_length=1, max_length=16) = Field(
+        ..., description='Short citation label referenced by the answer, e.g. S1.'
+    )
+    chunk_id: constr(min_length=1, max_length=128)
+    document_id: constr(min_length=1, max_length=128)
+    document_version_id: constr(min_length=1, max_length=128)
+    text: constr(min_length=1, max_length=262144)
+    score: float | None = None
+    page_index: conint(ge=0) | None = None
+    bbox: list[float] | None = Field(None, max_length=4, min_length=4)
+    heading_path: list[constr(min_length=1, max_length=512)] | None = Field(
+        None, max_length=16
+    )
+
+
+class KnowledgeAnswerResponse(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    request_id: str
+    answer: constr(max_length=65536) = Field(
+        ...,
+        description='Grounded answer text. Empty when insufficient_evidence is true.',
+    )
+    grounded: bool = Field(
+        ...,
+        description='True when the answer is backed by mapped citations; always false when insufficient_evidence is true.',
+    )
+    insufficient_evidence: bool = Field(
+        ...,
+        description='True when the retrieval produced no chunks or the model determined the evidence cannot answer the question. The service never answers from model imagination in this case.',
+    )
+    citations: list[KnowledgeAnswerCitation] = Field(..., max_length=32)
+    execution: ExecutionMetadata | None = Field(
+        None,
+        description='Present only when the rag role actually produced the answer. Null when the empty-retrieval short-circuit skipped the LLM call.',
+    )
     index_version: str
     embedding_profile: str
 

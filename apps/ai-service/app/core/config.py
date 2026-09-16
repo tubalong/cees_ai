@@ -269,6 +269,17 @@ def _validate_knowledge_readiness(
             "profile in production"
         )
     for name, profile in enabled_profiles:
+        # 交叉校验：向量表维度必须与启用的 embedding profile 声明维度
+        # 一致，否则索引写入或检索时才会暴露维度不匹配（统一走 500）。
+        if (
+            settings.knowledge_vector_dimension
+            and profile.dimension != settings.knowledge_vector_dimension
+        ):
+            errors.append(
+                f"enabled embedding profile {name} declares dimension "
+                f"{profile.dimension} but KNOWLEDGE_VECTOR_DIMENSION is "
+                f"{settings.knowledge_vector_dimension}"
+            )
         assert profile.api_key_env is not None
         key = os.getenv(profile.api_key_env)
         if not key:

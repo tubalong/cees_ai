@@ -1,6 +1,11 @@
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { AuditOutcome, KnowledgeDocumentStatus, Prisma, VisibilityScope } from '@prisma/client';
-import type { KnowledgeIndexRequest, KnowledgeVisibilityScope, ParsedDocument } from '@cees/ai-service-client';
+import type {
+    KnowledgeIndexDeleteResponse,
+    KnowledgeIndexRequest,
+    KnowledgeVisibilityScope,
+    ParsedDocument,
+} from '@cees/ai-service-client';
 import { randomUUID } from 'node:crypto';
 import { AiServiceGateway, AiServiceInvocationError } from '../ai-orchestration/ai-service-gateway.service';
 import { PrismaService } from '../database/prisma.service';
@@ -54,11 +59,7 @@ export class KnowledgeIndexingService implements OnModuleInit, OnModuleDestroy {
         DEFAULT_MAX_RETRIES,
     );
     // 索引三元组在构造时读取，允许按环境覆盖（chunking / embedding profile / index 版本）。
-    private readonly indexVersions = {
-        chunkingVersion: readEnv('KNOWLEDGE_CHUNKING_VERSION', 'knowledge-chunking-v1'),
-        embeddingProfile: readEnv('KNOWLEDGE_EMBEDDING_PROFILE', 'deterministic'),
-        indexVersion: readEnv('KNOWLEDGE_INDEX_VERSION', 'knowledge-index-v1'),
-    };
+    private readonly indexVersions = readIndexVersions();
 
     constructor(
         private readonly prisma: PrismaService,
@@ -83,6 +84,49 @@ export class KnowledgeIndexingService implements OnModuleInit, OnModuleDestroy {
     /** 上传完成后的即时触发；与定时轮询共用 Redis 锁，不会重复处理同一文档。 */
     async kick(): Promise<void> {
         void this.runOnce().catch((error: unknown) => this.logger.error(error));
+    }
+
+    /**
+     * 删除指定文档版本的派生索引。失败抛 AiServiceInvocationError，由调用方
+     * 决定降级策略（当前：fire-and-forget 记日志，不阻塞业务写入）。
+     */
+    async deleteDocumentVersionIndex(
+        tenantId: string,
+        userId: string,
+        documentVersionId: string,
+    ): Promise<KnowledgeIndexDeleteResponse> {
+        return this.gateway.deleteKnowledgeIndex({
+            request_id: randomUUID(),
+            tenant_id: tenantId,
+            user_id: userId,
+            document_version_id: documentVersionId,
+            index_version: this.indexVersions.indexVersion,
+        });
+    }
+
+    /**
+     * 清理知识库下全部文档版本的派生索引（知识库删除后的卫生清理）。
+     * 单个版本删除失败只记日志并继续清理其余版本，最坏遗留向量垃圾，
+     * 幂等重试后收敛。
+     */
+    async deleteKnowledgeBaseIndexes(tenantId: string, userId: string, knowledgeBaseId: string): Promise<void> {
+        const documents = await this.prisma.knowledgeDocument.findMany({
+            where: { tenantId, knowledgeBaseId },
+            select: { id: true },
+        });
+        if (documents.length === 0) return;
+        const versions = await this.prisma.documentVersion.findMany({
+            where: { tenantId, documentId: { in: documents.map((document) => document.id) } },
+            select: { id: true },
+        });
+        for (const version of versions) {
+            try {
+                await this.deleteDocumentVersionIndex(tenantId, userId, version.id);
+            } catch (error) {
+                const message = error instanceof Error ? error.message : 'unknown error';
+                this.logger.warn(`清理知识库派生索引失败（版本 ${version.id}）：${message}`);
+            }
+        }
     }
 
     async runOnce(): Promise<{ skipped: boolean; processed: number }> {
@@ -304,6 +348,19 @@ export class KnowledgeIndexingService implements OnModuleInit, OnModuleDestroy {
 function readEnv(name: string, fallback: string): string {
     const value = process.env[name]?.trim();
     return value || fallback;
+}
+
+/**
+ * 读取索引三元组的当前环境配置。索引侧与查询侧共用，保证检索请求
+ * 默认的 index_version 与写入侧一致；切换 embedding 或切分策略必须换新
+ * index_version（见 knowledge-rag.md 3.4）。
+ */
+export function readIndexVersions() {
+    return {
+        chunkingVersion: readEnv('KNOWLEDGE_CHUNKING_VERSION', 'knowledge-chunking-v1'),
+        embeddingProfile: readEnv('KNOWLEDGE_EMBEDDING_PROFILE', 'deterministic'),
+        indexVersion: readEnv('KNOWLEDGE_INDEX_VERSION', 'knowledge-index-v1'),
+    };
 }
 
 function readPositiveInteger(value: string | undefined, fallback: number): number {

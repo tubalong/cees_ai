@@ -1,5 +1,7 @@
+import type { KnowledgeBaseMemberPermission } from '@prisma/client';
+
+export type { KnowledgeBaseMemberPermission };
 export const KNOWLEDGE_BASE_MEMBER_PERMISSIONS = ['READER', 'EDITOR', 'MANAGER'] as const;
-export type KnowledgeBaseMemberPermission = typeof KNOWLEDGE_BASE_MEMBER_PERMISSIONS[number];
 
 export interface KnowledgeBaseResult {
     id: string;
@@ -66,4 +68,22 @@ export interface KnowledgeDocumentResult {
 export interface KnowledgeDocumentListResult {
     items: KnowledgeDocumentResult[];
     nextCursor: string | null;
+}
+
+export interface KnowledgeQueryCitationResult {
+    citationId: string;
+    documentId: string;
+    documentVersionId: string;
+    chunkId: string;
+    text: string;
+    score?: number;
+    pageIndex?: number | null;
+    bbox?: [number, number, number, number] | null;
+}
+
+export interface KnowledgeQueryResult {
+    answer: string;
+    grounded: boolean;
+    insufficientEvidence: boolean;
+    citations: KnowledgeQueryCitationResult[];
 }

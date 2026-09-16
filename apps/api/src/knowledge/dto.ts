@@ -144,3 +144,16 @@ export class CreateKnowledgeDocumentVersionDto {
     @IsUUID()
     projectId?: string | null;
 }
+
+export class QueryKnowledgeBaseDto {
+    @IsString()
+    @MinLength(1)
+    @MaxLength(4096)
+    query!: string;
+
+    @IsOptional()
+    @IsString()
+    @MinLength(1)
+    @MaxLength(64)
+    indexVersion?: string;
+}
