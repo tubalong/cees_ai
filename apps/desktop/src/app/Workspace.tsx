@@ -1,6 +1,6 @@
 import {
     AppstoreOutlined, BankOutlined, BellOutlined, BookOutlined, CheckCircleOutlined,
-    CodeOutlined, CopyOutlined, DatabaseOutlined, FileTextOutlined, FolderOutlined,
+    CloudSyncOutlined, CodeOutlined, CopyOutlined, DatabaseOutlined, FileTextOutlined, FolderOutlined,
     HomeOutlined, LogoutOutlined, MenuFoldOutlined, MenuUnfoldOutlined, MessageOutlined, MoreOutlined,
     PlusOutlined, ProjectOutlined, SafetyCertificateOutlined, SearchOutlined, SettingOutlined,
     CalendarOutlined, NotificationOutlined, ProfileOutlined,
@@ -21,6 +21,7 @@ import {
     type ManagedDocumentSummary, type MeResult, type TenantMember,
 } from '../core/api';
 import MeetingManagement from '../features/meetings/MeetingManagement';
+import DingTalkOrganizationPage from '../features/dingtalk/DingTalkOrganizationPage';
 import NotificationCenter from '../features/notifications/NotificationCenter';
 import OrganizationManagement from '../features/organization/OrganizationManagement';
 import ProjectManagement from '../features/projects/ProjectManagement';
@@ -55,6 +56,7 @@ const navItems: NavItem[] = [
     { path: '/applications', label: '应用中心', icon: <AppstoreOutlined /> },
     { path: '/architecture', label: '架构管理', icon: <TeamOutlined /> },
     { path: '/roles', label: '角色权限', icon: <SafetyCertificateOutlined /> },
+    { path: '/dingtalk', label: '钉钉管理', icon: <CloudSyncOutlined /> },
     { path: '/knowledge', label: '知识管理', icon: <BookOutlined /> },
     { path: '/notifications', label: '通知中心', icon: <NotificationOutlined /> },
 ];
@@ -76,6 +78,10 @@ const navPermissionByPath: Record<string, string> = {
     '/meetings': 'meeting.read',
     '/reports': 'work_report.read',
     '/notifications': 'notification.read',
+};
+
+const navAnyPermissionByPath: Record<string, string[]> = {
+    '/dingtalk': ['dingtalk.integration.read', 'dingtalk.organization.read', 'dingtalk.organization.mapping.preview'],
 };
 
 interface WorkspaceProps {
@@ -120,7 +126,11 @@ function SideNavigation({ collapsed, permissions, unreadCount, onToggle, onLogou
             {!collapsed && <span><strong>CEES AI</strong><small>{t('企业智能工作台')}</small></span>}
         </div>
         <nav className="nav-list">
-            {navItems.filter((item) => !navPermissionByPath[item.path] || permissions.includes(navPermissionByPath[item.path])).map((item) => <Tooltip key={item.path} title={collapsed ? t(item.label) : ''} placement="right">
+            {navItems.filter((item) => {
+                const requiredPermission = navPermissionByPath[item.path];
+                const anyPermissions = navAnyPermissionByPath[item.path];
+                return (!requiredPermission || permissions.includes(requiredPermission)) && (!anyPermissions || anyPermissions.some((permission) => permissions.includes(permission)));
+            }).map((item) => <Tooltip key={item.path} title={collapsed ? t(item.label) : ''} placement="right">
                 <button className={`nav-item ${location.pathname === item.path ? 'is-active' : ''}`} type="button" onClick={() => navigate(item.path)}>
                     {item.path === '/notifications' ? <Badge count={unreadCount} size="small" offset={[2, -2]}>{item.icon}</Badge> : item.icon}{!collapsed && <span>{t(item.label)}</span>}
                 </button>
@@ -553,6 +563,7 @@ function CurrentPage({ authContext, members, documents, membersLoading, document
     if (location.pathname === '/applications') return <ApplicationsPage />;
     if (location.pathname === '/architecture') return <OrganizationManagement authContext={authContext} fallbackMembers={members} membersLoading={membersLoading} onSessionExpired={onSessionExpired} />;
     if (location.pathname === '/roles') return <RoleManagement authContext={authContext} onSessionExpired={onSessionExpired} />;
+    if (location.pathname === '/dingtalk') return <DingTalkOrganizationPage authContext={authContext} onSessionExpired={onSessionExpired} />;
     if (location.pathname === '/knowledge') return <KnowledgePage documents={documents} loading={documentsLoading} />;
     if (location.pathname === '/profile') return <ProfileSettings tenantName={authContext.tenant.name} onProfileUpdated={onProfileUpdated} onSessionExpired={onSessionExpired} />;
     if (location.pathname === '/notifications') return <NotificationCenter authContext={authContext} onSessionExpired={onSessionExpired} />;

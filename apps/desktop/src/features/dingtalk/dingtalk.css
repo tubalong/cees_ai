@@ -1,0 +1,116 @@
+.dingtalk-page {
+    min-width: 0;
+}
+
+.dingtalk-page .ant-tabs-content-holder {
+    min-width: 0;
+}
+
+.dingtalk-stack {
+    display: grid;
+    gap: 16px;
+}
+
+.dingtalk-loading {
+    display: grid;
+    min-height: 260px;
+    place-items: center;
+}
+
+.dingtalk-error-text {
+    color: #d4380d;
+}
+
+.dingtalk-stat-row {
+    margin-bottom: 16px;
+}
+
+.dingtalk-apply-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid var(--cees-border);
+}
+
+.dingtalk-role-assignment {
+    display: grid;
+    grid-template-columns: 240px minmax(0, 1fr);
+    gap: 16px;
+}
+
+.dingtalk-role-list {
+    display: grid;
+    align-content: start;
+    gap: 6px;
+    padding: 8px;
+    border: 1px solid var(--cees-border);
+    border-radius: 8px;
+}
+
+.dingtalk-role-list button {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-width: 0;
+    padding: 10px;
+    color: var(--cees-text);
+    text-align: left;
+    cursor: pointer;
+    background: transparent;
+    border: 0;
+    border-radius: 6px;
+}
+
+.dingtalk-role-list button:hover,
+.dingtalk-role-list button.is-active {
+    color: #565cf6;
+    background: #eef0ff;
+}
+
+.dingtalk-role-list button span {
+    min-width: 0;
+}
+
+.dingtalk-role-list button strong,
+.dingtalk-role-list button small {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.dingtalk-role-list button small {
+    margin-top: 3px;
+    color: var(--cees-muted);
+    font-size: 11px;
+}
+
+.dingtalk-role-users {
+    min-width: 0;
+}
+
+.dingtalk-role-users-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 8px;
+}
+
+.dingtalk-role-users-heading h3 {
+    margin: 0;
+}
+
+.dingtalk-role-users-heading small {
+    color: var(--cees-muted);
+}
+
+@media (max-width: 800px) {
+    .dingtalk-role-assignment {
+        grid-template-columns: 1fr;
+    }
+}
