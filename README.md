@@ -38,8 +38,8 @@
 1. 本地开发将 `.env.example` 复制为 `.env`；应用服务器分别使用 `.env.staging.example` 和 `.env.production.example`；数据库服务器使用 `infra/database/` 下对应的环境示例。实际文件均不提交。
 2. 安装 Node.js 24 LTS、pnpm 12.3.4、uv、Python 3.14 和 Docker Desktop；移动端开发另需 Flutter SDK。
 3. 执行 `pnpm install --frozen-lockfile`。
-4. 在 `apps/ai-service` 执行 `uv sync --locked`。
-5. 本地执行 `pnpm infra:up`。
+4. 本地首次初始化或拉取包含依赖或数据库变更的代码后，执行 `pnpm local:deploy`；它会执行 `uv sync --locked`，启动 PostgreSQL/Redis、生成 Prisma Client、应用迁移、创建 `cees_ai_vectors`，并运行本地 seed（包括平台超级管理员）。
+5. 初始化完成后，启动 API、AI service 和桌面端；API 可执行 `pnpm --filter @cees/api dev`，或使用 VS Code 启动配置。
 6. 数据库服务器通过 `scripts/package-database-bundle.ps1` 生成部署包，服务器解压后执行 `infra/database/deploy-db.sh`；不需要 clone 仓库。
 7. Staging/Production 使用“本地构建镜像并上传 COS、服务器下载并导入镜像”的部署方式；应用服务器不需要 clone 完整仓库，也不执行依赖安装或镜像构建。
 

@@ -8,6 +8,7 @@
   },
   "scripts": {
     "dev": "pnpm --parallel --filter @cees/api --filter @cees/desktop dev",
+    "local:deploy": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/local-deploy.ps1",
     "build": "pnpm -r --if-present build",
     "test": "pnpm -r --if-present test",
     "lint": "pnpm -r --if-present lint",
