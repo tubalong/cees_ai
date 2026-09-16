@@ -45,6 +45,51 @@ describe('TenantService', () => {
         }));
     });
 
+    it('updates the tenant time zone and records a dedicated audit action', async () => {
+        const prisma = createPrismaMock();
+        const current = tenantRecord();
+        prisma.tenant.findFirst
+            .mockResolvedValueOnce(current)
+            .mockResolvedValueOnce({ ...current, timezone: 'UTC', version: 2 });
+        prisma.tenant.updateMany.mockResolvedValue({ count: 1 });
+        const service = createService(prisma);
+
+        const result = await service.updateCurrentTenant({ timezone: 'UTC', version: 1 });
+
+        expect(result.timezone).toBe('UTC');
+        expect(prisma.tenant.updateMany).toHaveBeenCalledWith({
+            where: { id: TENANT_ID, version: 1, deletedAt: null },
+            data: { timezone: 'UTC', version: { increment: 1 } },
+        });
+        expect(prisma.auditLog.create).toHaveBeenCalledWith({
+            data: expect.objectContaining({
+                action: 'TENANT_TIMEZONE_CHANGED',
+                metadata: expect.objectContaining({
+                    before: expect.objectContaining({ timezone: 'Asia/Shanghai' }),
+                    after: expect.objectContaining({ timezone: 'UTC' }),
+                }),
+            }),
+        });
+    });
+
+    it('rejects an unknown time zone identifier', async () => {
+        const prisma = createPrismaMock();
+        const service = createService(prisma);
+
+        await expect(service.updateCurrentTenant({ timezone: 'Mars/Phobos', version: 1 }))
+            .rejects.toMatchObject({ response: expect.objectContaining({ code: 'TENANT_TIMEZONE_INVALID' }) });
+        expect(prisma.tenant.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('rejects an empty tenant update payload', async () => {
+        const prisma = createPrismaMock();
+        const service = createService(prisma);
+
+        await expect(service.updateCurrentTenant({ version: 1 }))
+            .rejects.toMatchObject({ response: expect.objectContaining({ code: 'TENANT_UPDATE_EMPTY' }) });
+        expect(prisma.tenant.updateMany).not.toHaveBeenCalled();
+    });
+
     it('disables a member, revokes sessions and writes audit', async () => {
         const prisma = createPrismaMock();
         prisma.tenantMembership.findFirst
@@ -229,6 +274,7 @@ function tenantRecord(): Record<string, unknown> {
         id: TENANT_ID,
         code: 'cees',
         name: 'CEES',
+        timezone: 'Asia/Shanghai',
         status: TenantStatus.ACTIVE,
         version: 1,
         createdAt: new Date('2026-09-04T00:00:00.000Z'),

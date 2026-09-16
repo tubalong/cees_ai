@@ -55,6 +55,7 @@ User
 - User 是内部人员资料，使用 UUID 作为技术主键，邮箱字段暂时保留为可空兼容字段；
 - TenantMembership 表示用户在特定租户中的账号、凭证、成员身份和状态；
 - 租户账号业务唯一约束为 `tenantId + normalizedAccount`，登录时使用 `tenantCode + account`；
+- `tenants.timezone` 保存租户时区（IANA 标识，默认 `Asia/Shanghai`），用于业务日界线与项目编码年份；`0030_tenant_timezone` 新增该字段并回填存量租户；
 - AuthSession 必须同时绑定 User、Tenant 和 TenantMembership；
 - MembershipRole 负责成员与租户角色的关联。
 

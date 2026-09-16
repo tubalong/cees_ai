@@ -7,6 +7,7 @@ import {
     TaskStatus,
     WorkReportStatus,
 } from '@prisma/client';
+import { addLocalDays, dateKeyToUtcMidnight, DEFAULT_TENANT_TIMEZONE, shiftLocalDateKey, startOfLocalDay } from '../common/tenant-time';
 import { PrismaService } from '../database/prisma.service';
 import { RequestTenantContext, TenantContext } from '../tenant/tenant-context';
 import { DashboardTaskStatisticsQueryDto, DashboardTodosQueryDto, DashboardUpcomingMeetingsQueryDto } from './dto';
@@ -48,7 +49,8 @@ export class DashboardService {
     async overview(): Promise<DashboardOverviewResult> {
         const context = this.tenantContext.require();
         const now = new Date();
-        const [projects, tasks, reports, meetings, unreadCount] = await Promise.all([
+        const [timeZone, projects, tasks, reports, meetings, unreadCount] = await Promise.all([
+            this.tenantTimeZone(context.tenantId),
             this.can(context, 'project.read')
                 ? this.prisma.project.findMany({ where: this.projectWhere(context), select: { status: true } })
                 : Promise.resolve([]),
@@ -71,8 +73,8 @@ export class DashboardService {
         return {
             project: projectMetrics(projects),
             task: taskMetrics(tasks, now),
-            report: reportMetrics(reports, context.membershipId, now),
-            meeting: meetingMetrics(meetings as DashboardMeetingRecord[], now),
+            report: reportMetrics(reports, context.membershipId, now, timeZone),
+            meeting: meetingMetrics(meetings as DashboardMeetingRecord[], now, timeZone),
             notification: { unreadCount },
             generatedAt: now,
         };
@@ -198,6 +200,15 @@ export class DashboardService {
     private can(context: RequestTenantContext, permission: string): boolean {
         return context.permissions.includes(permission);
     }
+
+    /** 业务日界线按租户时区计算；租户时区缺失时回退到平台默认时区。 */
+    private async tenantTimeZone(tenantId: string): Promise<string> {
+        const tenant = await this.prisma.tenant.findFirst({
+            where: { id: tenantId, deletedAt: null },
+            select: { timezone: true },
+        });
+        return tenant?.timezone ?? DEFAULT_TENANT_TIMEZONE;
+    }
 }
 
 function projectMetrics(projects: Array<{ status: ProjectStatus }>) {
@@ -225,8 +236,8 @@ function taskMetrics(tasks: Array<{ status: TaskStatus; dueDate: Date | null }>,
     }, { ...calculated, todo: 0, inProgress: 0, blocked: 0, done: 0, cancelled: 0 });
 }
 
-function reportMetrics(reports: Array<{ status: WorkReportStatus; type: string; periodStart: Date; authorMembershipId: string; reviewerMembershipId: string | null }>, membershipId: string, now: Date) {
-    const previousDay = utcStartOfDay(addDays(now, -1)).getTime();
+function reportMetrics(reports: Array<{ status: WorkReportStatus; type: string; periodStart: Date; authorMembershipId: string; reviewerMembershipId: string | null }>, membershipId: string, now: Date, timeZone: string) {
+    const previousDay = dateKeyToUtcMidnight(shiftLocalDateKey(timeZone, now, -1)).getTime();
     const dailyReport = reports.find((report) => report.authorMembershipId === membershipId && report.type === 'DAILY' && report.periodStart.getTime() === previousDay);
     return reports.reduce((result, report) => {
         result.total += 1;
@@ -239,23 +250,13 @@ function reportMetrics(reports: Array<{ status: WorkReportStatus; type: string; 
     }, { total: 0, draft: 0, submitted: 0, approved: 0, rejected: 0, pendingReview: 0, dailyReportPending: !dailyReport || dailyReport.status === WorkReportStatus.DRAFT || dailyReport.status === WorkReportStatus.REJECTED });
 }
 
-function meetingMetrics(meetings: Array<{ status: MeetingStatus; startsAt: Date; participants: Array<{ responseStatus: MeetingResponseStatus }> }>, now: Date) {
-    const todayStart = utcStartOfDay(now).getTime();
-    const tomorrow = addDays(utcStartOfDay(now), 1).getTime();
+function meetingMetrics(meetings: Array<{ status: MeetingStatus; startsAt: Date; participants: Array<{ responseStatus: MeetingResponseStatus }> }>, now: Date, timeZone: string) {
+    const todayStart = startOfLocalDay(timeZone, now).getTime();
+    const tomorrow = addLocalDays(timeZone, now, 1).getTime();
     return meetings.reduce((result, meeting) => {
         if (meeting.startsAt >= now) result.upcoming += 1;
         if (meeting.startsAt.getTime() >= todayStart && meeting.startsAt.getTime() < tomorrow) result.today += 1;
         if (meeting.startsAt >= now && meeting.participants.some((participant) => participant.responseStatus === MeetingResponseStatus.INVITED || participant.responseStatus === MeetingResponseStatus.TENTATIVE)) result.pendingResponse += 1;
         return result;
     }, { upcoming: 0, today: 0, pendingResponse: 0 });
-}
-
-function utcStartOfDay(date: Date): Date {
-    return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
-}
-
-function addDays(date: Date, days: number): Date {
-    const result = new Date(date);
-    result.setUTCDate(result.getUTCDate() + days);
-    return result;
 }
