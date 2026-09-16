@@ -11,6 +11,7 @@ from app.api.generated.models import (
     ParsedDocument,
     VisibilityScope,
 )
+from app.core.errors import AIServiceError
 from app.embeddings.router import build_default_embedding_router
 from app.knowledge.ingestion import index_document
 from app.knowledge.retrieval import retrieve_chunks
@@ -329,7 +330,7 @@ async def test_index_rejects_document_without_indexable_text() -> None:
     request.parsed_document.blocks = [
         ParsedBlock(block_id="block-img", type="image", text=None, source_order=0)
     ]
-    with pytest.raises(ValueError, match="no indexable text"):
+    with pytest.raises(AIServiceError, match="no indexable text"):
         await index_document(request, store=store, embedding_router=router)
 
 

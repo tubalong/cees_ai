@@ -8,6 +8,7 @@ from app.api.generated.models import (
     KnowledgeIndexRequest,
     KnowledgeIndexResponse,
 )
+from app.core.errors import AIServiceError
 from app.embeddings.router import EmbeddingRouter
 from app.knowledge.node_builder import IndexContext, build_nodes
 from app.knowledge.parsed_models import assert_identity_matches
@@ -48,7 +49,14 @@ async def index_document(
     )
     nodes = build_nodes(document, context)
     if not nodes:
-        raise ValueError("document contains no indexable text blocks")
+        # 调用方输入问题：保持 400 语义，不走服务端错误 500 通道。
+        raise AIServiceError(
+            "INVALID_KNOWLEDGE_INDEX_REQUEST",
+            "document contains no indexable text blocks",
+            status_code=400,
+            retryable=False,
+            request_id=request.request_id,
+        )
 
     vectors = await embedding_router.embed_documents(
         request.embedding_profile, [node.text for node in nodes]
