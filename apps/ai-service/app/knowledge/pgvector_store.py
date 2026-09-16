@@ -18,6 +18,18 @@ from app.knowledge.stores import ScoredNode
 # PGVectorStore 会建表并启用 vector 扩展。
 VECTOR_TABLE_NAME = "knowledge_chunks"
 
+# HNSW 索引参数（3.1 节）：建表时一并声明，PGVectorStore 初始化时自动建索引
+# （CREATE INDEX ... USING hnsw）。m 控制每层连接数（召回/内存权衡），
+# ef_construction 控制建索引搜索宽度，ef_search 是查询时动态扩展候选集上限；
+# 距离函数用 cosine，与 embedding 的 L2 归一化匹配。存量表由
+# infra/database/manage-db.sh <env> create-vector-indexes 幂等补建。
+HNSW_KWARGS = {
+    "hnsw_m": 16,
+    "hnsw_ef_construction": 64,
+    "hnsw_ef_search": 64,
+    "hnsw_dist_method": "vector_cosine_ops",
+}
+
 
 class PGVectorStoreGateway:
     """LlamaIndex PGVectorStore 的薄适配，实现 VectorStoreGateway。
@@ -50,6 +62,9 @@ class PGVectorStoreGateway:
             table_name=table_name,
             embed_dim=embed_dim,
             use_jsonb=True,
+            # PGVectorStore 建索引时会破坏性 pop hnsw_kwargs 的键，按实例
+            # 传副本，避免共享模块级 dict 被首个实例消费后其余实例建不出索引。
+            hnsw_kwargs=dict(HNSW_KWARGS),
             create_engine_kwargs={"pool_pre_ping": True},
         )
 

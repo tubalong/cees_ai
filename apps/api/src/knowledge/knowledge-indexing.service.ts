@@ -181,6 +181,8 @@ export class KnowledgeIndexingService implements OnModuleInit, OnModuleDestroy {
                 mimeType: file.mimeType,
                 sizeBytes: file.sizeBytes,
                 objectKey: file.objectKey,
+                tenantId: document.tenantId,
+                userId: document.createdBy ?? 'system',
             });
             await this.markStatus(document.id, KnowledgeDocumentStatus.PARSED);
             await this.markStatus(document.id, KnowledgeDocumentStatus.INDEXING);

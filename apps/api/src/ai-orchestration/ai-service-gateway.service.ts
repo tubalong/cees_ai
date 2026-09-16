@@ -5,6 +5,7 @@ import {
   composeDocument as requestComposeDocument,
   createClient,
   deleteKnowledgeIndex as requestKnowledgeIndexDelete,
+  extractFile as requestFileExtraction,
   generateDocumentDocx as requestGenerateDocumentDocx,
   generateImage as requestImageGeneration,
   getReadiness,
@@ -25,6 +26,8 @@ import {
   type ComposeDocumentResponse,
   type ErrorResponse,
   type ExecutionMetadata,
+  type FileExtractionRequest,
+  type FileExtractionResponse,
   type ImageGenerateRequest,
   type ImageGenerateResponse,
   type ImageGenerationMetadata,
@@ -389,6 +392,18 @@ export class AiServiceGateway {
     if (result.error) throw this.toInvocationError(result.error, result.response?.status);
     if (!result.data) throw this.emptyResponseError();
     return Buffer.from(await result.data.arrayBuffer());
+  }
+
+  /**
+   * 调用 ai-service 文件提取路由：把文件字节（base64）交给本地确定性提取器，
+   * 返回纯文本 parts。提取不调用 LLM、不产生 Token 指标；知识库文本类解析
+   * （3.7 节格式分流）与对话附件注入共用该入口。
+   */
+  async extractFile(input: FileExtractionRequest): Promise<FileExtractionResponse> {
+    const result = await requestFileExtraction({ client: this.getClient(), body: input });
+    if (result.error) throw this.toInvocationError(result.error, result.response?.status);
+    if (!result.data) throw this.emptyResponseError();
+    return result.data;
   }
 
   /**
