@@ -194,7 +194,7 @@ def _retrieve_filters(
     语义与内存实现的 `_matches_scope` 一致：租户与 index_version 必须
     匹配；knowledge_base 必须在列表内；allowed_document_ids 提供时文档
     必须在其内；department/project 过滤只约束携带该属性的节点（IS NULL
-    视为通过），ACL 版本必须一致。过滤全部下推到 SQL WHERE。
+    视为通过）；ACL 版本仅在调用方提供时过滤。过滤全部下推到 SQL WHERE。
     """
     filters: list[MetadataFilters | MetadataFilter] = [
         MetadataFilter(key="tenant_id", value=tenant_id, operator=FilterOperator.EQ),
@@ -217,9 +217,10 @@ def _retrieve_filters(
         filters.append(_nullable_in_filter("department_id", scope.department_ids))
     if scope.project_ids is not None:
         filters.append(_nullable_in_filter("project_id", scope.project_ids))
-    filters.append(
-        MetadataFilter(key="acl_version", value=scope.acl_version, operator=FilterOperator.EQ)
-    )
+    if scope.acl_version is not None:
+        filters.append(
+            MetadataFilter(key="acl_version", value=scope.acl_version, operator=FilterOperator.EQ)
+        )
     return MetadataFilters(filters=filters)
 
 

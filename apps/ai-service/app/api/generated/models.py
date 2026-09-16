@@ -818,7 +818,10 @@ class KnowledgeRetrieveScope(BaseModel):
         description='Optional project allowlist computed by the caller. Only constrains nodes that carry a project_id; nodes without one pass through.',
         max_length=256,
     )
-    acl_version: constr(min_length=1, max_length=128)
+    acl_version: constr(min_length=1, max_length=128) | None = Field(
+        None,
+        description='Optional ACL snapshot identifier of the indexed nodes. When omitted, retrieval does not filter on ACL version. Callers that fold permissions in real time on every request may omit it until ACL versioning or retrieval caching is introduced.',
+    )
 
 
 class KnowledgeRetrieveRequest(BaseModel):

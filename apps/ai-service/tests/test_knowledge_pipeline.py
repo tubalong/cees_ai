@@ -82,7 +82,7 @@ def make_retrieve_request(
     allowed_document_ids: list[str] | None = None,
     department_ids: list[str] | None = None,
     project_ids: list[str] | None = None,
-    acl_version: str = "acl-1",
+    acl_version: str | None = None,
     index_version: str = "idx-v1",
     top_k: int = 8,
 ) -> KnowledgeRetrieveRequest:
@@ -244,6 +244,19 @@ async def test_stale_acl_version_never_served() -> None:
         embedding_router=router,
     )
     assert response.chunks == []
+
+
+async def test_retrieve_without_acl_version_serves_nodes() -> None:
+    # 调用方每次请求实时折叠 scope 时可省略 acl_version，检索不按 ACL 版本过滤。
+    store = InMemoryVectorStore()
+    router = build_default_embedding_router()
+    await index_document(make_index_request(), store=store, embedding_router=router)
+    response = await retrieve_chunks(
+        make_retrieve_request(query="项目延期"),
+        store=store,
+        embedding_router=router,
+    )
+    assert len(response.chunks) == 1
 
 
 async def test_retrieve_only_sees_declared_index_version() -> None:

@@ -679,7 +679,10 @@ export type KnowledgeRetrieveScope = {
      * Optional project allowlist computed by the caller. Only constrains nodes that carry a project_id; nodes without one pass through.
      */
     project_ids?: Array<string>;
-    acl_version: string;
+    /**
+     * Optional ACL snapshot identifier of the indexed nodes. When omitted, retrieval does not filter on ACL version. Callers that fold permissions in real time on every request may omit it until ACL versioning or retrieval caching is introduced.
+     */
+    acl_version?: string;
 };
 
 export type KnowledgeRetrieveRequest = {

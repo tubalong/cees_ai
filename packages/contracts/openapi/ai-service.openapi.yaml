@@ -2468,7 +2468,7 @@ components:
     KnowledgeRetrieveScope:
       type: object
       additionalProperties: false
-      required: [knowledge_base_ids, acl_version]
+      required: [knowledge_base_ids]
       properties:
         knowledge_base_ids:
           type: array
@@ -2514,6 +2514,11 @@ components:
           type: string
           minLength: 1
           maxLength: 128
+          description: >-
+            Optional ACL snapshot identifier of the indexed nodes. When
+            omitted, retrieval does not filter on ACL version. Callers that
+            fold permissions in real time on every request may omit it until
+            ACL versioning or retrieval caching is introduced.
     KnowledgeRetrieveRequest:
       type: object
       additionalProperties: false
