@@ -14,4 +14,4 @@ WHERE role.code = 'tenant_admin'
     'hr.profile.sensitive.read',
     'hr.profile.sensitive.manage'
   )
-ON CONFLICT (role_id, permission_id) DO NOTHING;
+ON CONFLICT (tenant_id, role_id, permission_id) DO NOTHING;
