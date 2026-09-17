@@ -390,7 +390,7 @@ describe('KnowledgeDocumentService.saveFromSource', () => {
         tenantId: TENANT_ID,
         userId: USER_ID,
         membershipId: MEMBERSHIP_ID,
-        permissions: ['knowledge_base.document.manage'],
+        permissions: ['knowledge_base.read'],
         requestId: 'request-id',
     };
 
@@ -558,7 +558,7 @@ describe('KnowledgeDocumentService.saveFromSource', () => {
             projectId: null,
         });
         const service = createService(prisma);
-        const readableActor = { ...actor, permissions: ['knowledge_base.document.manage', 'document.read'] };
+        const readableActor = { ...actor, permissions: ['knowledge_base.read', 'document.read'] };
 
         const result = await service.saveFromSource(readableActor, {
             knowledgeBaseId: KNOWLEDGE_BASE_ID,
@@ -739,7 +739,7 @@ describe('KnowledgeDocumentService.saveFromSource', () => {
             tenantId: TENANT_ID,
             userId: USER_ID,
             membershipId: MEMBERSHIP_ID,
-            permissions: ['knowledge_base.document.manage'],
+            permissions: ['knowledge_base.read'],
             requestId: 'request-id',
         };
 
@@ -782,7 +782,7 @@ describe('KnowledgeDocumentService.saveFromSource', () => {
             tenantId: TENANT_ID,
             userId: USER_ID,
             membershipId: MEMBERSHIP_ID,
-            permissions: ['knowledge_base.document.manage'],
+            permissions: ['knowledge_base.read'],
             requestId: 'request-id',
         };
 
@@ -828,7 +828,7 @@ function createService(prisma: Record<string, any>): KnowledgeDocumentService {
             membershipId: MEMBERSHIP_ID,
             requestId: 'request-id',
             roles: ['tenant_admin'],
-            permissions: ['knowledge_base.document.manage'],
+            permissions: ['knowledge_base.read'],
         }),
     } as unknown as TenantContext;
     const knowledgeService = new KnowledgeService(

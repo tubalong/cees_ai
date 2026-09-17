@@ -15,9 +15,9 @@ describe('SaveToKnowledgeTool', () => {
         definition = registry.get('save_to_knowledge');
     });
 
-    it('self-registers as a WRITE tool with the document.manage permission', () => {
+    it('self-registers as a WRITE tool with the knowledge_base.read permission', () => {
         expect(definition).toBeDefined();
-        expect(definition?.requiredPermissions).toEqual(['knowledge_base.document.manage']);
+        expect(definition?.requiredPermissions).toEqual(['knowledge_base.read']);
         expect(definition?.riskLevel).toEqual('WRITE');
         expect(definition?.parameters).toEqual(expect.objectContaining({
             type: 'object',
@@ -103,7 +103,7 @@ describe('SaveToKnowledgeTool', () => {
             toolCallId: 'tc-1',
             executionOwner: 'api:test',
             executionToken: 'execution-token-1',
-            permissions: ['knowledge_base.document.manage'],
+            permissions: ['knowledge_base.read'],
             knowledgeBaseEnabled: false,
         }, {
             sourceType: 'MESSAGE',
@@ -116,7 +116,7 @@ describe('SaveToKnowledgeTool', () => {
             tenantId: 't-1',
             userId: 'u-1',
             membershipId: 'm-1',
-            permissions: ['knowledge_base.document.manage'],
+            permissions: ['knowledge_base.read'],
             requestId: 'r-1',
             conversationId: 'c-1',
         }), {
@@ -156,7 +156,7 @@ describe('SaveToKnowledgeTool', () => {
             toolCallId: 'tc-1',
             executionOwner: 'api:test',
             executionToken: 'execution-token-1',
-            permissions: ['knowledge_base.document.manage'],
+            permissions: ['knowledge_base.read'],
             knowledgeBaseEnabled: false,
         }, {
             content: '林波是图巴隆公司的超级管理员。',

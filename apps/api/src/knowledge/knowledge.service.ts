@@ -89,7 +89,7 @@ export class KnowledgeService {
 
     async listKnowledgeBases(query: ListKnowledgeBasesQueryDto): Promise<KnowledgeBaseListResult> {
         const context = this.tenantContext.require();
-        const visibleIds = context.permissions.includes('knowledge_base.manage_all')
+        const visibleIds = this.canReadAllKnowledgeBases(context.permissions)
             ? undefined
             : query.permission
                 ? await this.listKnowledgeBaseIdsWithPermission(context.tenantId, context.userId, query.permission)
@@ -146,7 +146,7 @@ export class KnowledgeService {
         userId: string;
         permissions: string[];
     }): Promise<AssistantKnowledgeBaseCandidate[]> {
-        // manage_all 短路为租户全部未删除库，等效拥有最高权限。
+        // manage_all / read_all 短路为租户全部未删除库；manage_all 等效最高权限，read_all 只读。
         if (input.permissions.includes('knowledge_base.manage_all')) {
             const records = await this.prisma.knowledgeBase.findMany({
                 where: { tenantId: input.tenantId, deletedAt: null },
@@ -157,6 +157,18 @@ export class KnowledgeService {
             return Promise.all(records.map(async (record) => ({
                 ...(await this.toKnowledgeBaseResult(record)),
                 myPermission: 'MANAGER' as KnowledgeBaseMemberPermission,
+            })));
+        }
+        if (input.permissions.includes('knowledge_base.read_all')) {
+            const records = await this.prisma.knowledgeBase.findMany({
+                where: { tenantId: input.tenantId, deletedAt: null },
+                select: knowledgeBaseSelect,
+                orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+                take: 100,
+            });
+            return Promise.all(records.map(async (record) => ({
+                ...(await this.toKnowledgeBaseResult(record)),
+                myPermission: 'READER' as KnowledgeBaseMemberPermission,
             })));
         }
         const memberships = await this.prisma.knowledgeBaseMember.findMany({
@@ -483,6 +495,11 @@ export class KnowledgeService {
     }): Promise<KnowledgeBaseAccess> {
         const knowledgeBase = await this.requireKnowledgeBase(input.tenantId, input.knowledgeBaseId);
         if (input.permissions.includes('knowledge_base.manage_all')) return knowledgeBase;
+        // read_all 只读：仅放行 READER 等级需求，写操作仍按成员等级校验。
+        if (input.permissions.includes('knowledge_base.read_all')
+            && permissionRank[input.minimumPermission] <= permissionRank.READER) {
+            return knowledgeBase;
+        }
         const member = await this.prisma.knowledgeBaseMember.findUnique({
             where: {
                 tenantId_knowledgeBaseId_userId: {
@@ -570,7 +587,7 @@ export class KnowledgeService {
         requestId: string;
         query: string;
     }): Promise<AssistantKnowledgeSearchResult> {
-        const knowledgeBaseIds = input.permissions.includes('knowledge_base.manage_all')
+        const knowledgeBaseIds = this.canReadAllKnowledgeBases(input.permissions)
             ? await this.listTenantKnowledgeBaseIds(input.tenantId)
             : await this.listVisibleKnowledgeBaseIds(input.tenantId, input.userId);
         if (knowledgeBaseIds.length === 0) {
@@ -658,13 +675,19 @@ export class KnowledgeService {
         };
     }
 
-    /** 租户内未删除的全部知识库 ID；仅供 manage_all 权限短路使用。 */
+    /** 租户内未删除的全部知识库 ID；仅供 manage_all / read_all 权限短路使用。 */
     private async listTenantKnowledgeBaseIds(tenantId: string): Promise<string[]> {
         const records = await this.prisma.knowledgeBase.findMany({
             where: { tenantId, deletedAt: null },
             select: { id: true },
         });
         return records.map((record) => record.id);
+    }
+
+    /** 拥有 manage_all（隐含读）或 read_all 即可读租户全部知识库。 */
+    private canReadAllKnowledgeBases(permissions: string[]): boolean {
+        return permissions.includes('knowledge_base.manage_all')
+            || permissions.includes('knowledge_base.read_all');
     }
 
     /** 按 document_id 回查文档标题；缺失的文档回退默认标题。 */
@@ -838,6 +861,11 @@ export class KnowledgeService {
     ): Promise<void> {
         const context = this.tenantContext.require();
         if (context.permissions.includes('knowledge_base.manage_all')) return;
+        // read_all 只读：仅放行 READER 等级需求，写操作仍按成员等级校验。
+        if (context.permissions.includes('knowledge_base.read_all')
+            && permissionRank[minimumPermission] <= permissionRank.READER) {
+            return;
+        }
         const member = await this.prisma.knowledgeBaseMember.findUnique({
             where: {
                 tenantId_knowledgeBaseId_userId: {

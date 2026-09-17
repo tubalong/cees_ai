@@ -88,6 +88,7 @@ const navPermissionByPath: Record<string, string> = {
     '/projects': 'project.read',
     '/meetings': 'meeting.read',
     '/reports': 'work_report.read',
+    '/knowledge': 'knowledge_base.read',
     '/notifications': 'notification.read',
 };
 
@@ -379,7 +380,7 @@ function SaveToKnowledgeModal({ target, onClose, onSaved }: {
 function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element {
     const { t } = useI18n();
     const { message } = AntdApp.useApp();
-    const canSaveToKnowledge = permissions.includes('knowledge_base.document.manage');
+    const canSaveToKnowledge = permissions.includes('knowledge_base.read');
     const [input, setInput] = useState('');
     const [selectedPrompt, setSelectedPrompt] = useState<string>();
     const [mode, setMode] = useState<'standard' | 'ultra'>('standard');

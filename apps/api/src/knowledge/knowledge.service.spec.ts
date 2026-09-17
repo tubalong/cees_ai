@@ -62,6 +62,20 @@ describe('KnowledgeService', () => {
         }));
     });
 
+    it('allows read_all members to list all tenant knowledge bases', async () => {
+        const prisma = createPrismaMock();
+        prisma.knowledgeBase.findMany.mockResolvedValue([knowledgeBaseRecord()]);
+        prisma.knowledgeBaseMember.count.mockResolvedValue(1);
+        const service = createService(prisma, ['knowledge_base.read_all']);
+
+        await service.listKnowledgeBases({ limit: 20 });
+
+        expect(prisma.knowledgeBaseMember.findMany).not.toHaveBeenCalled();
+        expect(prisma.knowledgeBase.findMany).toHaveBeenCalledWith(expect.objectContaining({
+            where: expect.objectContaining({ tenantId: TENANT_ID, deletedAt: null, id: undefined }),
+        }));
+    });
+
     it('filters the list by a minimum member permission', async () => {
         const prisma = createPrismaMock();
         prisma.knowledgeBaseMember.findMany.mockResolvedValue([
@@ -145,12 +159,28 @@ describe('KnowledgeService', () => {
         expect(result).toEqual([expect.objectContaining({ id: KNOWLEDGE_BASE_ID, myPermission: 'MANAGER' })]);
     });
 
+    it('labels every candidate READER for the assistant when read_all shortcuts', async () => {
+        const prisma = createPrismaMock();
+        prisma.knowledgeBase.findMany.mockResolvedValue([knowledgeBaseRecord()]);
+        prisma.knowledgeBaseMember.count.mockResolvedValue(1);
+        const service = createService(prisma, ['knowledge_base.read_all']);
+
+        const result = await service.listKnowledgeBasesForAssistant({
+            tenantId: TENANT_ID,
+            userId: USER_ID,
+            permissions: ['knowledge_base.read_all'],
+        });
+
+        expect(prisma.knowledgeBaseMember.findMany).not.toHaveBeenCalled();
+        expect(result).toEqual([expect.objectContaining({ id: KNOWLEDGE_BASE_ID, myPermission: 'READER' })]);
+    });
+
     it('rejects an update with a stale version', async () => {
         const prisma = createPrismaMock();
         prisma.knowledgeBase.findFirst.mockResolvedValue(knowledgeBaseRecord());
         prisma.knowledgeBaseMember.findUnique.mockResolvedValue({ permission: 'MANAGER' });
         prisma.knowledgeBase.updateMany.mockResolvedValue({ count: 0 });
-        const service = createService(prisma, ['knowledge_base.update']);
+        const service = createService(prisma, ['knowledge_base.read']);
 
         await expect(service.updateKnowledgeBase(KNOWLEDGE_BASE_ID, { name: '新名称', version: 99 }))
             .rejects.toMatchObject({ response: expect.objectContaining({ code: 'RESOURCE_VERSION_CONFLICT' }) });
@@ -161,7 +191,7 @@ describe('KnowledgeService', () => {
         prisma.knowledgeBase.findFirst.mockResolvedValue(knowledgeBaseRecord());
         prisma.knowledgeBaseMember.findUnique.mockResolvedValue({ permission: 'MANAGER' });
         prisma.tenantMembership.findFirst.mockResolvedValue(null);
-        const service = createService(prisma, ['knowledge_base.member.manage']);
+        const service = createService(prisma, ['knowledge_base.read']);
 
         await expect(service.addMember(KNOWLEDGE_BASE_ID, {
             membershipId: OTHER_MEMBERSHIP_ID,
@@ -178,7 +208,7 @@ describe('KnowledgeService', () => {
         prisma.knowledgeBaseMember.create.mockRejectedValue(
             new Prisma.PrismaClientKnownRequestError('duplicate', { code: 'P2002', clientVersion: '6.19.3' }),
         );
-        const service = createService(prisma, ['knowledge_base.member.manage']);
+        const service = createService(prisma, ['knowledge_base.read']);
 
         await expect(service.addMember(KNOWLEDGE_BASE_ID, {
             membershipId: OTHER_MEMBERSHIP_ID,
@@ -193,7 +223,7 @@ describe('KnowledgeService', () => {
             .mockResolvedValueOnce({ permission: 'MANAGER' })
             .mockResolvedValueOnce(knowledgeBaseMemberRecord());
         prisma.tenantMembership.findFirst.mockResolvedValue(membershipRecord());
-        const service = createService(prisma, ['knowledge_base.member.manage']);
+        const service = createService(prisma, ['knowledge_base.read']);
 
         await expect(service.updateMember(KNOWLEDGE_BASE_ID, CURRENT_MEMBERSHIP_ID, { permission: 'READER' }))
             .rejects.toMatchObject({ response: expect.objectContaining({ code: 'KNOWLEDGE_BASE_OWNER_REQUIRED' }) });
@@ -208,7 +238,7 @@ describe('KnowledgeService', () => {
         }));
         prisma.tenantMembership.findFirst.mockResolvedValue(membershipRecord({ userId: OTHER_USER_ID }));
         prisma.knowledgeBaseMember.count.mockResolvedValue(1);
-        const service = createService(prisma, ['knowledge_base.member.manage']);
+        const service = createService(prisma, ['knowledge_base.read']);
 
         await expect(service.removeMember(KNOWLEDGE_BASE_ID, OTHER_MEMBERSHIP_ID))
             .rejects.toMatchObject({ response: expect.objectContaining({ code: 'KNOWLEDGE_BASE_LAST_MANAGER' }) });
@@ -223,7 +253,7 @@ describe('KnowledgeService', () => {
         const deleteIndexesSpy = jest.fn().mockResolvedValue(undefined);
         const service = createService(
             prisma,
-            ['knowledge_base.delete'],
+            ['knowledge_base.read'],
             undefined,
             { deleteKnowledgeBaseIndexes: deleteIndexesSpy },
         );

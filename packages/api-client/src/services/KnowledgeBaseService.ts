@@ -249,7 +249,7 @@ export class KnowledgeBaseService {
             errors: {
                 400: `分页游标无效`,
                 401: `登录状态无效或缺少有效租户成员身份`,
-                403: `缺少 knowledge_base.member.manage 权限或知识库 MANAGER 权限`,
+                403: `缺少 knowledge_base.read 权限或知识库 MANAGER 权限`,
                 404: `知识库不存在或当前成员无权访问`,
             },
         });
@@ -281,7 +281,7 @@ export class KnowledgeBaseService {
             errors: {
                 400: `请求字段校验失败`,
                 401: `登录状态无效或缺少有效租户成员身份`,
-                403: `缺少 knowledge_base.member.manage 权限或知识库 MANAGER 权限`,
+                403: `缺少 knowledge_base.read 权限或知识库 MANAGER 权限`,
                 404: `知识库或目标成员不存在`,
                 409: `目标成员已经加入知识库`,
             },
@@ -362,7 +362,7 @@ export class KnowledgeBaseService {
             errors: {
                 400: `请求字段校验失败或可见范围与部门、项目字段不一致`,
                 401: `登录状态无效或缺少有效租户成员身份`,
-                403: `缺少 knowledge_base.document.manage 权限或知识库 EDITOR 权限`,
+                403: `缺少 knowledge_base.read 权限或知识库 EDITOR 权限`,
                 404: `知识库不存在或文件对象不属于当前租户`,
                 409: `文件对象已被其他文档使用或已删除`,
             },
@@ -401,7 +401,7 @@ export class KnowledgeBaseService {
             errors: {
                 400: `请求字段校验失败或可见范围与部门、项目字段不一致`,
                 401: `登录状态无效或缺少有效租户成员身份`,
-                403: `缺少 knowledge_base.document.manage 权限或知识库 EDITOR 权限`,
+                403: `缺少 knowledge_base.read 权限或知识库 EDITOR 权限`,
                 404: `知识库、文档不存在或文件对象不属于当前租户`,
                 409: `文件对象已被其他文档使用或已删除`,
             },
@@ -435,7 +435,7 @@ export class KnowledgeBaseService {
             },
             errors: {
                 401: `登录状态无效或缺少有效租户成员身份`,
-                403: `缺少 knowledge_base.document.manage 权限或知识库 EDITOR 权限`,
+                403: `缺少 knowledge_base.read 权限或知识库 EDITOR 权限`,
                 404: `知识库或文档不存在`,
                 409: `文档当前状态不允许重试`,
             },
@@ -474,7 +474,7 @@ export class KnowledgeBaseService {
             errors: {
                 400: `请求字段校验失败`,
                 401: `登录状态无效或缺少有效租户成员身份`,
-                403: `缺少 knowledge_base.member.manage 权限或知识库 MANAGER 权限`,
+                403: `缺少 knowledge_base.read 权限或知识库 MANAGER 权限`,
                 404: `知识库或成员不存在`,
                 409: `不允许降低知识库创建者权限`,
             },
@@ -508,7 +508,7 @@ export class KnowledgeBaseService {
             },
             errors: {
                 401: `登录状态无效或缺少有效租户成员身份`,
-                403: `缺少 knowledge_base.member.manage 权限或知识库 MANAGER 权限`,
+                403: `缺少 knowledge_base.read 权限或知识库 MANAGER 权限`,
                 404: `知识库或成员不存在`,
                 409: `不允许移除创建者或最后一名 MANAGER`,
             },

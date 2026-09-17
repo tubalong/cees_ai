@@ -4646,7 +4646,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
         '403':
-          description: 缺少 knowledge_base.member.manage 权限或知识库 MANAGER 权限
+          description: 缺少 knowledge_base.read 权限或知识库 MANAGER 权限
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
@@ -4685,7 +4685,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
         '403':
-          description: 缺少 knowledge_base.member.manage 权限或知识库 MANAGER 权限
+          description: 缺少 knowledge_base.read 权限或知识库 MANAGER 权限
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
@@ -4786,7 +4786,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
         '403':
-          description: 缺少 knowledge_base.document.manage 权限或知识库 EDITOR 权限
+          description: 缺少 knowledge_base.read 权限或知识库 EDITOR 权限
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
@@ -4842,7 +4842,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
         '403':
-          description: 缺少 knowledge_base.document.manage 权限或知识库 EDITOR 权限
+          description: 缺少 knowledge_base.read 权限或知识库 EDITOR 权限
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
@@ -4888,7 +4888,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
         '403':
-          description: 缺少 knowledge_base.document.manage 权限或知识库 EDITOR 权限
+          description: 缺少 knowledge_base.read 权限或知识库 EDITOR 权限
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
@@ -5162,7 +5162,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
         '403':
-          description: 缺少 knowledge_base.member.manage 权限或知识库 MANAGER 权限
+          description: 缺少 knowledge_base.read 权限或知识库 MANAGER 权限
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
@@ -5193,7 +5193,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
         '403':
-          description: 缺少 knowledge_base.member.manage 权限或知识库 MANAGER 权限
+          description: 缺少 knowledge_base.read 权限或知识库 MANAGER 权限
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
