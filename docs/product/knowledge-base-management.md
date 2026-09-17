@@ -1,6 +1,6 @@
 # 知识库管理
 
-> 状态：第一至四阶段已落地（知识库与成员管理、文档上传与处理状态机、公开知识库查询、对话数据转知识库）
+> 状态：第一至五阶段已落地（知识库与成员管理、文档上传与处理状态机、公开知识库查询、对话数据转知识库、权限收敛与归属锚点+知识管理页面）
 > 最后同步：2026-09-17
 > 公开契约版本：`0.27.0`
 
@@ -49,8 +49,9 @@
 
 所有查询都自动使用当前 JWT 中的 `tenantId`，客户端不能提交租户 ID 来改变数据范围：
 
-- 普通成员只能查询自己在 `knowledge_base_members` 中加入的知识库；
-- 拥有 `knowledge_base.manage_all` 的成员可以查询当前租户全部未删除知识库，并不受成员关系限制；
+- 普通成员只能查询自己在 `knowledge_base_members` 中加入的知识库，以及归属锚点覆盖自己所在人群的知识库（挂部门的库对部门及全部子部门成员可见，挂项目的库对项目成员可见，`TENANT` 全员可见，`PRIVATE` 仅成员可见）；
+- 锚点人群是动态计算的虚拟 `READER`，不物化成员行；锚点人群之外可通过成员表加入（跨部门/跨项目协作），锚点人群之内可通过成员表升级为 `EDITOR`/`MANAGER`；
+- 拥有 `knowledge_base.manage_all` 的成员可以查询并管理当前租户全部未删除知识库，不受成员关系限制；`knowledge_base.read_all` 只读查询全部；
 - 详情、修改、删除和成员管理都会再次校验知识库属于当前租户；
 - 不存在、已删除或无权访问的知识库统一返回 `KNOWLEDGE_BASE_NOT_FOUND`，避免泄露跨租户数据。
 
@@ -75,26 +76,32 @@
 | `GET /knowledge-bases` | 分页查询当前成员可访问的知识库 | `knowledge_base.read` |
 | `POST /knowledge-bases` | 创建知识库，创建者自动成为 MANAGER | `knowledge_base.create` |
 | `GET /knowledge-bases/{knowledgeBaseId}` | 查询知识库详情 | `knowledge_base.read` + 知识库可见范围 |
-| `PATCH /knowledge-bases/{knowledgeBaseId}` | 修改名称或说明 | `knowledge_base.update` + MANAGER |
-| `DELETE /knowledge-bases/{knowledgeBaseId}?version=1` | 软删除知识库 | `knowledge_base.delete` + MANAGER |
-| `GET /knowledge-bases/{knowledgeBaseId}/members` | 查询知识库成员 | `knowledge_base.member.manage` + MANAGER |
-| `POST /knowledge-bases/{knowledgeBaseId}/members` | 添加知识库成员 | `knowledge_base.member.manage` + MANAGER |
-| `PATCH /knowledge-bases/{knowledgeBaseId}/members/{membershipId}` | 修改成员权限 | `knowledge_base.member.manage` + MANAGER |
-| `DELETE /knowledge-bases/{knowledgeBaseId}/members/{membershipId}` | 移除知识库成员 | `knowledge_base.member.manage` + MANAGER |
+| `PATCH /knowledge-bases/{knowledgeBaseId}` | 修改名称、说明或归属锚点 | `knowledge_base.read` + MANAGER |
+| `DELETE /knowledge-bases/{knowledgeBaseId}?version=1` | 软删除知识库 | `knowledge_base.read` + MANAGER |
+| `GET /knowledge-bases/{knowledgeBaseId}/members` | 查询知识库成员 | `knowledge_base.read` + MANAGER |
+| `POST /knowledge-bases/{knowledgeBaseId}/members` | 添加知识库成员 | `knowledge_base.read` + MANAGER |
+| `PATCH /knowledge-bases/{knowledgeBaseId}/members/{membershipId}` | 修改成员权限 | `knowledge_base.read` + MANAGER |
+| `DELETE /knowledge-bases/{knowledgeBaseId}/members/{membershipId}` | 移除知识库成员 | `knowledge_base.read` + MANAGER |
 | `GET /knowledge-bases/{knowledgeBaseId}/documents` | 分页查询知识库文档与处理状态 | `knowledge_base.read` + 知识库可见范围 |
-| `POST /knowledge-bases/{knowledgeBaseId}/documents` | 关联文件对象或转存来源（附件/AI 生成文档/对话消息）创建文档，进入处理队列 | `knowledge_base.document.manage` + EDITOR |
-| `POST /knowledge-bases/{knowledgeBaseId}/documents/{documentId}/versions` | 上传新版本，重新进入处理队列 | `knowledge_base.document.manage` + EDITOR |
-| `POST /knowledge-bases/{knowledgeBaseId}/documents/{documentId}/retry` | 重试处理失败的文档 | `knowledge_base.document.manage` + EDITOR |
+| `POST /knowledge-bases/{knowledgeBaseId}/documents` | 关联文件对象或转存来源（附件/AI 生成文档/对话消息）创建文档，进入处理队列 | `knowledge_base.read` + EDITOR |
+| `POST /knowledge-bases/{knowledgeBaseId}/documents/{documentId}/versions` | 上传新版本，重新进入处理队列 | `knowledge_base.read` + EDITOR |
+| `POST /knowledge-bases/{knowledgeBaseId}/documents/{documentId}/retry` | 重试处理失败的文档 | `knowledge_base.read` + EDITOR |
 | `POST /knowledge-bases/{knowledgeBaseId}/query` | 按知识库内容回答问题，返回带引用的答案 | `knowledge_base.query` + 知识库可见范围 |
+
+权限码（租户级开关）收敛为五码：`knowledge_base.create`（创建）、`knowledge_base.read`（查看自己可访问的知识库，所有写操作的基础门槛）、`knowledge_base.query`（知识库问答的 AI 额度）、`knowledge_base.read_all`（只读查看当前租户全部知识库）与 `knowledge_base.manage_all`（读写管理当前租户全部知识库）。写操作的深度由库内成员等级校验（对象级）：编辑资料/成员管理要求 `MANAGER`，文档写入要求 `EDITOR`。
 
 ### 4.1 创建示例
 
 ```json
 {
   "name": "产品知识库",
-  "description": "产品说明、研发规范和支持资料"
+  "description": "产品说明、研发规范和支持资料",
+  "visibilityScope": "DEPARTMENT",
+  "departmentId": "70000000-0000-0000-0000-000000000001"
 }
 ```
+
+`visibilityScope` 可选，默认 `PRIVATE`（仅成员可见）；`DEPARTMENT` 必填 `departmentId`、`PROJECT` 必填 `projectId`，两者互斥，部门/项目必须属于当前租户。
 
 ### 4.2 修改示例
 
@@ -120,7 +127,8 @@
 
 | HTTP | code | 含义 |
 | --- | --- | --- |
-| `400` | `KNOWLEDGE_BASE_UPDATE_EMPTY` | 修改请求没有提供名称或说明 |
+| `400` | `KNOWLEDGE_BASE_UPDATE_EMPTY` | 修改请求没有提供名称、说明或归属字段 |
+| `400` | `KNOWLEDGE_BASE_SCOPE_INVALID` | 归属无效：范围缺少部门/项目，或部门/项目不属于当前租户 |
 | `400` | `PAGINATION_CURSOR_INVALID` | 游标不属于当前租户或当前可见范围 |
 | `404` | `KNOWLEDGE_BASE_NOT_FOUND` | 知识库不存在、已删除或当前成员无权访问 |
 | `404` | `KNOWLEDGE_BASE_MEMBER_NOT_FOUND` | 目标成员不存在、非当前租户成员或已失效 |
@@ -180,5 +188,5 @@ KnowledgeBase
 1. 文档删除、配额、病毒扫描与后台任务监控；
 2. 检索分数阈值拒答（原计划随块 6 落地，尚未实现）；
 3. 助手人设中的知识库功能告知与交流层边界（架构文档 knowledge-rag.md 3.9，块 7d）；
-4. 知识库归属锚点管理与自动授权：挂项目/挂部门/公司级分类，锚点人群自动获得 READER（权限边界见架构文档 knowledge-rag.md 3.6，块 8）。
+4. 锚点失效提醒：挂接的部门/项目被删除后管理界面提示重新挂接（悬挂数据保留，自动授权自然失效）。
 
