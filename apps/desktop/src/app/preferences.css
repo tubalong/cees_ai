@@ -84,10 +84,8 @@ body {
 :root[data-theme='dark'] .security-panel dl,
 :root[data-theme='dark'] .role-summary-grid>div,
 :root[data-theme='dark'] .application-detail dl,
-:root[data-theme='dark'] .knowledge-detail dl,
 :root[data-theme='dark'] .application-example,
 :root[data-theme='dark'] .member-table-head,
-:root[data-theme='dark'] .knowledge-table-head,
 :root[data-theme='dark'] .platform-table-head {
     border-color: var(--app-border);
     background: var(--app-surface-soft);
@@ -103,7 +101,6 @@ body {
 :root[data-theme='dark'] .application-card,
 :root[data-theme='dark'] .shortcut-item,
 :root[data-theme='dark'] .member-table button,
-:root[data-theme='dark'] .knowledge-row,
 :root[data-theme='dark'] .platform-tenant-row,
 :root[data-theme='dark'] .role-list>button {
     color: var(--app-text);
@@ -124,8 +121,6 @@ body {
 :root[data-theme='dark'] .nav-item:hover,
 :root[data-theme='dark'] .member-table button:hover,
 :root[data-theme='dark'] .member-table button.is-selected,
-:root[data-theme='dark'] .knowledge-row:hover,
-:root[data-theme='dark'] .knowledge-row.is-selected,
 :root[data-theme='dark'] .role-list>button:hover,
 :root[data-theme='dark'] .role-list>button.is-active {
     background: #252642;

@@ -4,7 +4,7 @@ import {
     HomeOutlined, LogoutOutlined, MenuFoldOutlined, MenuUnfoldOutlined, MessageOutlined, MoreOutlined,
     PartitionOutlined, PlusOutlined, ProjectOutlined, SafetyCertificateOutlined, SearchOutlined, SettingOutlined,
     CalendarOutlined, NotificationOutlined, ProfileOutlined,
-    StarOutlined, TeamOutlined, UserOutlined,
+    TeamOutlined, UserOutlined,
 } from '@ant-design/icons';
 import { App as AntdApp, Avatar, Badge, Button, Empty, Image as AntImage, Input, Modal, Select, Spin, Tag, Tooltip, Dropdown } from 'antd';
 import { useQuery } from '@tanstack/react-query';
@@ -34,6 +34,7 @@ import AssignmentPolicyManagement from '../features/assignment/AssignmentPolicyM
 import HrManagement from '../features/hr/HrManagement';
 import FinanceManagement from '../features/finance/FinanceManagement';
 import LegalContractManagement from '../features/legal/LegalContractManagement';
+import KnowledgeManagement from '../features/knowledge/KnowledgeManagement';
 import { useDateFormatter, useI18n } from '../core/i18n';
 
 interface WebviewElement extends HTMLWebViewElement {
@@ -640,24 +641,6 @@ function ApplicationsPage(): JSX.Element {
     </div>;
 }
 
-function KnowledgePage({ documents, loading }: { documents: ManagedDocumentSummary[]; loading: boolean }): JSX.Element {
-    const { t } = useI18n();
-    const formatDate = useDateFormatter();
-    const [search, setSearch] = useState('');
-    const filteredDocuments = documents.filter((document) => document.title.toLowerCase().includes(search.toLowerCase()));
-    const [selectedId, setSelectedId] = useState<string>();
-    const selected = documents.find((document) => document.id === selectedId) ?? documents[0];
-
-    return <div className="workspace-page knowledge-page">
-        <PageHeader title={t('知识管理')} description={t('沉淀、组织并安全共享企业知识')} actions={<Button type="primary" icon={<PlusOutlined />}>{t('新建文档')}</Button>} />
-        <div className="knowledge-layout">
-            <aside className="knowledge-folders surface-panel"><h3>{t('受控文档')}</h3><button className="is-active" type="button"><BookOutlined />{t('全部文档')}<span>{documents.length}</span></button><button type="button"><FolderOutlined />{t('租户可见')}<span>{documents.filter((document) => document.visibility === 'TENANT').length}</span></button><button type="button"><FolderOutlined />{t('我的私有')}<span>{documents.filter((document) => document.visibility === 'PRIVATE').length}</span></button></aside>
-            <section className="knowledge-list surface-panel"><div className="knowledge-toolbar"><Input value={search} onChange={(event) => setSearch(event.target.value)} prefix={<SearchOutlined />} placeholder={t('搜索受控文档')} /><Button icon={<StarOutlined />}>{t('收藏')}</Button></div><div className="knowledge-table-head"><span>{t('文档名称')}</span><span>{t('可见性')}</span><span>{t('更新时间')}</span><span>{t('版本')}</span></div>{loading ? <div className="data-loading"><Spin /></div> : filteredDocuments.length ? filteredDocuments.map((document) => <button className={`knowledge-row ${selected?.id === document.id ? 'is-selected' : ''}`} type="button" key={document.id} onClick={() => setSelectedId(document.id)}><span><i><FileTextOutlined /></i><b>{document.title}</b><small>{t('受控文档')}</small></span><span>{document.visibility === 'TENANT' ? t('租户可见') : t('私有')}</span><span>{formatDate(document.updatedAt)}</span><span><Tag>v{document.version}</Tag></span></button>) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('当前权限范围内暂无文档')} />}</section>
-            <aside className="knowledge-detail surface-panel">{selected ? <><i className="knowledge-file-icon"><FileTextOutlined /></i><h2>{selected.title}</h2><Tag>{selected.visibility === 'TENANT' ? t('租户可见') : t('私有')}</Tag><p>{t('该受控文档由 NestJS 统一执行权限、资源范围、版本控制与审计。')}</p><dl><div><dt>{t('最近更新')}</dt><dd>{formatDate(selected.updatedAt)}</dd></div><div><dt>{t('当前版本')}</dt><dd>v{selected.version}</dd></div><div><dt>{t('有效权限')}</dt><dd>{selected.currentPermissions?.join('、') || t('读取')}</dd></div></dl><Button type="primary" block>{t('打开文档')}</Button></> : <Empty description={t('请选择文档')} />}</aside>
-        </div>
-    </div>;
-}
-
 function CurrentPage({ authContext, members, documents, membersLoading, documentsLoading, onSessionExpired, onProfileUpdated }: { authContext: MeResult; members: TenantMember[]; documents: ManagedDocumentSummary[]; membersLoading: boolean; documentsLoading: boolean; onSessionExpired: () => void; onProfileUpdated: (displayName: string) => void }): JSX.Element {
     const navigate = useNavigate();
     const hasPermission = (code: string): boolean => authContext.permissions.includes(code);
@@ -680,7 +663,7 @@ function CurrentPage({ authContext, members, documents, membersLoading, document
     if (location.pathname === '/legal') return <LegalContractManagement authContext={authContext} onSessionExpired={onSessionExpired} />;
     if (location.pathname === '/roles') return <RoleManagement authContext={authContext} onSessionExpired={onSessionExpired} />;
     if (location.pathname === '/dingtalk') return <DingTalkOrganizationPage authContext={authContext} onSessionExpired={onSessionExpired} />;
-    if (location.pathname === '/knowledge') return <KnowledgePage documents={documents} loading={documentsLoading} />;
+    if (location.pathname === '/knowledge') return <KnowledgeManagement authContext={authContext} onSessionExpired={onSessionExpired} />;
     if (location.pathname === '/profile') return <ProfileSettings tenantName={authContext.tenant.name} onProfileUpdated={onProfileUpdated} onSessionExpired={onSessionExpired} />;
     if (location.pathname === '/notifications') return <NotificationCenter authContext={authContext} onSessionExpired={onSessionExpired} />;
     return <HomePage
