@@ -1,9 +1,9 @@
 # 知识库 RAG（MinerU + LlamaIndex）
 
-> 状态：分块实施中。块 1（本文档与内部契约 `index`/`retrieve`）、块 2（ai-service 内存闭环 + HTTP 路由）、块 3（NestJS 文档状态机与上传触发索引）、块 4（真实 pgvector Gateway + `index/delete`）、块 5（公开 Query API + `answer` 契约与引用校验 + 索引删除 NestJS 接线）、块 7a（解析器格式分流 + pgvector HNSW 索引）、块 7b（Assistant RAG 工具接入：`knowledge_search` 工具 + 对话级知识库开关 + 权限折叠检索）已落地，其余按第 8 节分块计划推进。
-> 最后同步：2026-09-16
+> 状态：分块实施中。块 1（本文档与内部契约 `index`/`retrieve`）、块 2（ai-service 内存闭环 + HTTP 路由）、块 3（NestJS 文档状态机与上传触发索引）、块 4（真实 pgvector Gateway + `index/delete`）、块 5（公开 Query API + `answer` 契约与引用校验 + 索引删除 NestJS 接线）、块 6（MinerU 真机联调验收）、块 7a（解析器格式分流 + pgvector HNSW 索引）、块 7b（Assistant RAG 工具接入：`knowledge_search` 工具 + 对话级知识库开关 + 权限折叠检索）、块 7c（对话数据转知识库：双层入口 + 助手工具）、块 8（知识库归属锚点管理与自动授权 + 权限码收敛 + 知识管理页面）已落地；块 7d（助手人设功能告知）部分落地，按第 8 节分块计划推进。
+> 最后同步：2026-09-17
 > 内部契约版本：`0.5.0`
-> 公开契约版本：`0.25.0`（公开知识库查询 API）
+> 公开契约版本：`0.28.0`（公开知识库管理/查询 API）
 
 ## 1. 目标与边界
 
@@ -76,11 +76,8 @@ NestJS API   = 业务事实、权限、状态与审计层（apps/api）
 
 缺失：
 
-- 知识库归属锚点管理 API 与自动授权（3.6 节权限边界已定，块 8 实现）；当前锚点字段只存在于数据库，公开契约与 API 均不暴露
 - MinerU 真机联调已在测试环境（192.168.5.29）完成端到端验收（块 6）；生产环境以 Docker 容器方式部署 MinerU 并换用大规模 GPU 硬件
-- Assistant RAG 工具已接入（块 7b 落地，见第 7 节）：desktop composer 的"知识库"勾选结构化传参 `knowledgeBaseEnabled`，后端据此暴露/放行 `knowledge_search` 工具
-- 对话数据转知识库未实现（块 7）
-- 助手人设未包含知识库功能告知与交流层边界（3.9 节，块 7d）
+- 助手人设未包含知识库功能告知话术与诱导提问对抗用例（3.9 节，块 7d 剩余部分；语言约束与内部标识脱敏已提前落地）
 
 ## 3. 关键决策
 
@@ -151,27 +148,27 @@ ai-service 不自行推断权限。NestJS 计算可信 scope 后随检索请求�
 
 ### 3.6 知识库归属与权限颗粒
 
-**归属锚点单一**：一个知识库只属于一个租户，`tenantId` 是企业隔离底线，不做"多租户字段存储"；租户内按锚点分类——挂项目为项目知识库（一个项目一个知识库，最常见形态）、挂部门为部门知识库、不挂锚点为公司级知识库。跨部门协作不靠锚点，靠成员授权（见下）。
+**归属锚点单一**：一个知识库只属于一个租户，`tenantId` 是企业隔离底线，不做"多租户字段存储"；租户内按锚点分类——挂项目为项目知识库（一个项目一个知识库，最常见形态）、挂部门为部门知识库、`TENANT` 全员可见、`PRIVATE` 仅成员可见（默认）。跨部门协作不靠锚点，靠成员授权（见下）。
 
 **锚点的两层含义**：
 
 1. 分类与展示：锚点决定知识库的归属类型（项目/部门/公司级），前端据此展示归属标签；
-2. 默认访问人群（自动授权）：锚点定义"谁天然是这个知识库的 READER"——项目知识库的项目成员、部门知识库的部门及全部子部门成员（组织树递归，与 `DataScope.DEPARTMENT_TREE` 同口径）、公司级知识库无自动授权人群。
+2. 默认访问人群（自动授权）：锚点定义"谁天然是这个知识库的 READER"——项目知识库的项目成员、部门知识库的部门及全部子部门成员（组织树递归，与 `DataScope.DEPARTMENT_TREE` 同口径）、`TENANT` 库全员 READER、`PRIVATE` 库无自动授权人群。
 
-**锚点自动授权的权限边界**（实现锚点管理块时生效，当前暂缓）：
+**锚点自动授权的权限边界**（块 8 已落地）：
 
 - 自动授权是**动态计算的虚拟 READER**，不物化 `KnowledgeBaseMember` 行；访问判定 = 成员表显式授权 ∪ 锚点自动授权，自动授权恒为 `READER` 级、不升级为 `EDITOR`/`MANAGER`；
 - 显式成员授权独立于锚点：锚点人群之外可通过成员表加入（跨部门/跨项目协作），锚点人群之内可通过成员表升级为 `EDITOR`/`MANAGER`；成员退出项目/部门后，其显式授权**不自动删除**（显式授权显式撤销）；
 - RBAC 权限码仍是门槛：`knowledge_base.*` 权限由角色授予，锚点只解决资源归属判定（谁能读这个知识库），不替代权限码（能做什么）；
 - 锚点人群变化即时生效（虚拟计算，无同步任务），项目/部门成员增删不需要批处理。
 
-**锚点约束与生命周期**（实现锚点管理块时生效）：
+**锚点约束与生命周期**（块 8 已落地）：
 
-- 二选一互斥：`departmentId` 与 `projectId` 不能同时设置，都空即公司级；创建/修改时校验指向的部门/项目属于当前租户且未删除；
+- 二选一互斥：`departmentId` 与 `projectId` 不能同时设置，都空即 `PRIVATE`（仅成员）；创建/修改时校验指向的部门/项目属于当前租户且未删除；
 - 修改规则：`MANAGER`（或 `knowledge_base.manage_all`）可修改锚点，走乐观锁 `version`，审计记录 before/after；
-- 悬挂处理：锚点指向的项目/部门被删除后，锚点保留（历史归属可追溯）但自动授权自然失效（人群动态计算天然处理）；管理界面提示锚点已失效，`MANAGER` 可重新挂接或清空为公司级。
+- 悬挂处理：锚点指向的项目/部门被删除后，锚点保留（历史归属可追溯）但自动授权自然失效（人群动态计算天然处理）；管理界面提示锚点已失效，`MANAGER` 可重新挂接或清空为 `PRIVATE`。
 
-**与查询链路的关系**：锚点不改变 ai-service 检索过滤——scope 折叠仍按文档版本可见范围（见下与 3.5），过滤在向量检索阶段完成；锚点影响的是 NestJS 侧的知识库成员判定（`requireKnowledgeBasePermission`）与列表可见范围（`listVisibleKnowledgeBaseIds`），把锚点人群并入。锚点人群进入知识库后仍受文档版本可见范围收窄。
+**与查询链路的关系**：锚点不改变 ai-service 检索过滤——scope 折叠仍按文档版本可见范围（见下与 3.5），过滤在向量检索阶段完成；锚点影响的是 NestJS 侧的知识库成员判定（`requireKnowledgeBasePermission`）与列表可见范围（`listKnowledgeBases` 内联合并成员记录与 `listAnchorKnowledgeBaseIds` 的锚点库，并标注每库 `myPermission`），把锚点人群并入。锚点人群进入知识库后仍受文档版本可见范围收窄。
 
 **可见性分层**（版本级，`DocumentVersion.visibilityScope`）：
 
@@ -193,7 +190,7 @@ ai-service 不自行推断权限。NestJS 计算可信 scope 后随检索请求�
 
 - `KnowledgeBaseMember` 已存在（`@@unique([tenantId, knowledgeBaseId, userId])`），跨部门共享同一知识库的余地已留；块 5 迁移已把 `KnowledgeBaseMember.permission` 在数据库层收敛为枚举（Prisma enum，对应应用层 `READER` / `EDITOR` / `MANAGER`）；
 - `DocumentVersion` 已带 `visibilityScope` + `departmentId` / `projectId`；
-- `KnowledgeBase` 的 `departmentId` / `projectId` 锚点字段已由块 5 迁移补上（可选，二选一，都空即公司级）；公开契约 0.25.0 暂不暴露锚点字段，API 不接收/不返回锚点，自动授权未实现——当前所有知识库锚点为空，实际行为等同公司级知识库。锚点管理与自动授权在独立块（见第 8 节）实现，落地时契约、API、校验、自动授权判定与本文档同步变更。
+- `KnowledgeBase` 的 `departmentId` / `projectId` 锚点字段已由块 5 迁移补上（可选，二选一，都空即 `PRIVATE`）；块 8 已落地锚点管理与自动授权：公开契约暴露 `visibilityScope` / `departmentId` / `projectId` 与每库 `myPermission` 标注，创建/修改接口校验归属指向当前租户且互斥（`KNOWLEDGE_BASE_SCOPE_INVALID`），锚点人群动态计算为虚拟 READER（不物化成员行），查询库列表/详情/文档列表对锚点人群放行；`POST /knowledge-bases/{id}/query` 与助手检索不对锚点人群放行（成员-only）；知识库权限码收敛为五码（`create` / `read` / `read_all` / `query` / `manage_all`），写操作深度由成员等级校验（MANAGER 管理资料与成员、EDITOR 写文档）。
 
 ### 3.7 解析器格式分流（MinerU + 本地提取）
 
@@ -241,8 +238,8 @@ ai-service 不自行推断权限。NestJS 计算可信 scope 后随检索请求�
 
 **落地状态（块 7c 已落地）**：
 
-- 后端：`KnowledgeDocument` 增加 `source_type` / `source_id` 锚定与部分唯一索引（同库同源唯一，跨库拒绝 `KNOWLEDGE_SOURCE_ALREADY_SAVED`）；`FileService` 提供文本物化快照；`KnowledgeDocumentService.saveFromSource` 统一承接三类来源（FILE_OBJECT / DOCUMENT / MESSAGE），首次转存 `createDocument`、同源重复转存追加新版本并回 PENDING；MESSAGE 校验租户、`conversation.ownerMembershipId === actor.membershipId`、拒绝 TOOL 角色，工具路径另限定 `conversationId`；DOCUMENT 要求用户可读；name 留空时按来源取默认（FILE_OBJECT 用原文件名、DOCUMENT 用文档标题、MESSAGE 用「对话消息 {YYYY-MM-DD HH:mm}」）；`saveDirectContent` 承接内容直存（物化 Markdown 快照 + 无锚定新建文档 + 审计 `directContent: true`，name 留空取「对话内容 {YYYY-MM-DD HH:mm}」）；`save_to_knowledge` 工具参数校验强制 `sourceType+sourceId` 与 `content` 二选一（content 上限 20000 字符）；`save_to_knowledge` / `list_knowledge_bases` 两个 Assistant 工具已注册（提议 + 后端 EDITOR 校验 + 权限码审批）；`list_knowledge_bases` 返回当前用户可见的全部知识库（任意成员等级，含 READER）并标注每个库的成员权限 `myPermission`，既回答「我有哪些知识库」也为转存提供候选（转存仅 EDITOR/MANAGER 可写，`manage_all` 短路统一标 MANAGER）；`create_knowledge_base` 工具已注册（`knowledge_base.create` 权限，WRITE 风险级）：用户明确要求创建知识库时以用户确认的名称创建（创建者自动成为 MANAGER），与公开创建接口共用同一事务体。工具回喂脱敏：summary 携带内部 ID 的 instruction 均明确「不得向用户展示」；工具调用轮次的模型文本（如「I'll check…」预告语）由 turn-runner 缓存，不发布为公开事件，纯回答轮再补发（保持最终回答流式）。
-- 桌面端（desktop）：三处确定性按钮入口——生成文档卡片、已持久化消息、附件标签，均弹确认框：列出用户 EDITOR 权限的库（`GET /knowledge-bases?permission=EDITOR&limit=100`）供选择，可见范围提供 PRIVATE / TENANT 两级（DEPARTMENT / PROJECT 需归属 id，当前 UI 不提供，后端能力完整保留）；消息入口以该消息文本为内容，名称可在确认框拟定；入口按 `knowledge_base.document.manage` 权限过滤，后端仍二次校验（红线 3）。
+- 后端：`KnowledgeDocument` 增加 `source_type` / `source_id` 锚定与部分唯一索引（同库同源唯一，跨库拒绝 `KNOWLEDGE_SOURCE_ALREADY_SAVED`）；`FileService` 提供文本物化快照；`KnowledgeDocumentService.saveFromSource` 统一承接三类来源（FILE_OBJECT / DOCUMENT / MESSAGE），首次转存 `createDocument`、同源重复转存追加新版本并回 PENDING；MESSAGE 校验租户、`conversation.ownerMembershipId === actor.membershipId`、拒绝 TOOL 角色，工具路径另限定 `conversationId`；DOCUMENT 要求用户可读；name 留空时按来源取默认（FILE_OBJECT 用原文件名、DOCUMENT 用文档标题、MESSAGE 用「对话消息 {YYYY-MM-DD HH:mm}」）；`saveDirectContent` 承接内容直存（物化 Markdown 快照 + 无锚定新建文档 + 审计 `directContent: true`，name 留空取「对话内容 {YYYY-MM-DD HH:mm}」）；`save_to_knowledge` 工具参数校验强制 `sourceType+sourceId` 与 `content` 二选一（content 上限 20000 字符）；`save_to_knowledge` / `list_knowledge_bases` 两个 Assistant 工具已注册（提议 + 后端 EDITOR 校验 + 权限码审批）；`list_knowledge_bases` 返回当前用户可见的全部知识库（任意成员等级，含 READER）并标注每个库的成员权限 `myPermission`，既回答「我有哪些知识库」也为转存提供候选（转存仅 EDITOR/MANAGER 可写，`manage_all` 短路统一标 MANAGER，`read_all` 短路统一标 READER）；`create_knowledge_base` 工具已注册（`knowledge_base.create` 权限，WRITE 风险级）：用户明确要求创建知识库时以用户确认的名称创建（创建者自动成为 MANAGER），与公开创建接口共用同一事务体。工具回喂脱敏：summary 携带内部 ID 的 instruction 均明确「不得向用户展示」；工具调用轮次的模型文本（如「I'll check…」预告语）由 turn-runner 缓存，不发布为公开事件，纯回答轮再补发（保持最终回答流式）。
+- 桌面端（desktop）：三处确定性按钮入口——生成文档卡片、已持久化消息、附件标签，均弹确认框：列出用户 EDITOR 权限的库（`GET /knowledge-bases?permission=EDITOR&limit=100`）供选择，可见范围提供 PRIVATE / TENANT 两级（DEPARTMENT / PROJECT 需归属 id，当前 UI 不提供，后端能力完整保留）；消息入口以该消息文本为内容，名称可在确认框拟定；入口按 `knowledge_base.read` 权限过滤，后端仍二次校验（红线 3）。
 
 ### 3.9 助手人设中的功能告知（块 7d）
 
@@ -318,7 +315,7 @@ PENDING -> PARSING -> PARSED -> INDEXING -> READY
 - 把 RAG 检索注册为 Assistant 工具（块 7b 已落地）：
   - `knowledge_search` 工具（版本 1.0.0，`knowledge_base.query` 权限，READ 风险级）注册进 Assistant 工具链；
   - 对话级开关：`CreateTurnRequest.knowledgeBaseEnabled`（可选，默认 false）决定本轮是否暴露/允许 `knowledge_search`；关闭时工具列表被过滤，且工具执行前二次校验兼底（拒绝时 `ToolPolicyError` 告知用户「未在本轮启用」）；
-  - 检索走 `KnowledgeService.searchKnowledgeForAssistant`：显式传 tenantId/userId/membershipId/permissions（后台执行不依赖 AsyncLocalStorage），`manage_all` 短路为全租户库，否则按成员可见库折叠三层 scope；ai-service 不返回标题时按 `document_id` 查 `KnowledgeDocument` 补标题；
+  - 检索走 `KnowledgeService.searchKnowledgeForAssistant`：显式传 tenantId/userId/membershipId/permissions（后台执行不依赖 AsyncLocalStorage），`manage_all` / `read_all` 短路为全租户库，否则按成员可见库折叠三层 scope；ai-service 不返回标题时按 `document_id` 查 `KnowledgeDocument` 补标题；
   - 回喂模型的 summary 只含业务内容（S1 标签/标题/snippet/pageIndex），不含 document_id/chunk_id/知识库 ID 等内部标识；
   - 公开侧 `TurnStreamToolResultEvent` 新增可选 `citations`（兼容新增，老客户端忽略），desktop 渲染知识库引用卡片（标题+摘录+页码），并按会话 localStorage 恢复；
   - 多库检索时 `KnowledgeQueryLog.knowledgeBaseId` 记 null，审计 `resourceId` 为 null、`metadata.knowledgeBaseIds` 记录实际范围（块 7b 落地）。
@@ -337,7 +334,7 @@ PENDING -> PARSING -> PARSED -> INDEXING -> READY
 | 7b | Assistant RAG 工具接入：`knowledge_search` 工具注册 + 对话级知识库开关 + 权限折叠检索 | 块 5 | ✅ 已落地 |
 | 7c | 对话数据转知识库（3.8 节：双层入口 + 三条红线；附件/AI 生成文档/对话消息）+ 助手可见库清单与创建知识库工具 | 块 3、7b | ✅ 已落地 |
 | 7d | 助手人设功能告知与交流层边界（3.9 节） | 块 7b | 部分落地（语言约束与内部标识脱敏已写入 BASE_SYSTEM_PROMPT；介绍类告知话术待落地） |
-| 8 | 知识库归属锚点管理与自动授权（3.6 节：项目/部门/公司级分类、锚点人群虚拟 READER、悬挂处理） | 块 5 | 待开始 |
+| 8 | 知识库归属锚点管理与自动授权（3.6 节：项目/部门/公司级分类、锚点人群虚拟 READER、悬挂处理）+ 权限码收敛与知识管理页面 | 块 5 | ✅ 已落地 |
 
 每块独立可验证、可提交；块 2 使用内存向量库与假解析产物，不依赖 GPU 服务器。
 
@@ -364,4 +361,5 @@ PENDING -> PARSING -> PARSED -> INDEXING -> READY
 | 7a | jest 73 用例（mimeType 分流、提取错误语义、文本产物包装）+ pytest 16 用例（HNSW 索引落在 `data_knowledge_chunks`、hnsw_kwargs 每实例完整）+ ruff/tsc 全绿；29 真机 docx 上传经本地提取 READY 待部署后验收 | ✅ 本地完成 |
 | 7b | jest 34 用例（开关关闭过滤工具并二次校验拒绝、权限折叠检索（成员+manage_all）、summary 脱敏、标题补全、多库日志与审计范围）；tsc 全绿；契约兼容检查（redocly lint + api-client 重新生成）；desktop tsc + 生产构建通过（开关结构化传参、citations 卡片渲染与恢复） | ✅ 完成 |
 | 7c | jest：saveFromSource 13 用例（物化快照、EDITOR 校验、MESSAGE 归属/TOOL 拒绝、可读文档命名、同源追加版本、跨库拒绝、并发锚点冲突、source 字段互斥）+ saveDirectContent 2 用例（无锚定直存 + 权限拒绝）+ 工具 8 用例（save_to_knowledge 含 content 直存路径与二选一校验 / list_knowledge_bases 含脱敏指令：审批/EDITOR 校验/无意图不转存/引用不存在拒绝）+ 助手可见库清单 3 用例（权限标注/非成员空结果/manage_all 短路）+ create_knowledge_base 3 用例（注册/参数校验/显式上下文创建与回喂新库 id + 脱敏指令）+ turn-runner 工具轮预告语不发布 1 用例 + knowledge_search description 检索优先断言 2 例；pytest：chat context 7 用例（含语言/脱敏/检索优先约束 prompt）；tsc 全绿；契约校验 + 客户端重生成；desktop tsc + 生产构建通过（三入口 + 确认框） | ✅ 完成 |
+| 8 | jest：权限收敛（5 码目录/迁移/旧码清理）与锚点行为 118 用例（创建互斥校验、部门树可见、项目/全员锚点、助手标注、query 拒绝锚点、审计 before/after）+ 更新锚点契约 null 语义；redocly lint + api-client 重新生成；desktop tsc + 生产构建通过（知识管理页面：库 CRUD/归属表单/成员管理） | ✅ 完成 |
 | 7d | jest/真机：介绍性问题带知识库功能告知；诱导提问不泄露系统层信息（抽样对抗用例） | 待验证 |

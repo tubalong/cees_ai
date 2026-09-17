@@ -3,12 +3,21 @@ import type { KnowledgeBaseMemberPermission } from '@prisma/client';
 export type { KnowledgeBaseMemberPermission };
 export const KNOWLEDGE_BASE_MEMBER_PERMISSIONS = ['READER', 'EDITOR', 'MANAGER'] as const;
 
+/** 库级归属（锚点）：PRIVATE 仅成员、DEPARTMENT 部门树成员、PROJECT 项目成员、TENANT 租户全员。 */
+export const KNOWLEDGE_BASE_VISIBILITY_SCOPES = ['PRIVATE', 'DEPARTMENT', 'PROJECT', 'TENANT'] as const;
+export type KnowledgeBaseVisibilityScope = typeof KNOWLEDGE_BASE_VISIBILITY_SCOPES[number];
+
 export interface KnowledgeBaseResult {
     id: string;
     tenantId: string;
     name: string;
     description: string | null;
+    visibilityScope: KnowledgeBaseVisibilityScope;
+    departmentId: string | null;
+    projectId: string | null;
     memberCount: number;
+    /** 当前用户对该库的成员等级（锚点人群/read_all 恒 READER，manage_all 恒 MANAGER）；页面据此控制编辑与成员管理入口。 */
+    myPermission: KnowledgeBaseMemberPermission;
     createdBy: string | null;
     updatedBy: string | null;
     version: number;

@@ -4359,7 +4359,7 @@ paths:
   /knowledge-bases:
     get:
       summary: 查询当前成员可访问的知识库
-      description: 普通成员只能看到自己加入的知识库，拥有 knowledge_base.manage_all 权限的成员可看到当前租户全部知识库。
+      description: 普通成员看到自己加入的知识库与归属范围覆盖自己的知识库（TENANT 全员、DEPARTMENT 部门树、PROJECT 项目），拥有 knowledge_base.read_all 或 knowledge_base.manage_all 权限的成员可看到当前租户全部知识库。
       operationId: listKnowledgeBases
       tags: [KnowledgeBase]
       security:
@@ -4420,7 +4420,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/KnowledgeBaseResponseEnvelope' }
         '400':
-          description: 请求字段校验失败
+          description: 请求字段校验失败或归属锚点无效（KNOWLEDGE_BASE_SCOPE_INVALID）
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
@@ -4489,7 +4489,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/KnowledgeBaseResponseEnvelope' }
         '400':
-          description: 请求字段校验失败或没有可修改字段
+          description: 请求字段校验失败、没有可修改字段或归属锚点无效（KNOWLEDGE_BASE_SCOPE_INVALID）
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
@@ -4646,7 +4646,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
         '403':
-          description: 缺少 knowledge_base.member.manage 权限或知识库 MANAGER 权限
+          description: 缺少 knowledge_base.read 权限或知识库 MANAGER 权限
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
@@ -4685,7 +4685,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
         '403':
-          description: 缺少 knowledge_base.member.manage 权限或知识库 MANAGER 权限
+          description: 缺少 knowledge_base.read 权限或知识库 MANAGER 权限
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
@@ -4709,7 +4709,7 @@ paths:
         schema: { type: string, format: uuid }
     get:
       summary: 查询知识库文档
-      description: 返回知识库内未删除文档的分页列表，包含处理状态；普通成员只能查看自己加入的知识库。
+      description: 返回知识库内未删除文档的分页列表，包含处理状态；普通成员只能查看自己加入的知识库，归属人群（TENANT/部门树/项目）可按只读浏览。
       operationId: listKnowledgeDocuments
       tags: [KnowledgeBase]
       security:
@@ -4786,7 +4786,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
         '403':
-          description: 缺少 knowledge_base.document.manage 权限或知识库 EDITOR 权限
+          description: 缺少 knowledge_base.read 权限或知识库 EDITOR 权限
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
@@ -4842,7 +4842,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
         '403':
-          description: 缺少 knowledge_base.document.manage 权限或知识库 EDITOR 权限
+          description: 缺少 knowledge_base.read 权限或知识库 EDITOR 权限
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
@@ -4888,7 +4888,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
         '403':
-          description: 缺少 knowledge_base.document.manage 权限或知识库 EDITOR 权限
+          description: 缺少 knowledge_base.read 权限或知识库 EDITOR 权限
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
@@ -5162,7 +5162,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
         '403':
-          description: 缺少 knowledge_base.member.manage 权限或知识库 MANAGER 权限
+          description: 缺少 knowledge_base.read 权限或知识库 MANAGER 权限
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
@@ -5193,7 +5193,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
         '403':
-          description: 缺少 knowledge_base.member.manage 权限或知识库 MANAGER 权限
+          description: 缺少 knowledge_base.read 权限或知识库 MANAGER 权限
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
@@ -8577,6 +8577,11 @@ components:
         data: { $ref: '#/components/schemas/TenantSearchPolicy' }
         requestId: { type: [string, 'null'] }
 
+    KnowledgeBaseVisibilityScope:
+      type: string
+      enum: [PRIVATE, DEPARTMENT, PROJECT, TENANT]
+      description: 知识库归属；PRIVATE 仅成员（默认），DEPARTMENT 部门树成员，PROJECT 项目成员，TENANT 租户全员
+
     KnowledgeBaseMemberPermission:
       type: string
       enum: [READER, EDITOR, MANAGER]
@@ -8589,7 +8594,11 @@ components:
         - tenantId
         - name
         - description
+        - visibilityScope
+        - departmentId
+        - projectId
         - memberCount
+        - myPermission
         - createdBy
         - updatedBy
         - version
@@ -8606,9 +8615,22 @@ components:
           type: string
         description:
           type: [string, 'null']
+        visibilityScope:
+          $ref: '#/components/schemas/KnowledgeBaseVisibilityScope'
+        departmentId:
+          type: [string, 'null']
+          format: uuid
+          description: 归属锚点；DEPARTMENT 时挂部门，其余为空
+        projectId:
+          type: [string, 'null']
+          format: uuid
+          description: 归属锚点；PROJECT 时挂项目，其余为空
         memberCount:
           type: integer
           minimum: 0
+        myPermission:
+          $ref: '#/components/schemas/KnowledgeBaseMemberPermission'
+          description: 当前用户对该库的成员等级；锚点人群与 read_all 恒 READER，manage_all 恒 MANAGER
         createdBy:
           type: [string, 'null']
           format: uuid
@@ -8784,6 +8806,17 @@ components:
         description:
           type: [string, 'null']
           maxLength: 2000
+        visibilityScope:
+          $ref: '#/components/schemas/KnowledgeBaseVisibilityScope'
+          description: 归属范围，默认 PRIVATE；DEPARTMENT 必填 departmentId，PROJECT 必填 projectId，两者互斥
+        departmentId:
+          type: string
+          format: uuid
+          description: 归属部门，必须属于当前租户；仅 DEPARTMENT 时使用
+        projectId:
+          type: string
+          format: uuid
+          description: 归属项目，必须属于当前租户；仅 PROJECT 时使用
 
     UpdateKnowledgeBaseRequest:
       type: object
@@ -8797,6 +8830,17 @@ components:
         description:
           type: [string, 'null']
           maxLength: 2000
+        visibilityScope:
+          $ref: '#/components/schemas/KnowledgeBaseVisibilityScope'
+          description: 归属范围；未提供的锚点字段保持现值
+        departmentId:
+          type: [string, 'null']
+          format: uuid
+          description: 归属部门，必须属于当前租户；仅 DEPARTMENT 时使用，传 null 清除锚点
+        projectId:
+          type: [string, 'null']
+          format: uuid
+          description: 归属项目，必须属于当前租户；仅 PROJECT 时使用，传 null 清除锚点
         version:
           type: integer
           minimum: 1

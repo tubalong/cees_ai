@@ -1703,20 +1703,25 @@ model DingTalkSyncJob {
 }
 
 model KnowledgeBase {
-  id           String    @id @default(uuid()) @db.Uuid
-  tenantId     String    @map("tenant_id") @db.Uuid
-  name         String
-  description  String?
-  departmentId String?   @map("department_id") @db.Uuid
-  projectId    String?   @map("project_id") @db.Uuid
-  createdAt    DateTime  @default(now()) @map("created_at")
-  updatedAt    DateTime  @updatedAt @map("updated_at")
-  createdBy    String?   @map("created_by") @db.Uuid
-  updatedBy    String?   @map("updated_by") @db.Uuid
-  deletedAt    DateTime? @map("deleted_at")
-  version      Int       @default(1)
+  id              String          @id @default(uuid()) @db.Uuid
+  tenantId        String          @map("tenant_id") @db.Uuid
+  name            String
+  description     String?
+  /// 库级归属：PRIVATE 仅成员（个人库，默认）、DEPARTMENT 部门树成员、PROJECT 项目成员、TENANT 租户全员（公司库）。
+  /// 锚点人群为动态虚拟 READER，不物化成员行；显式成员授权独立于锚点。
+  visibilityScope VisibilityScope @default(PRIVATE) @map("visibility_scope")
+  /// 锚点二选一互斥：DEPARTMENT 时挂部门、PROJECT 时挂项目，其余为空。
+  departmentId    String?         @map("department_id") @db.Uuid
+  projectId       String?         @map("project_id") @db.Uuid
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+  createdBy       String?         @map("created_by") @db.Uuid
+  updatedBy       String?         @map("updated_by") @db.Uuid
+  deletedAt       DateTime?       @map("deleted_at")
+  version         Int             @default(1)
 
   @@index([tenantId])
+  @@index([tenantId, visibilityScope])
   @@map("knowledge_bases")
 }
 

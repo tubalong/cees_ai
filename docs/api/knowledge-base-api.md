@@ -1,6 +1,6 @@
 # 知识库管理 API
 
-公开契约版本：`0.25.0`。所有接口使用租户 Access Token，路径基于 `/api/v1`。
+公开契约版本：`0.28.0`。所有接口使用租户 Access Token，路径基于 `/api/v1`。
 
 ## 知识库
 
@@ -13,7 +13,7 @@ DELETE /knowledge-bases/{knowledgeBaseId}?version={version}
 POST   /knowledge-bases/{knowledgeBaseId}/query
 ```
 
-创建知识库时，当前登录用户自动获得 `MANAGER`。列表普通成员只返回自己加入的知识库；`knowledge_base.manage_all` 可以查询当前租户全部知识库。`permission` 可选，传入 `READER`/`EDITOR`/`MANAGER` 时只返回当前用户达到该成员权限的知识库（转存目标库选择用）。
+创建知识库时，当前登录用户自动获得 `MANAGER`。列表默认返回当前用户可见的知识库：自己加入的知识库（按成员等级），以及归属锚点覆盖人群内的知识库（虚拟 `READER`）——挂部门的库对部门及全部子部门成员可见，挂项目的库对项目成员可见，`TENANT` 全员可见，`PRIVATE` 仅成员可见。`knowledge_base.manage_all`（读写全部）或 `knowledge_base.read_all`（只读全部）可以查询当前租户全部知识库。`permission` 可选，传入 `READER`/`EDITOR`/`MANAGER` 时只返回当前用户达到该成员权限的知识库（转存目标库选择用；`READER` 级同时并入锚点人群库）。每个库返回 `myPermission` 标注当前用户的成员等级：`manage_all` 恒 `MANAGER`，成员等级优先，其余（`read_all` 与锚点人群）恒 `READER`。AI 问答接口（`query`）只对知识库真实成员（或 `read_all`/`manage_all`）放行，锚点人群的虚拟 `READER` 只覆盖库级浏览（列表/详情/文档列表）。
 
 ## 知识库成员
 
@@ -77,7 +77,7 @@ POST /knowledge-bases/{knowledgeBaseId}/documents/{documentId}/retry
 POST /knowledge-bases/{knowledgeBaseId}/query
 ```
 
-需要 `knowledge_base.query` 权限，请求示例：
+需要 `knowledge_base.query` 权限，且查询者必须是知识库成员（或持有 `knowledge_base.read_all`/`manage_all`）：锚点人群的虚拟 `READER` 不覆盖 AI 问答，避免 `PRIVATE` 文档内容外泄。请求示例：
 
 ```json
 {
@@ -121,6 +121,9 @@ POST /knowledge-bases/{knowledgeBaseId}/query
 | --- | --- | --- |
 | `name` | 知识库创建、修改；文档创建 | 1 到 200 个字符；服务端会去除首尾空白；文档转存路径下省略时沿用来源资源名称 |
 | `description` | 创建、修改 | 知识库说明，最多 2000 个字符；空字符串会规范化为 `null` |
+| `visibilityScope` | 知识库创建、修改；文档创建、新版本 | 知识库归属/文档可见范围：`PRIVATE`、`DEPARTMENT`、`PROJECT` 或 `TENANT`；知识库归属改为 `PRIVATE`/`TENANT` 时锚点自动置空 |
+| `departmentId` | 知识库创建、修改；文档创建、新版本 | `DEPARTMENT` 时必填，服务端校验属于当前租户；知识库修改传 `null` 清除锚点（须与归属范围配套） |
+| `projectId` | 知识库创建、修改；文档创建、新版本 | `PROJECT` 时必填，服务端校验属于当前租户；知识库修改传 `null` 清除锚点（须与归属范围配套） |
 | `version` | 修改、删除 | 当前知识库版本，修改成功后递增 |
 | `keyword` | 列表 | 按名称（知识库含说明）不区分大小写搜索 |
 | `limit` | 列表 | 每页 1 到 100 条，默认 20 |
@@ -129,15 +132,12 @@ POST /knowledge-bases/{knowledgeBaseId}/query
 | `fileObjectId` | 文档创建（人工上传）、新版本 | 文件对象 UUID，必须属于当前租户且未删除；与 `sourceType`/`sourceId` 二选一 |
 | `sourceType` | 文档创建（转存） | `FILE_OBJECT`、`DOCUMENT` 或 `MESSAGE`，与 `sourceId` 配套 |
 | `sourceId` | 文档创建（转存） | 来源资源 UUID（附件文件 / AI 生成文档 / 对话消息） |
-| `visibilityScope` | 文档创建、新版本 | `PRIVATE`、`DEPARTMENT`、`PROJECT` 或 `TENANT` |
-| `departmentId` | 文档创建、新版本 | `DEPARTMENT` 时必填，服务端校验属于当前租户 |
-| `projectId` | 文档创建、新版本 | `PROJECT` 时必填，服务端校验属于当前租户 |
 | `query` | 知识库查询 | 提问内容，1 到 4096 字符 |
 | `indexVersion` | 知识库查询 | 可选，指定检索的索引版本，不传时用服务端默认版本 |
 
 ## 返回字段
 
-`KnowledgeBase` 包含 `id`、`tenantId`、`name`、`description`、`memberCount`、`createdBy`、`updatedBy`、`version`、`createdAt` 和 `updatedAt`。
+`KnowledgeBase` 包含 `id`、`tenantId`、`name`、`description`、`visibilityScope`、`departmentId`、`projectId`、`memberCount`、`myPermission`（当前用户对该库的成员等级）、`createdBy`、`updatedBy`、`version`、`createdAt` 和 `updatedAt`。
 
 `KnowledgeBaseMember` 包含关系 `id`、`tenantId`、`knowledgeBaseId`、`membershipId`、`userId`、`account`、`displayName`、`permission` 和 `createdAt`。
 
@@ -150,6 +150,7 @@ POST /knowledge-bases/{knowledgeBaseId}/query
 | code | 含义 |
 | --- | --- |
 | `KNOWLEDGE_BASE_NOT_FOUND` | 知识库不存在、已删除或无权访问 |
+| `KNOWLEDGE_BASE_SCOPE_INVALID` | 知识库归属无效：范围缺少部门/项目，或部门/项目不属于当前租户 |
 | `KNOWLEDGE_BASE_MEMBER_NOT_FOUND` | 成员不存在或不属于当前租户 |
 | `KNOWLEDGE_BASE_UPDATE_EMPTY` | 修改请求没有可修改字段 |
 | `RESOURCE_VERSION_CONFLICT` | 提交的版本不是当前版本 |

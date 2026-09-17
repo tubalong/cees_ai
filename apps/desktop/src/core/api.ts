@@ -344,12 +344,21 @@ export type KnowledgeSourceType = 'FILE_OBJECT' | 'DOCUMENT' | 'MESSAGE';
 
 export type KnowledgeDocumentVisibilityScope = 'PRIVATE' | 'DEPARTMENT' | 'PROJECT' | 'TENANT';
 
+export type KnowledgeBaseVisibilityScope = 'PRIVATE' | 'DEPARTMENT' | 'PROJECT' | 'TENANT';
+
+export type KnowledgeBaseMemberPermission = 'READER' | 'EDITOR' | 'MANAGER';
+
 export interface KnowledgeBaseSummary {
     id: string;
     tenantId: string;
     name: string;
     description: string | null;
+    visibilityScope: KnowledgeBaseVisibilityScope;
+    departmentId: string | null;
+    projectId: string | null;
     memberCount: number;
+    /** 当前用户对该库的成员等级；锚点人群与 read_all 恒 READER，manage_all 恒 MANAGER。 */
+    myPermission: KnowledgeBaseMemberPermission;
     createdBy: string | null;
     updatedBy: string | null;
     version: number;
@@ -381,6 +390,109 @@ export interface KnowledgeDocumentResult {
 /** 转存目标库候选：当前用户达到 EDITOR 成员权限的知识库（块 7c）。 */
 export async function listWritableKnowledgeBases(): Promise<{ items: KnowledgeBaseSummary[]; nextCursor: string | null }> {
     return authorizedRequest<{ items: KnowledgeBaseSummary[]; nextCursor: string | null }>('v1/knowledge-bases?permission=EDITOR&limit=100');
+}
+
+// ---------------------------------------------------------------------------
+// 知识库管理（块 9）：库 CRUD、归属锚点与成员管理
+// ---------------------------------------------------------------------------
+
+export interface ListKnowledgeBasesParams {
+    keyword?: string;
+    limit?: number;
+    cursor?: string;
+    permission?: KnowledgeBaseMemberPermission;
+}
+
+export async function listKnowledgeBases(params: ListKnowledgeBasesParams = {}): Promise<CursorPage<KnowledgeBaseSummary>> {
+    const query = new URLSearchParams({ limit: String(params.limit ?? 100) });
+    if (params.keyword?.trim()) query.set('keyword', params.keyword.trim());
+    if (params.cursor) query.set('cursor', params.cursor);
+    if (params.permission) query.set('permission', params.permission);
+    return authorizedRequest<CursorPage<KnowledgeBaseSummary>>(`v1/knowledge-bases?${query}`);
+}
+
+export interface CreateKnowledgeBaseInput {
+    name: string;
+    description?: string | null;
+    visibilityScope?: KnowledgeBaseVisibilityScope;
+    departmentId?: string;
+    projectId?: string;
+}
+
+export async function createKnowledgeBase(input: CreateKnowledgeBaseInput): Promise<KnowledgeBaseSummary> {
+    return authorizedRequest<KnowledgeBaseSummary>('v1/knowledge-bases', {
+        method: 'POST',
+        body: JSON.stringify({
+            name: input.name.trim(),
+            ...(input.description?.trim() ? { description: input.description.trim() } : {}),
+            ...(input.visibilityScope ? { visibilityScope: input.visibilityScope } : {}),
+            ...(input.departmentId ? { departmentId: input.departmentId } : {}),
+            ...(input.projectId ? { projectId: input.projectId } : {}),
+        }),
+    });
+}
+
+export interface UpdateKnowledgeBaseInput {
+    name?: string;
+    description?: string | null;
+    visibilityScope?: KnowledgeBaseVisibilityScope;
+    /** 仅 DEPARTMENT 时使用；传 null 清除锚点。 */
+    departmentId?: string | null;
+    /** 仅 PROJECT 时使用；传 null 清除锚点。 */
+    projectId?: string | null;
+    version: number;
+}
+
+export async function updateKnowledgeBase(knowledgeBaseId: string, input: UpdateKnowledgeBaseInput): Promise<KnowledgeBaseSummary> {
+    return authorizedRequest<KnowledgeBaseSummary>(`v1/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+            ...(input.name?.trim() ? { name: input.name.trim() } : {}),
+            ...(input.description !== undefined ? { description: input.description?.trim() || null } : {}),
+            ...(input.visibilityScope !== undefined ? { visibilityScope: input.visibilityScope } : {}),
+            ...(input.departmentId !== undefined ? { departmentId: input.departmentId } : {}),
+            ...(input.projectId !== undefined ? { projectId: input.projectId } : {}),
+            version: input.version,
+        }),
+    });
+}
+
+export async function deleteKnowledgeBase(knowledgeBaseId: string, version: number): Promise<void> {
+    return authorizedRequest<void>(`v1/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}?version=${version}`, { method: 'DELETE' });
+}
+
+export interface KnowledgeBaseMemberSummary {
+    id: string;
+    tenantId: string;
+    knowledgeBaseId: string;
+    membershipId: string;
+    userId: string;
+    account: string;
+    displayName: string;
+    permission: KnowledgeBaseMemberPermission;
+    createdAt: string;
+}
+
+export async function listKnowledgeBaseMembers(knowledgeBaseId: string): Promise<CursorPage<KnowledgeBaseMemberSummary>> {
+    return authorizedRequest<CursorPage<KnowledgeBaseMemberSummary>>(`v1/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/members?limit=100`);
+}
+
+export async function addKnowledgeBaseMember(knowledgeBaseId: string, membershipId: string, permission: KnowledgeBaseMemberPermission): Promise<KnowledgeBaseMemberSummary> {
+    return authorizedRequest<KnowledgeBaseMemberSummary>(`v1/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/members`, {
+        method: 'POST',
+        body: JSON.stringify({ membershipId, permission }),
+    });
+}
+
+export async function updateKnowledgeBaseMember(knowledgeBaseId: string, membershipId: string, permission: KnowledgeBaseMemberPermission): Promise<KnowledgeBaseMemberSummary> {
+    return authorizedRequest<KnowledgeBaseMemberSummary>(`v1/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/members/${encodeURIComponent(membershipId)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ permission }),
+    });
+}
+
+export async function removeKnowledgeBaseMember(knowledgeBaseId: string, membershipId: string): Promise<void> {
+    return authorizedRequest<void>(`v1/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/members/${encodeURIComponent(membershipId)}`, { method: 'DELETE' });
 }
 
 /** 对话数据转知识库：附件 / AI 生成文档 / 对话消息走统一转存端点（块 7c）。 */

@@ -75,7 +75,7 @@ export class SaveToKnowledgeTool implements OnModuleInit {
             required: ['knowledgeBaseId'],
             additionalProperties: false,
         },
-        requiredPermissions: ['knowledge_base.document.manage'],
+        requiredPermissions: ['knowledge_base.read'],
         riskLevel: 'WRITE',
         validate: validateSaveToKnowledgeArguments,
         execute: (context, input) => this.executeSave(context, input),
