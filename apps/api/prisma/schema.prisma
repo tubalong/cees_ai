@@ -111,6 +111,71 @@ enum AssignmentPolicyFallbackMode {
   TENANT_MEMBERS
 }
 
+enum HrProfileStatus {
+  ACTIVE
+  SUSPENDED
+  TERMINATED
+  ON_LEAVE
+}
+
+enum HrLeaveUnit {
+  DAY
+  HALF_DAY
+  HOUR
+}
+
+enum HrLeaveRequestStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum HrAttendanceStatus {
+  NORMAL
+  LATE
+  EARLY_LEAVE
+  ABSENT
+  LEAVE
+  OVERTIME
+  EXCEPTION
+  CORRECTED
+}
+
+enum HrAttendanceSource {
+  MANUAL
+  IMPORT
+  DINGTALK
+}
+
+enum HrOvertimeRequestStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum HrEmployeeChangeType {
+  ONBOARD
+  PROBATION
+  TRANSFER
+  PROMOTION
+  DEMOTION
+  RESIGNATION
+  TERMINATION
+}
+
+enum HrEmployeeChangeStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+  CANCELLED
+  EFFECTIVE
+}
+
 enum TaskStatus {
   TODO
   IN_PROGRESS
@@ -314,6 +379,13 @@ model Tenant {
   invitations            TenantInvitation[]
   projects               Project[]
   assignmentPolicies     AssignmentPolicy[]
+  hrProfiles             HrProfile[]
+  hrLeaveTypes           HrLeaveType[]
+  hrLeaveBalances        HrLeaveBalance[]
+  hrLeaveRequests        HrLeaveRequest[]
+  hrAttendanceRecords    HrAttendanceRecord[]
+  hrOvertimeRequests     HrOvertimeRequest[]
+  hrEmployeeChanges      HrEmployeeChange[]
   projectCodeSequences   ProjectCodeSequence[]
   projectMembers         ProjectMember[]
   projectStatusHistory   ProjectStatusHistory[]
@@ -404,6 +476,12 @@ model TenantMembership {
   authoredWorkReports   WorkReport[]           @relation("WorkReportAuthorMembership")
   reviewedWorkReports   WorkReport[]           @relation("WorkReportReviewerMembership")
   dingTalkUserBindings  DingTalkUser[]
+  hrProfile             HrProfile?
+  hrLeaveBalances       HrLeaveBalance[]
+  hrLeaveRequests       HrLeaveRequest[]
+  hrAttendanceRecords   HrAttendanceRecord[]
+  hrOvertimeRequests    HrOvertimeRequest[]
+  hrEmployeeChanges     HrEmployeeChange[]
   createdAt             DateTime               @default(now()) @map("created_at")
   updatedAt             DateTime               @updatedAt @map("updated_at")
   createdBy             String?                @map("created_by") @db.Uuid
@@ -932,17 +1010,18 @@ model TaskActivity {
   @@index([tenantId, actorMembershipId])
   @@map("task_activities")
 }
-model AssignmentPolicy {
-  id          String                        @id @default(uuid()) @db.Uuid
-  tenantId    String                        @map("tenant_id") @db.Uuid
-  tenant      Tenant                        @relation(fields: [tenantId], references: [id])
-  projectId   String?                       @map("project_id") @db.Uuid
-  project     Project?                      @relation(fields: [projectId], references: [id])
 
-  domain       AssignmentPolicyDomain
-  level        AssignmentPolicyLevel
-  name         String
-  description  String?
+model AssignmentPolicy {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  projectId String?  @map("project_id") @db.Uuid
+  project   Project? @relation(fields: [projectId], references: [id])
+
+  domain      AssignmentPolicyDomain
+  level       AssignmentPolicyLevel
+  name        String
+  description String?
 
   candidatePool Json                         @map("candidate_pool")
   skipOnLeave   Boolean                      @default(false) @map("skip_on_leave")
@@ -959,6 +1038,208 @@ model AssignmentPolicy {
   @@index([tenantId, level, projectId, enabled])
   @@index([tenantId, domain, enabled])
   @@map("assignment_policies")
+}
+
+model HrProfile {
+  id                    String           @id @default(uuid()) @db.Uuid
+  tenantId              String           @map("tenant_id") @db.Uuid
+  tenant                Tenant           @relation(fields: [tenantId], references: [id])
+  membershipId          String           @unique @map("membership_id") @db.Uuid
+  membership            TenantMembership @relation(fields: [membershipId], references: [id])
+  employeeNo            String?          @map("employee_no")
+  displayName           String           @map("display_name")
+  departmentId          String?          @map("department_id") @db.Uuid
+  position              String?
+  employmentType        String?          @map("employment_type")
+  managerMembershipId   String?          @map("manager_membership_id") @db.Uuid
+  entryDate             DateTime?        @map("entry_date") @db.Date
+  leaveDate             DateTime?        @map("leave_date") @db.Date
+  status                HrProfileStatus  @default(ACTIVE)
+  phone                 String?
+  email                 String?
+  idType                String?          @map("id_type")
+  idNumber              String?          @map("id_number")
+  emergencyContactName  String?          @map("emergency_contact_name")
+  emergencyContactPhone String?          @map("emergency_contact_phone")
+  educationLevel        String?          @map("education_level")
+  costCenter            String?          @map("cost_center")
+  jobLevel              String?          @map("job_level")
+  probationEndDate      DateTime?        @map("probation_end_date") @db.Date
+  regularDate           DateTime?        @map("regular_date") @db.Date
+  workLocation          String?          @map("work_location")
+  createdAt             DateTime         @default(now()) @map("created_at")
+  updatedAt             DateTime         @updatedAt @map("updated_at")
+  createdBy             String?          @map("created_by") @db.Uuid
+  updatedBy             String?          @map("updated_by") @db.Uuid
+  deletedAt             DateTime?        @map("deleted_at")
+  version               Int              @default(1)
+
+  @@index([tenantId, departmentId])
+  @@index([tenantId, status])
+  @@index([tenantId, managerMembershipId])
+  @@map("hr_profiles")
+}
+
+model HrLeaveType {
+  id          String           @id @default(uuid()) @db.Uuid
+  tenantId    String           @map("tenant_id") @db.Uuid
+  tenant      Tenant           @relation(fields: [tenantId], references: [id])
+  code        String
+  name        String
+  unit        HrLeaveUnit
+  paid        Boolean          @default(true)
+  defaultDays Decimal?         @map("default_days") @db.Decimal(10, 2)
+  enabled     Boolean          @default(true)
+  balances    HrLeaveBalance[]
+  requests    HrLeaveRequest[]
+  createdAt   DateTime         @default(now()) @map("created_at")
+  updatedAt   DateTime         @updatedAt @map("updated_at")
+  createdBy   String?          @map("created_by") @db.Uuid
+  updatedBy   String?          @map("updated_by") @db.Uuid
+  deletedAt   DateTime?        @map("deleted_at")
+  version     Int              @default(1)
+
+  @@index([tenantId, enabled])
+  @@map("hr_leave_types")
+}
+
+model HrLeaveBalance {
+  id            String           @id @default(uuid()) @db.Uuid
+  tenantId      String           @map("tenant_id") @db.Uuid
+  tenant        Tenant           @relation(fields: [tenantId], references: [id])
+  membershipId  String           @map("membership_id") @db.Uuid
+  membership    TenantMembership @relation(fields: [membershipId], references: [id])
+  leaveTypeId   String           @map("leave_type_id") @db.Uuid
+  leaveType     HrLeaveType      @relation(fields: [leaveTypeId], references: [id])
+  year          Int
+  totalDays     Decimal          @map("total_days") @db.Decimal(10, 2)
+  usedDays      Decimal          @default(0) @map("used_days") @db.Decimal(10, 2)
+  pendingDays   Decimal          @default(0) @map("pending_days") @db.Decimal(10, 2)
+  remainingDays Decimal          @default(0) @map("remaining_days") @db.Decimal(10, 2)
+  unit          HrLeaveUnit
+  createdAt     DateTime         @default(now()) @map("created_at")
+  updatedAt     DateTime         @updatedAt @map("updated_at")
+  createdBy     String?          @map("created_by") @db.Uuid
+  updatedBy     String?          @map("updated_by") @db.Uuid
+  deletedAt     DateTime?        @map("deleted_at")
+  version       Int              @default(1)
+
+  @@index([tenantId, membershipId, year])
+  @@index([tenantId, leaveTypeId, year])
+  @@map("hr_leave_balances")
+}
+
+model HrLeaveRequest {
+  id            String               @id @default(uuid()) @db.Uuid
+  tenantId      String               @map("tenant_id") @db.Uuid
+  tenant        Tenant               @relation(fields: [tenantId], references: [id])
+  membershipId  String               @map("membership_id") @db.Uuid
+  membership    TenantMembership     @relation(fields: [membershipId], references: [id])
+  leaveTypeId   String               @map("leave_type_id") @db.Uuid
+  leaveType     HrLeaveType          @relation(fields: [leaveTypeId], references: [id])
+  startAt       DateTime             @map("start_at")
+  endAt         DateTime             @map("end_at")
+  durationDays  Decimal              @map("duration_days") @db.Decimal(10, 2)
+  reason        String?
+  status        HrLeaveRequestStatus @default(DRAFT)
+  reviewedBy    String?              @map("reviewed_by") @db.Uuid
+  reviewedAt    DateTime?            @map("reviewed_at")
+  reviewComment String?              @map("review_comment")
+  createdAt     DateTime             @default(now()) @map("created_at")
+  updatedAt     DateTime             @updatedAt @map("updated_at")
+  createdBy     String?              @map("created_by") @db.Uuid
+  updatedBy     String?              @map("updated_by") @db.Uuid
+  deletedAt     DateTime?            @map("deleted_at")
+  version       Int                  @default(1)
+
+  @@index([tenantId, membershipId, status])
+  @@index([tenantId, leaveTypeId])
+  @@index([tenantId, startAt, endAt])
+  @@map("hr_leave_requests")
+}
+
+model HrAttendanceRecord {
+  id           String             @id @default(uuid()) @db.Uuid
+  tenantId     String             @map("tenant_id") @db.Uuid
+  tenant       Tenant             @relation(fields: [tenantId], references: [id])
+  membershipId String             @map("membership_id") @db.Uuid
+  membership   TenantMembership   @relation(fields: [membershipId], references: [id])
+  workDate     DateTime           @map("work_date") @db.Date
+  checkInAt    DateTime?          @map("check_in_at")
+  checkOutAt   DateTime?          @map("check_out_at")
+  status       HrAttendanceStatus @default(NORMAL)
+  source       HrAttendanceSource @default(MANUAL)
+  note         String?
+  reviewedBy   String?            @map("reviewed_by") @db.Uuid
+  reviewedAt   DateTime?          @map("reviewed_at")
+  createdAt    DateTime           @default(now()) @map("created_at")
+  updatedAt    DateTime           @updatedAt @map("updated_at")
+  createdBy    String?            @map("created_by") @db.Uuid
+  updatedBy    String?            @map("updated_by") @db.Uuid
+  deletedAt    DateTime?          @map("deleted_at")
+  version      Int                @default(1)
+
+  @@index([tenantId, membershipId, workDate])
+  @@index([tenantId, workDate])
+  @@index([tenantId, status])
+  @@map("hr_attendance_records")
+}
+
+model HrOvertimeRequest {
+  id            String                  @id @default(uuid()) @db.Uuid
+  tenantId      String                  @map("tenant_id") @db.Uuid
+  tenant        Tenant                  @relation(fields: [tenantId], references: [id])
+  membershipId  String                  @map("membership_id") @db.Uuid
+  membership    TenantMembership        @relation(fields: [membershipId], references: [id])
+  startAt       DateTime                @map("start_at")
+  endAt         DateTime                @map("end_at")
+  durationHours Decimal                 @map("duration_hours") @db.Decimal(10, 2)
+  reason        String
+  status        HrOvertimeRequestStatus @default(DRAFT)
+  reviewedBy    String?                 @map("reviewed_by") @db.Uuid
+  reviewedAt    DateTime?               @map("reviewed_at")
+  reviewComment String?                 @map("review_comment")
+  createdAt     DateTime                @default(now()) @map("created_at")
+  updatedAt     DateTime                @updatedAt @map("updated_at")
+  createdBy     String?                 @map("created_by") @db.Uuid
+  updatedBy     String?                 @map("updated_by") @db.Uuid
+  deletedAt     DateTime?               @map("deleted_at")
+  version       Int                     @default(1)
+
+  @@index([tenantId, membershipId, status])
+  @@index([tenantId, startAt, endAt])
+  @@map("hr_overtime_requests")
+}
+
+model HrEmployeeChange {
+  id                      String                 @id @default(uuid()) @db.Uuid
+  tenantId                String                 @map("tenant_id") @db.Uuid
+  tenant                  Tenant                 @relation(fields: [tenantId], references: [id])
+  membershipId            String                 @map("membership_id") @db.Uuid
+  membership              TenantMembership       @relation(fields: [membershipId], references: [id])
+  type                    HrEmployeeChangeType
+  effectiveDate           DateTime               @map("effective_date") @db.Date
+  fromDepartmentId        String?                @map("from_department_id") @db.Uuid
+  toDepartmentId          String?                @map("to_department_id") @db.Uuid
+  fromPosition            String?                @map("from_position")
+  toPosition              String?                @map("to_position")
+  fromManagerMembershipId String?                @map("from_manager_membership_id") @db.Uuid
+  toManagerMembershipId   String?                @map("to_manager_membership_id") @db.Uuid
+  reason                  String?
+  status                  HrEmployeeChangeStatus @default(DRAFT)
+  reviewedBy              String?                @map("reviewed_by") @db.Uuid
+  reviewedAt              DateTime?              @map("reviewed_at")
+  reviewComment           String?                @map("review_comment")
+  createdAt               DateTime               @default(now()) @map("created_at")
+  updatedAt               DateTime               @updatedAt @map("updated_at")
+  createdBy               String?                @map("created_by") @db.Uuid
+  updatedBy               String?                @map("updated_by") @db.Uuid
+  deletedAt               DateTime?              @map("deleted_at")
+  version                 Int                    @default(1)
+
+  @@index([tenantId, membershipId, type, status])
+  @@index([tenantId, effectiveDate])
+  @@map("hr_employee_changes")
 }
 
 model FileObject {
@@ -1141,12 +1422,12 @@ enum KnowledgeBaseMemberPermission {
 }
 
 model KnowledgeBaseMember {
-  id              String                       @id @default(uuid()) @db.Uuid
-  tenantId        String                       @map("tenant_id") @db.Uuid
-  knowledgeBaseId String                       @map("knowledge_base_id") @db.Uuid
-  userId          String                       @map("user_id") @db.Uuid
+  id              String                        @id @default(uuid()) @db.Uuid
+  tenantId        String                        @map("tenant_id") @db.Uuid
+  knowledgeBaseId String                        @map("knowledge_base_id") @db.Uuid
+  userId          String                        @map("user_id") @db.Uuid
   permission      KnowledgeBaseMemberPermission
-  createdAt       DateTime                     @default(now()) @map("created_at")
+  createdAt       DateTime                      @default(now()) @map("created_at")
 
   @@unique([tenantId, knowledgeBaseId, userId])
   @@map("knowledge_base_members")
@@ -1175,16 +1456,16 @@ model KnowledgeDocument {
 }
 
 model DocumentVersion {
-  id              String         @id @default(uuid()) @db.Uuid
-  tenantId        String         @map("tenant_id") @db.Uuid
-  documentId      String         @map("document_id") @db.Uuid
-  fileObjectId    String         @unique @map("file_object_id") @db.Uuid
-  versionNumber   Int            @map("version_number")
+  id              String          @id @default(uuid()) @db.Uuid
+  tenantId        String          @map("tenant_id") @db.Uuid
+  documentId      String          @map("document_id") @db.Uuid
+  fileObjectId    String          @unique @map("file_object_id") @db.Uuid
+  versionNumber   Int             @map("version_number")
   visibilityScope VisibilityScope @map("visibility_scope")
-  departmentId    String?        @map("department_id") @db.Uuid
-  projectId       String?        @map("project_id") @db.Uuid
-  createdAt       DateTime       @default(now()) @map("created_at")
-  createdBy       String?        @map("created_by") @db.Uuid
+  departmentId    String?         @map("department_id") @db.Uuid
+  projectId       String?         @map("project_id") @db.Uuid
+  createdAt       DateTime        @default(now()) @map("created_at")
+  createdBy       String?         @map("created_by") @db.Uuid
 
   @@unique([tenantId, documentId, versionNumber])
   @@map("document_versions")

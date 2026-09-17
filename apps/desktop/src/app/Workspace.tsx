@@ -29,6 +29,7 @@ import WorkReportPage from '../features/reports/WorkReportPage';
 import ProfileSettings from '../features/profile/ProfileSettings';
 import RoleManagement from '../features/roles/RoleManagement';
 import AssignmentPolicyManagement from '../features/assignment/AssignmentPolicyManagement';
+import HrManagement from '../features/hr/HrManagement';
 import { useDateFormatter, useI18n } from '../core/i18n';
 
 interface WebviewElement extends HTMLWebViewElement {
@@ -58,6 +59,7 @@ const navItems: NavItem[] = [
     { path: '/architecture', label: '架构管理', icon: <TeamOutlined /> },
     { path: '/roles', label: '角色权限', icon: <SafetyCertificateOutlined /> },
     { path: '/assignment', label: '分配策略', icon: <PartitionOutlined /> },
+    { path: '/hr', label: '人力资源', icon: <UserOutlined /> },
     { path: '/dingtalk', label: '钉钉管理', icon: <CloudSyncOutlined /> },
     { path: '/knowledge', label: '知识管理', icon: <BookOutlined /> },
     { path: '/notifications', label: '通知中心', icon: <NotificationOutlined /> },
@@ -85,6 +87,7 @@ const navPermissionByPath: Record<string, string> = {
 
 const navAnyPermissionByPath: Record<string, string[]> = {
     '/dingtalk': ['dingtalk.integration.read', 'dingtalk.organization.read', 'dingtalk.organization.mapping.preview'],
+    '/hr': ['hr.profile.read', 'hr.leave.read', 'hr.attendance.read', 'hr.overtime.read', 'hr.employee_change.read', 'hr.report.read'],
 };
 
 interface WorkspaceProps {
@@ -566,6 +569,7 @@ function CurrentPage({ authContext, members, documents, membersLoading, document
     if (location.pathname === '/applications') return <ApplicationsPage />;
     if (location.pathname === '/architecture') return <OrganizationManagement authContext={authContext} fallbackMembers={members} membersLoading={membersLoading} onSessionExpired={onSessionExpired} />;
     if (location.pathname === '/assignment') return <AssignmentPolicyManagement authContext={authContext} onSessionExpired={onSessionExpired} />;
+    if (location.pathname === '/hr') return <HrManagement authContext={authContext} onSessionExpired={onSessionExpired} />;
     if (location.pathname === '/roles') return <RoleManagement authContext={authContext} onSessionExpired={onSessionExpired} />;
     if (location.pathname === '/dingtalk') return <DingTalkOrganizationPage authContext={authContext} onSessionExpired={onSessionExpired} />;
     if (location.pathname === '/knowledge') return <KnowledgePage documents={documents} loading={documentsLoading} />;

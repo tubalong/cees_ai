@@ -15,6 +15,18 @@ export type HrProfile = {
     managerMembershipId?: string | null;
     entryDate?: string | null;
     leaveDate?: string | null;
+    phone?: string | null;
+    email?: string | null;
+    idType?: string | null;
+    idNumber?: string | null;
+    emergencyContactName?: string | null;
+    emergencyContactPhone?: string | null;
+    educationLevel?: string | null;
+    costCenter?: string | null;
+    jobLevel?: string | null;
+    probationEndDate?: string | null;
+    regularDate?: string | null;
+    workLocation?: string | null;
     status: HrProfileStatus;
     version: number;
     createdAt: string;

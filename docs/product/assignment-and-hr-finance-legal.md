@@ -1,8 +1,8 @@
-# 分配策略与人财法 MVP（C 后端主体与分配）
+# 分配策略与人财法（C 后端主体与分配）
 
-> 状态：AssignmentPolicy 已实现（API + Desktop）；HR/Finance/Legal 与 tasks.scope 仍为契约草案
+> 状态：AssignmentPolicy 与 HR 已实现（API + Desktop）；Finance/Legal 与 tasks.scope 仍为契约草案
 > Owner：C
-> 当前版本：AssignmentPolicy 后端与桌面端已落地，具备 CRUD、解析预览、审计和测试；HR/Finance/Legal 仅完成 OpenAPI 契约。
+> 当前版本：AssignmentPolicy 与完整 HR 主线已落地；Finance/Legal 仅完成 OpenAPI 契约。
 
 ## 1. 目标
 
@@ -16,10 +16,10 @@
 | 权限目录扩展与自定义角色接入 | 已落地，权限码已进入 `permission-catalog.ts` |
 | `AssignmentPolicy`：租户默认 + 项目覆盖 | 已实现，见下方行为说明 |
 | 通用任务 `tasks.scope` | 契约草案，待 D 落地 `tasks` 表与任务模块边界 |
-| HR 假勤优先 | 契约草案，页面与 API 未实现 |
+| HR 员工档案、假勤、考勤、加班、异动、报表 | 已实现，页面入口 `/hr` |
 | Finance 报销 | 契约草案，页面与 API 未实现 |
 | Legal 合同台账 | 契约草案，页面与 API 未实现 |
-| P2：智能跳过请假人员 | 当前为策略字段和解析占位，待接入真实请假数据 |
+| P2：智能跳过请假人员 | HR 请假数据已具备，AssignmentPolicy 解析接线仍待后续迭代 |
 | 钉钉出勤同步 | 暂停，恢复后实现 |
 
 ## 3. AssignmentPolicy 已落地行为
@@ -50,6 +50,17 @@
   - 租户、组织、平台租户、RBAC 沿用现有目录。
 - ai-service：仅用于草稿、建议或文本提取，不直接写正式业务数据。
 
+## 4.1 HR 已落地行为
+
+- 员工档案与 `TenantMembership` 一对一关联，成员账号、组织身份和角色仍由主体模块维护。
+- 假期类型支持租户配置；余额按“成员 + 假期类型 + 年度”唯一维护，人工调整必须写明原因并记录审计。
+- 请假创建即进入 `SUBMITTED`，提交时冻结余额；通过后从冻结转为已使用，拒绝、撤回或取消时返还可用余额。
+- 考勤支持手工新增、批量导入、修改和异常复核；`DINGTALK` 来源仅保留数据兼容，自动同步仍暂停。
+- 加班申请支持成员发起、本人撤销和数据范围内审批。
+- 人事异动覆盖入职、转正、调岗、晋升、降级、离职和解除；审批通过后同步员工档案，调岗同步成员部门。
+- HR 查询统一应用角色 `DataScope`，写操作记录租户、操作者、请求和资源审计信息。
+- 报表提供在职人数、请假汇总、考勤汇总和加班汇总，供桌面端及老板经营概况只读消费。
+
 ## 5. 依赖与协作
 
 - 依赖 B 的壳层和 `packages/ui-kit`，但 C 不修改 `apps/desktop/src/app/**` 与 `packages/ui-kit/src/**`；桌面导航接线由 B 统一收口。
@@ -61,7 +72,7 @@
 
 - `DataScopeResolverService` 已具备解析能力；HR/Finance/Legal 落地时按资源类型接入。
 - `tasks.scope` 的枚举、索引和迁移待 D 实现。
-- HR/Finance/Legal 的状态机、数据范围与审批边界仍是契约草案。
+- Finance/Legal 的状态机、数据范围与审批边界仍是契约草案。
 - 钉钉出勤同步当前暂停。
 
 ## 7. 验收基线

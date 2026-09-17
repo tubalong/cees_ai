@@ -1,6 +1,6 @@
 # 分配策略与人财法 API
 
-> 状态：AssignmentPolicy 已实现；HR/Finance/Legal 与 tasks.scope 仍为契约草案
+> 状态：AssignmentPolicy 与 HR 已实现；Finance/Legal 与 tasks.scope 仍为契约草案
 > Owner：C
 > 关联：[通用任务 tasks.scope 方案](../architecture/task-scope-proposal.md)、[人财法数据契约](../architecture/hr-finance-legal-data-contract.md)
 
@@ -52,7 +52,7 @@ POST   /api/v1/assignment/policies/resolve
 - `assignment.policy.manage`：创建、修改、删除。
 - 审计事件：`ASSIGNMENT_POLICY_CREATED`、`ASSIGNMENT_POLICY_UPDATED`、`ASSIGNMENT_POLICY_DELETED`、`ASSIGNMENT_POLICY_RESOLVED`。
 
-## 2. HR 假勤（契约草案）
+## 2. HR（已实现）
 
 ```text
 GET    /api/v1/hr/profiles
@@ -65,11 +65,31 @@ GET    /api/v1/hr/leave-balances
 GET    /api/v1/hr/leave-requests
 POST   /api/v1/hr/leave-requests
 POST   /api/v1/hr/leave-requests/{leaveRequestId}/review
+POST   /api/v1/hr/leave-requests/{leaveRequestId}/cancel
+POST   /api/v1/hr/leave-requests/{leaveRequestId}/withdraw
+GET    /api/v1/hr/attendance-records
+POST   /api/v1/hr/attendance-records
+POST   /api/v1/hr/attendance-records/import
+PATCH  /api/v1/hr/attendance-records/{attendanceRecordId}
+POST   /api/v1/hr/attendance-records/{attendanceRecordId}/review
+GET    /api/v1/hr/overtime-requests
+POST   /api/v1/hr/overtime-requests
+POST   /api/v1/hr/overtime-requests/{overtimeRequestId}/review
+GET    /api/v1/hr/employee-changes
+POST   /api/v1/hr/employee-changes
+POST   /api/v1/hr/employee-changes/{employeeChangeId}/review
+GET    /api/v1/hr/reports/headcount
+GET    /api/v1/hr/reports/leave-summary
+GET    /api/v1/hr/reports/attendance-summary
+GET    /api/v1/hr/reports/overtime-summary
 ```
 
 - 员工档案以 `membershipId` 为标识，避免复制成员账号状态。
 - 请假审批通过统一 `review` 接口完成，`decision = APPROVE | REJECT`。
-- 当前契约未包含提交、取消、撤销的独立接口，服务端实现阶段可在此基础上补兼容操作。
+- 请假提交冻结余额，审批、撤回和取消在同一事务中更新余额和申请状态。
+- 考勤导入单批最多 500 条，返回逐条失败位置与原因，不因单条失败回滚整批。
+- 人事异动审批通过后同步员工档案；目标部门变化同步 `TenantMembership.departmentId`。
+- 全部 HR 资源按租户隔离并接入 `DataScopeResolverService`、乐观锁和审计。
 
 ## 3. Finance 报销（契约草案）
 
@@ -112,6 +132,10 @@ PATCH  /api/v1/tenants/current/search-policy
 - `hr.leave.request`
 - `hr.leave.approve`
 - `hr.leave.manage_all`
+- `hr.attendance.read` / `hr.attendance.manage` / `hr.attendance.approve`
+- `hr.overtime.read` / `hr.overtime.request` / `hr.overtime.approve`
+- `hr.employee_change.read` / `hr.employee_change.manage` / `hr.employee_change.approve`
+- `hr.report.read`
 - `finance.expense.read`
 - `finance.expense.request`
 - `finance.expense.approve`

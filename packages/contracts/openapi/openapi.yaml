@@ -5554,6 +5554,658 @@ paths:
         '403': { description: 缺少 hr.leave.approve 权限或数据范围不足 }
         '404': { description: 请假申请不存在 }
         '409': { description: 请假申请状态或版本冲突 }
+  /hr/leave-types/{leaveTypeId}:
+    parameters:
+      - name: leaveTypeId
+        in: path
+        required: true
+        description: 请假类型 ID
+        schema: { type: string, format: uuid }
+    patch:
+      summary: 修改请假类型
+      operationId: updateHrLeaveType
+      tags: [HR]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateHrLeaveTypeRequest' }
+      responses:
+        '200':
+          description: 修改后的请假类型
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HrLeaveTypeResponseEnvelope' }
+        '400': { description: 请求字段校验失败 }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 hr.leave.manage_all 权限 }
+        '404': { description: 请假类型不存在 }
+        '409': { description: 请假类型编码已存在或乐观锁版本冲突 }
+    delete:
+      summary: 删除请假类型
+      operationId: deleteHrLeaveType
+      tags: [HR]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: version
+          in: query
+          required: true
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '204': { description: 请假类型已删除 }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 hr.leave.manage_all 权限 }
+        '404': { description: 请假类型不存在 }
+        '409': { description: 请假类型已被使用或乐观锁版本冲突 }
+
+  /hr/leave-balances/adjust:
+    post:
+      summary: 调整请假余额
+      operationId: adjustHrLeaveBalance
+      tags: [HR]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AdjustHrLeaveBalanceRequest' }
+      responses:
+        '200':
+          description: 调整后的请假余额
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HrLeaveBalanceResponseEnvelope' }
+        '400': { description: 请求字段校验失败 }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 hr.leave.manage_all 权限或数据范围不足 }
+        '404': { description: 请假余额不存在 }
+
+  /hr/leave-requests/{leaveRequestId}:
+    parameters:
+      - name: leaveRequestId
+        in: path
+        required: true
+        description: 请假申请 ID
+        schema: { type: string, format: uuid }
+    get:
+      summary: 查询请假申请详情
+      operationId: getHrLeaveRequest
+      tags: [HR]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: 请假申请详情
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HrLeaveRequestResponseEnvelope' }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 hr.leave.read 权限或数据范围不足 }
+        '404': { description: 请假申请不存在 }
+
+  /hr/leave-requests/{leaveRequestId}/cancel:
+    parameters:
+      - name: leaveRequestId
+        in: path
+        required: true
+        description: 请假申请 ID
+        schema: { type: string, format: uuid }
+    post:
+      summary: 撤销请假申请
+      operationId: cancelHrLeaveRequest
+      tags: [HR]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CancelHrLeaveRequestRequest' }
+      responses:
+        '200':
+          description: 撤销后的请假申请
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HrLeaveRequestResponseEnvelope' }
+        '400': { description: 请求字段校验失败 }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 hr.leave.request 权限或数据范围不足 }
+        '404': { description: 请假申请不存在 }
+        '409': { description: 请假申请状态或版本冲突 }
+
+  /hr/leave-requests/{leaveRequestId}/withdraw:
+    parameters:
+      - name: leaveRequestId
+        in: path
+        required: true
+        description: 请假申请 ID
+        schema: { type: string, format: uuid }
+    post:
+      summary: 撤回已提交的请假申请
+      operationId: withdrawHrLeaveRequest
+      tags: [HR]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/WithdrawHrLeaveRequestRequest' }
+      responses:
+        '200':
+          description: 撤回后的请假申请
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HrLeaveRequestResponseEnvelope' }
+        '400': { description: 请求字段校验失败 }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 hr.leave.request 权限或数据范围不足 }
+        '404': { description: 请假申请不存在 }
+        '409': { description: 请假申请状态或版本冲突 }
+
+  /hr/attendance-records:
+    get:
+      summary: 查询考勤记录
+      operationId: listHrAttendanceRecords
+      tags: [HR]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: membershipId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: dateFrom
+          in: query
+          schema: { type: string, format: date }
+        - name: dateTo
+          in: query
+          schema: { type: string, format: date }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/HrAttendanceStatus' }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - name: cursor
+          in: query
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: 考勤记录列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HrAttendanceRecordListResponseEnvelope' }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 hr.attendance.read 权限或数据范围不足 }
+    post:
+      summary: 手工创建考勤记录
+      operationId: createHrAttendanceRecord
+      tags: [HR]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateHrAttendanceRecordRequest' }
+      responses:
+        '201':
+          description: 考勤记录已创建
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HrAttendanceRecordResponseEnvelope' }
+        '400': { description: 请求字段校验失败 }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 hr.attendance.manage 权限 }
+        '409': { description: 同一成员同一日期已存在考勤记录 }
+
+  /hr/attendance-records/import:
+    post:
+      summary: 批量导入考勤记录
+      operationId: importHrAttendanceRecords
+      tags: [HR]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ImportHrAttendanceRecordsRequest' }
+      responses:
+        '200':
+          description: 考勤导入结果
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HrAttendanceImportResultResponseEnvelope' }
+        '400': { description: 请求字段校验失败 }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 hr.attendance.manage 权限 }
+
+  /hr/attendance-records/{attendanceRecordId}:
+    parameters:
+      - name: attendanceRecordId
+        in: path
+        required: true
+        description: 考勤记录 ID
+        schema: { type: string, format: uuid }
+    get:
+      summary: 查询考勤记录详情
+      operationId: getHrAttendanceRecord
+      tags: [HR]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: 考勤记录详情
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HrAttendanceRecordResponseEnvelope' }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 hr.attendance.read 权限或数据范围不足 }
+        '404': { description: 考勤记录不存在 }
+    patch:
+      summary: 修改考勤记录
+      operationId: updateHrAttendanceRecord
+      tags: [HR]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateHrAttendanceRecordRequest' }
+      responses:
+        '200':
+          description: 修改后的考勤记录
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HrAttendanceRecordResponseEnvelope' }
+        '400': { description: 请求字段校验失败 }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 hr.attendance.manage 权限或数据范围不足 }
+        '404': { description: 考勤记录不存在 }
+        '409': { description: 考勤记录状态或版本冲突 }
+
+  /hr/attendance-records/{attendanceRecordId}/review:
+    parameters:
+      - name: attendanceRecordId
+        in: path
+        required: true
+        description: 考勤记录 ID
+        schema: { type: string, format: uuid }
+    post:
+      summary: 审批考勤修正
+      operationId: reviewHrAttendanceRecord
+      tags: [HR]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReviewHrAttendanceRecordRequest' }
+      responses:
+        '200':
+          description: 审批后的考勤记录
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HrAttendanceRecordResponseEnvelope' }
+        '400': { description: 请求字段校验失败 }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 hr.attendance.approve 权限或数据范围不足 }
+        '404': { description: 考勤记录不存在 }
+        '409': { description: 考勤记录状态或版本冲突 }
+
+  /hr/overtime-requests:
+    get:
+      summary: 查询加班申请
+      operationId: listHrOvertimeRequests
+      tags: [HR]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: membershipId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/HrOvertimeRequestStatus' }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - name: cursor
+          in: query
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: 加班申请列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HrOvertimeRequestListResponseEnvelope' }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 hr.overtime.read 权限或数据范围不足 }
+    post:
+      summary: 创建加班申请
+      operationId: createHrOvertimeRequest
+      tags: [HR]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateHrOvertimeRequestRequest' }
+      responses:
+        '201':
+          description: 加班申请已创建
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HrOvertimeRequestResponseEnvelope' }
+        '400': { description: 请求字段校验失败 }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 hr.overtime.request 权限 }
+
+  /hr/overtime-requests/{overtimeRequestId}:
+    parameters:
+      - name: overtimeRequestId
+        in: path
+        required: true
+        description: 加班申请 ID
+        schema: { type: string, format: uuid }
+    get:
+      summary: 查询加班申请详情
+      operationId: getHrOvertimeRequest
+      tags: [HR]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: 加班申请详情
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HrOvertimeRequestResponseEnvelope' }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 hr.overtime.read 权限或数据范围不足 }
+        '404': { description: 加班申请不存在 }
+
+  /hr/overtime-requests/{overtimeRequestId}/cancel:
+    parameters:
+      - name: overtimeRequestId
+        in: path
+        required: true
+        description: 加班申请 ID
+        schema: { type: string, format: uuid }
+    post:
+      summary: 撤销加班申请
+      operationId: cancelHrOvertimeRequest
+      tags: [HR]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CancelHrOvertimeRequestRequest' }
+      responses:
+        '200':
+          description: 撤销后的加班申请
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HrOvertimeRequestResponseEnvelope' }
+        '400': { description: 请求字段校验失败 }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 hr.overtime.request 权限或数据范围不足 }
+        '404': { description: 加班申请不存在 }
+        '409': { description: 加班申请状态或版本冲突 }
+
+  /hr/overtime-requests/{overtimeRequestId}/review:
+    parameters:
+      - name: overtimeRequestId
+        in: path
+        required: true
+        description: 加班申请 ID
+        schema: { type: string, format: uuid }
+    post:
+      summary: 审批加班申请
+      operationId: reviewHrOvertimeRequest
+      tags: [HR]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReviewHrOvertimeRequestRequest' }
+      responses:
+        '200':
+          description: 审批后的加班申请
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HrOvertimeRequestResponseEnvelope' }
+        '400': { description: 请求字段校验失败 }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 hr.overtime.approve 权限或数据范围不足 }
+        '404': { description: 加班申请不存在 }
+        '409': { description: 加班申请状态或版本冲突 }
+
+  /hr/employee-changes:
+    get:
+      summary: 查询人事异动
+      operationId: listHrEmployeeChanges
+      tags: [HR]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: membershipId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: type
+          in: query
+          schema: { $ref: '#/components/schemas/HrEmployeeChangeType' }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/HrEmployeeChangeStatus' }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - name: cursor
+          in: query
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: 人事异动列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HrEmployeeChangeListResponseEnvelope' }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 hr.employee_change.read 权限或数据范围不足 }
+    post:
+      summary: 创建人事异动
+      operationId: createHrEmployeeChange
+      tags: [HR]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateHrEmployeeChangeRequest' }
+      responses:
+        '201':
+          description: 人事异动已创建
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HrEmployeeChangeResponseEnvelope' }
+        '400': { description: 请求字段校验失败 }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 hr.employee_change.manage 权限 }
+
+  /hr/employee-changes/{employeeChangeId}:
+    parameters:
+      - name: employeeChangeId
+        in: path
+        required: true
+        description: 人事异动 ID
+        schema: { type: string, format: uuid }
+    get:
+      summary: 查询人事异动详情
+      operationId: getHrEmployeeChange
+      tags: [HR]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: 人事异动详情
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HrEmployeeChangeResponseEnvelope' }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 hr.employee_change.read 权限或数据范围不足 }
+        '404': { description: 人事异动不存在 }
+
+  /hr/employee-changes/{employeeChangeId}/cancel:
+    parameters:
+      - name: employeeChangeId
+        in: path
+        required: true
+        description: 人事异动 ID
+        schema: { type: string, format: uuid }
+    post:
+      summary: 撤销人事异动
+      operationId: cancelHrEmployeeChange
+      tags: [HR]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CancelHrEmployeeChangeRequest' }
+      responses:
+        '200':
+          description: 撤销后的人事异动
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HrEmployeeChangeResponseEnvelope' }
+        '400': { description: 请求字段校验失败 }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 hr.employee_change.manage 权限或数据范围不足 }
+        '404': { description: 人事异动不存在 }
+        '409': { description: 人事异动状态或版本冲突 }
+
+  /hr/employee-changes/{employeeChangeId}/review:
+    parameters:
+      - name: employeeChangeId
+        in: path
+        required: true
+        description: 人事异动 ID
+        schema: { type: string, format: uuid }
+    post:
+      summary: 审批人事异动
+      operationId: reviewHrEmployeeChange
+      tags: [HR]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReviewHrEmployeeChangeRequest' }
+      responses:
+        '200':
+          description: 审批后的人事异动
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HrEmployeeChangeResponseEnvelope' }
+        '400': { description: 请求字段校验失败 }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 hr.employee_change.approve 权限或数据范围不足 }
+        '404': { description: 人事异动不存在 }
+        '409': { description: 人事异动状态或版本冲突 }
+
+  /hr/reports/headcount:
+    get:
+      summary: 查询 HR 在职人数报表
+      operationId: getHrHeadcountReport
+      tags: [HR]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: departmentId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: asOf
+          in: query
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: 在职人数报表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HrHeadcountReportResponseEnvelope' }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 hr.report.read 权限或数据范围不足 }
+
+  /hr/reports/leave-summary:
+    get:
+      summary: 查询请假汇总报表
+      operationId: getHrLeaveSummaryReport
+      tags: [HR]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: year
+          in: query
+          required: true
+          schema: { type: integer, minimum: 2024, maximum: 2100 }
+        - name: departmentId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: leaveTypeId
+          in: query
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: 请假汇总报表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HrLeaveSummaryReportResponseEnvelope' }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 hr.report.read 权限或数据范围不足 }
+
+  /hr/reports/attendance-summary:
+    get:
+      summary: 查询考勤汇总报表
+      operationId: getHrAttendanceSummaryReport
+      tags: [HR]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: dateFrom
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - name: dateTo
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - name: departmentId
+          in: query
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: 考勤汇总报表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HrAttendanceSummaryReportResponseEnvelope' }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 hr.report.read 权限或数据范围不足 }
+
+  /hr/reports/overtime-summary:
+    get:
+      summary: 查询加班汇总报表
+      operationId: getHrOvertimeSummaryReport
+      tags: [HR]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: dateFrom
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - name: dateTo
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - name: departmentId
+          in: query
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: 加班汇总报表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HrOvertimeSummaryReportResponseEnvelope' }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 hr.report.read 权限或数据范围不足 }
 
   /finance/expense-categories:
     get:
@@ -6015,6 +6667,18 @@ components:
         managerMembershipId: { type: [string, 'null'], format: uuid }
         entryDate: { type: [string, 'null'], format: date }
         leaveDate: { type: [string, 'null'], format: date }
+        phone: { type: [string, 'null'], maxLength: 64 }
+        email: { type: [string, 'null'], maxLength: 120 }
+        idType: { type: [string, 'null'], maxLength: 32 }
+        idNumber: { type: [string, 'null'], maxLength: 64 }
+        emergencyContactName: { type: [string, 'null'], maxLength: 120 }
+        emergencyContactPhone: { type: [string, 'null'], maxLength: 64 }
+        educationLevel: { type: [string, 'null'], maxLength: 64 }
+        costCenter: { type: [string, 'null'], maxLength: 64 }
+        jobLevel: { type: [string, 'null'], maxLength: 64 }
+        probationEndDate: { type: [string, 'null'], format: date }
+        regularDate: { type: [string, 'null'], format: date }
+        workLocation: { type: [string, 'null'], maxLength: 160 }
         status: { $ref: '#/components/schemas/HrProfileStatus' }
         version: { type: integer, minimum: 1 }
         createdAt: { type: string, format: date-time }
@@ -6042,7 +6706,18 @@ components:
         managerMembershipId: { type: [string, 'null'], format: uuid }
         entryDate: { type: [string, 'null'], format: date }
         leaveDate: { type: [string, 'null'], format: date }
-
+        phone: { type: [string, 'null'], maxLength: 64 }
+        email: { type: [string, 'null'], maxLength: 120 }
+        idType: { type: [string, 'null'], maxLength: 32 }
+        idNumber: { type: [string, 'null'], maxLength: 64 }
+        emergencyContactName: { type: [string, 'null'], maxLength: 120 }
+        emergencyContactPhone: { type: [string, 'null'], maxLength: 64 }
+        educationLevel: { type: [string, 'null'], maxLength: 64 }
+        costCenter: { type: [string, 'null'], maxLength: 64 }
+        jobLevel: { type: [string, 'null'], maxLength: 64 }
+        probationEndDate: { type: [string, 'null'], format: date }
+        regularDate: { type: [string, 'null'], format: date }
+        workLocation: { type: [string, 'null'], maxLength: 160 }
     UpdateHrProfileRequest:
       type: object
       additionalProperties: false
@@ -6055,6 +6730,18 @@ components:
         managerMembershipId: { type: [string, 'null'], format: uuid }
         entryDate: { type: [string, 'null'], format: date }
         leaveDate: { type: [string, 'null'], format: date }
+        phone: { type: [string, 'null'], maxLength: 64 }
+        email: { type: [string, 'null'], maxLength: 120 }
+        idType: { type: [string, 'null'], maxLength: 32 }
+        idNumber: { type: [string, 'null'], maxLength: 64 }
+        emergencyContactName: { type: [string, 'null'], maxLength: 120 }
+        emergencyContactPhone: { type: [string, 'null'], maxLength: 64 }
+        educationLevel: { type: [string, 'null'], maxLength: 64 }
+        costCenter: { type: [string, 'null'], maxLength: 64 }
+        jobLevel: { type: [string, 'null'], maxLength: 64 }
+        probationEndDate: { type: [string, 'null'], format: date }
+        regularDate: { type: [string, 'null'], format: date }
+        workLocation: { type: [string, 'null'], maxLength: 160 }
         status: { $ref: '#/components/schemas/HrProfileStatus' }
         version: { type: integer, minimum: 1 }
 
@@ -6210,6 +6897,357 @@ components:
         decision: { type: string, enum: [APPROVE, REJECT] }
         comment: { type: [string, 'null'], maxLength: 2000 }
         version: { type: integer, minimum: 1 }
+    UpdateHrLeaveTypeRequest:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        code: { type: string, minLength: 1, maxLength: 64 }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        unit: { $ref: '#/components/schemas/HrLeaveUnit' }
+        paid: { type: boolean }
+        defaultDays: { type: [number, 'null'], minimum: 0 }
+        enabled: { type: boolean }
+        version: { type: integer, minimum: 1 }
+
+    AdjustHrLeaveBalanceRequest:
+      type: object
+      additionalProperties: false
+      required: [membershipId, leaveTypeId, year, deltaDays, reason]
+      properties:
+        membershipId: { type: string, format: uuid }
+        leaveTypeId: { type: string, format: uuid }
+        year: { type: integer, minimum: 2024, maximum: 2100 }
+        deltaDays: { type: number }
+        reason: { type: string, minLength: 1, maxLength: 500 }
+
+    CancelHrLeaveRequestRequest:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        version: { type: integer, minimum: 1 }
+        reason: { type: [string, 'null'], maxLength: 500 }
+
+    WithdrawHrLeaveRequestRequest:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        version: { type: integer, minimum: 1 }
+
+    HrAttendanceStatus:
+      type: string
+      enum: [NORMAL, LATE, EARLY_LEAVE, ABSENT, LEAVE, OVERTIME, EXCEPTION, CORRECTED]
+
+    HrAttendanceRecord:
+      type: object
+      required:
+        - id
+        - tenantId
+        - membershipId
+        - workDate
+        - status
+        - version
+        - createdAt
+        - updatedAt
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        membershipId: { type: string, format: uuid }
+        workDate: { type: string, format: date }
+        checkInAt: { type: [string, 'null'], format: date-time }
+        checkOutAt: { type: [string, 'null'], format: date-time }
+        status: { $ref: '#/components/schemas/HrAttendanceStatus' }
+        source: { type: string, enum: [MANUAL, IMPORT, DINGTALK] }
+        note: { type: [string, 'null'], maxLength: 1000 }
+        reviewedBy: { type: [string, 'null'], format: uuid }
+        reviewedAt: { type: [string, 'null'], format: date-time }
+        version: { type: integer, minimum: 1 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    HrAttendanceRecordList:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/HrAttendanceRecord' }
+        nextCursor: { type: [string, 'null'], format: uuid }
+
+    CreateHrAttendanceRecordRequest:
+      type: object
+      additionalProperties: false
+      required: [membershipId, workDate, status]
+      properties:
+        membershipId: { type: string, format: uuid }
+        workDate: { type: string, format: date }
+        checkInAt: { type: [string, 'null'], format: date-time }
+        checkOutAt: { type: [string, 'null'], format: date-time }
+        status: { $ref: '#/components/schemas/HrAttendanceStatus' }
+        note: { type: [string, 'null'], maxLength: 1000 }
+
+    UpdateHrAttendanceRecordRequest:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        checkInAt: { type: [string, 'null'], format: date-time }
+        checkOutAt: { type: [string, 'null'], format: date-time }
+        status: { $ref: '#/components/schemas/HrAttendanceStatus' }
+        note: { type: [string, 'null'], maxLength: 1000 }
+        version: { type: integer, minimum: 1 }
+
+    ReviewHrAttendanceRecordRequest:
+      type: object
+      additionalProperties: false
+      required: [decision, version]
+      properties:
+        decision: { type: string, enum: [APPROVE, REJECT] }
+        comment: { type: [string, 'null'], maxLength: 500 }
+        version: { type: integer, minimum: 1 }
+
+    ImportHrAttendanceRecordsRequest:
+      type: object
+      additionalProperties: false
+      required: [records]
+      properties:
+        records:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/CreateHrAttendanceRecordRequest' }
+
+    HrAttendanceImportResult:
+      type: object
+      required: [total, imported, failed, failures]
+      properties:
+        total: { type: integer, minimum: 0 }
+        imported: { type: integer, minimum: 0 }
+        failed: { type: integer, minimum: 0 }
+        failures:
+          type: array
+          items:
+            type: object
+            required: [index, code, message]
+            properties:
+              index: { type: integer, minimum: 0 }
+              code: { type: string }
+              message: { type: string }
+
+    HrOvertimeRequestStatus:
+      type: string
+      enum: [DRAFT, SUBMITTED, APPROVED, REJECTED, CANCELLED]
+
+    HrOvertimeRequest:
+      type: object
+      required:
+        - id
+        - tenantId
+        - membershipId
+        - startAt
+        - endAt
+        - durationHours
+        - reason
+        - status
+        - version
+        - createdAt
+        - updatedAt
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        membershipId: { type: string, format: uuid }
+        startAt: { type: string, format: date-time }
+        endAt: { type: string, format: date-time }
+        durationHours: { type: number, minimum: 0 }
+        reason: { type: string, minLength: 1, maxLength: 2000 }
+        status: { $ref: '#/components/schemas/HrOvertimeRequestStatus' }
+        reviewedBy: { type: [string, 'null'], format: uuid }
+        reviewedAt: { type: [string, 'null'], format: date-time }
+        reviewComment: { type: [string, 'null'], maxLength: 500 }
+        version: { type: integer, minimum: 1 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    HrOvertimeRequestList:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/HrOvertimeRequest' }
+        nextCursor: { type: [string, 'null'], format: uuid }
+
+    CreateHrOvertimeRequestRequest:
+      type: object
+      additionalProperties: false
+      required: [startAt, endAt, durationHours, reason]
+      properties:
+        startAt: { type: string, format: date-time }
+        endAt: { type: string, format: date-time }
+        durationHours: { type: number, minimum: 0 }
+        reason: { type: string, minLength: 1, maxLength: 2000 }
+
+    CancelHrOvertimeRequestRequest:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        version: { type: integer, minimum: 1 }
+
+    ReviewHrOvertimeRequestRequest:
+      type: object
+      additionalProperties: false
+      required: [decision, version]
+      properties:
+        decision: { type: string, enum: [APPROVE, REJECT] }
+        comment: { type: [string, 'null'], maxLength: 500 }
+        version: { type: integer, minimum: 1 }
+
+    HrEmployeeChangeType:
+      type: string
+      enum: [ONBOARD, PROBATION, TRANSFER, PROMOTION, DEMOTION, RESIGNATION, TERMINATION]
+
+    HrEmployeeChangeStatus:
+      type: string
+      enum: [DRAFT, SUBMITTED, APPROVED, REJECTED, CANCELLED, EFFECTIVE]
+
+    HrEmployeeChange:
+      type: object
+      required:
+        - id
+        - tenantId
+        - membershipId
+        - type
+        - effectiveDate
+        - status
+        - version
+        - createdAt
+        - updatedAt
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        membershipId: { type: string, format: uuid }
+        type: { $ref: '#/components/schemas/HrEmployeeChangeType' }
+        effectiveDate: { type: string, format: date }
+        fromDepartmentId: { type: [string, 'null'], format: uuid }
+        toDepartmentId: { type: [string, 'null'], format: uuid }
+        fromPosition: { type: [string, 'null'], maxLength: 120 }
+        toPosition: { type: [string, 'null'], maxLength: 120 }
+        fromManagerMembershipId: { type: [string, 'null'], format: uuid }
+        toManagerMembershipId: { type: [string, 'null'], format: uuid }
+        reason: { type: [string, 'null'], maxLength: 2000 }
+        status: { $ref: '#/components/schemas/HrEmployeeChangeStatus' }
+        reviewedBy: { type: [string, 'null'], format: uuid }
+        reviewedAt: { type: [string, 'null'], format: date-time }
+        reviewComment: { type: [string, 'null'], maxLength: 500 }
+        version: { type: integer, minimum: 1 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    HrEmployeeChangeList:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/HrEmployeeChange' }
+        nextCursor: { type: [string, 'null'], format: uuid }
+
+    CreateHrEmployeeChangeRequest:
+      type: object
+      additionalProperties: false
+      required: [membershipId, type, effectiveDate]
+      properties:
+        membershipId: { type: string, format: uuid }
+        type: { $ref: '#/components/schemas/HrEmployeeChangeType' }
+        effectiveDate: { type: string, format: date }
+        fromDepartmentId: { type: [string, 'null'], format: uuid }
+        toDepartmentId: { type: [string, 'null'], format: uuid }
+        fromPosition: { type: [string, 'null'], maxLength: 120 }
+        toPosition: { type: [string, 'null'], maxLength: 120 }
+        fromManagerMembershipId: { type: [string, 'null'], format: uuid }
+        toManagerMembershipId: { type: [string, 'null'], format: uuid }
+        reason: { type: [string, 'null'], maxLength: 2000 }
+
+    CancelHrEmployeeChangeRequest:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        version: { type: integer, minimum: 1 }
+
+    ReviewHrEmployeeChangeRequest:
+      type: object
+      additionalProperties: false
+      required: [decision, version]
+      properties:
+        decision: { type: string, enum: [APPROVE, REJECT] }
+        comment: { type: [string, 'null'], maxLength: 500 }
+        version: { type: integer, minimum: 1 }
+
+    HrHeadcountReport:
+      type: object
+      required: [asOf, total, byDepartment]
+      properties:
+        asOf: { type: string, format: date }
+        total: { type: integer, minimum: 0 }
+        byDepartment:
+          type: array
+          items:
+            type: object
+            required: [departmentId, departmentName, headcount]
+            properties:
+              departmentId: { type: string, format: uuid }
+              departmentName: { type: string }
+              headcount: { type: integer, minimum: 0 }
+
+    HrLeaveSummaryReport:
+      type: object
+      required: [year, totalRequestedDays, totalApprovedDays, byLeaveType]
+      properties:
+        year: { type: integer, minimum: 2024, maximum: 2100 }
+        totalRequestedDays: { type: number, minimum: 0 }
+        totalApprovedDays: { type: number, minimum: 0 }
+        byLeaveType:
+          type: array
+          items:
+            type: object
+            required: [leaveTypeId, leaveTypeName, requestedDays, approvedDays]
+            properties:
+              leaveTypeId: { type: string, format: uuid }
+              leaveTypeName: { type: string }
+              requestedDays: { type: number, minimum: 0 }
+              approvedDays: { type: number, minimum: 0 }
+
+    HrAttendanceSummaryReport:
+      type: object
+      required: [dateFrom, dateTo, normalDays, lateCount, earlyLeaveCount, absentDays, leaveDays]
+      properties:
+        dateFrom: { type: string, format: date }
+        dateTo: { type: string, format: date }
+        normalDays: { type: integer, minimum: 0 }
+        lateCount: { type: integer, minimum: 0 }
+        earlyLeaveCount: { type: integer, minimum: 0 }
+        absentDays: { type: integer, minimum: 0 }
+        leaveDays: { type: integer, minimum: 0 }
+
+    HrOvertimeSummaryReport:
+      type: object
+      required: [dateFrom, dateTo, totalHours, byMember]
+      properties:
+        dateFrom: { type: string, format: date }
+        dateTo: { type: string, format: date }
+        totalHours: { type: number, minimum: 0 }
+        byMember:
+          type: array
+          items:
+            type: object
+            required: [membershipId, displayName, overtimeHours]
+            properties:
+              membershipId: { type: string, format: uuid }
+              displayName: { type: string }
+              overtimeHours: { type: number, minimum: 0 }
 
     FinanceExpenseCategory:
       type: object
@@ -6595,6 +7633,101 @@ components:
       properties:
         success: { type: boolean, const: true }
         data: { $ref: '#/components/schemas/HrLeaveRequestList' }
+        requestId: { type: [string, 'null'] }
+    HrLeaveBalanceResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/HrLeaveBalance' }
+        requestId: { type: [string, 'null'] }
+
+    HrAttendanceRecordResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/HrAttendanceRecord' }
+        requestId: { type: [string, 'null'] }
+
+    HrAttendanceRecordListResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/HrAttendanceRecordList' }
+        requestId: { type: [string, 'null'] }
+
+    HrAttendanceImportResultResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/HrAttendanceImportResult' }
+        requestId: { type: [string, 'null'] }
+
+    HrOvertimeRequestResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/HrOvertimeRequest' }
+        requestId: { type: [string, 'null'] }
+
+    HrOvertimeRequestListResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/HrOvertimeRequestList' }
+        requestId: { type: [string, 'null'] }
+
+    HrEmployeeChangeResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/HrEmployeeChange' }
+        requestId: { type: [string, 'null'] }
+
+    HrEmployeeChangeListResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/HrEmployeeChangeList' }
+        requestId: { type: [string, 'null'] }
+
+    HrHeadcountReportResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/HrHeadcountReport' }
+        requestId: { type: [string, 'null'] }
+
+    HrLeaveSummaryReportResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/HrLeaveSummaryReport' }
+        requestId: { type: [string, 'null'] }
+
+    HrAttendanceSummaryReportResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/HrAttendanceSummaryReport' }
+        requestId: { type: [string, 'null'] }
+
+    HrOvertimeSummaryReportResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/HrOvertimeSummaryReport' }
         requestId: { type: [string, 'null'] }
 
     FinanceExpenseCategoryResponseEnvelope:
