@@ -12,9 +12,11 @@ import {
 } from 'class-validator';
 import {
     KNOWLEDGE_BASE_MEMBER_PERMISSIONS,
+    KNOWLEDGE_BASE_VISIBILITY_SCOPES,
     KNOWLEDGE_DOCUMENT_SOURCE_TYPES,
     KNOWLEDGE_DOCUMENT_VISIBILITY_SCOPES,
     KnowledgeBaseMemberPermission,
+    KnowledgeBaseVisibilityScope,
     KnowledgeDocumentSourceType,
     KnowledgeDocumentVisibilityScope,
 } from './knowledge.types';
@@ -52,6 +54,19 @@ export class CreateKnowledgeBaseDto {
     @IsString()
     @MaxLength(2000)
     description?: string | null;
+
+    /** 库级归属，默认 PRIVATE（仅成员可见）。DEPARTMENT 必填 departmentId，PROJECT 必填 projectId。 */
+    @IsOptional()
+    @IsIn(KNOWLEDGE_BASE_VISIBILITY_SCOPES)
+    visibilityScope?: KnowledgeBaseVisibilityScope;
+
+    @IsOptional()
+    @IsUUID()
+    departmentId?: string | null;
+
+    @IsOptional()
+    @IsUUID()
+    projectId?: string | null;
 }
 
 export class UpdateKnowledgeBaseDto {
@@ -65,6 +80,19 @@ export class UpdateKnowledgeBaseDto {
     @IsString()
     @MaxLength(2000)
     description?: string | null;
+
+    /** 修改库级归属；与锚点配套校验（DEPARTMENT 必填 departmentId，PROJECT 必填 projectId）。 */
+    @IsOptional()
+    @IsIn(KNOWLEDGE_BASE_VISIBILITY_SCOPES)
+    visibilityScope?: KnowledgeBaseVisibilityScope;
+
+    @IsOptional()
+    @IsUUID()
+    departmentId?: string | null;
+
+    @IsOptional()
+    @IsUUID()
+    projectId?: string | null;
 
     @IsInt()
     @Min(1)

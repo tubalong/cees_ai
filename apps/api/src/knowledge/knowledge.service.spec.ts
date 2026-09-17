@@ -33,6 +33,78 @@ describe('KnowledgeService', () => {
         });
     });
 
+    it('creates a department-scoped knowledge base with a valid anchor', async () => {
+        const prisma = createPrismaMock();
+        prisma.department.findFirst.mockResolvedValue({ id: 'dept-1' });
+        prisma.knowledgeBase.create.mockResolvedValue(
+            knowledgeBaseRecord({ visibilityScope: 'DEPARTMENT', departmentId: 'dept-1' }),
+        );
+        prisma.knowledgeBaseMember.create.mockResolvedValue(knowledgeBaseMemberRecord());
+        const service = createService(prisma, ['knowledge_base.create']);
+
+        const result = await service.createKnowledgeBase({
+            name: '市场部知识库',
+            visibilityScope: 'DEPARTMENT',
+            departmentId: 'dept-1',
+        });
+
+        expect(prisma.knowledgeBase.create).toHaveBeenCalledWith({
+            data: expect.objectContaining({
+                visibilityScope: 'DEPARTMENT',
+                departmentId: 'dept-1',
+                projectId: null,
+            }),
+            select: expect.anything(),
+        });
+        expect(result).toEqual(expect.objectContaining({ visibilityScope: 'DEPARTMENT', departmentId: 'dept-1' }));
+    });
+
+    it('creates a project-scoped knowledge base with a valid anchor', async () => {
+        const prisma = createPrismaMock();
+        prisma.project.findFirst.mockResolvedValue({ id: 'project-1' });
+        prisma.knowledgeBase.create.mockResolvedValue(
+            knowledgeBaseRecord({ visibilityScope: 'PROJECT', projectId: 'project-1' }),
+        );
+        prisma.knowledgeBaseMember.create.mockResolvedValue(knowledgeBaseMemberRecord());
+        const service = createService(prisma, ['knowledge_base.create']);
+
+        await service.createKnowledgeBase({
+            name: '项目知识库',
+            visibilityScope: 'PROJECT',
+            projectId: 'project-1',
+        });
+
+        expect(prisma.knowledgeBase.create).toHaveBeenCalledWith({
+            data: expect.objectContaining({
+                visibilityScope: 'PROJECT',
+                departmentId: null,
+                projectId: 'project-1',
+            }),
+            select: expect.anything(),
+        });
+    });
+
+    it('rejects a department-scoped knowledge base without a department anchor', async () => {
+        const prisma = createPrismaMock();
+        const service = createService(prisma, ['knowledge_base.create']);
+
+        await expect(service.createKnowledgeBase({ name: '无锚点部门库', visibilityScope: 'DEPARTMENT' }))
+            .rejects.toMatchObject({ response: expect.objectContaining({ code: 'KNOWLEDGE_BASE_SCOPE_INVALID' }) });
+        expect(prisma.knowledgeBase.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects an anchor department outside the current tenant', async () => {
+        const prisma = createPrismaMock();
+        prisma.department.findFirst.mockResolvedValue(null);
+        const service = createService(prisma, ['knowledge_base.create']);
+
+        await expect(service.createKnowledgeBase({
+            name: '外部部门库',
+            visibilityScope: 'DEPARTMENT',
+            departmentId: 'dept-x',
+        })).rejects.toMatchObject({ response: expect.objectContaining({ code: 'KNOWLEDGE_BASE_SCOPE_INVALID' }) });
+    });
+
     it('limits ordinary members to knowledge bases they joined', async () => {
         const prisma = createPrismaMock();
         prisma.knowledgeBaseMember.findMany.mockResolvedValue([{ knowledgeBaseId: KNOWLEDGE_BASE_ID }]);
@@ -46,6 +118,47 @@ describe('KnowledgeService', () => {
         expect(prisma.knowledgeBase.findMany).toHaveBeenCalledWith(expect.objectContaining({
             where: expect.objectContaining({ id: { in: [KNOWLEDGE_BASE_ID] } }),
         }));
+    });
+
+    it('shows TENANT-scoped knowledge bases to anchor readers who are not members', async () => {
+        const prisma = createPrismaMock();
+        // 非成员：成员表无记录，但库归属 TENANT 使全员成为虚拟 READER。
+        prisma.knowledgeBaseMember.findMany.mockResolvedValue([]);
+        prisma.knowledgeBase.findMany
+            .mockResolvedValueOnce([{ id: KNOWLEDGE_BASE_ID, visibilityScope: 'TENANT', departmentId: null, projectId: null }])
+            .mockResolvedValueOnce([knowledgeBaseRecord({ visibilityScope: 'TENANT' })]);
+        prisma.knowledgeBaseMember.count.mockResolvedValue(1);
+        const service = createService(prisma, ['knowledge_base.read']);
+
+        const result = await service.listKnowledgeBases({ limit: 20 });
+
+        expect(result.items).toHaveLength(1);
+        expect(result.items[0]).toEqual(expect.objectContaining({ id: KNOWLEDGE_BASE_ID, visibilityScope: 'TENANT' }));
+        // 第二次 findMany 是页面主查询，锚点库必须被并入可见范围。
+        expect(prisma.knowledgeBase.findMany).toHaveBeenNthCalledWith(2, expect.objectContaining({
+            where: expect.objectContaining({ id: { in: [KNOWLEDGE_BASE_ID] } }),
+        }));
+    });
+
+    it('shows DEPARTMENT-scoped knowledge bases to department tree members', async () => {
+        const prisma = createPrismaMock();
+        prisma.knowledgeBaseMember.findMany.mockResolvedValue([]);
+        // 锚点查询命中一个挂在子部门上的库，当前成员属于父部门。
+        prisma.knowledgeBase.findMany
+            .mockResolvedValueOnce([{ id: KNOWLEDGE_BASE_ID, visibilityScope: 'DEPARTMENT', departmentId: 'dept-child', projectId: null }])
+            .mockResolvedValueOnce([knowledgeBaseRecord({ visibilityScope: 'DEPARTMENT', departmentId: 'dept-child' })]);
+        prisma.tenantMembership.findFirst.mockResolvedValue({ departmentId: 'dept-root' });
+        prisma.department.findMany.mockResolvedValue([
+            { id: 'dept-root', parentId: null },
+            { id: 'dept-child', parentId: 'dept-root' },
+        ]);
+        prisma.knowledgeBaseMember.count.mockResolvedValue(1);
+        const service = createService(prisma, ['knowledge_base.read']);
+
+        const result = await service.listKnowledgeBases({ limit: 20 });
+
+        expect(result.items).toHaveLength(1);
+        expect(result.items[0]).toEqual(expect.objectContaining({ id: KNOWLEDGE_BASE_ID, visibilityScope: 'DEPARTMENT' }));
     });
 
     it('allows manage_all members to list all tenant knowledge bases', async () => {
@@ -114,6 +227,7 @@ describe('KnowledgeService', () => {
         const result = await service.listKnowledgeBasesForAssistant({
             tenantId: TENANT_ID,
             userId: USER_ID,
+            membershipId: CURRENT_MEMBERSHIP_ID,
             permissions: ['knowledge_base.read'],
         });
 
@@ -128,19 +242,40 @@ describe('KnowledgeService', () => {
         expect(result[1]).toEqual(expect.objectContaining({ id: OTHER_KNOWLEDGE_BASE_ID, myPermission: 'READER' }));
     });
 
-    it('returns no candidates when the user is not a member of any knowledge base', async () => {
+    it('labels anchor-only knowledge bases as READER for the assistant', async () => {
         const prisma = createPrismaMock();
         prisma.knowledgeBaseMember.findMany.mockResolvedValue([]);
+        prisma.knowledgeBase.findMany
+            .mockResolvedValueOnce([{ id: KNOWLEDGE_BASE_ID, visibilityScope: 'TENANT', departmentId: null, projectId: null }])
+            .mockResolvedValueOnce([knowledgeBaseRecord({ visibilityScope: 'TENANT' })]);
+        prisma.knowledgeBaseMember.count.mockResolvedValue(1);
         const service = createService(prisma, ['knowledge_base.read']);
 
         const result = await service.listKnowledgeBasesForAssistant({
             tenantId: TENANT_ID,
             userId: USER_ID,
+            membershipId: CURRENT_MEMBERSHIP_ID,
+            permissions: ['knowledge_base.read'],
+        });
+
+        expect(result).toEqual([expect.objectContaining({ id: KNOWLEDGE_BASE_ID, myPermission: 'READER' })]);
+    });
+
+    it('returns no candidates when the user is neither a member nor in any anchor group', async () => {
+        const prisma = createPrismaMock();
+        prisma.knowledgeBaseMember.findMany.mockResolvedValue([]);
+        // 锚点库查询（TENANT/部门树/项目）无命中。
+        prisma.knowledgeBase.findMany.mockResolvedValue([]);
+        const service = createService(prisma, ['knowledge_base.read']);
+
+        const result = await service.listKnowledgeBasesForAssistant({
+            tenantId: TENANT_ID,
+            userId: USER_ID,
+            membershipId: CURRENT_MEMBERSHIP_ID,
             permissions: ['knowledge_base.read'],
         });
 
         expect(result).toEqual([]);
-        expect(prisma.knowledgeBase.findMany).not.toHaveBeenCalled();
     });
 
     it('labels every candidate MANAGER for the assistant when manage_all shortcuts', async () => {
@@ -152,6 +287,7 @@ describe('KnowledgeService', () => {
         const result = await service.listKnowledgeBasesForAssistant({
             tenantId: TENANT_ID,
             userId: USER_ID,
+            membershipId: CURRENT_MEMBERSHIP_ID,
             permissions: ['knowledge_base.manage_all'],
         });
 
@@ -168,11 +304,52 @@ describe('KnowledgeService', () => {
         const result = await service.listKnowledgeBasesForAssistant({
             tenantId: TENANT_ID,
             userId: USER_ID,
+            membershipId: CURRENT_MEMBERSHIP_ID,
             permissions: ['knowledge_base.read_all'],
         });
 
         expect(prisma.knowledgeBaseMember.findMany).not.toHaveBeenCalled();
         expect(result).toEqual([expect.objectContaining({ id: KNOWLEDGE_BASE_ID, myPermission: 'READER' })]);
+    });
+
+    it('lets anchor readers open a TENANT-scoped knowledge base detail', async () => {
+        const prisma = createPrismaMock();
+        prisma.knowledgeBase.findFirst
+            .mockResolvedValueOnce(knowledgeBaseRecord({ visibilityScope: 'TENANT' }))
+            .mockResolvedValueOnce({ visibilityScope: 'TENANT', departmentId: null, projectId: null });
+        prisma.knowledgeBaseMember.findUnique.mockResolvedValue(null);
+        prisma.knowledgeBaseMember.count.mockResolvedValue(1);
+        const service = createService(prisma, ['knowledge_base.read']);
+
+        const result = await service.getKnowledgeBase(KNOWLEDGE_BASE_ID);
+
+        expect(result).toEqual(expect.objectContaining({ id: KNOWLEDGE_BASE_ID, visibilityScope: 'TENANT', memberCount: 1 }));
+    });
+
+    it('audits visibility scope changes when updating a knowledge base anchor', async () => {
+        const prisma = createPrismaMock();
+        prisma.knowledgeBase.findFirst
+            .mockResolvedValueOnce(knowledgeBaseRecord({ visibilityScope: 'PRIVATE' }))
+            .mockResolvedValueOnce(knowledgeBaseRecord({ visibilityScope: 'TENANT' }));
+        prisma.knowledgeBaseMember.findUnique.mockResolvedValue({ permission: 'MANAGER' });
+        prisma.knowledgeBase.updateMany.mockResolvedValue({ count: 1 });
+        prisma.knowledgeBaseMember.count.mockResolvedValue(1);
+        const service = createService(prisma, ['knowledge_base.read']);
+
+        await service.updateKnowledgeBase(KNOWLEDGE_BASE_ID, { visibilityScope: 'TENANT', version: 1 });
+
+        expect(prisma.knowledgeBase.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+            data: expect.objectContaining({ visibilityScope: 'TENANT', departmentId: null, projectId: null }),
+        }));
+        expect(prisma.auditLog.create).toHaveBeenCalledWith({
+            data: expect.objectContaining({
+                action: 'KNOWLEDGE_BASE_UPDATED',
+                metadata: {
+                    before: expect.objectContaining({ visibilityScope: 'PRIVATE', departmentId: null, projectId: null }),
+                    after: expect.objectContaining({ visibilityScope: 'TENANT', departmentId: null, projectId: null }),
+                },
+            }),
+        });
     });
 
     it('rejects an update with a stale version', async () => {
@@ -268,6 +445,18 @@ describe('KnowledgeService', () => {
             data: expect.objectContaining({ action: 'KNOWLEDGE_BASE_DELETED' }),
         });
         expect(deleteIndexesSpy).toHaveBeenCalledWith(TENANT_ID, USER_ID, KNOWLEDGE_BASE_ID);
+    });
+
+    it('rejects AI queries for anchor readers who are not real members', async () => {
+        const prisma = createPrismaMock();
+        prisma.knowledgeBase.findFirst.mockResolvedValue(knowledgeBaseRecord({ visibilityScope: 'TENANT' }));
+        prisma.knowledgeBaseMember.findUnique.mockResolvedValue(null);
+        const gateway = { answerKnowledge: jest.fn() };
+        const service = createService(prisma, ['knowledge_base.query'], gateway);
+
+        await expect(service.queryKnowledgeBase(KNOWLEDGE_BASE_ID, { query: '问题' }))
+            .rejects.toMatchObject({ response: expect.objectContaining({ code: 'KNOWLEDGE_BASE_NOT_FOUND' }) });
+        expect(gateway.answerKnowledge).not.toHaveBeenCalled();
     });
 
     it('queries a knowledge base with folded scope and records the query log', async () => {
@@ -551,9 +740,10 @@ function createPrismaMock(): Record<string, any> {
             delete: jest.fn(),
             count: jest.fn(),
         },
-        tenantMembership: { findFirst: jest.fn(), findMany: jest.fn() },
-        department: { findMany: jest.fn() },
-        projectMember: { findMany: jest.fn() },
+        tenantMembership: { findFirst: jest.fn().mockResolvedValue(null), findMany: jest.fn() },
+        department: { findFirst: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
+        project: { findFirst: jest.fn() },
+        projectMember: { findMany: jest.fn().mockResolvedValue([]) },
         knowledgeDocument: { findMany: jest.fn() },
         knowledgeQueryLog: { create: jest.fn() },
         auditLog: { create: jest.fn() },
@@ -568,6 +758,9 @@ function knowledgeBaseRecord(overrides: Record<string, unknown> = {}): Record<st
         tenantId: TENANT_ID,
         name: '产品知识库',
         description: '产品资料',
+        visibilityScope: 'PRIVATE',
+        departmentId: null,
+        projectId: null,
         createdBy: USER_ID,
         updatedBy: USER_ID,
         version: 1,

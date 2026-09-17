@@ -233,6 +233,7 @@ export type { KnowledgeBaseMemberListResponseEnvelope } from './models/Knowledge
 export { KnowledgeBaseMemberPermission } from './models/KnowledgeBaseMemberPermission';
 export type { KnowledgeBaseMemberResponseEnvelope } from './models/KnowledgeBaseMemberResponseEnvelope';
 export type { KnowledgeBaseResponseEnvelope } from './models/KnowledgeBaseResponseEnvelope';
+export { KnowledgeBaseVisibilityScope } from './models/KnowledgeBaseVisibilityScope';
 export type { KnowledgeDocument } from './models/KnowledgeDocument';
 export type { KnowledgeDocumentList } from './models/KnowledgeDocumentList';
 export type { KnowledgeDocumentListResponseEnvelope } from './models/KnowledgeDocumentListResponseEnvelope';

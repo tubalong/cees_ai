@@ -23,7 +23,7 @@ import { request as __request } from '../core/request';
 export class KnowledgeBaseService {
     /**
      * 查询当前成员可访问的知识库
-     * 普通成员只能看到自己加入的知识库，拥有 knowledge_base.manage_all 权限的成员可看到当前租户全部知识库。
+     * 普通成员看到自己加入的知识库与归属范围覆盖自己的知识库（TENANT 全员、DEPARTMENT 部门树、PROJECT 项目），拥有 knowledge_base.read_all 或 knowledge_base.manage_all 权限的成员可看到当前租户全部知识库。
      * @returns KnowledgeBaseListResponseEnvelope 知识库列表
      * @throws ApiError
      */
@@ -81,7 +81,7 @@ export class KnowledgeBaseService {
             body: requestBody,
             mediaType: 'application/json',
             errors: {
-                400: `请求字段校验失败`,
+                400: `请求字段校验失败或归属锚点无效（KNOWLEDGE_BASE_SCOPE_INVALID）`,
                 401: `登录状态无效或缺少有效租户成员身份`,
                 403: `缺少 knowledge_base.create 权限`,
             },
@@ -138,7 +138,7 @@ export class KnowledgeBaseService {
             body: requestBody,
             mediaType: 'application/json',
             errors: {
-                400: `请求字段校验失败或没有可修改字段`,
+                400: `请求字段校验失败、没有可修改字段或归属锚点无效（KNOWLEDGE_BASE_SCOPE_INVALID）`,
                 401: `登录状态无效或缺少有效租户成员身份`,
                 403: `缺少知识库 MANAGER 权限`,
                 404: `知识库不存在或当前成员无权访问`,
@@ -289,7 +289,7 @@ export class KnowledgeBaseService {
     }
     /**
      * 查询知识库文档
-     * 返回知识库内未删除文档的分页列表，包含处理状态；普通成员只能查看自己加入的知识库。
+     * 返回知识库内未删除文档的分页列表，包含处理状态；普通成员只能查看自己加入的知识库，归属人群（TENANT/部门树/项目）可按只读浏览。
      * @returns KnowledgeDocumentListResponseEnvelope 知识库文档列表
      * @throws ApiError
      */

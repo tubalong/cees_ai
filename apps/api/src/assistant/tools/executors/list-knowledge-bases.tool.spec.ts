@@ -34,6 +34,9 @@ describe('ListKnowledgeBasesTool', () => {
                 tenantId: 't-1',
                 name: '产品知识库',
                 description: '产品资料',
+                visibilityScope: 'PRIVATE',
+                departmentId: null,
+                projectId: null,
                 memberCount: 3,
                 createdBy: null,
                 updatedBy: null,
@@ -47,6 +50,9 @@ describe('ListKnowledgeBasesTool', () => {
                 tenantId: 't-1',
                 name: '公司制度库',
                 description: null,
+                visibilityScope: 'TENANT',
+                departmentId: null,
+                projectId: null,
                 memberCount: 8,
                 createdBy: null,
                 updatedBy: null,
@@ -73,6 +79,7 @@ describe('ListKnowledgeBasesTool', () => {
         expect(knowledgeService.listKnowledgeBasesForAssistant).toHaveBeenCalledWith({
             tenantId: 't-1',
             userId: 'u-1',
+            membershipId: 'm-1',
             permissions: ['knowledge_base.read'],
         });
         expect(result.resourceType).toBeNull();

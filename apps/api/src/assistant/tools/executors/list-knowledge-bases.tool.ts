@@ -43,6 +43,7 @@ export class ListKnowledgeBasesTool implements OnModuleInit {
         const candidates = await this.knowledgeService.listKnowledgeBasesForAssistant({
             tenantId: context.tenantId,
             userId: context.userId,
+            membershipId: context.membershipId,
             permissions: context.permissions,
         });
         // knowledge_base_id 是后续 save_to_knowledge 的参数引用，必须进模型上下文；
