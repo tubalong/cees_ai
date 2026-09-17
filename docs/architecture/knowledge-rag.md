@@ -292,8 +292,8 @@ PENDING -> PARSING -> PARSED -> INDEXING -> READY
 ```
 
 - 模型只输出 `citation_ids`，服务端把 ID 映射回真实来源（document / version / chunk / page / bbox / text），不允许模型编造文档 ID、页码或 URL；
-- 证据不足时返回 `grounded=false`、`insufficient_evidence=true`，不自由发挥；检索无结果时短路不调用模型；基于分数阈值的拒答延后到块 6；
-- 公开侧为同步 REST：`POST /knowledge-bases/{id}/query`（流式留到块 7 评估）；NestJS 折叠三层权限为 scope、调用 `answer`，成功写入 `KnowledgeQueryLog`（含知识库、grounded、耗时与 Token 用量）与审计，ai-service 不可用时统一映射 `503 KNOWLEDGE_QUERY_SERVICE_UNAVAILABLE` 并写失败审计；
+- 证据不足时返回 `grounded=false`、`insufficient_evidence=true`，不自由发挥；检索无结果时短路不调用模型；基于分数阈值的拒答尚未实现（原计划随块 6 落地，块 6 验收未纳入，待排期）；
+- 公开侧为同步 REST：`POST /knowledge-bases/{id}/query`（公开侧保持同步 REST，不做流式；对话工具链的引用以流式事件 `TurnStreamToolResultEvent.citations` 携带，块 7b 落地）；NestJS 折叠三层权限为 scope、调用 `answer`，成功写入 `KnowledgeQueryLog`（含知识库、grounded、耗时与 Token 用量）与审计，ai-service 不可用时统一映射 `503 KNOWLEDGE_QUERY_SERVICE_UNAVAILABLE` 并写失败审计；
 
 ## 6. 内部契约
 
