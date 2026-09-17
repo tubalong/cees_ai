@@ -51,6 +51,7 @@
 - 知识库归属锚点：`visibilityScope`（PRIVATE/DEPARTMENT/PROJECT/TENANT）+ `departmentId`/`projectId` 二选一互斥，锚点人群（部门树成员/项目成员/全员）动态计算为虚拟 `READER`（不物化成员行，只覆盖库级浏览）；创建/修改校验归属属于当前租户（`KNOWLEDGE_BASE_SCOPE_INVALID`）；迁移 `20260917065945_knowledge_base_visibility_scope`；
 - 公开知识库响应增加 `myPermission` 标注当前用户成员等级（`manage_all` 恒 MANAGER、成员等级优先、其余恒 READER），前端据此控制编辑/成员管理入口；
 - 桌面端「知识管理」页面：库列表与搜索、创建/修改（含归属表单：部门树/项目选择）、删除、成员管理（添加/改级/移除，创建者保留 MANAGER 不可降级移除）；页面入口按 `knowledge_base.read`、创建按 `knowledge_base.create`、编辑与成员管理按 `myPermission` 为 MANAGER（或 `manage_all`）。
+- 桌面端「文档管理」面板：文档列表（名称/处理状态/版本/可见范围/失败原因）、上传文档（拖动或点击选择 PDF、Word、Excel、PPT、CSV、Markdown、TXT、JSON 与图片，文件先直传 COS 登记文件对象再关联创建文档进入解析索引队列，文档名默认取文件名可改，可见范围 PRIVATE/TENANT 与转存一致）、失败重试；上传/重试按 `myPermission` 为 EDITOR 及以上（或 `manage_all`）开放，只读成员仅可浏览；存在处理中的文档时列表每 5 秒自动刷新，全部落定后停止。
 
 ## 2. 知识库可见范围
 
