@@ -1197,16 +1197,18 @@ export interface UploadSessionCompleted {
 }
 
 function readUploadSession(data: Record<string, unknown>): UploadSessionCreated {
-    const uploadUrl = (data.uploadUrl ?? data.putUrl ?? data.url) as string | undefined;
+    // 后端返回嵌套结构：upload: { method, url, headers }，fileId 为文件对象 ID；顶层字段为兼容回退。
+    const nested = (data.upload ?? {}) as Record<string, unknown>;
+    const uploadUrl = (nested.url ?? data.uploadUrl ?? data.putUrl ?? data.url) as string | undefined;
     if (!uploadUrl) throw new Error('上传会话响应缺少直传地址');
-    const rawHeaders = (data.uploadHeaders ?? data.headers ?? data.requiredHeaders ?? {}) as Record<string, unknown>;
+    const rawHeaders = (nested.headers ?? data.uploadHeaders ?? data.headers ?? data.requiredHeaders ?? {}) as Record<string, unknown>;
     const uploadHeaders: Record<string, string> = {};
     Object.entries(rawHeaders).forEach(([key, value]) => {
         if (typeof value === 'string') uploadHeaders[key] = value;
     });
     return {
-        uploadSessionId: String(data.id ?? data.uploadSessionId ?? ''),
-        fileObjectId: String(data.fileObjectId ?? data.fileId ?? ''),
+        uploadSessionId: String(data.uploadSessionId ?? data.id ?? ''),
+        fileObjectId: String(data.fileId ?? data.fileObjectId ?? ''),
         uploadUrl,
         uploadHeaders,
         expiresAt: typeof data.expiresAt === 'string' ? data.expiresAt : undefined,
