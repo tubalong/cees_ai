@@ -81,7 +81,7 @@ export type { CreateHrOvertimeRequestRequest } from './models/CreateHrOvertimeRe
 export type { CreateHrProfileRequest } from './models/CreateHrProfileRequest';
 export type { CreateKnowledgeBaseMemberRequest } from './models/CreateKnowledgeBaseMemberRequest';
 export type { CreateKnowledgeBaseRequest } from './models/CreateKnowledgeBaseRequest';
-export type { CreateKnowledgeDocumentRequest } from './models/CreateKnowledgeDocumentRequest';
+export { CreateKnowledgeDocumentRequest } from './models/CreateKnowledgeDocumentRequest';
 export type { CreateKnowledgeDocumentVersionRequest } from './models/CreateKnowledgeDocumentVersionRequest';
 export type { CreateLegalContractRequest } from './models/CreateLegalContractRequest';
 export type { CreateMeetingRequest } from './models/CreateMeetingRequest';

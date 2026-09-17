@@ -62,6 +62,28 @@ describe('KnowledgeService', () => {
         }));
     });
 
+    it('filters the list by a minimum member permission', async () => {
+        const prisma = createPrismaMock();
+        prisma.knowledgeBaseMember.findMany.mockResolvedValue([
+            { knowledgeBaseId: KNOWLEDGE_BASE_ID, permission: 'EDITOR' },
+            { knowledgeBaseId: OTHER_KNOWLEDGE_BASE_ID, permission: 'READER' },
+        ]);
+        prisma.knowledgeBase.findMany.mockResolvedValue([knowledgeBaseRecord()]);
+        prisma.knowledgeBaseMember.count.mockResolvedValue(1);
+        const service = createService(prisma, ['knowledge_base.read']);
+
+        const result = await service.listKnowledgeBases({ limit: 20, permission: 'EDITOR' });
+
+        expect(prisma.knowledgeBaseMember.findMany).toHaveBeenCalledWith(expect.objectContaining({
+            where: { tenantId: TENANT_ID, userId: USER_ID },
+            select: { knowledgeBaseId: true, permission: true },
+        }));
+        expect(prisma.knowledgeBase.findMany).toHaveBeenCalledWith(expect.objectContaining({
+            where: expect.objectContaining({ id: { in: [KNOWLEDGE_BASE_ID] } }),
+        }));
+        expect(result.items).toHaveLength(1);
+    });
+
     it('rejects an update with a stale version', async () => {
         const prisma = createPrismaMock();
         prisma.knowledgeBase.findFirst.mockResolvedValue(knowledgeBaseRecord());

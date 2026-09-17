@@ -4380,6 +4380,11 @@ paths:
           required: false
           description: 上一页返回的知识库 ID
           schema: { type: string, format: uuid }
+        - name: permission
+          in: query
+          required: false
+          description: 只返回当前用户达到该成员权限的知识库（转存目标库选择）；省略时按可见范围返回
+          schema: { $ref: '#/components/schemas/KnowledgeBaseMemberPermission' }
       responses:
         '200':
           description: 知识库列表
@@ -8139,16 +8144,25 @@ components:
     CreateKnowledgeDocumentRequest:
       type: object
       additionalProperties: false
-      required: [fileObjectId, name, visibilityScope]
+      required: [visibilityScope]
       properties:
         fileObjectId:
           type: string
           format: uuid
-          description: 已上传完成的文件对象 ID
+          description: 人工上传路径：已上传完成的文件对象 ID；与 sourceType/sourceId 二选一
+        sourceType:
+          type: string
+          enum: [FILE_OBJECT, DOCUMENT, MESSAGE]
+          description: 转存路径：来源类型（附件文件 / AI 生成文档 / 对话消息），与 sourceId 配套，二选一必填
+        sourceId:
+          type: string
+          format: uuid
+          description: 转存路径：来源资源 ID，与 sourceType 配套
         name:
           type: string
           minLength: 1
           maxLength: 200
+          description: 文档名称；转存路径下省略时沿用来源资源名称
         visibilityScope:
           $ref: '#/components/schemas/KnowledgeDocumentVisibilityScope'
         departmentId:

@@ -12,8 +12,10 @@ import {
 } from 'class-validator';
 import {
     KNOWLEDGE_BASE_MEMBER_PERMISSIONS,
+    KNOWLEDGE_DOCUMENT_SOURCE_TYPES,
     KNOWLEDGE_DOCUMENT_VISIBILITY_SCOPES,
     KnowledgeBaseMemberPermission,
+    KnowledgeDocumentSourceType,
     KnowledgeDocumentVisibilityScope,
 } from './knowledge.types';
 
@@ -22,6 +24,11 @@ export class ListKnowledgeBasesQueryDto {
     @IsString()
     @MaxLength(100)
     keyword?: string;
+
+    /** 只列出当前用户达到该成员权限的知识库（转存目标库选择）；省略时按可见范围返回。 */
+    @IsOptional()
+    @IsIn(KNOWLEDGE_BASE_MEMBER_PERMISSIONS)
+    permission?: KnowledgeBaseMemberPermission;
 
     @IsOptional()
     @Type(() => Number)
@@ -109,13 +116,26 @@ export class ListKnowledgeDocumentsQueryDto {
 }
 
 export class CreateKnowledgeDocumentDto {
+    /** 人工上传路径：已上传完成的文件对象 ID；与 sourceType/sourceId 二选一。 */
+    @IsOptional()
     @IsUUID()
-    fileObjectId!: string;
+    fileObjectId?: string;
 
+    /** 转存路径（块 7c）：来源类型，与 sourceId 配套。 */
+    @IsOptional()
+    @IsIn(KNOWLEDGE_DOCUMENT_SOURCE_TYPES)
+    sourceType?: KnowledgeDocumentSourceType;
+
+    /** 转存路径：来源资源 ID（附件 FileObject / AI 文档 / 对话消息）。 */
+    @IsOptional()
+    @IsUUID()
+    sourceId?: string;
+
+    @IsOptional()
     @IsString()
     @MinLength(1)
     @MaxLength(200)
-    name!: string;
+    name?: string;
 
     @IsIn(KNOWLEDGE_DOCUMENT_VISIBILITY_SCOPES)
     visibilityScope!: KnowledgeDocumentVisibilityScope;

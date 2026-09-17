@@ -8,6 +8,7 @@ import type { CreateKnowledgeDocumentRequest } from '../models/CreateKnowledgeDo
 import type { CreateKnowledgeDocumentVersionRequest } from '../models/CreateKnowledgeDocumentVersionRequest';
 import type { KnowledgeBaseListResponseEnvelope } from '../models/KnowledgeBaseListResponseEnvelope';
 import type { KnowledgeBaseMemberListResponseEnvelope } from '../models/KnowledgeBaseMemberListResponseEnvelope';
+import type { KnowledgeBaseMemberPermission } from '../models/KnowledgeBaseMemberPermission';
 import type { KnowledgeBaseMemberResponseEnvelope } from '../models/KnowledgeBaseMemberResponseEnvelope';
 import type { KnowledgeBaseResponseEnvelope } from '../models/KnowledgeBaseResponseEnvelope';
 import type { KnowledgeDocumentListResponseEnvelope } from '../models/KnowledgeDocumentListResponseEnvelope';
@@ -30,6 +31,7 @@ export class KnowledgeBaseService {
         keyword,
         limit = 20,
         cursor,
+        permission,
     }: {
         /**
          * 按知识库名称或说明模糊搜索
@@ -43,6 +45,10 @@ export class KnowledgeBaseService {
          * 上一页返回的知识库 ID
          */
         cursor?: string,
+        /**
+         * 只返回当前用户达到该成员权限的知识库（转存目标库选择）；省略时按可见范围返回
+         */
+        permission?: KnowledgeBaseMemberPermission,
     }): CancelablePromise<KnowledgeBaseListResponseEnvelope> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -51,6 +57,7 @@ export class KnowledgeBaseService {
                 'keyword': keyword,
                 'limit': limit,
                 'cursor': cursor,
+                'permission': permission,
             },
             errors: {
                 400: `分页游标无效或请求参数校验失败`,

@@ -5,7 +5,7 @@
 ## 知识库
 
 ```text
-GET    /knowledge-bases?keyword={keyword}&limit={limit}&cursor={cursor}
+GET    /knowledge-bases?keyword={keyword}&limit={limit}&cursor={cursor}&permission={permission}
 POST   /knowledge-bases
 GET    /knowledge-bases/{knowledgeBaseId}
 PATCH  /knowledge-bases/{knowledgeBaseId}
@@ -13,7 +13,7 @@ DELETE /knowledge-bases/{knowledgeBaseId}?version={version}
 POST   /knowledge-bases/{knowledgeBaseId}/query
 ```
 
-创建知识库时，当前登录用户自动获得 `MANAGER`。列表普通成员只返回自己加入的知识库；`knowledge_base.manage_all` 可以查询当前租户全部知识库。
+创建知识库时，当前登录用户自动获得 `MANAGER`。列表普通成员只返回自己加入的知识库；`knowledge_base.manage_all` 可以查询当前租户全部知识库。`permission` 可选，传入 `READER`/`EDITOR`/`MANAGER` 时只返回当前用户达到该成员权限的知识库（转存目标库选择用）。
 
 ## 知识库成员
 
@@ -56,6 +56,18 @@ POST /knowledge-bases/{knowledgeBaseId}/documents/{documentId}/retry
 ```
 
 `fileObjectId` 来自文件上传接口返回的对象 ID，上传走文件模块、再关联为知识库文档。同一个文件对象只能作为一个文档版本的内容源，重复关联返回 `KNOWLEDGE_FILE_OBJECT_IN_USE`。
+
+转存路径（把附件、AI 生成文档或对话消息存入知识库）请求示例：
+
+```json
+{
+  "sourceType": "MESSAGE",
+  "sourceId": "90000000-0000-0000-0000-000000000001",
+  "visibilityScope": "TENANT"
+}
+```
+
+`sourceType` 为 `FILE_OBJECT`（附件文件）/ `DOCUMENT`（AI 生成文档）/ `MESSAGE`（对话消息），与 `sourceId` 配套；`fileObjectId` 与 `sourceType`+`sourceId` 只能二选一。转存先把来源物化为文件快照，再进入与人工上传相同的解析→索引链路；同一来源（sourceType+sourceId）只能存入一个知识库，重复转存到同一知识库追加新版本，转存到其他知识库返回 `KNOWLEDGE_SOURCE_ALREADY_SAVED`。`name` 省略时沿用来源资源名称。
 
 文档创建后立即进入后台处理队列，状态机为 `PENDING -> PARSING -> PARSED -> INDEXING -> READY`，失败置 `FAILED`。可重试错误自动回 `PENDING` 重试，达到上限（默认 3 次）后置 `FAILED`，此时可调用 retry 接口手动重试。文档列表返回当前版本的可见范围、版本号与最新处理状态。
 
@@ -107,14 +119,16 @@ POST /knowledge-bases/{knowledgeBaseId}/query
 
 | 字段 | 适用接口 | 说明 |
 | --- | --- | --- |
-| `name` | 创建、修改 | 知识库名称，1 到 200 个字符；服务端会去除首尾空白 |
+| `name` | 知识库创建、修改；文档创建 | 1 到 200 个字符；服务端会去除首尾空白；文档转存路径下省略时沿用来源资源名称 |
 | `description` | 创建、修改 | 知识库说明，最多 2000 个字符；空字符串会规范化为 `null` |
 | `version` | 修改、删除 | 当前知识库版本，修改成功后递增 |
 | `keyword` | 列表 | 按名称（知识库含说明）不区分大小写搜索 |
 | `limit` | 列表 | 每页 1 到 100 条，默认 20 |
 | `cursor` | 列表 | 上一页返回的 UUID 游标 |
-| `permission` | 成员添加、修改 | `READER`、`EDITOR` 或 `MANAGER` |
-| `fileObjectId` | 文档创建、新版本 | 文件对象 UUID，必须属于当前租户且未删除 |
+| `permission` | 成员添加、修改；知识库列表过滤 | `READER`、`EDITOR` 或 `MANAGER` |
+| `fileObjectId` | 文档创建（人工上传）、新版本 | 文件对象 UUID，必须属于当前租户且未删除；与 `sourceType`/`sourceId` 二选一 |
+| `sourceType` | 文档创建（转存） | `FILE_OBJECT`、`DOCUMENT` 或 `MESSAGE`，与 `sourceId` 配套 |
+| `sourceId` | 文档创建（转存） | 来源资源 UUID（附件文件 / AI 生成文档 / 对话消息） |
 | `visibilityScope` | 文档创建、新版本 | `PRIVATE`、`DEPARTMENT`、`PROJECT` 或 `TENANT` |
 | `departmentId` | 文档创建、新版本 | `DEPARTMENT` 时必填，服务端校验属于当前租户 |
 | `projectId` | 文档创建、新版本 | `PROJECT` 时必填，服务端校验属于当前租户 |
@@ -143,6 +157,14 @@ POST /knowledge-bases/{knowledgeBaseId}/query
 | `KNOWLEDGE_BASE_OWNER_REQUIRED` | 创建者不能降级或移除 |
 | `KNOWLEDGE_BASE_LAST_MANAGER` | 不能移除最后一名 MANAGER |
 | `KNOWLEDGE_DOCUMENT_NOT_FOUND` | 文档不存在、已删除或不属于该知识库 |
+| `KNOWLEDGE_DOCUMENT_SOURCE_REQUIRED` | 必须提供 `fileObjectId`，或 `sourceType` + `sourceId` 之一 |
+| `KNOWLEDGE_DOCUMENT_SOURCE_INCOMPLETE` | `sourceType` 与 `sourceId` 必须同时提供 |
+| `KNOWLEDGE_DOCUMENT_SOURCE_AMBIGUOUS` | `fileObjectId` 与 `sourceType`/`sourceId` 只能二选一 |
+| `KNOWLEDGE_SOURCE_ALREADY_SAVED` | 来源已存入其他知识库，一份来源只能存一个知识库 |
+| `KNOWLEDGE_SOURCE_DOCUMENT_NOT_FOUND` | 转存的 AI 文档不存在或无权访问 |
+| `KNOWLEDGE_SOURCE_MESSAGE_NOT_FOUND` | 转存的对话消息不存在或无权访问 |
+| `KNOWLEDGE_SOURCE_MESSAGE_INVALID` | 该消息类型不支持转存（仅用户或助手消息） |
+| `KNOWLEDGE_BASE_MEMBER_PERMISSION_DENIED` | 成员权限不满足操作要求（转存要求 `EDITOR`） |
 | `KNOWLEDGE_DOCUMENT_RETRY_INVALID` | 只有 `FAILED` 状态的文档可以重试 |
 | `KNOWLEDGE_DOCUMENT_SCOPE_INVALID` | 可见范围缺少部门/项目，或部门/项目不属于当前租户 |
 | `KNOWLEDGE_FILE_OBJECT_NOT_FOUND` | 文件不存在、非当前租户或已删除 |

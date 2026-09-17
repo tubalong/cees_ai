@@ -44,6 +44,10 @@ export type KnowledgeDocumentStatus = typeof KNOWLEDGE_DOCUMENT_STATUSES[number]
 export const KNOWLEDGE_DOCUMENT_VISIBILITY_SCOPES = ['PRIVATE', 'DEPARTMENT', 'PROJECT', 'TENANT'] as const;
 export type KnowledgeDocumentVisibilityScope = typeof KNOWLEDGE_DOCUMENT_VISIBILITY_SCOPES[number];
 
+/** 转存来源类型（块 7c）：附件文件 / AI 生成文档 / 对话消息。 */
+export const KNOWLEDGE_DOCUMENT_SOURCE_TYPES = ['FILE_OBJECT', 'DOCUMENT', 'MESSAGE'] as const;
+export type KnowledgeDocumentSourceType = typeof KNOWLEDGE_DOCUMENT_SOURCE_TYPES[number];
+
 export interface KnowledgeDocumentResult {
     id: string;
     tenantId: string;

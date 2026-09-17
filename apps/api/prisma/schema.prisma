@@ -83,6 +83,13 @@ enum KnowledgeDocumentStatus {
   FAILED
 }
 
+/// 转存来源锚定类型（块 7c）：附件文件 / AI 生成文档 / 对话消息；人工上传文档为空。
+enum KnowledgeDocumentSourceType {
+  FILE_OBJECT
+  DOCUMENT
+  MESSAGE
+}
+
 enum DataScope {
   SELF
   DEPARTMENT
@@ -1438,6 +1445,10 @@ model KnowledgeDocument {
   tenantId         String                  @map("tenant_id") @db.Uuid
   knowledgeBaseId  String                  @map("knowledge_base_id") @db.Uuid
   fileObjectId     String                  @map("file_object_id") @db.Uuid
+  /// 转存来源锚定（块 7c）；人工上传文档为空。同源重复转存按该锚定追加新版本。
+  sourceType       KnowledgeDocumentSourceType? @map("source_type")
+  /// 来源资源 ID：附件 FileObject ID / AI 文档 ID / 对话消息 ID，与 sourceType 配套。
+  sourceId         String?                      @map("source_id") @db.Uuid
   name             String
   status           KnowledgeDocumentStatus @default(PENDING)
   currentVersionId String?                 @map("current_version_id") @db.Uuid
@@ -1452,6 +1463,7 @@ model KnowledgeDocument {
   version          Int                     @default(1)
 
   @@index([tenantId, knowledgeBaseId])
+  @@index([tenantId, sourceType, sourceId])
   @@map("documents")
 }
 

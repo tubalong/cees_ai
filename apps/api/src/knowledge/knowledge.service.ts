@@ -90,7 +90,9 @@ export class KnowledgeService {
         const context = this.tenantContext.require();
         const visibleIds = context.permissions.includes('knowledge_base.manage_all')
             ? undefined
-            : await this.listVisibleKnowledgeBaseIds(context.tenantId, context.userId);
+            : query.permission
+                ? await this.listKnowledgeBaseIdsWithPermission(context.tenantId, context.userId, query.permission)
+                : await this.listVisibleKnowledgeBaseIds(context.tenantId, context.userId);
         if (visibleIds && visibleIds.length === 0) return { items: [], nextCursor: null };
         if (query.cursor) {
             const cursorExists = await this.prisma.knowledgeBase.findFirst({
@@ -380,6 +382,41 @@ export class KnowledgeService {
         const context = this.tenantContext.require();
         const knowledgeBase = await this.requireKnowledgeBase(context.tenantId, knowledgeBaseId);
         await this.requireKnowledgeBasePermission(knowledgeBaseId, minimumPermission);
+        return knowledgeBase;
+    }
+
+    /**
+     * 显式上下文的成员权限校验（后台工具执行用，不依赖 AsyncLocalStorage）：
+     * manage_all 短路放行，否则按成员表权限等级比对；语义与 requireKnowledgeBaseAccess 一致。
+     */
+    async assertKnowledgeBaseMemberPermission(input: {
+        tenantId: string;
+        userId: string;
+        permissions: string[];
+        knowledgeBaseId: string;
+        minimumPermission: KnowledgeBaseMemberPermission;
+    }): Promise<KnowledgeBaseAccess> {
+        const knowledgeBase = await this.requireKnowledgeBase(input.tenantId, input.knowledgeBaseId);
+        if (input.permissions.includes('knowledge_base.manage_all')) return knowledgeBase;
+        const member = await this.prisma.knowledgeBaseMember.findUnique({
+            where: {
+                tenantId_knowledgeBaseId_userId: {
+                    tenantId: input.tenantId,
+                    knowledgeBaseId: input.knowledgeBaseId,
+                    userId: input.userId,
+                },
+            },
+            select: { permission: true },
+        });
+        if (!member) throw this.knowledgeBaseNotFound();
+        if (!isKnowledgeBaseMemberPermission(member.permission)
+            || permissionRank[member.permission] < permissionRank[input.minimumPermission]) {
+            throw new ForbiddenException({
+                code: 'KNOWLEDGE_BASE_MEMBER_PERMISSION_DENIED',
+                message: '知识库成员权限不足',
+                details: { required: input.minimumPermission },
+            });
+        }
         return knowledgeBase;
     }
 
@@ -683,6 +720,22 @@ export class KnowledgeService {
             select: { knowledgeBaseId: true },
         });
         return memberships.map((membership) => membership.knowledgeBaseId);
+    }
+
+    /** 成员权限达到最低等级的知识库 ID（转存目标库选择过滤，块 7c）。 */
+    private async listKnowledgeBaseIdsWithPermission(
+        tenantId: string,
+        userId: string,
+        minimumPermission: KnowledgeBaseMemberPermission,
+    ): Promise<string[]> {
+        const memberships = await this.prisma.knowledgeBaseMember.findMany({
+            where: { tenantId, userId },
+            select: { knowledgeBaseId: true, permission: true },
+        });
+        return memberships
+            .filter((membership) => isKnowledgeBaseMemberPermission(membership.permission)
+                && permissionRank[membership.permission] >= permissionRank[minimumPermission])
+            .map((membership) => membership.knowledgeBaseId);
     }
 
     private async requireKnowledgeBase(tenantId: string, knowledgeBaseId: string): Promise<KnowledgeBaseRecord> {
