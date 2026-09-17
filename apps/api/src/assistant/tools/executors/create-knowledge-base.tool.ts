@@ -1,0 +1,108 @@
+import { Injectable, OnModuleInit } from '@nestjs/common';
+import { KnowledgeService } from '../../../knowledge/knowledge.service';
+import { ToolRegistryService } from '../tool-registry';
+import type { ToolDefinition, ToolExecutionContext, ToolExecutionResult } from '../tool.types';
+
+const MAX_NAME_LENGTH = 200;
+const MAX_DESCRIPTION_LENGTH = 2000;
+
+/**
+ * create_knowledge_base 工具执行器（块 7c 扩展）：在用户明确要求创建知识库时，
+ * 以用户确认的名称与说明创建知识库（创建者自动成为 MANAGER）。只做参数校验与
+ * 业务调用；权限、批准与额度由 ToolRegistry/ToolPolicy 统一处理，禁止在执行器内
+ * 重复实现。红线写入描述：无明确创建意图不调用、名称与说明须经用户确认。
+ */
+@Injectable()
+export class CreateKnowledgeBaseTool implements OnModuleInit {
+    constructor(
+        private readonly registry: ToolRegistryService,
+        private readonly knowledgeService: KnowledgeService,
+    ) {}
+
+    onModuleInit(): void {
+        this.registry.register(this.definition);
+    }
+
+    private readonly definition: ToolDefinition = {
+        name: 'create_knowledge_base',
+        version: '1.0.0',
+        displayName: '创建知识库',
+        description: '在当前用户所属租户内创建新的知识库，创建后当前用户自动成为该库管理员（MANAGER）。'
+            + '仅在用户明确要求创建/新建知识库时调用；name 与 description 必须来自用户表达或经用户确认，'
+            + '不得替用户编造。创建成功后可用 save_to_knowledge 把对话内容存入新库。',
+        parameters: {
+            type: 'object',
+            properties: {
+                name: {
+                    type: 'string',
+                    description: '知识库名称，必须经用户确认',
+                },
+                description: {
+                    type: 'string',
+                    description: '知识库说明，可选；省略时为空',
+                },
+            },
+            required: ['name'],
+            additionalProperties: false,
+        },
+        requiredPermissions: ['knowledge_base.create'],
+        riskLevel: 'WRITE',
+        validate: validateCreateKnowledgeBaseArguments,
+        execute: (context, input) => this.executeCreate(context, input),
+    };
+
+    private async executeCreate(
+        context: ToolExecutionContext,
+        input: Record<string, unknown>,
+    ): Promise<ToolExecutionResult> {
+        const knowledgeBase = await this.knowledgeService.createKnowledgeBaseForAssistant({
+            tenantId: context.tenantId,
+            userId: context.userId,
+            membershipId: context.membershipId,
+            requestId: context.requestId,
+            name: input.name as string,
+            description: input.description as string | undefined,
+        });
+        // knowledge_base_id 是后续 save_to_knowledge 的参数引用，必须进模型上下文；
+        // 其余只放业务内容（名称），供用户确认创建结果。
+        return {
+            resourceType: null,
+            resourceId: null,
+            summary: JSON.stringify({
+                type: 'knowledge_base_created',
+                knowledge_base_id: knowledgeBase.id,
+                name: knowledgeBase.name,
+                instruction: '知识库已创建，当前用户是该库管理员。'
+                    + '用户想继续把对话内容存入新库时调用 save_to_knowledge 并传对应 knowledge_base_id。',
+            }),
+        };
+    }
+}
+
+/** 校验并解析模型参数；非法输入抛错，由 ToolPolicy 统一映射为 INVALID_ARGUMENTS 拒绝。 */
+function validateCreateKnowledgeBaseArguments(input: unknown): Record<string, unknown> {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) {
+        throw new Error('工具参数必须为对象');
+    }
+    const raw = input as Record<string, unknown>;
+
+    if (typeof raw.name !== 'string' || raw.name.trim().length === 0) {
+        throw new Error('name 必须是非空字符串');
+    }
+    if (raw.name.length > MAX_NAME_LENGTH) {
+        throw new Error(`name 不能超过 ${MAX_NAME_LENGTH} 字符`);
+    }
+    const parsed: Record<string, unknown> = { name: raw.name.trim() };
+
+    if (raw.description !== undefined && raw.description !== null) {
+        if (typeof raw.description !== 'string') {
+            throw new Error('description 必须是字符串');
+        }
+        if (raw.description.length > MAX_DESCRIPTION_LENGTH) {
+            throw new Error(`description 不能超过 ${MAX_DESCRIPTION_LENGTH} 字符`);
+        }
+        const trimmed = raw.description.trim();
+        if (trimmed.length > 0) parsed.description = trimmed;
+    }
+    return parsed;
+}

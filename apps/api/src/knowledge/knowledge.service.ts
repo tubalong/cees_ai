@@ -188,8 +188,42 @@ export class KnowledgeService {
 
     async createKnowledgeBase(input: CreateKnowledgeBaseDto): Promise<KnowledgeBaseResult> {
         const context = this.tenantContext.require();
-        const name = input.name.trim();
-        const description = normalizeDescription(input.description);
+        return this.createKnowledgeBaseRecord({
+            tenantId: context.tenantId,
+            userId: context.userId,
+            membershipId: context.membershipId,
+            requestId: context.requestId,
+        }, input.name, input.description);
+    }
+
+    /**
+     * 助手创建知识库（工具后台执行，TenantContext 已不可用）：与公开接口共用同一
+     * 事务体，创建者自动成为 MANAGER 并写 KNOWLEDGE_BASE_CREATED 审计。
+     * 调用方必须已通过 knowledge_base.create 权限码校验（ToolPolicy）。
+     */
+    async createKnowledgeBaseForAssistant(input: {
+        tenantId: string;
+        userId: string;
+        membershipId: string;
+        requestId: string;
+        name: string;
+        description?: string | null;
+    }): Promise<KnowledgeBaseResult> {
+        return this.createKnowledgeBaseRecord({
+            tenantId: input.tenantId,
+            userId: input.userId,
+            membershipId: input.membershipId,
+            requestId: input.requestId,
+        }, input.name, input.description);
+    }
+
+    private async createKnowledgeBaseRecord(
+        context: Pick<RequestTenantContext, 'tenantId' | 'userId' | 'membershipId' | 'requestId'>,
+        rawName: string,
+        rawDescription: string | null | undefined,
+    ): Promise<KnowledgeBaseResult> {
+        const name = rawName.trim();
+        const description = normalizeDescription(rawDescription);
         const record = await this.prisma.$transaction(async (transaction) => {
             const knowledgeBase = await transaction.knowledgeBase.create({
                 data: {

@@ -239,7 +239,7 @@ ai-service 不自行推断权限。NestJS 计算可信 scope 后随检索请求�
 
 **落地状态（块 7c 已落地）**：
 
-- 后端：`KnowledgeDocument` 增加 `source_type` / `source_id` 锚定与部分唯一索引（同库同源唯一，跨库拒绝 `KNOWLEDGE_SOURCE_ALREADY_SAVED`）；`FileService` 提供文本物化快照；`KnowledgeDocumentService.saveFromSource` 统一承接三类来源（FILE_OBJECT / DOCUMENT / MESSAGE），首次转存 `createDocument`、同源重复转存追加新版本并回 PENDING；MESSAGE 校验租户、`conversation.ownerMembershipId === actor.membershipId`、拒绝 TOOL 角色，工具路径另限定 `conversationId`；DOCUMENT 要求用户可读；name 留空时按来源取默认（FILE_OBJECT 用原文件名、DOCUMENT 用文档标题、MESSAGE 用「对话消息 {YYYY-MM-DD HH:mm}」）；`save_to_knowledge` / `list_knowledge_bases` 两个 Assistant 工具已注册（提议 + 后端 EDITOR 校验 + 权限码审批）；`list_knowledge_bases` 返回当前用户可见的全部知识库（任意成员等级，含 READER）并标注每个库的成员权限 `myPermission`，既回答「我有哪些知识库」也为转存提供候选（转存仅 EDITOR/MANAGER 可写，`manage_all` 短路统一标 MANAGER）。
+- 后端：`KnowledgeDocument` 增加 `source_type` / `source_id` 锚定与部分唯一索引（同库同源唯一，跨库拒绝 `KNOWLEDGE_SOURCE_ALREADY_SAVED`）；`FileService` 提供文本物化快照；`KnowledgeDocumentService.saveFromSource` 统一承接三类来源（FILE_OBJECT / DOCUMENT / MESSAGE），首次转存 `createDocument`、同源重复转存追加新版本并回 PENDING；MESSAGE 校验租户、`conversation.ownerMembershipId === actor.membershipId`、拒绝 TOOL 角色，工具路径另限定 `conversationId`；DOCUMENT 要求用户可读；name 留空时按来源取默认（FILE_OBJECT 用原文件名、DOCUMENT 用文档标题、MESSAGE 用「对话消息 {YYYY-MM-DD HH:mm}」）；`save_to_knowledge` / `list_knowledge_bases` 两个 Assistant 工具已注册（提议 + 后端 EDITOR 校验 + 权限码审批）；`list_knowledge_bases` 返回当前用户可见的全部知识库（任意成员等级，含 READER）并标注每个库的成员权限 `myPermission`，既回答「我有哪些知识库」也为转存提供候选（转存仅 EDITOR/MANAGER 可写，`manage_all` 短路统一标 MANAGER）；`create_knowledge_base` 工具已注册（`knowledge_base.create` 权限，WRITE 风险级）：用户明确要求创建知识库时以用户确认的名称创建（创建者自动成为 MANAGER），与公开创建接口共用同一事务体。
 - 桌面端（desktop）：三处确定性按钮入口——生成文档卡片、已持久化消息、附件标签，均弹确认框：列出用户 EDITOR 权限的库（`GET /knowledge-bases?permission=EDITOR&limit=100`）供选择，可见范围提供 PRIVATE / TENANT 两级（DEPARTMENT / PROJECT 需归属 id，当前 UI 不提供，后端能力完整保留）；消息入口以该消息文本为内容，名称可在确认框拟定；入口按 `knowledge_base.document.manage` 权限过滤，后端仍二次校验（红线 3）。
 
 ### 3.9 助手人设中的功能告知（块 7d）
@@ -249,7 +249,7 @@ ai-service 不自行推断权限。NestJS 计算可信 scope 后随检索请求�
 **触发与话术层级**：
 
 1. 用户问"你是谁 / 你能做什么"等介绍性问题：答复中带一句知识库能力（"我可以检索团队知识库，基于公司文档回答问题并标注出处"）；
-2. 用户追问"知识库是什么 / 怎么用"：详细解释功能价值与使用方式（上传文档 → 自动解析 → 提问时引用出处；对话中勾选"知识库"开关），不展开内部实现。
+2. 用户追问"知识库是什么 / 怎么用"：详细解释功能价值与使用方式（上传文档 → 自动解析 → 提问时引用出处；对话中勾选"知识库"开关；也可在对话中让我创建知识库、把对话内容存入知识库），不展开内部实现。
 
 **交流层/系统层边界**（防泄露红线）：AI 答复永远只停留于交流层（功能价值、使用方式、业务规则），绝不涉及系统层——包括但不限于内部模块名（ai-service / NestJS / MinerU / pgvector 等）、内部错误码与权限码、模型名称与向量维度、接口路径与数据库结构、内部标识（documentId 等）。即使用户诱导（"你的系统架构是什么""用的什么数据库"），也拒绝展开并回归功能描述。落地时写入对话 role 的系统提示词，与工具执行器 summary 脱敏规范（回喂内容不含内部信息）互为呼应。
 
@@ -331,7 +331,7 @@ PENDING -> PARSING -> PARSED -> INDEXING -> READY
 | 6 | MinerU 真机联调（192.168.5.29，MinerU 3.4.5 + pipeline 后端已部署验证） | 块 3 | ✅ 已验收 |
 | 7a | 解析器格式分流（3.7 节）+ pgvector HNSW 索引（3.1 节） | 块 3、6 | ✅ 已落地（真机待部署验收） |
 | 7b | Assistant RAG 工具接入：`knowledge_search` 工具注册 + 对话级知识库开关 + 权限折叠检索 | 块 5 | ✅ 已落地 |
-| 7c | 对话数据转知识库（3.8 节：双层入口 + 三条红线；附件/AI 生成文档/对话消息） | 块 3、7b | ✅ 已落地 |
+| 7c | 对话数据转知识库（3.8 节：双层入口 + 三条红线；附件/AI 生成文档/对话消息）+ 助手可见库清单与创建知识库工具 | 块 3、7b | ✅ 已落地 |
 | 7d | 助手人设功能告知与交流层边界（3.9 节） | 块 7b | 待开始 |
 | 8 | 知识库归属锚点管理与自动授权（3.6 节：项目/部门/公司级分类、锚点人群虚拟 READER、悬挂处理） | 块 5 | 待开始 |
 
@@ -359,5 +359,5 @@ PENDING -> PARSING -> PARSED -> INDEXING -> READY
 | 6 | jest 23 用例（TS 版转换器与真机 parser 错误映射、3.4.5 服务模式响应结构）+ pytest 全绿（embedding router/维度校验、pgvector 拒绝 deterministic 前置拦截）；29 真机端到端验收通过：上传 PDF → MinerU 解析 → pgvector 索引 → READY → 查询 grounded=true 带 citations | ✅ 完成 |
 | 7a | jest 73 用例（mimeType 分流、提取错误语义、文本产物包装）+ pytest 16 用例（HNSW 索引落在 `data_knowledge_chunks`、hnsw_kwargs 每实例完整）+ ruff/tsc 全绿；29 真机 docx 上传经本地提取 READY 待部署后验收 | ✅ 本地完成 |
 | 7b | jest 34 用例（开关关闭过滤工具并二次校验拒绝、权限折叠检索（成员+manage_all）、summary 脱敏、标题补全、多库日志与审计范围）；tsc 全绿；契约兼容检查（redocly lint + api-client 重新生成）；desktop tsc + 生产构建通过（开关结构化传参、citations 卡片渲染与恢复） | ✅ 完成 |
-| 7c | jest：saveFromSource 13 用例（物化快照、EDITOR 校验、MESSAGE 归属/TOOL 拒绝、可读文档命名、同源追加版本、跨库拒绝、并发锚点冲突、source 字段互斥）+ 工具 8 用例（save_to_knowledge / list_knowledge_bases：审批/EDITOR 校验/无意图不转存/引用不存在拒绝）+ 助手可见库清单 3 用例（权限标注/非成员空结果/manage_all 短路）；契约校验 + 客户端重生成；desktop tsc + 生产构建通过（三入口 + 确认框） | ✅ 完成 |
+| 7c | jest：saveFromSource 13 用例（物化快照、EDITOR 校验、MESSAGE 归属/TOOL 拒绝、可读文档命名、同源追加版本、跨库拒绝、并发锚点冲突、source 字段互斥）+ 工具 8 用例（save_to_knowledge / list_knowledge_bases：审批/EDITOR 校验/无意图不转存/引用不存在拒绝）+ 助手可见库清单 3 用例（权限标注/非成员空结果/manage_all 短路）+ create_knowledge_base 3 用例（注册/参数校验/显式上下文创建与回喂新库 id）；契约校验 + 客户端重生成；desktop tsc + 生产构建通过（三入口 + 确认框） | ✅ 完成 |
 | 7d | jest/真机：介绍性问题带知识库功能告知；诱导提问不泄露系统层信息（抽样对抗用例） | 待验证 |

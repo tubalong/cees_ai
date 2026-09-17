@@ -17,6 +17,7 @@ import { ToolRegistryService } from './tools/tool-registry';
 import { ToolPolicyService } from './tools/tool-policy.service';
 import { GenerateDocumentTool } from './tools/executors/generate-document.tool';
 import { GenerateImageTool } from './tools/executors/generate-image.tool';
+import { CreateKnowledgeBaseTool } from './tools/executors/create-knowledge-base.tool';
 import { KnowledgeSearchTool } from './tools/executors/knowledge-search.tool';
 import { ListKnowledgeBasesTool } from './tools/executors/list-knowledge-bases.tool';
 import { SaveToKnowledgeTool } from './tools/executors/save-to-knowledge.tool';
@@ -43,6 +44,7 @@ import { WebSearchTool } from './tools/executors/web-search.tool';
     TurnRecoveryService,
     GenerateDocumentTool,
     GenerateImageTool,
+    CreateKnowledgeBaseTool,
     KnowledgeSearchTool,
     ListKnowledgeBasesTool,
     SaveToKnowledgeTool,
