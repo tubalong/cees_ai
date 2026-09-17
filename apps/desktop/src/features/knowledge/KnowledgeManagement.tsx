@@ -290,13 +290,14 @@ export default function KnowledgeManagement({ authContext, onSessionExpired }: K
         }
     };
 
-    const submitUpload = async ({ file, name, visibilityScope }: KnowledgeDocumentUploadInput): Promise<void> => {
+    const submitUpload = async ({ file, name }: KnowledgeDocumentUploadInput): Promise<void> => {
         if (!selected) return;
         setUploading(true);
         try {
-            // 文件先直传 COS 登记为文件对象，再关联创建文档进入解析索引队列。
+            // 文件先直传 COS 登记为文件对象，再关联创建文档进入解析索引队列；
+            // 库内上传统一按 PRIVATE（仅知识库成员可见）提交，不做文档级范围选择。
             const fileObjectId = await uploadAttachmentFile(file);
-            await uploadKnowledgeDocument(selected.id, { fileObjectId, name, visibilityScope });
+            await uploadKnowledgeDocument(selected.id, { fileObjectId, name, visibilityScope: 'PRIVATE' });
             message.success(t('文档已提交解析，处理完成后即可检索'));
             setUploadOpen(false);
             refreshDocuments();
