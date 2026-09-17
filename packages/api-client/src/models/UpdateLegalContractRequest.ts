@@ -2,7 +2,6 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
-import type { LegalContractStatus } from './LegalContractStatus';
 import type { LegalContractType } from './LegalContractType';
 export type UpdateLegalContractRequest = {
     contractNo?: string;
@@ -12,11 +11,14 @@ export type UpdateLegalContractRequest = {
     amount?: number | null;
     currency?: string;
     startDate?: string;
-    endDate?: string;
+    endDate?: string | null;
     signedAt?: string | null;
-    status?: LegalContractStatus;
     description?: string | null;
-    ownerMembershipId?: string | null;
+    ownerMembershipId?: string;
+    departmentId?: string | null;
+    projectId?: string | null;
+    renewalReminderDays?: number;
+    attachmentIds?: Array<string>;
     version: number;
 };
 

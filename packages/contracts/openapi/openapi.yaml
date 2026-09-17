@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CEES AI API
-  version: 0.27.0
+  version: 0.28.0
   description: 以本文件为唯一事实源的公开 API 契约。资源与操作按 docs/api 约定补充。
 
 servers:
@@ -6625,6 +6625,31 @@ paths:
         - name: status
           in: query
           schema: { $ref: '#/components/schemas/LegalContractStatus' }
+        - name: type
+          in: query
+          schema: { $ref: '#/components/schemas/LegalContractType' }
+        - name: ownerMembershipId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: departmentId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: projectId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: currency
+          in: query
+          schema: { type: string, pattern: '^[A-Z]{3}$' }
+        - name: endDateFrom
+          in: query
+          schema: { type: string, format: date }
+        - name: endDateTo
+          in: query
+          schema: { type: string, format: date }
+        - name: expiringWithinDays
+          in: query
+          description: 仅返回截至当前租户日期未来指定天数内到期的 ACTIVE 或 PENDING_RENEWAL 合同
+          schema: { type: integer, minimum: 0, maximum: 365 }
         - name: limit
           in: query
           schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
@@ -6658,6 +6683,7 @@ paths:
         '400': { description: 请求字段校验失败 }
         '401': { description: 登录状态无效或已过期 }
         '403': { description: 缺少 legal.contract.create 权限 }
+        '409': { description: 当前租户合同编号已存在 }
 
   /legal/contracts/{contractId}:
     parameters:
@@ -6700,7 +6726,7 @@ paths:
         '401': { description: 登录状态无效或已过期 }
         '403': { description: 缺少 legal.contract.update 权限或数据范围不足 }
         '404': { description: 合同不存在或不属于当前租户 }
-        '409': { description: 乐观锁版本冲突 }
+        '409': { description: 合同编号、合同状态或乐观锁版本冲突 }
     delete:
       summary: 删除合同台账
       operationId: deleteLegalContract
@@ -6716,7 +6742,169 @@ paths:
         '401': { description: 登录状态无效或已过期 }
         '403': { description: 缺少 legal.contract.delete 权限或数据范围不足 }
         '404': { description: 合同不存在或不属于当前租户 }
-        '409': { description: 乐观锁版本冲突 }
+        '409': { description: 仅草稿合同可删除，或乐观锁版本冲突 }
+
+  /legal/contracts/{contractId}/activate:
+    parameters:
+      - name: contractId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: 激活草稿合同
+      operationId: activateLegalContract
+      tags: [Legal]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LegalContractActionRequest' }
+      responses:
+        '200':
+          description: 已激活的合同
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LegalContractResponseEnvelope' }
+        '400': { description: 合同缺少签署日期或关联资源校验失败 }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 legal.contract.update 权限或数据范围不足 }
+        '404': { description: 合同不存在或不属于当前租户 }
+        '409': { description: 合同状态或乐观锁版本冲突 }
+
+  /legal/contracts/{contractId}/mark-pending-renewal:
+    parameters:
+      - name: contractId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: 标记合同待续签
+      operationId: markLegalContractPendingRenewal
+      tags: [Legal]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LegalContractActionRequest' }
+      responses:
+        '200':
+          description: 已标记待续签的合同
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LegalContractResponseEnvelope' }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 legal.contract.update 权限或数据范围不足 }
+        '404': { description: 合同不存在或不属于当前租户 }
+        '409': { description: 合同状态或乐观锁版本冲突 }
+
+  /legal/contracts/{contractId}/renew:
+    parameters:
+      - name: contractId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: 续签合同并恢复生效
+      operationId: renewLegalContract
+      tags: [Legal]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RenewLegalContractRequest' }
+      responses:
+        '200':
+          description: 已续签的合同
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LegalContractResponseEnvelope' }
+        '400': { description: 新到期日期或请求字段校验失败 }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 legal.contract.update 权限或数据范围不足 }
+        '404': { description: 合同不存在或不属于当前租户 }
+        '409': { description: 合同状态或乐观锁版本冲突 }
+
+  /legal/contracts/{contractId}/terminate:
+    parameters:
+      - name: contractId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: 提前终止合同
+      operationId: terminateLegalContract
+      tags: [Legal]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TerminateLegalContractRequest' }
+      responses:
+        '200':
+          description: 已终止的合同
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LegalContractResponseEnvelope' }
+        '400': { description: 终止日期或原因校验失败 }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 legal.contract.update 权限或数据范围不足 }
+        '404': { description: 合同不存在或不属于当前租户 }
+        '409': { description: 合同状态或乐观锁版本冲突 }
+
+  /legal/contracts/{contractId}/archive:
+    parameters:
+      - name: contractId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: 归档已到期或已终止合同
+      operationId: archiveLegalContract
+      tags: [Legal]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LegalContractActionRequest' }
+      responses:
+        '200':
+          description: 已归档的合同
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LegalContractResponseEnvelope' }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 legal.contract.update 权限或数据范围不足 }
+        '404': { description: 合同不存在或不属于当前租户 }
+        '409': { description: 合同状态或乐观锁版本冲突 }
+
+  /legal/reports/contract-summary:
+    get:
+      summary: 查询合同台账汇总
+      operationId: getLegalContractSummary
+      tags: [Legal]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: asOf
+          in: query
+          description: 统计基准日期；未传时使用当前租户日期
+          schema: { type: string, format: date }
+        - name: expiringWithinDays
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 365, default: 30 }
+      responses:
+        '200':
+          description: 当前数据范围内的合同汇总
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LegalContractSummaryResponseEnvelope' }
+        '400': { description: 统计日期或到期窗口校验失败 }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 缺少 legal.contract.read 权限或数据范围不足 }
 
   /boss-overview:
     get:
@@ -7856,8 +8044,11 @@ components:
         - type
         - currency
         - startDate
-        - endDate
         - status
+        - ownerMembershipId
+        - renewalReminderDays
+        - attachments
+        - statusHistory
         - version
         - createdAt
         - updatedAt
@@ -7868,17 +8059,55 @@ components:
         name: { type: string, minLength: 1, maxLength: 160 }
         counterparty: { type: string, minLength: 1, maxLength: 160 }
         type: { $ref: '#/components/schemas/LegalContractType' }
-        amount: { type: [number, 'null'] }
-        currency: { type: string, minLength: 3, maxLength: 3 }
+        amount: { type: [number, 'null'], minimum: 0 }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
         startDate: { type: string, format: date }
-        endDate: { type: string, format: date }
+        endDate: { type: [string, 'null'], format: date }
         signedAt: { type: [string, 'null'], format: date }
         status: { $ref: '#/components/schemas/LegalContractStatus' }
         description: { type: [string, 'null'], maxLength: 2000 }
-        ownerMembershipId: { type: [string, 'null'], format: uuid }
+        ownerMembershipId: { type: string, format: uuid }
+        departmentId: { type: [string, 'null'], format: uuid }
+        projectId: { type: [string, 'null'], format: uuid }
+        renewalReminderDays: { type: integer, minimum: 0, maximum: 365 }
+        activatedAt: { type: [string, 'null'], format: date-time }
+        terminatedAt: { type: [string, 'null'], format: date-time }
+        terminationReason: { type: [string, 'null'], maxLength: 1000 }
+        archivedAt: { type: [string, 'null'], format: date-time }
+        attachments:
+          type: array
+          items: { $ref: '#/components/schemas/LegalContractAttachment' }
+        statusHistory:
+          type: array
+          items: { $ref: '#/components/schemas/LegalContractStatusHistory' }
         version: { type: integer, minimum: 1 }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+
+    LegalContractAttachment:
+      type: object
+      required: [id, fileObjectId, originalName, mimeType, sizeBytes, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        fileObjectId: { type: string, format: uuid }
+        originalName: { type: string }
+        mimeType: { type: string }
+        sizeBytes: { type: number, minimum: 0 }
+        createdAt: { type: string, format: date-time }
+
+    LegalContractStatusHistory:
+      type: object
+      required: [id, toStatus, actorMembershipId, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        fromStatus:
+          anyOf:
+            - { $ref: '#/components/schemas/LegalContractStatus' }
+            - { type: 'null' }
+        toStatus: { $ref: '#/components/schemas/LegalContractStatus' }
+        actorMembershipId: { type: [string, 'null'], format: uuid }
+        comment: { type: [string, 'null'], maxLength: 1000 }
+        createdAt: { type: string, format: date-time }
 
     LegalContractList:
       type: object
@@ -7892,20 +8121,31 @@ components:
     CreateLegalContractRequest:
       type: object
       additionalProperties: false
-      required: [name, counterparty, startDate, endDate]
+      required: [name, counterparty, type, startDate, ownerMembershipId]
       properties:
-        contractNo: { type: string, minLength: 1, maxLength: 64 }
+        contractNo:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: 未传时由服务端按租户和年份自动生成
         name: { type: string, minLength: 1, maxLength: 160 }
         counterparty: { type: string, minLength: 1, maxLength: 160 }
         type: { $ref: '#/components/schemas/LegalContractType' }
-        amount: { type: [number, 'null'] }
-        currency: { type: string, minLength: 3, maxLength: 3 }
+        amount: { type: [number, 'null'], minimum: 0 }
+        currency: { type: string, pattern: '^[A-Z]{3}$', default: CNY }
         startDate: { type: string, format: date }
-        endDate: { type: string, format: date }
+        endDate: { type: [string, 'null'], format: date }
         signedAt: { type: [string, 'null'], format: date }
-        status: { $ref: '#/components/schemas/LegalContractStatus' }
         description: { type: [string, 'null'], maxLength: 2000 }
-        ownerMembershipId: { type: [string, 'null'], format: uuid }
+        ownerMembershipId: { type: string, format: uuid }
+        departmentId: { type: [string, 'null'], format: uuid }
+        projectId: { type: [string, 'null'], format: uuid }
+        renewalReminderDays: { type: integer, minimum: 0, maximum: 365, default: 30 }
+        attachmentIds:
+          type: array
+          maxItems: 20
+          uniqueItems: true
+          items: { type: string, format: uuid }
 
     UpdateLegalContractRequest:
       type: object
@@ -7916,15 +8156,75 @@ components:
         name: { type: string, minLength: 1, maxLength: 160 }
         counterparty: { type: string, minLength: 1, maxLength: 160 }
         type: { $ref: '#/components/schemas/LegalContractType' }
-        amount: { type: [number, 'null'] }
-        currency: { type: string, minLength: 3, maxLength: 3 }
+        amount: { type: [number, 'null'], minimum: 0 }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
         startDate: { type: string, format: date }
-        endDate: { type: string, format: date }
+        endDate: { type: [string, 'null'], format: date }
         signedAt: { type: [string, 'null'], format: date }
-        status: { $ref: '#/components/schemas/LegalContractStatus' }
         description: { type: [string, 'null'], maxLength: 2000 }
-        ownerMembershipId: { type: [string, 'null'], format: uuid }
+        ownerMembershipId: { type: string, format: uuid }
+        departmentId: { type: [string, 'null'], format: uuid }
+        projectId: { type: [string, 'null'], format: uuid }
+        renewalReminderDays: { type: integer, minimum: 0, maximum: 365 }
+        attachmentIds:
+          type: array
+          maxItems: 20
+          uniqueItems: true
+          items: { type: string, format: uuid }
         version: { type: integer, minimum: 1 }
+
+    LegalContractActionRequest:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        comment: { type: [string, 'null'], maxLength: 1000 }
+        version: { type: integer, minimum: 1 }
+
+    RenewLegalContractRequest:
+      type: object
+      additionalProperties: false
+      required: [newEndDate, version]
+      properties:
+        newEndDate: { type: string, format: date }
+        renewalReminderDays: { type: integer, minimum: 0, maximum: 365 }
+        comment: { type: [string, 'null'], maxLength: 1000 }
+        version: { type: integer, minimum: 1 }
+
+    TerminateLegalContractRequest:
+      type: object
+      additionalProperties: false
+      required: [effectiveDate, reason, version]
+      properties:
+        effectiveDate: { type: string, format: date }
+        reason: { type: string, minLength: 1, maxLength: 1000 }
+        version: { type: integer, minimum: 1 }
+
+    LegalContractAmountSummary:
+      type: object
+      required: [currency, activeAmount, expiringAmount]
+      properties:
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        activeAmount: { type: number, minimum: 0 }
+        expiringAmount: { type: number, minimum: 0 }
+
+    LegalContractSummary:
+      type: object
+      required: [asOf, expiringWithinDays, totalCount, draftCount, activeCount, pendingRenewalCount, expiringCount, expiredCount, terminatedCount, archivedCount, amountsByCurrency]
+      properties:
+        asOf: { type: string, format: date }
+        expiringWithinDays: { type: integer, minimum: 1, maximum: 365 }
+        totalCount: { type: integer, minimum: 0 }
+        draftCount: { type: integer, minimum: 0 }
+        activeCount: { type: integer, minimum: 0 }
+        pendingRenewalCount: { type: integer, minimum: 0 }
+        expiringCount: { type: integer, minimum: 0 }
+        expiredCount: { type: integer, minimum: 0 }
+        terminatedCount: { type: integer, minimum: 0 }
+        archivedCount: { type: integer, minimum: 0 }
+        amountsByCurrency:
+          type: array
+          items: { $ref: '#/components/schemas/LegalContractAmountSummary' }
 
     BossOverviewHr:
       type: object
@@ -8246,6 +8546,14 @@ components:
       properties:
         success: { type: boolean, const: true }
         data: { $ref: '#/components/schemas/LegalContractList' }
+        requestId: { type: [string, 'null'] }
+
+    LegalContractSummaryResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/LegalContractSummary' }
         requestId: { type: [string, 'null'] }
 
     BossOverviewResponseEnvelope:

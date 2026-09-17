@@ -1,8 +1,8 @@
 # 人财法数据契约
 
-> 状态：HR 与 Finance 已实现；Legal 仍为契约草案
+> 状态：HR 与 Finance 已实现；Legal 契约已冻结待实现
 > Owner：C
-> 关联：`packages/contracts/openapi/openapi.yaml`
+> 关联：`packages/contracts/openapi/openapi.yaml`、[Legal 合同台账设计](legal-contract-ledger.md)
 
 ## 1. 目标
 
@@ -33,7 +33,10 @@
 
 - 合同为租户级台账，不替代法务审批系统。
 - `LegalContractStatus` 覆盖草稿、生效、待续签、到期、终止和归档。
-- 创建/修改/删除均要求数据范围与审计；删除采用乐观锁版本校验。
+- 负责人、业务部门和项目归属接入 `DataScopeResolverService`；`manage_all` 只放宽当前租户内的数据范围。
+- 附件复用 `FileObject`，状态动作写入不可变状态历史和审计。
+- 创建、修改、状态动作和删除均使用乐观锁；仅草稿合同允许删除。
+- 完整状态机、字段规则、到期任务和兼容说明见 [Legal 合同台账设计](legal-contract-ledger.md)。
 
 ## 5. 老板经营概况
 
