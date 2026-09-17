@@ -2162,3 +2162,71 @@ export async function resolveAssignmentPolicy(input: AssignmentPolicyResolveInpu
         body: JSON.stringify(input),
     });
 }
+
+export type HrProfileStatus = 'ACTIVE' | 'SUSPENDED' | 'TERMINATED' | 'ON_LEAVE';
+export type HrLeaveUnit = 'DAY' | 'HALF_DAY' | 'HOUR';
+export type HrRequestStatus = 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
+export type HrAttendanceStatus = 'NORMAL' | 'LATE' | 'EARLY_LEAVE' | 'ABSENT' | 'LEAVE' | 'OVERTIME' | 'EXCEPTION' | 'CORRECTED';
+export type HrEmployeeChangeType = 'ONBOARD' | 'PROBATION' | 'TRANSFER' | 'PROMOTION' | 'DEMOTION' | 'RESIGNATION' | 'TERMINATION';
+export type HrEmployeeChangeStatus = HrRequestStatus | 'EFFECTIVE';
+
+export interface HrProfile {
+    id: string; membershipId: string; employeeNo?: string | null; displayName: string; departmentId?: string | null;
+    position?: string | null; employmentType?: string | null; managerMembershipId?: string | null;
+    entryDate?: string | null; leaveDate?: string | null; phone?: string | null; email?: string | null;
+    idType?: string | null; idNumber?: string | null; emergencyContactName?: string | null;
+    emergencyContactPhone?: string | null; educationLevel?: string | null; costCenter?: string | null;
+    jobLevel?: string | null; probationEndDate?: string | null; regularDate?: string | null;
+    workLocation?: string | null; status: HrProfileStatus; version: number; createdAt: string; updatedAt: string;
+}
+
+export interface HrLeaveType { id: string; code: string; name: string; unit: HrLeaveUnit; paid: boolean; defaultDays?: number | null; enabled: boolean; version: number; }
+export interface HrLeaveBalance { id: string; membershipId: string; leaveTypeId: string; year: number; totalDays: number; usedDays: number; pendingDays: number; remainingDays: number; unit: HrLeaveUnit; version: number; }
+export interface HrLeaveRequest { id: string; membershipId: string; leaveTypeId: string; startAt: string; endAt: string; durationDays: number; reason?: string | null; status: HrRequestStatus; reviewedBy?: string | null; reviewedAt?: string | null; reviewComment?: string | null; version: number; createdAt: string; updatedAt: string; }
+export interface HrAttendanceRecord { id: string; membershipId: string; workDate: string; checkInAt?: string | null; checkOutAt?: string | null; status: HrAttendanceStatus; source: 'MANUAL' | 'IMPORT' | 'DINGTALK'; note?: string | null; reviewedBy?: string | null; reviewedAt?: string | null; version: number; }
+export interface HrOvertimeRequest { id: string; membershipId: string; startAt: string; endAt: string; durationHours: number; reason: string; status: HrRequestStatus; reviewedBy?: string | null; reviewedAt?: string | null; reviewComment?: string | null; version: number; createdAt: string; }
+export interface HrEmployeeChange { id: string; membershipId: string; type: HrEmployeeChangeType; effectiveDate: string; fromDepartmentId?: string | null; toDepartmentId?: string | null; fromPosition?: string | null; toPosition?: string | null; fromManagerMembershipId?: string | null; toManagerMembershipId?: string | null; reason?: string | null; status: HrEmployeeChangeStatus; reviewedBy?: string | null; reviewedAt?: string | null; reviewComment?: string | null; version: number; createdAt: string; }
+
+export interface HrProfileInput {
+    membershipId?: string; employeeNo?: string | null; departmentId?: string | null; position?: string | null;
+    employmentType?: string | null; managerMembershipId?: string | null; entryDate?: string | null; leaveDate?: string | null;
+    phone?: string | null; email?: string | null; idType?: string | null; idNumber?: string | null;
+    emergencyContactName?: string | null; emergencyContactPhone?: string | null; educationLevel?: string | null;
+    costCenter?: string | null; jobLevel?: string | null; probationEndDate?: string | null; regularDate?: string | null;
+    workLocation?: string | null; status?: HrProfileStatus; version?: number;
+}
+
+export async function listHrProfiles(keyword?: string): Promise<CursorPage<HrProfile>> {
+    const query = new URLSearchParams({ limit: '100' }); if (keyword) query.set('keyword', keyword);
+    return authorizedRequest<CursorPage<HrProfile>>(`v1/hr/profiles?${query}`);
+}
+export async function createHrProfile(input: HrProfileInput & { membershipId: string }): Promise<HrProfile> { return authorizedRequest<HrProfile>('v1/hr/profiles', { method: 'POST', body: JSON.stringify(input) }); }
+export async function updateHrProfile(membershipId: string, input: HrProfileInput & { version: number }): Promise<HrProfile> { return authorizedRequest<HrProfile>(`v1/hr/profiles/${encodeURIComponent(membershipId)}`, { method: 'PATCH', body: JSON.stringify(input) }); }
+export async function listHrLeaveTypes(): Promise<{ items: HrLeaveType[] }> { return authorizedRequest<{ items: HrLeaveType[] }>('v1/hr/leave-types'); }
+export async function createHrLeaveType(input: Omit<HrLeaveType, 'id' | 'version'>): Promise<HrLeaveType> { return authorizedRequest<HrLeaveType>('v1/hr/leave-types', { method: 'POST', body: JSON.stringify(input) }); }
+export async function updateHrLeaveType(id: string, input: Partial<Omit<HrLeaveType, 'id'>> & { version: number }): Promise<HrLeaveType> { return authorizedRequest<HrLeaveType>(`v1/hr/leave-types/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(input) }); }
+export async function deleteHrLeaveType(id: string, version: number): Promise<void> { return authorizedRequest<void>(`v1/hr/leave-types/${encodeURIComponent(id)}?version=${version}`, { method: 'DELETE' }); }
+export async function listHrLeaveBalances(year?: number): Promise<{ items: HrLeaveBalance[] }> { return authorizedRequest<{ items: HrLeaveBalance[] }>(`v1/hr/leave-balances${year ? `?year=${year}` : ''}`); }
+export async function adjustHrLeaveBalance(input: { membershipId: string; leaveTypeId: string; year: number; deltaDays: number; reason: string }): Promise<HrLeaveBalance> { return authorizedRequest<HrLeaveBalance>('v1/hr/leave-balances/adjust', { method: 'POST', body: JSON.stringify(input) }); }
+export async function listHrLeaveRequests(status?: HrRequestStatus): Promise<CursorPage<HrLeaveRequest>> { return authorizedRequest<CursorPage<HrLeaveRequest>>(`v1/hr/leave-requests?limit=100${status ? `&status=${status}` : ''}`); }
+export async function createHrLeaveRequest(input: { leaveTypeId: string; startAt: string; endAt: string; durationDays: number; reason?: string | null }): Promise<HrLeaveRequest> { return authorizedRequest<HrLeaveRequest>('v1/hr/leave-requests', { method: 'POST', body: JSON.stringify(input) }); }
+export async function reviewHrLeaveRequest(id: string, decision: 'APPROVE' | 'REJECT', version: number, comment?: string): Promise<HrLeaveRequest> { return authorizedRequest<HrLeaveRequest>(`v1/hr/leave-requests/${encodeURIComponent(id)}/review`, { method: 'POST', body: JSON.stringify({ decision, version, comment }) }); }
+export async function withdrawHrLeaveRequest(id: string, version: number): Promise<HrLeaveRequest> { return authorizedRequest<HrLeaveRequest>(`v1/hr/leave-requests/${encodeURIComponent(id)}/withdraw`, { method: 'POST', body: JSON.stringify({ version }) }); }
+export async function cancelHrLeaveRequest(id: string, version: number, reason?: string): Promise<HrLeaveRequest> { return authorizedRequest<HrLeaveRequest>(`v1/hr/leave-requests/${encodeURIComponent(id)}/cancel`, { method: 'POST', body: JSON.stringify({ version, reason }) }); }
+export async function listHrAttendanceRecords(): Promise<CursorPage<HrAttendanceRecord>> { return authorizedRequest<CursorPage<HrAttendanceRecord>>('v1/hr/attendance-records?limit=100'); }
+export async function createHrAttendanceRecord(input: { membershipId: string; workDate: string; checkInAt?: string | null; checkOutAt?: string | null; status: HrAttendanceStatus; note?: string | null }): Promise<HrAttendanceRecord> { return authorizedRequest<HrAttendanceRecord>('v1/hr/attendance-records', { method: 'POST', body: JSON.stringify(input) }); }
+export async function importHrAttendanceRecords(records: Array<{ membershipId: string; workDate: string; checkInAt?: string | null; checkOutAt?: string | null; status: HrAttendanceStatus; note?: string | null }>): Promise<{ total: number; imported: number; failed: number; failures: Array<{ index: number; code: string; message: string }> }> { return authorizedRequest('v1/hr/attendance-records/import', { method: 'POST', body: JSON.stringify({ records }) }); }
+export async function updateHrAttendanceRecord(id: string, input: { checkInAt?: string | null; checkOutAt?: string | null; status?: HrAttendanceStatus; note?: string | null; version: number }): Promise<HrAttendanceRecord> { return authorizedRequest<HrAttendanceRecord>(`v1/hr/attendance-records/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(input) }); }
+export async function reviewHrAttendanceRecord(id: string, decision: 'APPROVE' | 'REJECT', version: number, comment?: string): Promise<HrAttendanceRecord> { return authorizedRequest<HrAttendanceRecord>(`v1/hr/attendance-records/${encodeURIComponent(id)}/review`, { method: 'POST', body: JSON.stringify({ decision, version, comment }) }); }
+export async function listHrOvertimeRequests(): Promise<CursorPage<HrOvertimeRequest>> { return authorizedRequest<CursorPage<HrOvertimeRequest>>('v1/hr/overtime-requests?limit=100'); }
+export async function createHrOvertimeRequest(input: { startAt: string; endAt: string; durationHours: number; reason: string }): Promise<HrOvertimeRequest> { return authorizedRequest<HrOvertimeRequest>('v1/hr/overtime-requests', { method: 'POST', body: JSON.stringify(input) }); }
+export async function reviewHrOvertimeRequest(id: string, decision: 'APPROVE' | 'REJECT', version: number, comment?: string): Promise<HrOvertimeRequest> { return authorizedRequest<HrOvertimeRequest>(`v1/hr/overtime-requests/${encodeURIComponent(id)}/review`, { method: 'POST', body: JSON.stringify({ decision, version, comment }) }); }
+export async function cancelHrOvertimeRequest(id: string, version: number): Promise<HrOvertimeRequest> { return authorizedRequest<HrOvertimeRequest>(`v1/hr/overtime-requests/${encodeURIComponent(id)}/cancel`, { method: 'POST', body: JSON.stringify({ version }) }); }
+export async function listHrEmployeeChanges(): Promise<CursorPage<HrEmployeeChange>> { return authorizedRequest<CursorPage<HrEmployeeChange>>('v1/hr/employee-changes?limit=100'); }
+export async function createHrEmployeeChange(input: { membershipId: string; type: HrEmployeeChangeType; effectiveDate: string; fromDepartmentId?: string | null; toDepartmentId?: string | null; fromPosition?: string | null; toPosition?: string | null; fromManagerMembershipId?: string | null; toManagerMembershipId?: string | null; reason?: string | null }): Promise<HrEmployeeChange> { return authorizedRequest<HrEmployeeChange>('v1/hr/employee-changes', { method: 'POST', body: JSON.stringify(input) }); }
+export async function reviewHrEmployeeChange(id: string, decision: 'APPROVE' | 'REJECT', version: number, comment?: string): Promise<HrEmployeeChange> { return authorizedRequest<HrEmployeeChange>(`v1/hr/employee-changes/${encodeURIComponent(id)}/review`, { method: 'POST', body: JSON.stringify({ decision, version, comment }) }); }
+export async function cancelHrEmployeeChange(id: string, version: number): Promise<HrEmployeeChange> { return authorizedRequest<HrEmployeeChange>(`v1/hr/employee-changes/${encodeURIComponent(id)}/cancel`, { method: 'POST', body: JSON.stringify({ version }) }); }
+export async function getHrHeadcountReport(): Promise<{ asOf: string; total: number; byDepartment: Array<{ departmentId: string; departmentName: string; headcount: number }> }> { return authorizedRequest('v1/hr/reports/headcount'); }
+export async function getHrLeaveSummaryReport(year: number): Promise<{ year: number; totalRequestedDays: number; totalApprovedDays: number; byLeaveType: Array<{ leaveTypeId: string; leaveTypeName: string; requestedDays: number; approvedDays: number }> }> { return authorizedRequest(`v1/hr/reports/leave-summary?year=${year}`); }
+export async function getHrAttendanceSummaryReport(dateFrom: string, dateTo: string): Promise<{ dateFrom: string; dateTo: string; normalDays: number; lateCount: number; earlyLeaveCount: number; absentDays: number; leaveDays: number }> { return authorizedRequest(`v1/hr/reports/attendance-summary?dateFrom=${dateFrom}&dateTo=${dateTo}`); }
+export async function getHrOvertimeSummaryReport(dateFrom: string, dateTo: string): Promise<{ dateFrom: string; dateTo: string; totalHours: number; byMember: Array<{ membershipId: string; displayName: string; overtimeHours: number }> }> { return authorizedRequest(`v1/hr/reports/overtime-summary?dateFrom=${dateFrom}&dateTo=${dateTo}`); }

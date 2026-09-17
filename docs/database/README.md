@@ -8,8 +8,7 @@
 通知中心与后台任务见 [通知中心与后台任务](../product/notification-center.md)。
 工作台与数据看板见 [工作台与数据看板](../product/dashboard-workbench.md)。
 
-> 新环境使用 `prisma migrate deploy` 按 `0001_init` 到 `0030_c_assignment_policy` 的目录顺序执行迁移；全部迁移完成后与当前 `schema.prisma` 保持一致。
-> 新环境使用 `prisma migrate deploy` 按 `0001_init` 到 `0031_project_code_sequence_and_timestamps` 的目录顺序执行迁移；全部迁移完成后与当前 `schema.prisma` 保持一致。
+> 新环境使用 `prisma migrate deploy` 按 `0001_init` 到 `0032_c_hr_fullstack` 的目录顺序执行迁移；全部迁移完成后与当前 `schema.prisma` 保持一致。
 
 - `apps/api/prisma/schema.prisma` 是数据模型唯一事实源，迁移提交 `prisma/migrations`。
 - 新建表和字段必须在同一迁移中使用 `COMMENT ON TABLE`、`COMMENT ON COLUMN` 添加 PostgreSQL 注释；`0003_organization_departments_and_database_comments` 已补齐此前全部业务表和字段注释。
@@ -17,6 +16,22 @@
 - 向量检索使用 pgvector；扩展由 `0001_init` 在创建向量字段前启用，不使用环境专属初始化 SQL。
 - AI 服务对业务库只读；正式写入统一经 NestJS。
 - 业务模型落地前，先在此文档维护实体与关系草图。
+
+## HR 模型
+
+```text
+TenantMembership ── HrProfile
+TenantMembership ── HrLeaveBalance ── HrLeaveType
+TenantMembership ── HrLeaveRequest ── HrLeaveType
+TenantMembership ── HrAttendanceRecord
+TenantMembership ── HrOvertimeRequest
+TenantMembership ── HrEmployeeChange
+```
+
+- `0032_c_hr_fullstack` 创建员工档案、假期类型、假期余额、请假申请、考勤记录、加班申请和人事异动表；
+- 员工档案与成员一对一；活跃工号、假期类型编码、年度余额和每日考勤使用唯一索引约束；
+- 各表保留 `tenant_id`、审计创建/更新人、软删除和 `version` 乐观锁字段；
+- HR 聚合报表不创建快照表，直接读取正式业务事实并应用当前角色数据范围。
 
 ## 通知中心模型
 
