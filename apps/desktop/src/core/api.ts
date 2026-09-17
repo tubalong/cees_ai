@@ -2409,3 +2409,77 @@ export async function getFinanceProjectSpend(projectId: string, dateFrom?: strin
     if (dateTo) query.set('dateTo', dateTo);
     return authorizedRequest(`v1/finance/reports/project-spend?${query}`);
 }
+
+export type LegalContractStatus = 'DRAFT' | 'ACTIVE' | 'PENDING_RENEWAL' | 'EXPIRED' | 'TERMINATED' | 'ARCHIVED';
+export type LegalContractType = 'PURCHASE' | 'SALES' | 'SERVICE' | 'EMPLOYMENT' | 'NDA' | 'LEASE' | 'OTHER';
+
+export interface LegalContractAttachment {
+    id: string; fileObjectId: string; originalName: string; mimeType: string; sizeBytes: number; createdAt: string;
+}
+export interface LegalContractStatusHistory {
+    id: string; fromStatus?: LegalContractStatus | null; toStatus: LegalContractStatus;
+    actorMembershipId?: string | null; comment?: string | null; createdAt: string;
+}
+export interface LegalContract {
+    id: string; tenantId: string; contractNo: string; name: string; counterparty: string; type: LegalContractType;
+    amount?: number | null; currency: string; startDate: string; endDate?: string | null; signedAt?: string | null;
+    status: LegalContractStatus; description?: string | null; ownerMembershipId: string;
+    departmentId?: string | null; projectId?: string | null; renewalReminderDays: number;
+    activatedAt?: string | null; terminatedAt?: string | null; terminationReason?: string | null; archivedAt?: string | null;
+    attachments: LegalContractAttachment[]; statusHistory: LegalContractStatusHistory[];
+    version: number; createdAt: string; updatedAt: string;
+}
+export interface LegalContractInput {
+    contractNo?: string; name: string; counterparty: string; type: LegalContractType; amount?: number | null;
+    currency?: string; startDate: string; endDate?: string | null; signedAt?: string | null; description?: string | null;
+    ownerMembershipId: string; departmentId?: string | null; projectId?: string | null;
+    renewalReminderDays?: number; attachmentIds?: string[];
+}
+export interface LegalContractFilters {
+    keyword?: string; status?: LegalContractStatus; type?: LegalContractType; ownerMembershipId?: string;
+    departmentId?: string; projectId?: string; currency?: string; endDateFrom?: string; endDateTo?: string;
+    expiringWithinDays?: number;
+}
+export interface LegalContractSummary {
+    asOf: string; expiringWithinDays: number; totalCount: number; draftCount: number; activeCount: number;
+    pendingRenewalCount: number; expiringCount: number; expiredCount: number; terminatedCount: number; archivedCount: number;
+    amountsByCurrency: Array<{ currency: string; activeAmount: number; expiringAmount: number }>;
+}
+
+export async function listLegalContracts(filters: LegalContractFilters = {}): Promise<CursorPage<LegalContract>> {
+    const query = new URLSearchParams({ limit: '100' });
+    Object.entries(filters).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && String(value).trim()) query.set(key, String(value));
+    });
+    return authorizedRequest(`v1/legal/contracts?${query}`);
+}
+export async function createLegalContract(input: LegalContractInput): Promise<LegalContract> {
+    return authorizedRequest('v1/legal/contracts', { method: 'POST', body: JSON.stringify(input) });
+}
+export async function updateLegalContract(id: string, input: Partial<LegalContractInput> & { version: number }): Promise<LegalContract> {
+    return authorizedRequest(`v1/legal/contracts/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(input) });
+}
+export async function deleteLegalContract(id: string, version: number): Promise<void> {
+    return authorizedRequest(`v1/legal/contracts/${encodeURIComponent(id)}?version=${version}`, { method: 'DELETE' });
+}
+export async function activateLegalContract(id: string, version: number, comment?: string): Promise<LegalContract> {
+    return legalContractAction(id, 'activate', { version, comment });
+}
+export async function markLegalContractPendingRenewal(id: string, version: number, comment?: string): Promise<LegalContract> {
+    return legalContractAction(id, 'mark-pending-renewal', { version, comment });
+}
+export async function renewLegalContract(id: string, input: { newEndDate: string; renewalReminderDays?: number; comment?: string; version: number }): Promise<LegalContract> {
+    return legalContractAction(id, 'renew', input);
+}
+export async function terminateLegalContract(id: string, input: { effectiveDate: string; reason: string; version: number }): Promise<LegalContract> {
+    return legalContractAction(id, 'terminate', input);
+}
+export async function archiveLegalContract(id: string, version: number, comment?: string): Promise<LegalContract> {
+    return legalContractAction(id, 'archive', { version, comment });
+}
+export async function getLegalContractSummary(expiringWithinDays = 30): Promise<LegalContractSummary> {
+    return authorizedRequest(`v1/legal/reports/contract-summary?expiringWithinDays=${expiringWithinDays}`);
+}
+function legalContractAction(id: string, action: string, body: unknown): Promise<LegalContract> {
+    return authorizedRequest(`v1/legal/contracts/${encodeURIComponent(id)}/${action}`, { method: 'POST', body: JSON.stringify(body) });
+}

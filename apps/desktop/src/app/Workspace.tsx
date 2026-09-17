@@ -1,6 +1,6 @@
 import {
     AppstoreOutlined, BankOutlined, BellOutlined, BookOutlined, CheckCircleOutlined,
-    CloudSyncOutlined, CodeOutlined, CopyOutlined, DatabaseOutlined, FileTextOutlined, FolderOutlined,
+    CloudSyncOutlined, CodeOutlined, CopyOutlined, DatabaseOutlined, FileProtectOutlined, FileTextOutlined, FolderOutlined,
     HomeOutlined, LogoutOutlined, MenuFoldOutlined, MenuUnfoldOutlined, MessageOutlined, MoreOutlined,
     PartitionOutlined, PlusOutlined, ProjectOutlined, SafetyCertificateOutlined, SearchOutlined, SettingOutlined,
     CalendarOutlined, NotificationOutlined, ProfileOutlined,
@@ -33,6 +33,7 @@ import RoleManagement from '../features/roles/RoleManagement';
 import AssignmentPolicyManagement from '../features/assignment/AssignmentPolicyManagement';
 import HrManagement from '../features/hr/HrManagement';
 import FinanceManagement from '../features/finance/FinanceManagement';
+import LegalContractManagement from '../features/legal/LegalContractManagement';
 import { useDateFormatter, useI18n } from '../core/i18n';
 
 interface WebviewElement extends HTMLWebViewElement {
@@ -64,6 +65,7 @@ const navItems: NavItem[] = [
     { path: '/assignment', label: '分配策略', icon: <PartitionOutlined /> },
     { path: '/hr', label: '人力资源', icon: <UserOutlined /> },
     { path: '/finance', label: '财务管理', icon: <BankOutlined /> },
+    { path: '/legal', label: '合同台账', icon: <FileProtectOutlined /> },
     { path: '/dingtalk', label: '钉钉管理', icon: <CloudSyncOutlined /> },
     { path: '/knowledge', label: '知识管理', icon: <BookOutlined /> },
     { path: '/notifications', label: '通知中心', icon: <NotificationOutlined /> },
@@ -93,6 +95,7 @@ const navAnyPermissionByPath: Record<string, string[]> = {
     '/dingtalk': ['dingtalk.integration.read', 'dingtalk.organization.read', 'dingtalk.organization.mapping.preview'],
     '/hr': ['hr.profile.read', 'hr.leave.read', 'hr.attendance.read', 'hr.overtime.read', 'hr.employee_change.read', 'hr.report.read'],
     '/finance': ['finance.expense.read', 'finance.expense.request', 'finance.expense.approve', 'finance.expense.manage_all'],
+    '/legal': ['legal.contract.read', 'legal.contract.create', 'legal.contract.update', 'legal.contract.delete', 'legal.contract.manage_all'],
 };
 
 interface WorkspaceProps {
@@ -673,6 +676,7 @@ function CurrentPage({ authContext, members, documents, membersLoading, document
     if (location.pathname === '/assignment') return <AssignmentPolicyManagement authContext={authContext} onSessionExpired={onSessionExpired} />;
     if (location.pathname === '/hr') return <HrManagement authContext={authContext} onSessionExpired={onSessionExpired} />;
     if (location.pathname === '/finance') return <FinanceManagement authContext={authContext} onSessionExpired={onSessionExpired} />;
+    if (location.pathname === '/legal') return <LegalContractManagement authContext={authContext} onSessionExpired={onSessionExpired} />;
     if (location.pathname === '/roles') return <RoleManagement authContext={authContext} onSessionExpired={onSessionExpired} />;
     if (location.pathname === '/dingtalk') return <DingTalkOrganizationPage authContext={authContext} onSessionExpired={onSessionExpired} />;
     if (location.pathname === '/knowledge') return <KnowledgePage documents={documents} loading={documentsLoading} />;

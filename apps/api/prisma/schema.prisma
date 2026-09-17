@@ -200,6 +200,25 @@ enum FinancePaymentMethod {
   OTHER
 }
 
+enum LegalContractStatus {
+  DRAFT
+  ACTIVE
+  PENDING_RENEWAL
+  EXPIRED
+  TERMINATED
+  ARCHIVED
+}
+
+enum LegalContractType {
+  PURCHASE
+  SALES
+  SERVICE
+  EMPLOYMENT
+  NDA
+  LEASE
+  OTHER
+}
+
 enum TaskStatus {
   TODO
   IN_PROGRESS
@@ -416,6 +435,10 @@ model Tenant {
   financeExpenseAttachments FinanceExpenseAttachment[]
   financeExpenseHistories   FinanceExpenseStatusHistory[]
   financeExpenseSequences   FinanceExpenseReportSequence[]
+  legalContracts            LegalContract[]
+  legalContractAttachments  LegalContractAttachment[]
+  legalContractHistories    LegalContractStatusHistory[]
+  legalContractSequences    LegalContractSequence[]
   projectCodeSequences      ProjectCodeSequence[]
   projectMembers            ProjectMember[]
   projectStatusHistory      ProjectStatusHistory[]
@@ -509,6 +532,8 @@ model TenantMembership {
   reviewedExpenseReports  FinanceExpenseReport[]        @relation("FinanceExpenseReviewer")
   paidExpenseReports      FinanceExpenseReport[]        @relation("FinanceExpensePayer")
   financeStatusChanges    FinanceExpenseStatusHistory[] @relation("FinanceExpenseStatusActor")
+  ownedLegalContracts     LegalContract[]                @relation("LegalContractOwner")
+  legalStatusChanges      LegalContractStatusHistory[]   @relation("LegalContractStatusActor")
   dingTalkUserBindings    DingTalkUser[]
   hrProfile               HrProfile?
   hrLeaveBalances         HrLeaveBalance[]
@@ -618,6 +643,7 @@ model Department {
   dingTalkDepartmentBindings DingTalkDepartment[]
   financeExpenseReports      FinanceExpenseReport[]
   financeExpenseItems        FinanceExpenseItem[]
+  legalContracts             LegalContract[]
   createdAt                  DateTime               @default(now()) @map("created_at")
   updatedAt                  DateTime               @updatedAt @map("updated_at")
   createdBy                  String?                @map("created_by") @db.Uuid
@@ -864,6 +890,7 @@ model Project {
   workReportLinks         WorkReportProject[]
   assignmentPolicies      AssignmentPolicy[]
   financeExpenseItems     FinanceExpenseItem[]
+  legalContracts          LegalContract[]
   createdAt               DateTime               @default(now()) @map("created_at")
   updatedAt               DateTime               @updatedAt @map("updated_at")
   createdBy               String?                @map("created_by") @db.Uuid
@@ -1428,6 +1455,96 @@ model FinanceExpenseStatusHistory {
   @@map("finance_expense_status_history")
 }
 
+model LegalContractSequence {
+  id         String   @id @default(uuid()) @db.Uuid
+  tenantId   String   @map("tenant_id") @db.Uuid
+  tenant     Tenant   @relation(fields: [tenantId], references: [id])
+  year       Int
+  lastNumber Int      @default(0) @map("last_number")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@unique([tenantId, year])
+  @@map("legal_contract_sequences")
+}
+
+model LegalContract {
+  id                    String                       @id @default(uuid()) @db.Uuid
+  tenantId              String                       @map("tenant_id") @db.Uuid
+  tenant                Tenant                       @relation(fields: [tenantId], references: [id])
+  contractNo            String                       @map("contract_no")
+  name                  String
+  counterparty          String
+  type                  LegalContractType
+  amount                Decimal?                     @db.Decimal(18, 2)
+  currency              String                       @default("CNY") @db.VarChar(3)
+  startDate             DateTime                     @map("start_date") @db.Date
+  endDate               DateTime?                    @map("end_date") @db.Date
+  signedAt              DateTime?                    @map("signed_at") @db.Date
+  status                LegalContractStatus          @default(DRAFT)
+  description           String?                      @db.Text
+  ownerMembershipId     String                       @map("owner_membership_id") @db.Uuid
+  ownerMembership       TenantMembership             @relation("LegalContractOwner", fields: [ownerMembershipId], references: [id])
+  departmentId          String?                      @map("department_id") @db.Uuid
+  department            Department?                  @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  projectId             String?                      @map("project_id") @db.Uuid
+  project               Project?                     @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  renewalReminderDays   Int                          @default(30) @map("renewal_reminder_days")
+  activatedAt           DateTime?                    @map("activated_at")
+  terminatedAt          DateTime?                    @map("terminated_at")
+  terminationReason     String?                      @map("termination_reason") @db.Text
+  archivedAt            DateTime?                    @map("archived_at")
+  attachments           LegalContractAttachment[]
+  statusHistory         LegalContractStatusHistory[]
+  createdAt             DateTime                     @default(now()) @map("created_at")
+  updatedAt             DateTime                     @updatedAt @map("updated_at")
+  createdBy             String?                      @map("created_by") @db.Uuid
+  updatedBy             String?                      @map("updated_by") @db.Uuid
+  deletedAt             DateTime?                    @map("deleted_at")
+  version               Int                          @default(1)
+
+  @@unique([tenantId, contractNo])
+  @@index([tenantId, status, endDate])
+  @@index([tenantId, ownerMembershipId, updatedAt])
+  @@index([tenantId, departmentId, status])
+  @@index([tenantId, projectId, status])
+  @@map("legal_contracts")
+}
+
+model LegalContractAttachment {
+  id           String        @id @default(uuid()) @db.Uuid
+  tenantId     String        @map("tenant_id") @db.Uuid
+  tenant       Tenant        @relation(fields: [tenantId], references: [id])
+  contractId   String        @map("contract_id") @db.Uuid
+  contract     LegalContract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  fileObjectId String        @map("file_object_id") @db.Uuid
+  fileObject   FileObject    @relation(fields: [fileObjectId], references: [id], onDelete: Restrict)
+  createdAt    DateTime      @default(now()) @map("created_at")
+
+  @@unique([contractId, fileObjectId])
+  @@index([tenantId, contractId])
+  @@index([fileObjectId])
+  @@map("legal_contract_attachments")
+}
+
+model LegalContractStatusHistory {
+  id                String               @id @default(uuid()) @db.Uuid
+  tenantId          String               @map("tenant_id") @db.Uuid
+  tenant            Tenant               @relation(fields: [tenantId], references: [id])
+  contractId        String               @map("contract_id") @db.Uuid
+  contract          LegalContract        @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  fromStatus        LegalContractStatus? @map("from_status")
+  toStatus          LegalContractStatus  @map("to_status")
+  actorMembershipId String?              @map("actor_membership_id") @db.Uuid
+  actorMembership   TenantMembership?    @relation("LegalContractStatusActor", fields: [actorMembershipId], references: [id], onDelete: SetNull)
+  comment           String?              @db.Text
+  metadata          Json?
+  createdAt         DateTime             @default(now()) @map("created_at")
+
+  @@index([tenantId, contractId, createdAt])
+  @@map("legal_contract_status_history")
+}
+
 model FileObject {
   id                        String                     @id @default(uuid()) @db.Uuid
   tenantId                  String                     @map("tenant_id") @db.Uuid
@@ -1444,6 +1561,7 @@ model FileObject {
   taskAttachments           TaskAttachment[]
   managedImages             ManagedImage[]
   financeExpenseAttachments FinanceExpenseAttachment[]
+  legalContractAttachments  LegalContractAttachment[]
   createdAt                 DateTime                   @default(now()) @map("created_at")
   updatedAt                 DateTime                   @updatedAt @map("updated_at")
   createdBy                 String?                    @map("created_by") @db.Uuid

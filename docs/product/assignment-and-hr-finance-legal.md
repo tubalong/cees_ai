@@ -1,8 +1,8 @@
 # 分配策略与人财法（C 后端主体与分配）
 
-> 状态：AssignmentPolicy、HR 与 Finance 已实现（API + Desktop）；Legal 契约已冻结待实现，tasks.scope 仍为契约草案
+> 状态：AssignmentPolicy、HR、Finance 与 Legal 已实现（API + Desktop）；tasks.scope 仍为契约草案
 > Owner：C
-> 当前版本：AssignmentPolicy、完整 HR 与 Finance 已落地；Legal 已完成 OpenAPI 和主设计文档。
+> 当前版本：AssignmentPolicy、完整 HR、Finance 与 Legal 合同台账已落地。
 
 ## 1. 目标
 
@@ -18,7 +18,7 @@
 | 通用任务 `tasks.scope` | 契约草案，待 D 落地 `tasks` 表与任务模块边界 |
 | HR 员工档案、假勤、考勤、加班、异动、报表 | 已实现，页面入口 `/hr` |
 | Finance 报销 | 已实现：类别、草稿、审批、付款、附件、统计与页面，入口 `/finance` |
-| Legal 合同台账 | 契约与主设计已冻结，页面、Prisma 与 API 未实现 |
+| Legal 合同台账 | 已实现：台账、附件、状态机、到期任务、汇总与页面，入口 `/legal` |
 | P2：智能跳过请假人员 | HR 请假数据已具备，AssignmentPolicy 解析接线仍待后续迭代 |
 | 钉钉出勤同步 | 暂停，恢复后实现 |
 
@@ -61,6 +61,15 @@
 - HR 查询统一应用角色 `DataScope`，写操作记录租户、操作者、请求和资源审计信息。
 - 报表提供在职人数、请假汇总、考勤汇总和加班汇总，供桌面端及老板经营概况只读消费。
 
+## 4.2 Legal 已落地行为
+
+- 合同支持手工编号或按租户时区年份自动生成 `HT-YYYY-000001` 格式编号。
+- 台账记录交易对方、类型、金额、负责人、部门、项目、有效期、提醒天数和正式附件。
+- 状态流转为草稿、已生效、待续签、已到期、已终止和已归档；普通 PATCH 不能直接修改状态。
+- 后台任务按租户本地日期自动进入续签提醒期并标记到期，自动动作同步写状态历史与审计。
+- 查询和汇总统一应用负责人、部门、项目数据范围；`legal.contract.manage_all` 仅放宽租户内数据范围。
+- Desktop 页面入口为 `/legal`，支持概览、组合筛选、登记编辑、附件、详情和状态操作。
+
 ## 5. 依赖与协作
 
 - 依赖 B 的壳层和 `packages/ui-kit`，但 C 不修改 `apps/desktop/src/app/**` 与 `packages/ui-kit/src/**`；桌面导航接线由 B 统一收口。
@@ -71,7 +80,7 @@
 
 ## 6. 待确认与暂缓
 
-- `DataScopeResolverService` 已具备解析能力；HR/Finance 已接入，Legal 实现时按负责人、部门和项目归属接入。
+- `DataScopeResolverService` 已由 HR、Finance 与 Legal 接入；Legal 按负责人、部门和项目归属取并集过滤。
 - `tasks.scope` 的枚举、索引和迁移待 D 实现。
 - Finance 状态机、数据范围与审批边界见 [财务报销与支出数据设计](../architecture/finance-expense-management.md)。
 - Legal 状态机、数据范围、附件、到期规则与非审批边界已冻结，见 [Legal 合同台账设计](../architecture/legal-contract-ledger.md)。
@@ -82,4 +91,4 @@
 - P0/P1 通过契约校验、jest 与页面联调。
 - AssignmentPolicy 已通过 API 单测和桌面端构建。
 - 通用任务与分配策略需持续补齐审计与测试覆盖。
-- Legal 实现完成后复核数据范围、审计、状态任务和桌面端边界。
+- B 的老板经营概况仍需消费 Legal 汇总应用服务，禁止直接读取 Legal 数据表。

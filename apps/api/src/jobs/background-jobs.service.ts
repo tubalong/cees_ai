@@ -3,6 +3,7 @@ import { DraftStatus, MembershipStatus, Prisma, UserStatus, WorkReportStatus, Wo
 import { randomUUID } from 'node:crypto';
 import { dateKeyToUtcMidnight, DEFAULT_TENANT_TIMEZONE, shiftLocalDateKey } from '../common/tenant-time';
 import { PrismaService } from '../database/prisma.service';
+import { LegalService } from '../legal/legal.service';
 import { NotificationService } from '../notification/notification.service';
 import { RedisService } from '../redis/redis.service';
 
@@ -11,6 +12,7 @@ export interface BackgroundJobRunResult {
     expiredUploadSessions: number;
     expiredAiActionDrafts: number;
     workReportReminderNotifications: number;
+    legalContractTransitions: number;
 }
 
 const DEFAULT_INTERVAL_SECONDS = 60;
@@ -26,6 +28,7 @@ export class BackgroundJobsService implements OnModuleInit, OnModuleDestroy {
         private readonly prisma: PrismaService,
         private readonly redis: RedisService,
         private readonly notifications: NotificationService,
+        private readonly legalService: LegalService,
     ) { }
 
     onModuleInit(): void {
@@ -41,12 +44,25 @@ export class BackgroundJobsService implements OnModuleInit, OnModuleDestroy {
     async runOnce(now = new Date()): Promise<BackgroundJobRunResult> {
         const lockToken = randomUUID();
         const acquired = await this.redis.setIfAbsent(LOCK_KEY, lockToken, Math.max(this.intervalSeconds * 2, 30));
-        if (!acquired) return { skipped: true, expiredUploadSessions: 0, expiredAiActionDrafts: 0, workReportReminderNotifications: 0 };
+        if (!acquired) return {
+            skipped: true,
+            expiredUploadSessions: 0,
+            expiredAiActionDrafts: 0,
+            workReportReminderNotifications: 0,
+            legalContractTransitions: 0,
+        };
         try {
             const expiredUploadSessions = await this.expireUploadSessions(now);
             const expiredAiActionDrafts = await this.expireAiActionDrafts(now);
             const workReportReminderNotifications = await this.createDailyReportReminders(now);
-            return { skipped: false, expiredUploadSessions, expiredAiActionDrafts, workReportReminderNotifications };
+            const legalContractTransitions = await this.legalService.processLifecycle(now);
+            return {
+                skipped: false,
+                expiredUploadSessions,
+                expiredAiActionDrafts,
+                workReportReminderNotifications,
+                legalContractTransitions,
+            };
         } finally {
             await this.redis.deleteIfValue(LOCK_KEY, lockToken);
         }
