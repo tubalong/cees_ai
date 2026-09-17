@@ -496,6 +496,46 @@ export async function removeKnowledgeBaseMember(knowledgeBaseId: string, members
     return authorizedRequest<void>(`v1/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/members/${encodeURIComponent(membershipId)}`, { method: 'DELETE' });
 }
 
+// ---------------------------------------------------------------------------
+// 知识库文档管理：上传文件对象进解析索引队列、列表与失败重试
+// ---------------------------------------------------------------------------
+
+export interface ListKnowledgeDocumentsParams {
+    keyword?: string;
+    limit?: number;
+    cursor?: string;
+}
+
+export async function listKnowledgeDocuments(knowledgeBaseId: string, params: ListKnowledgeDocumentsParams = {}): Promise<CursorPage<KnowledgeDocumentResult>> {
+    const query = new URLSearchParams({ limit: String(params.limit ?? 100) });
+    if (params.keyword?.trim()) query.set('keyword', params.keyword.trim());
+    if (params.cursor) query.set('cursor', params.cursor);
+    return authorizedRequest<CursorPage<KnowledgeDocumentResult>>(`v1/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/documents?${query}`);
+}
+
+/** 人工上传路径：关联已上传完成的文件对象创建文档，进入 PENDING 后由后台任务解析索引。 */
+export async function uploadKnowledgeDocument(knowledgeBaseId: string, input: {
+    fileObjectId: string;
+    name?: string;
+    visibilityScope: KnowledgeDocumentVisibilityScope;
+}): Promise<KnowledgeDocumentResult> {
+    return authorizedRequest<KnowledgeDocumentResult>(`v1/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/documents`, {
+        method: 'POST',
+        body: JSON.stringify({
+            fileObjectId: input.fileObjectId,
+            name: input.name?.trim() || undefined,
+            visibilityScope: input.visibilityScope,
+        }),
+    });
+}
+
+/** 重新把处理失败的文档送入解析索引队列（仅 FAILED 状态可重试）。 */
+export async function retryKnowledgeDocument(knowledgeBaseId: string, documentId: string): Promise<KnowledgeDocumentResult> {
+    return authorizedRequest<KnowledgeDocumentResult>(`v1/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/documents/${encodeURIComponent(documentId)}/retry`, {
+        method: 'POST',
+    });
+}
+
 /** 对话数据转知识库：附件 / AI 生成文档 / 对话消息走统一转存端点（块 7c）。 */
 export async function createKnowledgeDocument(knowledgeBaseId: string, input: {
     sourceType: KnowledgeSourceType;
