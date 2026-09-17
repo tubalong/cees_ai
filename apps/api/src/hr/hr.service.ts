@@ -5,6 +5,7 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
 import { DataScopeResolverService } from '../rbac/data-scope-resolver.service';
+import { TENANT_ADMIN_ROLE_CODE } from '../rbac/permission-catalog';
 import { TenantContext } from '../tenant/tenant-context';
 import {
     AdjustHrLeaveBalanceDto, CancelHrLeaveRequestDto, CreateHrAttendanceRecordDto, CreateHrEmployeeChangeDto,
@@ -28,6 +29,7 @@ export class HrService {
 
     async listProfiles(query: ListHrProfilesQueryDto): Promise<JsonRecord> {
         const context = this.tenantContext.require();
+        const includeSensitive = context.permissions.includes('hr.profile.sensitive.read');
         const membershipIds = await this.scopedMembershipIds(query.departmentId);
         await this.validateCursor('hrProfile', query.cursor, context.tenantId);
         const items = await this.prisma.hrProfile.findMany({
@@ -47,11 +49,12 @@ export class HrService {
             skip: query.cursor ? 1 : 0,
             take: query.limit + 1,
         });
-        return cursorPage(items, query.limit, toProfile);
+        return cursorPage(items, query.limit, (item) => toProfile(item, includeSensitive));
     }
 
     async createProfile(input: CreateHrProfileDto): Promise<JsonRecord> {
         const context = this.tenantContext.require();
+        this.assertSensitiveProfileWrite(input);
         const membership = await this.requireMembership(input.membershipId);
         await this.assertMembershipAccess(input.membershipId);
         await this.validateProfileReferences(input.departmentId, input.managerMembershipId);
@@ -70,19 +73,21 @@ export class HrService {
                 await this.audit(transaction, 'HR_PROFILE_CREATED', 'HR_PROFILE', created.id, { membershipId: input.membershipId });
                 return created;
             });
-            return toProfile(profile);
+            return toProfile(profile, context.permissions.includes('hr.profile.sensitive.read'));
         } catch (error) {
             this.handleUniqueConflict(error, 'HR_PROFILE_CONFLICT', '该成员已有员工档案或工号已被使用');
         }
     }
 
     async getProfile(membershipId: string): Promise<JsonRecord> {
+        const context = this.tenantContext.require();
         await this.assertMembershipAccess(membershipId);
-        return toProfile(await this.requireProfile(membershipId));
+        return toProfile(await this.requireProfile(membershipId), context.permissions.includes('hr.profile.sensitive.read'));
     }
 
     async updateProfile(membershipId: string, input: UpdateHrProfileDto): Promise<JsonRecord> {
         const context = this.tenantContext.require();
+        this.assertSensitiveProfileWrite(input);
         await this.assertMembershipAccess(membershipId);
         await this.requireProfile(membershipId);
         await this.validateProfileReferences(input.departmentId, input.managerMembershipId);
@@ -97,7 +102,7 @@ export class HrService {
                 await this.audit(transaction, 'HR_PROFILE_UPDATED', 'HR_PROFILE', result.id, { membershipId });
                 return result;
             });
-            return toProfile(profile);
+            return toProfile(profile, context.permissions.includes('hr.profile.sensitive.read'));
         } catch (error) {
             this.handleUniqueConflict(error, 'HR_PROFILE_CONFLICT', '员工工号已被使用');
         }
@@ -616,20 +621,81 @@ export class HrService {
 
     private async applyEmployeeChange(transaction: Prisma.TransactionClient, item: Record<string, any>): Promise<void> {
         const context = this.tenantContext.require();
+        const isOffboarding = [HrEmployeeChangeType.RESIGNATION, HrEmployeeChangeType.TERMINATION].includes(item.type);
         const data: Prisma.HrProfileUpdateManyMutationInput = { updatedBy: context.userId, version: { increment: 1 } };
         if (item.toDepartmentId !== null) data.departmentId = item.toDepartmentId;
         if (item.toPosition !== null) data.position = item.toPosition;
         if (item.toManagerMembershipId !== null) data.managerMembershipId = item.toManagerMembershipId;
         if (item.type === HrEmployeeChangeType.ONBOARD) { data.entryDate = item.effectiveDate; data.status = HrProfileStatus.ACTIVE; }
         if (item.type === HrEmployeeChangeType.PROBATION) data.regularDate = item.effectiveDate;
-        if ([HrEmployeeChangeType.RESIGNATION, HrEmployeeChangeType.TERMINATION].includes(item.type)) {
+        if (isOffboarding) {
             data.leaveDate = item.effectiveDate;
             data.status = HrProfileStatus.TERMINATED;
         }
         await transaction.hrProfile.updateMany({ where: { tenantId: context.tenantId, membershipId: item.membershipId, deletedAt: null }, data });
-        if (item.toDepartmentId !== null) await transaction.tenantMembership.updateMany({
+        if (isOffboarding) {
+            await this.disableOffboardedMembership(transaction, item);
+        } else if (item.toDepartmentId !== null) {
+            await transaction.tenantMembership.updateMany({
+                where: { tenantId: context.tenantId, id: item.membershipId, deletedAt: null },
+                data: { departmentId: item.toDepartmentId, updatedBy: context.userId, version: { increment: 1 } },
+            });
+        }
+    }
+
+    private async disableOffboardedMembership(transaction: Prisma.TransactionClient, item: Record<string, any>): Promise<void> {
+        const context = this.tenantContext.require();
+        const membership = await transaction.tenantMembership.findFirst({
             where: { tenantId: context.tenantId, id: item.membershipId, deletedAt: null },
-            data: { departmentId: item.toDepartmentId, updatedBy: context.userId, version: { increment: 1 } },
+            include: {
+                membershipRoles: {
+                    where: { role: { deletedAt: null } },
+                    include: { role: true },
+                },
+            },
+        });
+        if (!membership) {
+            throw new ConflictException({ code: 'HR_OFFBOARDING_SUBJECT_NOT_FOUND', message: '离职人员对应的租户成员不存在' });
+        }
+        const isActiveTenantAdmin = membership.status === MembershipStatus.ACTIVE
+            && membership.membershipRoles.some((assignment) => assignment.role.code === TENANT_ADMIN_ROLE_CODE);
+        if (isActiveTenantAdmin) {
+            const otherAdminCount = await transaction.tenantMembership.count({
+                where: {
+                    tenantId: context.tenantId,
+                    id: { not: item.membershipId },
+                    status: MembershipStatus.ACTIVE,
+                    deletedAt: null,
+                    membershipRoles: { some: { role: { code: TENANT_ADMIN_ROLE_CODE, deletedAt: null } } },
+                },
+            });
+            if (otherAdminCount === 0) {
+                throw new ConflictException({
+                    code: 'TENANT_LAST_ADMIN',
+                    message: '不能通过离职审批停用最后一名有效租户管理员',
+                });
+            }
+        }
+
+        const now = new Date();
+        const disabled = await transaction.tenantMembership.updateMany({
+            where: { tenantId: context.tenantId, id: item.membershipId, deletedAt: null },
+            data: {
+                status: MembershipStatus.DISABLED,
+                departmentId: item.toDepartmentId ?? membership.departmentId,
+                updatedBy: context.userId,
+                version: { increment: 1 },
+            },
+        });
+        if (disabled.count !== 1) throw this.stateConflict('离职人员主体状态已发生变化');
+        const revokedSessions = await transaction.authSession.updateMany({
+            where: { tenantId: context.tenantId, membershipId: item.membershipId, revokedAt: null },
+            data: { revokedAt: now },
+        });
+        await this.audit(transaction, 'HR_OFFBOARDING_SUBJECT_DISABLED', 'TENANT_MEMBERSHIP', item.membershipId, {
+            employeeChangeId: item.id,
+            employeeChangeType: item.type,
+            revokedSessionCount: revokedSessions.count,
         });
     }
 
@@ -725,6 +791,17 @@ export class HrService {
         if (managerId) await this.requireMembership(managerId);
     }
 
+    private assertSensitiveProfileWrite(input: CreateHrProfileDto | UpdateHrProfileDto): void {
+        const context = this.tenantContext.require();
+        if (hasSensitiveProfileFields(input) && !context.permissions.includes('hr.profile.sensitive.manage')) {
+            throw new ForbiddenException({
+                code: 'HR_PROFILE_SENSITIVE_PERMISSION_DENIED',
+                message: '缺少管理员工敏感档案字段的权限',
+                details: { required: ['hr.profile.sensitive.manage'] },
+            });
+        }
+    }
+
     private async validateCursor(model: string, cursor: string | undefined, tenantId: string): Promise<void> {
         if (!cursor) return;
         const item = await (this.prisma as any)[model].findFirst({ where: { id: cursor, tenantId, deletedAt: null }, select: { id: true } });
@@ -782,15 +859,63 @@ function cursorPage(items: Record<string, any>[], limit: number, mapper: (item: 
     return { items: page.map(mapper), nextCursor: hasNext ? page[page.length - 1]?.id ?? null : null };
 }
 
-function toProfile(item: Record<string, any>): JsonRecord {
+function toProfile(item: Record<string, any>, includeSensitive: boolean): JsonRecord {
     return { ...base(item), membershipId: item.membershipId, employeeNo: item.employeeNo, displayName: item.displayName,
         departmentId: item.departmentId, position: item.position, employmentType: item.employmentType,
         managerMembershipId: item.managerMembershipId, entryDate: formatOptionalDate(item.entryDate), leaveDate: formatOptionalDate(item.leaveDate),
-        phone: item.phone, email: item.email, idType: item.idType, idNumber: item.idNumber,
-        emergencyContactName: item.emergencyContactName, emergencyContactPhone: item.emergencyContactPhone,
+        phone: protectSensitiveValue(item.phone, includeSensitive, maskPhone),
+        email: protectSensitiveValue(item.email, includeSensitive, maskEmail),
+        idType: protectSensitiveValue(item.idType, includeSensitive, maskGeneric),
+        idNumber: protectSensitiveValue(item.idNumber, includeSensitive, maskIdentifier),
+        emergencyContactName: protectSensitiveValue(item.emergencyContactName, includeSensitive, maskName),
+        emergencyContactPhone: protectSensitiveValue(item.emergencyContactPhone, includeSensitive, maskPhone),
         educationLevel: item.educationLevel, costCenter: item.costCenter, jobLevel: item.jobLevel,
         probationEndDate: formatOptionalDate(item.probationEndDate), regularDate: formatOptionalDate(item.regularDate),
         workLocation: item.workLocation, status: item.status };
+}
+
+const SENSITIVE_PROFILE_FIELDS = [
+    'phone', 'email', 'idType', 'idNumber', 'emergencyContactName', 'emergencyContactPhone',
+] as const;
+
+function hasSensitiveProfileFields(input: CreateHrProfileDto | UpdateHrProfileDto): boolean {
+    return SENSITIVE_PROFILE_FIELDS.some((field) => input[field] !== undefined);
+}
+
+function protectSensitiveValue(
+    value: string | null | undefined,
+    includeSensitive: boolean,
+    masker: (value: string) => string,
+): string | null {
+    if (value === null || value === undefined || value === '') return value ?? null;
+    return includeSensitive ? value : masker(value);
+}
+
+function maskPhone(value: string): string {
+    if (value.length <= 4) return '*'.repeat(value.length);
+    if (value.length <= 7) return `${value.slice(0, 2)}${'*'.repeat(value.length - 4)}${value.slice(-2)}`;
+    return `${value.slice(0, 3)}${'*'.repeat(value.length - 7)}${value.slice(-4)}`;
+}
+
+function maskEmail(value: string): string {
+    const separator = value.indexOf('@');
+    if (separator <= 0) return maskGeneric(value);
+    const local = value.slice(0, separator);
+    const domain = value.slice(separator + 1);
+    return `${local.slice(0, 1)}***@${domain}`;
+}
+
+function maskIdentifier(value: string): string {
+    if (value.length <= 4) return '*'.repeat(value.length);
+    return `${'*'.repeat(value.length - 4)}${value.slice(-4)}`;
+}
+
+function maskName(value: string): string {
+    return value.length <= 1 ? '*' : `${value.slice(0, 1)}${'*'.repeat(value.length - 1)}`;
+}
+
+function maskGeneric(value: string): string {
+    return '*'.repeat(Math.max(3, value.length));
 }
 
 function toLeaveType(item: Record<string, any>): JsonRecord {

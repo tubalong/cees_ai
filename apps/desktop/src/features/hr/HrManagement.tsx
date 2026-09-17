@@ -19,6 +19,8 @@ type Dialog = 'profile' | 'leaveType' | 'balance' | 'leave' | 'attendance' | 'at
 
 export default function HrManagement({ authContext, onSessionExpired }: { authContext: MeResult; onSessionExpired: () => void }): JSX.Element {
     const permissions = new Set(authContext.permissions);
+    const canReadSensitiveProfile = permissions.has('hr.profile.sensitive.read');
+    const canManageSensitiveProfile = permissions.has('hr.profile.sensitive.manage');
     const queryClient = useQueryClient();
     const { message, modal } = AntdApp.useApp();
     const [dialog, setDialog] = useState<Dialog>(null);
@@ -65,7 +67,9 @@ export default function HrManagement({ authContext, onSessionExpired }: { authCo
     };
     const submitProfile = async (): Promise<void> => {
         const values = normalizeEmptyValues(await profileForm.validateFields());
-        mutation.mutate(() => editingProfile ? updateHrProfile(editingProfile.membershipId, { ...values, version: editingProfile.version }) : createHrProfile(values));
+        const canSubmitSensitiveProfile = canManageSensitiveProfile && (!editingProfile || canReadSensitiveProfile);
+        const payload = canSubmitSensitiveProfile ? values : omitSensitiveProfileFields(values);
+        mutation.mutate(() => editingProfile ? updateHrProfile(editingProfile.membershipId, { ...payload, version: editingProfile.version }) : createHrProfile(payload));
     };
     const openLeaveType = (item?: HrLeaveType): void => {
         setEditingLeaveType(item); leaveTypeForm.resetFields(); leaveTypeForm.setFieldsValue(item ?? { unit: 'DAY', paid: true, enabled: true }); setDialog('leaveType');
@@ -181,6 +185,8 @@ export default function HrManagement({ authContext, onSessionExpired }: { authCo
         <Tabs items={tabs} />
 
         <Modal open={dialog === 'profile'} title={editingProfile ? '编辑员工档案' : '新建员工档案'} width={760} confirmLoading={mutation.isPending} onCancel={() => setDialog(null)} onOk={() => void submitProfile()}>
+            {!canManageSensitiveProfile && <Alert type="info" showIcon message="敏感字段受保护" description="手机号、邮箱、证件和紧急联系人仅对具有员工敏感档案管理权限的角色开放编辑。" style={{ marginBottom: 16 }} />}
+            {editingProfile && canManageSensitiveProfile && !canReadSensitiveProfile && <Alert type="warning" showIcon message="敏感字段不可编辑" description="当前角色可管理但不可读取敏感字段，为避免覆盖真实数据，本次编辑不会提交这些字段。" style={{ marginBottom: 16 }} />}
             <Form form={profileForm} layout="vertical"><Row gutter={16}>
                 {!editingProfile && <Col span={12}><Form.Item name="membershipId" label="租户成员" rules={[{ required: true }]}><Select showSearch options={memberOptions} /></Form.Item></Col>}
                 <Col span={12}><Form.Item name="employeeNo" label="工号"><Input /></Form.Item></Col>
@@ -194,14 +200,14 @@ export default function HrManagement({ authContext, onSessionExpired }: { authCo
                 <Col span={12}><Form.Item name="probationEndDate" label="试用期结束"><Input type="date" /></Form.Item></Col>
                 <Col span={12}><Form.Item name="regularDate" label="转正日期"><Input type="date" /></Form.Item></Col>
                 <Col span={12}><Form.Item name="workLocation" label="工作地点"><Input /></Form.Item></Col>
-                <Col span={12}><Form.Item name="phone" label="手机号"><Input /></Form.Item></Col>
-                <Col span={12}><Form.Item name="email" label="邮箱" rules={[{ type: 'email' }]}><Input /></Form.Item></Col>
-                <Col span={12}><Form.Item name="idType" label="证件类型"><Input placeholder="身份证/护照" /></Form.Item></Col>
-                <Col span={12}><Form.Item name="idNumber" label="证件号码"><Input /></Form.Item></Col>
+                <Col span={12}><Form.Item name="phone" label="手机号"><Input disabled={!canManageSensitiveProfile || Boolean(editingProfile && !canReadSensitiveProfile)} /></Form.Item></Col>
+                <Col span={12}><Form.Item name="email" label="邮箱" rules={[{ type: 'email' }]}><Input disabled={!canManageSensitiveProfile || Boolean(editingProfile && !canReadSensitiveProfile)} /></Form.Item></Col>
+                <Col span={12}><Form.Item name="idType" label="证件类型"><Input placeholder="身份证/护照" disabled={!canManageSensitiveProfile || Boolean(editingProfile && !canReadSensitiveProfile)} /></Form.Item></Col>
+                <Col span={12}><Form.Item name="idNumber" label="证件号码"><Input disabled={!canManageSensitiveProfile || Boolean(editingProfile && !canReadSensitiveProfile)} /></Form.Item></Col>
                 <Col span={12}><Form.Item name="educationLevel" label="学历"><Input /></Form.Item></Col>
                 <Col span={12}><Form.Item name="leaveDate" label="离职日期"><Input type="date" /></Form.Item></Col>
-                <Col span={12}><Form.Item name="emergencyContactName" label="紧急联系人"><Input /></Form.Item></Col>
-                <Col span={12}><Form.Item name="emergencyContactPhone" label="紧急联系电话"><Input /></Form.Item></Col>
+                <Col span={12}><Form.Item name="emergencyContactName" label="紧急联系人"><Input disabled={!canManageSensitiveProfile || Boolean(editingProfile && !canReadSensitiveProfile)} /></Form.Item></Col>
+                <Col span={12}><Form.Item name="emergencyContactPhone" label="紧急联系电话"><Input disabled={!canManageSensitiveProfile || Boolean(editingProfile && !canReadSensitiveProfile)} /></Form.Item></Col>
                 {editingProfile && <Col span={12}><Form.Item name="status" label="状态"><Select options={profileStatusOptions} /></Form.Item></Col>}
             </Row></Form>
         </Modal>
@@ -283,6 +289,16 @@ function formatTime(value?: string | null): string { return value ? new Date(val
 function dateTimeValue(value: string): string { return new Date(value).toISOString(); }
 function optionalDateTimeValue(value?: string | null): string | null { return value ? dateTimeValue(value) : null; }
 function normalizeEmptyValues<T extends Record<string, unknown>>(values: T): T { return Object.fromEntries(Object.entries(values).map(([key, value]) => [key, value === '' ? null : value])) as T; }
+function omitSensitiveProfileFields<T extends Record<string, unknown>>(values: T): T {
+    const result = { ...values };
+    delete result.phone;
+    delete result.email;
+    delete result.idType;
+    delete result.idNumber;
+    delete result.emergencyContactName;
+    delete result.emergencyContactPhone;
+    return result;
+}
 function parseAttendanceImport(value: string): Array<{ membershipId: string; workDate: string; status: HrAttendanceStatus; checkInAt?: string | null; checkOutAt?: string | null; note?: string | null }> {
     const lines = value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
     if (!lines.length) throw new Error('请输入至少一条考勤记录');

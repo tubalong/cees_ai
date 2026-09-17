@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CEES AI API
-  version: 0.28.0
+  version: 0.29.0
   description: 以本文件为唯一事实源的公开 API 契约。资源与操作按 docs/api 约定补充。
 
 servers:
@@ -5381,7 +5381,7 @@ paths:
               schema: { $ref: '#/components/schemas/HrProfileResponseEnvelope' }
         '400': { description: 请求字段校验失败 }
         '401': { description: 登录状态无效或已过期 }
-        '403': { description: 缺少 hr.profile.manage 权限 }
+        '403': { description: 缺少 hr.profile.manage 权限；提交敏感字段时还需 hr.profile.sensitive.manage 权限 }
         '409': { description: 该成员已有员工档案 }
 
   /hr/profiles/{membershipId}:
@@ -5423,7 +5423,7 @@ paths:
               schema: { $ref: '#/components/schemas/HrProfileResponseEnvelope' }
         '400': { description: 请求字段校验失败 }
         '401': { description: 登录状态无效或已过期 }
-        '403': { description: 缺少 hr.profile.manage 权限或数据范围不足 }
+        '403': { description: 缺少 hr.profile.manage 权限或数据范围不足；提交敏感字段时还需 hr.profile.sensitive.manage 权限 }
         '404': { description: 员工档案不存在 }
         '409': { description: 乐观锁版本冲突 }
 
@@ -6100,7 +6100,7 @@ paths:
             schema: { $ref: '#/components/schemas/ReviewHrEmployeeChangeRequest' }
       responses:
         '200':
-          description: 审批后的人事异动
+          description: 审批后的人事异动；批准离职或解除时同步停用租户成员并撤销其全部有效会话，历史主体记录保留
           content:
             application/json:
               schema: { $ref: '#/components/schemas/HrEmployeeChangeResponseEnvelope' }
@@ -7136,6 +7136,7 @@ components:
 
     HrProfile:
       type: object
+      description: 员工档案。phone、email、idType、idNumber、emergencyContactName、emergencyContactPhone 为敏感字段；缺少 hr.profile.sensitive.read 时返回脱敏值或 null。
       required:
         - id
         - tenantId
@@ -7157,12 +7158,12 @@ components:
         managerMembershipId: { type: [string, 'null'], format: uuid }
         entryDate: { type: [string, 'null'], format: date }
         leaveDate: { type: [string, 'null'], format: date }
-        phone: { type: [string, 'null'], maxLength: 64 }
-        email: { type: [string, 'null'], maxLength: 120 }
-        idType: { type: [string, 'null'], maxLength: 32 }
-        idNumber: { type: [string, 'null'], maxLength: 64 }
-        emergencyContactName: { type: [string, 'null'], maxLength: 120 }
-        emergencyContactPhone: { type: [string, 'null'], maxLength: 64 }
+        phone: { type: [string, 'null'], maxLength: 64, description: 敏感字段；无 hr.profile.sensitive.read 时返回脱敏值 }
+        email: { type: [string, 'null'], maxLength: 120, description: 敏感字段；无 hr.profile.sensitive.read 时返回脱敏值 }
+        idType: { type: [string, 'null'], maxLength: 32, description: 敏感字段；无 hr.profile.sensitive.read 时返回脱敏值 }
+        idNumber: { type: [string, 'null'], maxLength: 64, description: 敏感字段；无 hr.profile.sensitive.read 时返回脱敏值 }
+        emergencyContactName: { type: [string, 'null'], maxLength: 120, description: 敏感字段；无 hr.profile.sensitive.read 时返回脱敏值 }
+        emergencyContactPhone: { type: [string, 'null'], maxLength: 64, description: 敏感字段；无 hr.profile.sensitive.read 时返回脱敏值 }
         educationLevel: { type: [string, 'null'], maxLength: 64 }
         costCenter: { type: [string, 'null'], maxLength: 64 }
         jobLevel: { type: [string, 'null'], maxLength: 64 }
@@ -7185,6 +7186,7 @@ components:
 
     CreateHrProfileRequest:
       type: object
+      description: 创建员工档案。提交任一敏感字段需要 hr.profile.sensitive.manage 权限。
       additionalProperties: false
       required: [membershipId]
       properties:
@@ -7210,6 +7212,7 @@ components:
         workLocation: { type: [string, 'null'], maxLength: 160 }
     UpdateHrProfileRequest:
       type: object
+      description: 修改员工档案。提交任一敏感字段需要 hr.profile.sensitive.manage 权限；客户端不得将服务端返回的脱敏值回写。
       additionalProperties: false
       required: [version]
       properties:

@@ -90,6 +90,8 @@ export const TENANT_PERMISSION_DEFINITIONS = [
     ['task.cross_functional.attachment.manage', '管理跨职能任务附件'],
     ['hr.profile.read', '查看员工档案'],
     ['hr.profile.manage', '管理员工档案'],
+    ['hr.profile.sensitive.read', '查看员工敏感档案字段'],
+    ['hr.profile.sensitive.manage', '管理员工敏感档案字段'],
     ['hr.leave.read', '查看请假记录'],
     ['hr.leave.request', '发起请假申请'],
     ['hr.leave.approve', '审批请假申请'],
