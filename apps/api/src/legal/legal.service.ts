@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import { AuditOutcome, FilePurpose, LegalContractStatus, MembershipStatus, Prisma } from '@prisma/client';
 import { calendarYear, dateKeyToUtcMidnight, DEFAULT_TENANT_TIMEZONE, localDateKey } from '../common/tenant-time';
 import { PrismaService } from '../database/prisma.service';
+import { NotificationService } from '../notification/notification.service';
 import { DataScopeResolverService } from '../rbac/data-scope-resolver.service';
 import { TenantContext } from '../tenant/tenant-context';
 import {
@@ -19,6 +20,12 @@ const contractInclude = {
 
 type ContractRecord = Prisma.LegalContractGetPayload<{ include: typeof contractInclude }>;
 
+/** 后台任务流转合同状态所需的字段。 */
+type LifecycleContractRecord = {
+    id: string; tenantId: string; status: LegalContractStatus; version: number;
+    name: string; contractNo: string | null; ownerMembershipId: string | null; endDate: Date | null;
+};
+
 const ACTIVE_LIFECYCLE_STATUSES: LegalContractStatus[] = [
     LegalContractStatus.ACTIVE,
     LegalContractStatus.PENDING_RENEWAL,
@@ -30,6 +37,7 @@ export class LegalService {
         private readonly prisma: PrismaService,
         private readonly tenantContext: TenantContext,
         private readonly dataScopeResolver: DataScopeResolverService,
+        private readonly notifications: NotificationService,
     ) { }
 
     async listContracts(query: ListLegalContractsQueryDto): Promise<JsonRecord> {
@@ -330,6 +338,9 @@ export class LegalService {
                 version: true,
                 endDate: true,
                 renewalReminderDays: true,
+                contractNo: true,
+                name: true,
+                ownerMembershipId: true,
                 tenant: { select: { timezone: true } },
             },
         });
@@ -388,7 +399,7 @@ export class LegalService {
     }
 
     private async systemTransition(
-        contract: { id: string; tenantId: string; status: LegalContractStatus; version: number },
+        contract: LifecycleContractRecord,
         toStatus: LegalContractStatus,
         now: Date,
     ): Promise<number> {
@@ -413,6 +424,7 @@ export class LegalService {
                 comment: toStatus === LegalContractStatus.EXPIRED ? '系统自动标记合同到期' : '系统自动进入续签提醒期',
                 metadata: { trigger: 'BACKGROUND_JOB', evaluatedAt: now.toISOString() },
             } });
+            const notificationId = await this.notifyLifecycleOwner(transaction, contract, toStatus);
             await transaction.auditLog.create({ data: {
                 tenantId: contract.tenantId,
                 actorUserId: null,
@@ -424,10 +436,44 @@ export class LegalService {
                 resourceType: 'LEGAL_CONTRACT',
                 resourceId: contract.id,
                 requestId: `system:legal-lifecycle:${now.toISOString()}`,
-                metadata: { fromStatus: contract.status, toStatus },
+                metadata: { fromStatus: contract.status, toStatus, notificationId },
             } });
             return 1;
         });
+    }
+
+    /**
+     * 合同进入续签提醒期或自动到期时通知负责人处理。
+     * 负责人缺失、已停用或不属于当前租户时只跳过通知，不回滚状态流转。
+     */
+    private async notifyLifecycleOwner(
+        transaction: Prisma.TransactionClient,
+        contract: LifecycleContractRecord,
+        toStatus: LegalContractStatus,
+    ): Promise<string | null> {
+        if (!contract.ownerMembershipId || !contract.endDate) return null;
+        const owner = await transaction.tenantMembership.findFirst({
+            where: {
+                tenantId: contract.tenantId, id: contract.ownerMembershipId,
+                deletedAt: null, status: MembershipStatus.ACTIVE,
+            },
+            select: { userId: true },
+        });
+        if (!owner) return null;
+        const endDateKey = dateOnly(contract.endDate);
+        const expired = toStatus === LegalContractStatus.EXPIRED;
+        const label = contract.contractNo ? `合同「${contract.name}」（${contract.contractNo}）` : `合同「${contract.name}」`;
+        return this.notifications.createForUsers({
+            tenantId: contract.tenantId,
+            title: expired ? '合同已到期' : '合同续签提醒',
+            content: expired
+                ? `${label}已于 ${endDateKey} 到期，请及时处理续签或归档。`
+                : `${label}将于 ${endDateKey} 到期，请及时评估续签。`,
+            relationType: 'LEGAL_CONTRACT',
+            relationId: contract.id,
+            dedupKey: `${expired ? 'LEGAL_CONTRACT_EXPIRED' : 'LEGAL_CONTRACT_RENEWAL_REMINDER'}:${contract.id}:${endDateKey}`,
+            recipientUserIds: [owner.userId],
+        }, transaction);
     }
 
     private async prepareCreateInput(input: CreateLegalContractDto): Promise<{

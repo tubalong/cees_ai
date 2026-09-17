@@ -1,5 +1,5 @@
 import { FileProtectOutlined, PlusOutlined, ReloadOutlined, UploadOutlined } from '@ant-design/icons';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
     App as AntdApp, Button, Card, Col, Descriptions, Drawer, Form, Input, InputNumber, Modal,
     Popconfirm, Row, Select, Space, Statistic, Table, Tag, Timeline, Typography,
@@ -55,7 +55,17 @@ export default function LegalContractManagement({ authContext, onSessionExpired 
         onError: handleError,
     });
 
-    const contractsQuery = useQuery({ queryKey: ['legal', 'contracts', filters], queryFn: () => listLegalContracts(filters), enabled: canRead });
+    const contractsQuery = useInfiniteQuery({
+        queryKey: ['legal', 'contracts', filters],
+        queryFn: ({ pageParam }) => listLegalContracts({ ...filters, cursor: pageParam ?? undefined }),
+        initialPageParam: null as string | null,
+        getNextPageParam: (lastPage) => lastPage.nextCursor,
+        enabled: canRead,
+    });
+    const contracts = useMemo(
+        () => (contractsQuery.data?.pages ?? []).flatMap((page) => page.items),
+        [contractsQuery.data],
+    );
     const summaryQuery = useQuery({ queryKey: ['legal', 'summary'], queryFn: () => getLegalContractSummary(30), enabled: canRead });
     const membersQuery = useQuery({ queryKey: ['legal', 'members'], queryFn: () => listTenantMembers(), enabled: canRead });
     const departmentsQuery = useQuery({ queryKey: ['legal', 'departments'], queryFn: () => listDepartments(), enabled: canRead });
@@ -120,13 +130,19 @@ export default function LegalContractManagement({ authContext, onSessionExpired 
             <Col span={4}><Card><Statistic title="草稿" value={summary?.draftCount ?? 0} /></Card></Col>
         </Row>
         <Card className="legal-filters"><Space wrap>
-            <Input allowClear placeholder="编号、名称、交易对方" className="legal-keyword" onChange={(event) => setFilters((value) => ({ ...value, keyword: event.target.value || undefined }))} />
-            <Select allowClear placeholder="状态" className="legal-select" options={Object.entries(statusLabels).map(([value, label]) => ({ value, label }))} onChange={(status) => setFilters((value) => ({ ...value, status }))} />
-            <Select allowClear placeholder="合同类型" className="legal-select" options={Object.entries(typeLabels).map(([value, label]) => ({ value, label }))} onChange={(type) => setFilters((value) => ({ ...value, type }))} />
-            <Select allowClear showSearch placeholder="负责人" className="legal-select" options={members.map((member) => ({ value: member.id, label: member.user.displayName }))} onChange={(ownerMembershipId) => setFilters((value) => ({ ...value, ownerMembershipId }))} />
+            <Input allowClear placeholder="编号、名称、交易对方" className="legal-keyword" value={filters.keyword ?? ''} onChange={(event) => setFilters((value) => ({ ...value, keyword: event.target.value || undefined }))} />
+            <Select allowClear placeholder="状态" className="legal-select" value={filters.status} options={Object.entries(statusLabels).map(([value, label]) => ({ value, label }))} onChange={(status) => setFilters((value) => ({ ...value, status }))} />
+            <Select allowClear placeholder="合同类型" className="legal-select" value={filters.type} options={Object.entries(typeLabels).map(([value, label]) => ({ value, label }))} onChange={(type) => setFilters((value) => ({ ...value, type }))} />
+            <Select allowClear showSearch placeholder="负责人" className="legal-select" value={filters.ownerMembershipId} options={members.map((member) => ({ value: member.id, label: member.user.displayName }))} onChange={(ownerMembershipId) => setFilters((value) => ({ ...value, ownerMembershipId }))} />
+            <Select allowClear showSearch placeholder="归属部门" className="legal-select" value={filters.departmentId} options={departments.map((department) => ({ value: department.id, label: department.name }))} onChange={(departmentId) => setFilters((value) => ({ ...value, departmentId }))} />
+            <Select allowClear showSearch placeholder="关联项目" className="legal-select" value={filters.projectId} options={projects.map((project) => ({ value: project.id, label: project.name }))} onChange={(projectId) => setFilters((value) => ({ ...value, projectId }))} />
+            <Input type="date" className="legal-date" value={filters.endDateFrom ?? ''} onChange={(event) => setFilters((value) => ({ ...value, endDateFrom: event.target.value || undefined }))} />
+            <Typography.Text type="secondary">至</Typography.Text>
+            <Input type="date" className="legal-date" value={filters.endDateTo ?? ''} onChange={(event) => setFilters((value) => ({ ...value, endDateTo: event.target.value || undefined }))} />
             <Button onClick={() => setFilters({ expiringWithinDays: 30 })}>只看 30 天内到期</Button>
+            <Button onClick={() => setFilters({})}>清空筛选</Button>
         </Space></Card>
-        <Card><Table rowKey="id" loading={contractsQuery.isLoading} dataSource={contractsQuery.data?.items ?? []} columns={[
+        <Card><Table rowKey="id" loading={contractsQuery.isLoading} dataSource={contracts} columns={[
             { title: '合同编号', dataIndex: 'contractNo', width: 155 },
             { title: '合同名称', dataIndex: 'name', ellipsis: true },
             { title: '交易对方', dataIndex: 'counterparty', ellipsis: true },
@@ -145,7 +161,12 @@ export default function LegalContractManagement({ authContext, onSessionExpired 
                 {canUpdate && ['EXPIRED', 'TERMINATED'].includes(contract.status) && <Button size="small" onClick={() => action(() => archiveLegalContract(contract.id, contract.version))}>归档</Button>}
                 {canDelete && contract.status === 'DRAFT' && <Popconfirm title="确认删除该草稿合同？" onConfirm={() => action(() => deleteLegalContract(contract.id, contract.version))}><Button size="small" danger>删除</Button></Popconfirm>}
             </Space> },
-        ]} scroll={{ x: 1450 }} /></Card>
+        ]} scroll={{ x: 1450 }} />
+            {(contractsQuery.hasNextPage || contracts.length > 0) && <Space className="legal-load-more">
+                <Typography.Text type="secondary">已加载 {contracts.length} 条</Typography.Text>
+                {contractsQuery.hasNextPage && <Button loading={contractsQuery.isFetchingNextPage} onClick={() => void contractsQuery.fetchNextPage()}>加载更多</Button>}
+            </Space>}
+        </Card>
 
         <Modal title={editing ? '编辑合同' : '新增合同'} open={formOpen} width={820} onCancel={() => setFormOpen(false)} onOk={() => void submit()} confirmLoading={mutation.isPending}>
             <Form form={form} layout="vertical"><Row gutter={16}>

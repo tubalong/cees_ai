@@ -13,3 +13,5 @@
 .legal-full-width { width: 100%; }
 .legal-attachments { gap: 12px; margin-top: 8px; }
 @media (max-width: 1100px) { .legal-summary .ant-col { flex: 0 0 50%; max-width: 50%; margin-bottom: 12px; } }
+.legal-date { width: 145px; }
+.legal-load-more { margin-top: 12px; }

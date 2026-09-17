@@ -66,8 +66,11 @@
 | 上传会话过期 | `upload_sessions.status = PENDING` 且 `expiresAt <= now` | 更新为 `EXPIRED`，写入 `UPLOAD_SESSION_EXPIRED` |
 | AI 动作草稿过期 | 状态为 `PENDING_CONFIRMATION` 且已超过 `expiresAt` | 更新为 `EXPIRED` |
 | 日报提交提醒 | 有效成员前一天没有已提交或已通过日报 | 为未提交成员创建一条站内提醒 |
+| 合同到期提醒 | `ACTIVE` 合同进入 `renewalReminderDays` 提醒窗口或超过 `endDate` 自动流转 | 向合同负责人创建一条站内提醒 |
 
 日报提醒只面向有效租户成员和有效用户，不提醒已提交或已通过日报的成员。日报日期按 UTC 日界线计算，通知关联类型为 `WORK_REPORT`。
+
+合同到期提醒由 Legal 生命周期任务在同一事务内创建，按「合同 + 到期日」去重，通知关联类型为 `LEGAL_CONTRACT`；负责人已停用或不存在时只跳过通知，不阻断状态流转。
 
 ## 6. 配置
 

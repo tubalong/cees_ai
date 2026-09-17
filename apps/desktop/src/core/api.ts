@@ -2549,7 +2549,7 @@ export interface LegalContractInput {
     renewalReminderDays?: number; attachmentIds?: string[];
 }
 export interface LegalContractFilters {
-    keyword?: string; status?: LegalContractStatus; type?: LegalContractType; ownerMembershipId?: string;
+    keyword?: string; status?: LegalContractStatus; type?: LegalContractType; ownerMembershipId?: string; cursor?: string;
     departmentId?: string; projectId?: string; currency?: string; endDateFrom?: string; endDateTo?: string;
     expiringWithinDays?: number;
 }
