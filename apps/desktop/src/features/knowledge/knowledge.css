@@ -84,6 +84,7 @@
 }
 
 .kb-detail-panel,
+.kb-documents-panel,
 .kb-members-panel {
     padding: 14px 16px;
 }
@@ -146,6 +147,10 @@
 
 .kb-uploader-form {
     margin-top: 4px;
+}
+
+.kb-doc-error {
+    color: #e5484d;
 }
 
 @media (max-width: 1100px) {
