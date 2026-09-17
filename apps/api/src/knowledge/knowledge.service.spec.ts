@@ -84,6 +84,29 @@ describe('KnowledgeService', () => {
         expect(result.items).toHaveLength(1);
     });
 
+    it('lists candidate knowledge bases for the assistant with EDITOR permission filtering', async () => {
+        const prisma = createPrismaMock();
+        prisma.knowledgeBaseMember.findMany.mockResolvedValue([
+            { knowledgeBaseId: KNOWLEDGE_BASE_ID, permission: 'EDITOR' },
+            { knowledgeBaseId: OTHER_KNOWLEDGE_BASE_ID, permission: 'READER' },
+        ]);
+        prisma.knowledgeBase.findMany.mockResolvedValue([knowledgeBaseRecord()]);
+        prisma.knowledgeBaseMember.count.mockResolvedValue(1);
+        const service = createService(prisma, ['knowledge_base.read']);
+
+        const result = await service.listKnowledgeBasesForAssistant({
+            tenantId: TENANT_ID,
+            userId: USER_ID,
+            permissions: ['knowledge_base.read'],
+        });
+
+        expect(prisma.knowledgeBase.findMany).toHaveBeenCalledWith(expect.objectContaining({
+            where: expect.objectContaining({ id: { in: [KNOWLEDGE_BASE_ID] } }),
+            take: 100,
+        }));
+        expect(result).toHaveLength(1);
+    });
+
     it('rejects an update with a stale version', async () => {
         const prisma = createPrismaMock();
         prisma.knowledgeBase.findFirst.mockResolvedValue(knowledgeBaseRecord());

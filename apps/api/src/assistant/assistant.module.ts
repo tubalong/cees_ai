@@ -18,6 +18,8 @@ import { ToolPolicyService } from './tools/tool-policy.service';
 import { GenerateDocumentTool } from './tools/executors/generate-document.tool';
 import { GenerateImageTool } from './tools/executors/generate-image.tool';
 import { KnowledgeSearchTool } from './tools/executors/knowledge-search.tool';
+import { ListKnowledgeBasesTool } from './tools/executors/list-knowledge-bases.tool';
+import { SaveToKnowledgeTool } from './tools/executors/save-to-knowledge.tool';
 import { WebSearchTool } from './tools/executors/web-search.tool';
 
 /**
@@ -42,6 +44,8 @@ import { WebSearchTool } from './tools/executors/web-search.tool';
     GenerateDocumentTool,
     GenerateImageTool,
     KnowledgeSearchTool,
+    ListKnowledgeBasesTool,
+    SaveToKnowledgeTool,
     WebSearchTool,
   ],
 })

@@ -135,6 +135,32 @@ export class KnowledgeService {
         };
     }
 
+    /**
+     * 助手候选库列表（转存目标库选择，块 7c）：只返回当前用户达到 EDITOR 成员权限的知识库；
+     * 工具在后台执行，TenantContext 已不可用，因此身份与权限全部显式传入。
+     */
+    async listKnowledgeBasesForAssistant(input: {
+        tenantId: string;
+        userId: string;
+        permissions: string[];
+    }): Promise<KnowledgeBaseResult[]> {
+        const visibleIds = input.permissions.includes('knowledge_base.manage_all')
+            ? undefined
+            : await this.listKnowledgeBaseIdsWithPermission(input.tenantId, input.userId, 'EDITOR');
+        if (visibleIds && visibleIds.length === 0) return [];
+        const records = await this.prisma.knowledgeBase.findMany({
+            where: {
+                tenantId: input.tenantId,
+                deletedAt: null,
+                id: visibleIds ? { in: visibleIds } : undefined,
+            },
+            select: knowledgeBaseSelect,
+            orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+            take: 100,
+        });
+        return Promise.all(records.map((record) => this.toKnowledgeBaseResult(record)));
+    }
+
     async createKnowledgeBase(input: CreateKnowledgeBaseDto): Promise<KnowledgeBaseResult> {
         const context = this.tenantContext.require();
         const name = input.name.trim();
