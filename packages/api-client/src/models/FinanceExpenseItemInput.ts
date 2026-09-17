@@ -7,5 +7,12 @@ export type FinanceExpenseItemInput = {
     description: string;
     amount: number;
     occurredAt: string;
+    merchantName?: string | null;
+    invoiceNumber?: string | null;
+    invoiceType?: string | null;
+    taxAmount?: number;
+    projectId?: string | null;
+    departmentId?: string | null;
+    remark?: string | null;
 };
 

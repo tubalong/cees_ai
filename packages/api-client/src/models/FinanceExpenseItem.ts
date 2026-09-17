@@ -8,7 +8,15 @@ export type FinanceExpenseItem = {
     categoryId: string;
     description: string;
     amount: number;
+    taxAmount: number;
     occurredAt: string;
+    merchantName?: string | null;
+    invoiceNumber?: string | null;
+    invoiceType?: string | null;
+    projectId?: string | null;
+    departmentId?: string | null;
+    remark?: string | null;
+    sortOrder: number;
     version: number;
     createdAt: string;
 };

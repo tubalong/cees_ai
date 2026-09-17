@@ -1,6 +1,6 @@
 # 分配策略与人财法 API
 
-> 状态：AssignmentPolicy 与 HR 已实现；Finance/Legal 与 tasks.scope 仍为契约草案
+> 状态：AssignmentPolicy、HR 与 Finance 已实现；Legal 与 tasks.scope 仍为契约草案
 > Owner：C
 > 关联：[通用任务 tasks.scope 方案](../architecture/task-scope-proposal.md)、[人财法数据契约](../architecture/hr-finance-legal-data-contract.md)
 
@@ -96,10 +96,29 @@ GET    /api/v1/hr/reports/overtime-summary
 ```text
 GET    /api/v1/finance/expense-categories
 POST   /api/v1/finance/expense-categories
+PATCH  /api/v1/finance/expense-categories/{categoryId}
+DELETE /api/v1/finance/expense-categories/{categoryId}?version={version}
 GET    /api/v1/finance/expense-reports
 POST   /api/v1/finance/expense-reports
+GET    /api/v1/finance/expense-reports/{reportId}
+PATCH  /api/v1/finance/expense-reports/{reportId}
+DELETE /api/v1/finance/expense-reports/{reportId}?version={version}
+POST   /api/v1/finance/expense-reports/{reportId}/submit
+POST   /api/v1/finance/expense-reports/{reportId}/withdraw
+POST   /api/v1/finance/expense-reports/{reportId}/cancel
 POST   /api/v1/finance/expense-reports/{reportId}/review
+POST   /api/v1/finance/expense-reports/{reportId}/mark-paid
+GET    /api/v1/finance/reports/expense-summary
+GET    /api/v1/finance/reports/project-spend
 ```
+
+- 创建报销单生成草稿，总金额由服务端对明细求和。
+- 草稿、撤回和被拒绝的报销单可修改后重新提交。
+- 审批人不得审批自己的报销单；拒绝必须填写意见。
+- 付款确认只允许 `APPROVED` 状态，记录付款方式、时间和流水号。
+- 费用汇总和项目支出接口为 B、D 提供只读聚合。
+- 报销列表支持关键字、状态、报销人、部门、项目、类别和费用发生日期筛选。
+- 详细边界见 [财务报销与支出数据设计](../architecture/finance-expense-management.md)。
 
 - 报销单包含明细数组，`totalAmount` 由服务端与明细求和校验。
 - 审批通过统一 `review` 接口，`decision = APPROVE | REJECT`。
