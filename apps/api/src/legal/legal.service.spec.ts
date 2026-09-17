@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import { LegalContractStatus, LegalContractType, Prisma } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
+import { NotificationService } from '../notification/notification.service';
 import { DataScopeResolverService } from '../rbac/data-scope-resolver.service';
 import { TenantContext } from '../tenant/tenant-context';
 import { LegalService } from './legal.service';
@@ -76,8 +77,11 @@ describe('LegalService', () => {
     it('automatically marks contracts pending renewal and expired', async () => {
         const prisma = createPrismaMock();
         prisma.legalContract.findMany.mockResolvedValue([
-            { id: CONTRACT_ID, tenantId: TENANT_ID, status: LegalContractStatus.ACTIVE, version: 1, endDate: new Date('2026-09-30T00:00:00.000Z'), renewalReminderDays: 30, tenant: { timezone: 'Asia/Shanghai' } },
-            { id: SECOND_CONTRACT_ID, tenantId: TENANT_ID, status: LegalContractStatus.PENDING_RENEWAL, version: 2, endDate: new Date('2026-09-16T00:00:00.000Z'), renewalReminderDays: 30, tenant: { timezone: 'Asia/Shanghai' } },
+            lifecycleContract(),
+            lifecycleContract({
+                id: SECOND_CONTRACT_ID, status: LegalContractStatus.PENDING_RENEWAL, version: 2,
+                endDate: new Date('2026-09-16T00:00:00.000Z'),
+            }),
         ]);
         prisma.legalContract.updateMany.mockResolvedValue({ count: 1 });
         const service = createService(prisma);
@@ -91,6 +95,43 @@ describe('LegalService', () => {
         }));
         expect(prisma.auditLog.create).toHaveBeenCalledTimes(2);
     });
+
+    it('notifies the contract owner when the contract enters the renewal window or expires', async () => {
+        const prisma = createPrismaMock();
+        prisma.legalContract.findMany.mockResolvedValue([lifecycleContract()]);
+        prisma.legalContract.updateMany.mockResolvedValue({ count: 1 });
+        const notifications = createNotificationsMock();
+        const service = createService(prisma, undefined, undefined, notifications);
+
+        await expect(service.processLifecycle(new Date('2026-09-17T08:00:00.000Z'))).resolves.toBe(1);
+
+        expect(notifications.createForUsers).toHaveBeenCalledWith(expect.objectContaining({
+            tenantId: TENANT_ID,
+            title: '合同续签提醒',
+            relationType: 'LEGAL_CONTRACT',
+            relationId: CONTRACT_ID,
+            dedupKey: `LEGAL_CONTRACT_RENEWAL_REMINDER:${CONTRACT_ID}:2026-09-30`,
+            recipientUserIds: [USER_ID],
+        }), expect.anything());
+        expect(prisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+            data: expect.objectContaining({ metadata: expect.objectContaining({ notificationId: NOTIFICATION_ID }) }),
+        }));
+    });
+
+    it('keeps the lifecycle transition when the owner is no longer an active member', async () => {
+        const prisma = createPrismaMock();
+        prisma.legalContract.findMany.mockResolvedValue([lifecycleContract()]);
+        prisma.legalContract.updateMany.mockResolvedValue({ count: 1 });
+        prisma.tenantMembership.findFirst.mockResolvedValue(null);
+        const notifications = createNotificationsMock();
+        const service = createService(prisma, undefined, undefined, notifications);
+
+        await expect(service.processLifecycle(new Date('2026-09-17T08:00:00.000Z'))).resolves.toBe(1);
+        expect(notifications.createForUsers).not.toHaveBeenCalled();
+        expect(prisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+            data: expect.objectContaining({ metadata: expect.objectContaining({ notificationId: null }) }),
+        }));
+    });
 });
 
 const TENANT_ID = '10000000-0000-0000-0000-000000000001';
@@ -100,17 +141,24 @@ const DEPARTMENT_ID = '60000000-0000-0000-0000-000000000001';
 const PROJECT_ID = '70000000-0000-0000-0000-000000000001';
 const CONTRACT_ID = '80000000-0000-0000-0000-000000000001';
 const SECOND_CONTRACT_ID = '80000000-0000-0000-0000-000000000002';
+const NOTIFICATION_ID = '80000000-0000-0000-0000-0000000000f1';
+
+function createNotificationsMock(): Record<string, any> {
+    return { createForUsers: jest.fn().mockResolvedValue(NOTIFICATION_ID) };
+}
 
 function createService(
     prisma: Record<string, any>,
     permissions = ['legal.contract.read', 'legal.contract.create', 'legal.contract.update', 'legal.contract.delete', 'legal.contract.manage_all'],
     dataScope: Record<string, any> = { resolve: jest.fn() },
+    notifications: Record<string, any> = createNotificationsMock(),
 ): LegalService {
     const tenantContext = { require: jest.fn().mockReturnValue({
         tenantId: TENANT_ID, userId: USER_ID, membershipId: MEMBERSHIP_ID, requestId: 'request-id',
         roles: ['tenant_admin'], permissions,
     }) } as unknown as TenantContext;
-    return new LegalService(prisma as unknown as PrismaService, tenantContext, dataScope as unknown as DataScopeResolverService);
+    return new LegalService(prisma as unknown as PrismaService, tenantContext, dataScope as unknown as DataScopeResolverService,
+        notifications as unknown as NotificationService);
 }
 
 function createPrismaMock(): Record<string, any> {
@@ -119,7 +167,7 @@ function createPrismaMock(): Record<string, any> {
         legalContractSequence: { upsert: jest.fn() },
         legalContractAttachment: { deleteMany: jest.fn(), createMany: jest.fn() },
         legalContractStatusHistory: { create: jest.fn() },
-        tenantMembership: { findFirst: jest.fn().mockResolvedValue({ id: MEMBERSHIP_ID }) },
+        tenantMembership: { findFirst: jest.fn().mockResolvedValue({ id: MEMBERSHIP_ID, userId: USER_ID }) },
         department: { findFirst: jest.fn().mockResolvedValue({ id: DEPARTMENT_ID }) },
         project: { findFirst: jest.fn().mockResolvedValue({ id: PROJECT_ID }) },
         fileObject: { count: jest.fn() },
@@ -129,6 +177,15 @@ function createPrismaMock(): Record<string, any> {
     };
     prisma.$transaction.mockImplementation(async (callback: (transaction: Record<string, any>) => Promise<unknown>) => callback(prisma));
     return prisma;
+}
+
+function lifecycleContract(overrides: Record<string, any> = {}): Record<string, any> {
+    return {
+        id: CONTRACT_ID, tenantId: TENANT_ID, status: LegalContractStatus.ACTIVE, version: 1,
+        endDate: new Date('2026-09-30T00:00:00.000Z'), renewalReminderDays: 30,
+        contractNo: 'HT-2026-000001', name: '年度服务合同', ownerMembershipId: MEMBERSHIP_ID,
+        tenant: { timezone: 'Asia/Shanghai' }, ...overrides,
+    };
 }
 
 function contractRecord(overrides: Record<string, any> = {}): Record<string, any> {

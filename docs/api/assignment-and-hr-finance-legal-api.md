@@ -176,6 +176,8 @@ GET    /api/v1/legal/reports/contract-summary
 - 完整规则见 [Legal 合同台账设计](../architecture/legal-contract-ledger.md)。
 - 实现位置：`apps/api/src/legal/**`；数据库迁移：`0034_c_legal_contract_fullstack`；Desktop 入口：`/legal`。
 - 自动到期与续签提醒由统一后台任务执行，系统动作保留状态历史和审计记录。
+- 进入续签提醒期或自动到期时向负责人发送站内通知（`relationType = LEGAL_CONTRACT`），通知按「合同 + 到期日」去重，审计记录带上 `notificationId`。
+- 普通 PATCH 仅在 `DRAFT` 接受编号、名称、对方、类型、金额、币种和日期字段；`ACTIVE`、`PENDING_RENEWAL` 只能改描述、负责人、归属、附件和提醒天数，其余字段返回 `409`。
 
 ## 5. 老板经营概况与租户联网检索策略（契约草案）
 

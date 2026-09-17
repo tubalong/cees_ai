@@ -6732,7 +6732,7 @@ paths:
         '401': { description: 登录状态无效或已过期 }
         '403': { description: 缺少 legal.contract.update 权限或数据范围不足 }
         '404': { description: 合同不存在或不属于当前租户 }
-        '409': { description: 合同编号、合同状态或乐观锁版本冲突 }
+        '409': { description: 合同编号、合同状态、乐观锁版本冲突，或非草稿合同提交仅草稿可改字段（编号、名称、对方、类型、金额、币种和日期字段） }
     delete:
       summary: 删除合同台账
       operationId: deleteLegalContract
