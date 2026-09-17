@@ -888,6 +888,17 @@
     color: var(--muted);
 }
 
+.chat-citation-page {
+    margin-left: 4px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: var(--primary-soft);
+    color: var(--primary);
+    font-size: 11px;
+    font-style: normal;
+    white-space: nowrap;
+}
+
 .chat-document-preview {
     width: 100%;
     min-width: 0;
@@ -969,11 +980,20 @@
     text-align: left;
 }
 
-.chat-copy {
+.chat-message-actions {
     position: absolute;
     top: 100%;
     left: 0;
     margin-top: 4px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity .15s, visibility .15s;
+}
+
+.chat-copy {
     display: inline-flex;
     align-items: center;
     gap: 4px;
@@ -986,12 +1006,9 @@
     line-height: 1.4;
     white-space: nowrap;
     cursor: pointer;
-    opacity: 0;
-    visibility: hidden;
-    transition: opacity .15s, visibility .15s;
 }
 
-.chat-message:hover .chat-copy {
+.chat-message:hover .chat-message-actions {
     opacity: 1;
     visibility: visible;
 }
@@ -1001,9 +1018,14 @@
     background: var(--primary-soft);
 }
 
-.chat-message.user .chat-copy {
+.chat-message.user .chat-message-actions {
     left: auto;
     right: 0;
+}
+
+.chat-save-to-knowledge svg {
+    flex: 0 0 auto;
+    stroke-width: 1.8;
 }
 
 .composer-area {
@@ -1066,6 +1088,54 @@
     color: var(--primary);
     border-color: color-mix(in srgb, var(--primary) 28%, transparent);
     background: var(--primary-soft);
+}
+
+/* 附件标签上的转存入口：紧贴附件名的图标按钮（块 7c）。 */
+.attachment-save {
+    width: 18px;
+    height: 18px;
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    margin-left: 2px;
+    padding: 0;
+    color: var(--primary);
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    cursor: pointer;
+    transition: background .15s;
+}
+
+.attachment-save:hover {
+    background: color-mix(in srgb, var(--primary) 16%, transparent);
+}
+
+.attachment-save svg {
+    stroke-width: 2;
+}
+
+/* 转存确认框表单（块 7c）。 */
+.save-to-knowledge-form {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.save-to-knowledge-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.save-to-knowledge-field label {
+    color: #667085;
+    font-size: 12px;
+}
+
+.save-to-knowledge-field .ant-select {
+    width: 100%;
 }
 
 .message-editor .ant-input {

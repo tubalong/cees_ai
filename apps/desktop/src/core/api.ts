@@ -340,6 +340,67 @@ export async function getDocument(documentId: string): Promise<ManagedDocumentDe
     return authorizedRequest<ManagedDocumentDetail>(`v1/documents/${encodeURIComponent(documentId)}`);
 }
 
+export type KnowledgeSourceType = 'FILE_OBJECT' | 'DOCUMENT' | 'MESSAGE';
+
+export type KnowledgeDocumentVisibilityScope = 'PRIVATE' | 'DEPARTMENT' | 'PROJECT' | 'TENANT';
+
+export interface KnowledgeBaseSummary {
+    id: string;
+    tenantId: string;
+    name: string;
+    description: string | null;
+    memberCount: number;
+    createdBy: string | null;
+    updatedBy: string | null;
+    version: number;
+    createdAt: string;
+    updatedAt: string;
+}
+
+export interface KnowledgeDocumentResult {
+    id: string;
+    tenantId: string;
+    knowledgeBaseId: string;
+    name: string;
+    status: 'PENDING' | 'PARSING' | 'PARSED' | 'INDEXING' | 'READY' | 'FAILED';
+    fileObjectId: string;
+    versionNumber: number;
+    currentVersionId: string;
+    retryCount: number;
+    lastError: string | null;
+    visibilityScope: KnowledgeDocumentVisibilityScope;
+    departmentId: string | null;
+    projectId: string | null;
+    createdBy: string | null;
+    updatedBy: string | null;
+    version: number;
+    createdAt: string;
+    updatedAt: string;
+}
+
+/** 转存目标库候选：当前用户达到 EDITOR 成员权限的知识库（块 7c）。 */
+export async function listWritableKnowledgeBases(): Promise<{ items: KnowledgeBaseSummary[]; nextCursor: string | null }> {
+    return authorizedRequest<{ items: KnowledgeBaseSummary[]; nextCursor: string | null }>('v1/knowledge-bases?permission=EDITOR&limit=100');
+}
+
+/** 对话数据转知识库：附件 / AI 生成文档 / 对话消息走统一转存端点（块 7c）。 */
+export async function createKnowledgeDocument(knowledgeBaseId: string, input: {
+    sourceType: KnowledgeSourceType;
+    sourceId: string;
+    name?: string;
+    visibilityScope: KnowledgeDocumentVisibilityScope;
+}): Promise<KnowledgeDocumentResult> {
+    return authorizedRequest<KnowledgeDocumentResult>(`v1/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/documents`, {
+        method: 'POST',
+        body: JSON.stringify({
+            sourceType: input.sourceType,
+            sourceId: input.sourceId,
+            name: input.name?.trim() || undefined,
+            visibilityScope: input.visibilityScope,
+        }),
+    });
+}
+
 async function authorizedRequest<T>(path: string, init: RequestInit = {}, retry = true): Promise<T> {
     const accessToken = getStoredValue(ACCESS_TOKEN_KEY);
     if (!accessToken) throw new Error('登录状态已失效，请重新登录');
@@ -1054,7 +1115,7 @@ export type TurnStreamEvent =
     | { type: 'status'; seq: number; phase: 'reasoning' | 'answering' | 'tool_executing' }
     | { type: 'content_delta'; seq: number; text: string }
     | { type: 'tool_call'; seq: number; toolCallId: string; name: string; arguments: Record<string, unknown> }
-    | { type: 'tool_result'; seq: number; toolCallId: string; status: 'completed' | 'failed' | 'rejected'; resourceId?: string | null; resourceUrl?: string | null; resource?: { id: string; type: 'IMAGE' | 'DOCUMENT' } | null; sources?: Array<{ id: string; title: string; url: string; domain: string; snippet: string; publishedAt?: string | null }>; error?: Record<string, unknown> | null }
+    | { type: 'tool_result'; seq: number; toolCallId: string; status: 'completed' | 'failed' | 'rejected'; resourceId?: string | null; resourceUrl?: string | null; resource?: { id: string; type: 'IMAGE' | 'DOCUMENT' } | null; sources?: Array<{ id: string; title: string; url: string; domain: string; snippet: string; publishedAt?: string | null }>; citations?: Array<{ id: string; title: string; snippet: string; pageIndex?: number | null }>; error?: Record<string, unknown> | null }
     | { type: 'usage'; seq: number; tokenUsage: Record<string, number | null> }
     | { type: 'completed'; seq: number; latencyMs: number; finishReason: string | null }
     | { type: 'error'; seq: number; error: { code: string; message: string; retryable: boolean } };
@@ -1093,7 +1154,7 @@ async function streamSse(path: string, init: RequestInit, onEvent: (event: TurnS
     try { while (true) { const { value, done } = await reader.read(); if (done) { consume(decoder.decode()); if (buffer.trim()) throw new Error('事件流意外中断'); break; } consume(decoder.decode(value, { stream: true })); } } finally { reader.releaseLock(); }
 }
 
-export function createTurn(conversationId: string, input: { content: string; mode: ChatMode; imageFileIds?: string[] }, idempotencyKey: string, onEvent: (event: TurnStreamEvent) => void, signal?: AbortSignal): Promise<void> { return streamSse(`v1/conversations/${encodeURIComponent(conversationId)}/turns`, { method: 'POST', body: JSON.stringify({ content: input.content, mode: input.mode, ...(input.imageFileIds?.length ? { imageFileIds: input.imageFileIds } : {}) }), signal, headers: { 'Idempotency-Key': idempotencyKey } }, onEvent); }
+export function createTurn(conversationId: string, input: { content: string; mode: ChatMode; imageFileIds?: string[]; knowledgeBaseEnabled?: boolean }, idempotencyKey: string, onEvent: (event: TurnStreamEvent) => void, signal?: AbortSignal): Promise<void> { return streamSse(`v1/conversations/${encodeURIComponent(conversationId)}/turns`, { method: 'POST', body: JSON.stringify({ content: input.content, mode: input.mode, ...(input.imageFileIds?.length ? { imageFileIds: input.imageFileIds } : {}), ...(input.knowledgeBaseEnabled ? { knowledgeBaseEnabled: true } : {}) }), signal, headers: { 'Idempotency-Key': idempotencyKey } }, onEvent); }
 export function replayTurnEvents(conversationId: string, turnId: string, afterSeq: number, onEvent: (event: TurnStreamEvent) => void, signal?: AbortSignal): Promise<void> { return streamSse(`v1/conversations/${encodeURIComponent(conversationId)}/turns/${encodeURIComponent(turnId)}/events?afterSeq=${afterSeq}`, { method: 'GET', signal }, onEvent); }
 export async function cancelTurn(conversationId: string, turnId: string): Promise<Turn> { return authorizedRequest<Turn>(`v1/conversations/${encodeURIComponent(conversationId)}/turns/${encodeURIComponent(turnId)}/cancel`, { method: 'POST' }); }
 

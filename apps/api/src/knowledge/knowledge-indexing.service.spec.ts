@@ -8,7 +8,7 @@ import { KnowledgeIndexingService } from './knowledge-indexing.service';
 describe('KnowledgeIndexingService', () => {
     it('walks a document from PENDING to READY and submits the index request', async () => {
         const mocks = createMocks();
-        mocks.prisma.knowledgeDocument.findMany.mockResolvedValue([pendingDocument()]);
+        mocks.prisma.knowledgeDocument.findMany.mockResolvedValueOnce([]).mockResolvedValue([pendingDocument()]);
         mocks.prisma.knowledgeDocument.updateMany.mockResolvedValue({ count: 1 });
         mocks.prisma.documentVersion.findFirst.mockResolvedValue(documentVersion());
         mocks.prisma.fileObject.findFirst.mockResolvedValue(fileObject());
@@ -62,7 +62,7 @@ describe('KnowledgeIndexingService', () => {
 
     it('returns to PENDING after a retryable parse failure and retries', async () => {
         const mocks = createMocks();
-        mocks.prisma.knowledgeDocument.findMany.mockResolvedValue([pendingDocument()]);
+        mocks.prisma.knowledgeDocument.findMany.mockResolvedValueOnce([]).mockResolvedValue([pendingDocument()]);
         mocks.prisma.knowledgeDocument.updateMany.mockResolvedValue({ count: 1 });
         mocks.prisma.documentVersion.findFirst.mockResolvedValue(documentVersion());
         mocks.prisma.fileObject.findFirst.mockResolvedValue(fileObject());
@@ -87,7 +87,7 @@ describe('KnowledgeIndexingService', () => {
 
     it('marks FAILED after retryable failures reach the limit', async () => {
         const mocks = createMocks();
-        mocks.prisma.knowledgeDocument.findMany.mockResolvedValue([pendingDocument()]);
+        mocks.prisma.knowledgeDocument.findMany.mockResolvedValueOnce([]).mockResolvedValue([pendingDocument()]);
         mocks.prisma.knowledgeDocument.updateMany.mockResolvedValue({ count: 1 });
         mocks.prisma.documentVersion.findFirst.mockResolvedValue(documentVersion());
         mocks.prisma.fileObject.findFirst.mockResolvedValue(fileObject());
@@ -119,7 +119,7 @@ describe('KnowledgeIndexingService', () => {
 
     it('fails immediately for non-retryable parse errors', async () => {
         const mocks = createMocks();
-        mocks.prisma.knowledgeDocument.findMany.mockResolvedValue([pendingDocument()]);
+        mocks.prisma.knowledgeDocument.findMany.mockResolvedValueOnce([]).mockResolvedValue([pendingDocument()]);
         mocks.prisma.knowledgeDocument.updateMany.mockResolvedValue({ count: 1 });
         mocks.prisma.documentVersion.findFirst.mockResolvedValue(documentVersion());
         mocks.prisma.fileObject.findFirst.mockResolvedValue(fileObject());
@@ -141,7 +141,7 @@ describe('KnowledgeIndexingService', () => {
 
     it('retries a retryable index failure from the gateway', async () => {
         const mocks = createMocks();
-        mocks.prisma.knowledgeDocument.findMany.mockResolvedValue([pendingDocument()]);
+        mocks.prisma.knowledgeDocument.findMany.mockResolvedValueOnce([]).mockResolvedValue([pendingDocument()]);
         mocks.prisma.knowledgeDocument.updateMany.mockResolvedValue({ count: 1 });
         mocks.prisma.documentVersion.findFirst.mockResolvedValue(documentVersion());
         mocks.prisma.fileObject.findFirst.mockResolvedValue(fileObject());
@@ -165,9 +165,37 @@ describe('KnowledgeIndexingService', () => {
         });
     });
 
+    it('recovers stalled PARSING/INDEXING documents back to PENDING', async () => {
+        const mocks = createMocks();
+        const stalled = pendingDocument({ status: KnowledgeDocumentStatus.PARSING });
+        mocks.prisma.knowledgeDocument.findMany
+            .mockResolvedValueOnce([stalled])
+            .mockResolvedValueOnce([]);
+        mocks.prisma.knowledgeDocument.updateMany.mockResolvedValue({ count: 1 });
+        const service = createService(mocks);
+
+        const result = await service.runOnce();
+
+        expect(result).toEqual({ skipped: false, processed: 0 });
+        expect(mocks.prisma.knowledgeDocument.updateMany).toHaveBeenCalledWith({
+            where: { id: DOCUMENT_ID, status: KnowledgeDocumentStatus.PARSING, deletedAt: null },
+            data: {
+                status: KnowledgeDocumentStatus.PENDING,
+                lastError: '处理超时，已自动回收重新排队',
+            },
+        });
+        expect(mocks.prisma.auditLog.create).toHaveBeenCalledWith({
+            data: expect.objectContaining({
+                action: 'KNOWLEDGE_DOCUMENT_PROCESS_RECOVERED',
+                outcome: 'SUCCESS',
+                metadata: expect.objectContaining({ priorStatus: 'PARSING' }),
+            }),
+        });
+    });
+
     it('skips a document already claimed by another instance', async () => {
         const mocks = createMocks();
-        mocks.prisma.knowledgeDocument.findMany.mockResolvedValue([pendingDocument()]);
+        mocks.prisma.knowledgeDocument.findMany.mockResolvedValueOnce([]).mockResolvedValue([pendingDocument()]);
         mocks.prisma.knowledgeDocument.updateMany.mockResolvedValue({ count: 0 });
         const service = createService(mocks);
 
@@ -179,7 +207,9 @@ describe('KnowledgeIndexingService', () => {
 
     it('fails immediately when the document has no current version', async () => {
         const mocks = createMocks();
-        mocks.prisma.knowledgeDocument.findMany.mockResolvedValue([
+        mocks.prisma.knowledgeDocument.findMany
+            .mockResolvedValueOnce([])
+            .mockResolvedValue([
             pendingDocument({ currentVersionId: null }),
         ]);
         mocks.prisma.knowledgeDocument.updateMany.mockResolvedValue({ count: 1 });
@@ -202,7 +232,7 @@ describe('KnowledgeIndexingService', () => {
 
     it('fails immediately when the file object is missing', async () => {
         const mocks = createMocks();
-        mocks.prisma.knowledgeDocument.findMany.mockResolvedValue([pendingDocument()]);
+        mocks.prisma.knowledgeDocument.findMany.mockResolvedValueOnce([]).mockResolvedValue([pendingDocument()]);
         mocks.prisma.knowledgeDocument.updateMany.mockResolvedValue({ count: 1 });
         mocks.prisma.documentVersion.findFirst.mockResolvedValue(documentVersion());
         mocks.prisma.fileObject.findFirst.mockResolvedValue(null);
@@ -234,7 +264,7 @@ describe('KnowledgeIndexingService', () => {
     it('derives stable index identity from configuration', async () => {
         process.env.KNOWLEDGE_INDEX_VERSION = 'custom-index-v2';
         const mocks = createMocks();
-        mocks.prisma.knowledgeDocument.findMany.mockResolvedValue([pendingDocument()]);
+        mocks.prisma.knowledgeDocument.findMany.mockResolvedValueOnce([]).mockResolvedValue([pendingDocument()]);
         mocks.prisma.knowledgeDocument.updateMany.mockResolvedValue({ count: 1 });
         mocks.prisma.documentVersion.findFirst.mockResolvedValue(documentVersion());
         mocks.prisma.fileObject.findFirst.mockResolvedValue(fileObject());

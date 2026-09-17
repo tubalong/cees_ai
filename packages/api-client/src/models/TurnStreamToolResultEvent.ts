@@ -2,6 +2,7 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
+import type { KnowledgeToolCitation } from './KnowledgeToolCitation';
 import type { ToolResultResourceReference } from './ToolResultResourceReference';
 import type { ToolSource } from './ToolSource';
 /**
@@ -29,6 +30,10 @@ export type TurnStreamToolResultEvent = {
      * 联网搜索等非资源型工具返回的结构化来源；老客户端可忽略该字段
      */
     sources?: Array<ToolSource>;
+    /**
+     * 知识库检索工具命中的文档引用；老客户端可忽略该字段
+     */
+    citations?: Array<KnowledgeToolCitation>;
     /**
      * 工具失败或被拒绝时的错误信息
      */

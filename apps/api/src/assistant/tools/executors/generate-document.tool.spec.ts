@@ -64,6 +64,7 @@ describe('GenerateDocumentTool', () => {
             executionOwner: 'api:test',
             executionToken: 'execution-token-1',
             permissions: ['ai.document.generate'],
+            knowledgeBaseEnabled: false,
         }, { instruction: '写一份周报', visibility: 'PRIVATE' });
 
         expect(documentService.createGeneratedDocument).toHaveBeenCalledWith(expect.objectContaining({

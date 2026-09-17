@@ -81,7 +81,7 @@ export type { CreateHrOvertimeRequestRequest } from './models/CreateHrOvertimeRe
 export type { CreateHrProfileRequest } from './models/CreateHrProfileRequest';
 export type { CreateKnowledgeBaseMemberRequest } from './models/CreateKnowledgeBaseMemberRequest';
 export type { CreateKnowledgeBaseRequest } from './models/CreateKnowledgeBaseRequest';
-export type { CreateKnowledgeDocumentRequest } from './models/CreateKnowledgeDocumentRequest';
+export { CreateKnowledgeDocumentRequest } from './models/CreateKnowledgeDocumentRequest';
 export type { CreateKnowledgeDocumentVersionRequest } from './models/CreateKnowledgeDocumentVersionRequest';
 export type { CreateLegalContractRequest } from './models/CreateLegalContractRequest';
 export type { CreateMeetingRequest } from './models/CreateMeetingRequest';
@@ -243,6 +243,7 @@ export type { KnowledgeQueryCitation } from './models/KnowledgeQueryCitation';
 export type { KnowledgeQueryRequest } from './models/KnowledgeQueryRequest';
 export type { KnowledgeQueryResponse } from './models/KnowledgeQueryResponse';
 export type { KnowledgeQueryResponseEnvelope } from './models/KnowledgeQueryResponseEnvelope';
+export type { KnowledgeToolCitation } from './models/KnowledgeToolCitation';
 export type { LegalContract } from './models/LegalContract';
 export type { LegalContractList } from './models/LegalContractList';
 export type { LegalContractListResponseEnvelope } from './models/LegalContractListResponseEnvelope';

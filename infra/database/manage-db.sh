@@ -5,7 +5,7 @@ set -Eeuo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  ./manage-db.sh <staging|production> [up|down|logs|ps|validate|create-vector-db] [service...]
+  ./manage-db.sh <staging|production> [up|down|logs|ps|validate|create-vector-db|create-vector-indexes] [service...]
 
 Examples:
   ./manage-db.sh staging validate
@@ -13,6 +13,7 @@ Examples:
   ./manage-db.sh staging ps
   ./manage-db.sh production down
   ./manage-db.sh staging create-vector-db
+  ./manage-db.sh staging create-vector-indexes
 
 Use deploy-db.sh for deployment. The default action remains "up" for operational
 compatibility, but it only uses images already prepared locally and never pulls.
@@ -144,7 +145,7 @@ case "$ENVIRONMENT" in
 esac
 
 case "$ACTION" in
-  up | down | logs | ps | validate | create-vector-db)
+  up | down | logs | ps | validate | create-vector-db | create-vector-indexes)
     ;;
   -h | --help | help)
     usage
@@ -218,5 +219,26 @@ SELECT 'CREATE DATABASE cees_ai_vectors'
 WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'cees_ai_vectors')\gexec
 SQL
     echo "cees_ai_vectors database is ready."
+    ;;
+  create-vector-indexes)
+    validate_inputs
+    local postgres_user
+    local postgres_container
+    postgres_user="$(read_env_value POSTGRES_USER)"
+    postgres_container="$("${COMPOSE[@]}" ps -q postgres)"
+    if [[ -z "$postgres_container" ]]; then
+      echo "Error: postgres container is not running; start it with 'up' first." >&2
+      exit 1
+    fi
+    echo "Ensuring the knowledge_chunks HNSW index exists on $ENVIRONMENT..."
+    echo "Note: PGVectorStore stores embeddings in the data_knowledge_chunks table,"
+    echo "created by ai-service on first use; this action requires the table to exist."
+    docker exec -i "$postgres_container" \
+      psql -U "$postgres_user" -d cees_ai_vectors -v ON_ERROR_STOP=1 <<'SQL'
+CREATE INDEX IF NOT EXISTS data_knowledge_chunks_embedding_idx
+ON data_knowledge_chunks USING hnsw (embedding vector_cosine_ops)
+WITH (m = 16, ef_construction = 64);
+SQL
+    echo "knowledge_chunks HNSW index is ready."
     ;;
 esac

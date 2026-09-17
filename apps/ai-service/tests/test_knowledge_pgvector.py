@@ -5,9 +5,11 @@ from pathlib import Path
 
 import pytest
 from llama_index.core.schema import NodeRelationship, RelatedNodeInfo, TextNode
+from sqlalchemy import text
 
 from app.api.generated.models import KnowledgeRetrieveScope
 from app.knowledge.pgvector_store import (
+    HNSW_KWARGS,
     PGVectorStoreGateway,
     _nullable_in_filter,
     _to_async_url,
@@ -134,6 +136,38 @@ def test_nullable_in_filter_combines_empty_and_list() -> None:
 def test_gateway_rejects_invalid_embed_dim() -> None:
     with pytest.raises(ValueError, match="embed_dim"):
         PGVectorStoreGateway("postgresql://x", embed_dim=0)
+
+
+def test_gateway_declares_hnsw_kwargs_per_instance() -> None:
+    # PGVectorStore 建索引时会破坏性 pop hnsw_kwargs 的键，按实例传副本；
+    # 断言每个实例都拿到完整参数（3.1 节 m=16 / ef_construction=64）。
+    first = PGVectorStoreGateway("postgresql://x", embed_dim=4)
+    second = PGVectorStoreGateway("postgresql://x", embed_dim=4)
+    assert first._store.hnsw_kwargs == HNSW_KWARGS
+    assert second._store.hnsw_kwargs == HNSW_KWARGS
+    assert HNSW_KWARGS == {
+        "hnsw_m": 16,
+        "hnsw_ef_construction": 64,
+        "hnsw_ef_search": 64,
+        "hnsw_dist_method": "vector_cosine_ops",
+    }
+
+
+async def test_hnsw_index_created_after_initialize(clean_gateway: PGVectorStoreGateway) -> None:
+    # 表初始化时 PGVectorStore 自动建 HNSW 索引；0.9.0 的向量数据表名
+    # 为 data_<table_name>，索引名随之是 data_<table_name>_embedding_idx。
+    gateway = clean_gateway
+    data_table = f"data_{TEST_TABLE}"
+    async with gateway._store._async_session() as session:
+        result = await session.execute(
+            text(
+                "SELECT indexname FROM pg_indexes "
+                "WHERE schemaname = current_schema() AND tablename = :table"
+            ),
+            {"table": data_table},
+        )
+    index_names = [row[0] for row in result]
+    assert f"{data_table}_embedding_idx" in index_names
 
 
 # ---- PG 集成：upsert/delete/filter/幂等/部分失败 ----

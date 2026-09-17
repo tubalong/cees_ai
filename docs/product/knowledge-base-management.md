@@ -1,8 +1,8 @@
 # 知识库管理
 
-> 状态：第二阶段（文档上传与处理状态机）、第三阶段（公开知识库查询）已落地
-> 最后同步：2026-09-16
-> 公开契约版本：`0.25.0`
+> 状态：第一至四阶段已落地（知识库与成员管理、文档上传与处理状态机、公开知识库查询、对话数据转知识库）
+> 最后同步：2026-09-17
+> 公开契约版本：`0.27.0`
 
 ## 1. 阶段范围
 
@@ -34,6 +34,17 @@
 
 文档解析已接入真机 MinerU 3.4.5（测试环境 192.168.5.29 完成端到端验收：上传 → 解析 → 索引 → 查询闭环）；`DocumentChunk` 表读写尚未启用，当前引用明细直接由 ai-service 响应携带。生产环境以 Docker 容器方式部署 MinerU 并换用大规模 GPU 硬件。
 
+第四阶段落地对话数据转知识库：
+
+- 附件文件、AI 生成文档、对话消息三类来源经来源锚定（`sourceType` + `sourceId`）转存为知识库文档；
+- 转存先把来源物化为文件快照，进入与人工上传相同的解析 → 索引链路；同一来源只能存入一个知识库，重复转存到同一知识库追加新版本；
+- 转存要求成员 `EDITOR` 权限；桌面端提供生成文档卡片、消息、附件标签三处「存入知识库」入口与确认框（选目标库与可见范围），Assistant 提供 `save_to_knowledge` 工具（自然语言快捷路径：模型只提议，后端校验 EDITOR 与来源归属）。对话中用户口述要保存的内容时，模型可整理为文本经 `content` 参数直存（物化为新文档，不锚定来源，每次直存都是新文档；内容必须来自用户明确口述或经用户确认）；
+- Assistant 的 `list_knowledge_bases` 工具列出当前用户可见的全部知识库（含只读库）并标注每个库的成员权限（READER/EDITOR/MANAGER），回答「我有哪些知识库」；转存候选只取 EDITOR 及以上；
+- Assistant 的 `create_knowledge_base` 工具在用户明确要求时创建知识库（`knowledge_base.create` 权限，创建者自动成为 MANAGER），名称与说明须经用户确认；
+- 对话侧脱敏与语言约束：知识库 ID、权限枚举（READER/EDITOR/MANAGER）等内部标识不得出现在 AI 答复中（答复统一用简体中文，权限用「只读/可编辑/管理员」表述）；工具调用过程中的模型预告语不对用户展示；
+- 检索优先：开关开启时，人员/团队/项目/制度等内部信息类问题必须先检索知识库再回答，不得未检索就声称没有信息或反问用户；
+- 来源锚定字段、部分唯一索引与迁移落于 `20260916094414_add_knowledge_document_source_anchor`。
+
 ## 2. 知识库可见范围
 
 所有查询都自动使用当前 JWT 中的 `tenantId`，客户端不能提交租户 ID 来改变数据范围：
@@ -48,7 +59,7 @@
 | 权限 | 能力 |
 | --- | --- |
 | `READER` | 读取知识库及后续允许读取的内容 |
-| `EDITOR` | 在 `READER` 基础上编辑知识库内容（后续阶段使用） |
+| `EDITOR` | 在 `READER` 基础上编辑知识库内容：上传/转存文档与文档新版本（第四阶段落地） |
 | `MANAGER` | 在 `EDITOR` 基础上管理知识库资料和成员 |
 
 权限等级为 `READER < EDITOR < MANAGER`。知识库创建者创建时自动加入当前用户并获得 `MANAGER`。创建者不能被降级或移除，知识库不能移除最后一名 `MANAGER`。
@@ -71,7 +82,7 @@
 | `PATCH /knowledge-bases/{knowledgeBaseId}/members/{membershipId}` | 修改成员权限 | `knowledge_base.member.manage` + MANAGER |
 | `DELETE /knowledge-bases/{knowledgeBaseId}/members/{membershipId}` | 移除知识库成员 | `knowledge_base.member.manage` + MANAGER |
 | `GET /knowledge-bases/{knowledgeBaseId}/documents` | 分页查询知识库文档与处理状态 | `knowledge_base.read` + 知识库可见范围 |
-| `POST /knowledge-bases/{knowledgeBaseId}/documents` | 关联文件对象创建文档，进入处理队列 | `knowledge_base.document.manage` + EDITOR |
+| `POST /knowledge-bases/{knowledgeBaseId}/documents` | 关联文件对象或转存来源（附件/AI 生成文档/对话消息）创建文档，进入处理队列 | `knowledge_base.document.manage` + EDITOR |
 | `POST /knowledge-bases/{knowledgeBaseId}/documents/{documentId}/versions` | 上传新版本，重新进入处理队列 | `knowledge_base.document.manage` + EDITOR |
 | `POST /knowledge-bases/{knowledgeBaseId}/documents/{documentId}/retry` | 重试处理失败的文档 | `knowledge_base.document.manage` + EDITOR |
 | `POST /knowledge-bases/{knowledgeBaseId}/query` | 按知识库内容回答问题，返回带引用的答案 | `knowledge_base.query` + 知识库可见范围 |
@@ -122,6 +133,10 @@
 | `400` | `KNOWLEDGE_DOCUMENT_SCOPE_INVALID` | 可见范围缺少部门/项目，或部门/项目不属于当前租户 |
 | `404` | `KNOWLEDGE_FILE_OBJECT_NOT_FOUND` | 文件不存在、非当前租户或已删除 |
 | `409` | `KNOWLEDGE_FILE_OBJECT_IN_USE` | 文件已作为其他文档版本的内容源 |
+| `409` | `KNOWLEDGE_SOURCE_ALREADY_SAVED` | 来源已存入其他知识库，一份来源只能存一个知识库 |
+| `404` | `KNOWLEDGE_SOURCE_DOCUMENT_NOT_FOUND` | 转存的 AI 生成文档不存在或无权访问 |
+| `404` | `KNOWLEDGE_SOURCE_MESSAGE_NOT_FOUND` | 转存的对话消息不存在或无权访问 |
+| `400` | `KNOWLEDGE_SOURCE_MESSAGE_INVALID` | 该消息类型不支持转存（仅用户或助手消息） |
 | `503` | `KNOWLEDGE_QUERY_SERVICE_UNAVAILABLE` | AI 服务暂不可用，本次查询已记入失败审计，可稍后重试 |
 
 ## 6. 审计与数据模型
@@ -142,6 +157,7 @@
 - `KNOWLEDGE_DOCUMENT_RETRY_REQUESTED`；
 - `KNOWLEDGE_DOCUMENT_INDEXED`（后台任务，无操作者）；
 - `KNOWLEDGE_DOCUMENT_PROCESS_FAILED`（后台任务，无操作者）；
+- `KNOWLEDGE_DOCUMENT_PROCESS_RECOVERED`（后台任务，无操作者；孤儿状态回收）；
 - `KNOWLEDGE_BASE_QUERIED`（知识库查询成功；失败时 outcome 为 `FAILURE` 并携带错误码）。
 
 当前阶段使用以下模型：
@@ -155,13 +171,14 @@ KnowledgeBase
 
 `KnowledgeBaseMember` 以 `tenantId + knowledgeBaseId + userId` 保证成员关系唯一。知识库删除采用软删除；成员关系当前没有 `deletedAt` 字段，移除采用硬删除。
 
-数据库迁移为 `apps/api/prisma/migrations/0015_knowledge_base_management/migration.sql`（第一阶段）、`0026_knowledge_document_indexing/migration.sql`（第二阶段：处理状态机字段、可见范围下沉 `DocumentVersion`、删除 `DocumentChunk.embedding`）与 `0028_knowledge_query_api/migration.sql`（第三阶段：知识库锚点字段、成员权限枚举、`KnowledgeQueryLog` 扩展）。
+数据库迁移为 `apps/api/prisma/migrations/0015_knowledge_base_management/migration.sql`（第一阶段）、`0026_knowledge_document_indexing/migration.sql`（第二阶段：处理状态机字段、可见范围下沉 `DocumentVersion`、删除 `DocumentChunk.embedding`）、`0028_knowledge_query_api/migration.sql`（第三阶段：知识库锚点字段、成员权限枚举、`KnowledgeQueryLog` 扩展）、`20260916084227_assistant_knowledge_tool`（Assistant RAG 工具接入：对话级知识库开关字段）与 `20260916094414_add_knowledge_document_source_anchor`（第四阶段：来源锚定字段与部分唯一索引）。
 
 ## 7. 后续阶段
 
 后续实现应在新的契约和迁移中逐步加入：
 
 1. 文档删除、配额、病毒扫描与后台任务监控；
-2. 检索分数阈值拒答（块 6）、Assistant RAG 工具接入（块 7）；
-3. 知识库归属锚点管理与自动授权：挂项目/挂部门/公司级分类，锚点人群自动获得 READER（权限边界见架构文档 knowledge-rag.md 3.6，块 8）。
+2. 检索分数阈值拒答（原计划随块 6 落地，尚未实现）；
+3. 助手人设中的知识库功能告知与交流层边界（架构文档 knowledge-rag.md 3.9，块 7d）；
+4. 知识库归属锚点管理与自动授权：挂项目/挂部门/公司级分类，锚点人群自动获得 READER（权限边界见架构文档 knowledge-rag.md 3.6，块 8）。
 

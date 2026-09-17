@@ -11,7 +11,7 @@ import { AuditOutcome, MembershipStatus, Prisma, UserStatus } from '@prisma/clie
 import type { KnowledgeAnswerResponse, KnowledgeRetrieveScope } from '@cees/ai-service-client';
 import { AiServiceGateway, AiServiceInvocationError } from '../ai-orchestration/ai-service-gateway.service';
 import { PrismaService } from '../database/prisma.service';
-import { TenantContext } from '../tenant/tenant-context';
+import { TenantContext, RequestTenantContext } from '../tenant/tenant-context';
 import {
     CreateKnowledgeBaseDto,
     CreateKnowledgeBaseMemberDto,
@@ -25,6 +25,8 @@ import {
 import { KnowledgeIndexingService, readIndexVersions } from './knowledge-indexing.service';
 import {
     KNOWLEDGE_BASE_MEMBER_PERMISSIONS,
+    AssistantKnowledgeBaseCandidate,
+    AssistantKnowledgeSearchResult,
     KnowledgeBaseMemberListResult,
     KnowledgeBaseMemberPermission,
     KnowledgeBaseMemberResult,
@@ -89,7 +91,9 @@ export class KnowledgeService {
         const context = this.tenantContext.require();
         const visibleIds = context.permissions.includes('knowledge_base.manage_all')
             ? undefined
-            : await this.listVisibleKnowledgeBaseIds(context.tenantId, context.userId);
+            : query.permission
+                ? await this.listKnowledgeBaseIdsWithPermission(context.tenantId, context.userId, query.permission)
+                : await this.listVisibleKnowledgeBaseIds(context.tenantId, context.userId);
         if (visibleIds && visibleIds.length === 0) return { items: [], nextCursor: null };
         if (query.cursor) {
             const cursorExists = await this.prisma.knowledgeBase.findFirst({
@@ -132,10 +136,94 @@ export class KnowledgeService {
         };
     }
 
+    /**
+     * 助手可见库清单（回答“我有哪些知识库”与转存目标库选择，块 7c）：返回当前用户
+     * 可见（任意成员等级，含 READER）的全部知识库，并标注每个库的成员权限；
+     * 工具在后台执行，TenantContext 已不可用，因此身份与权限全部显式传入。
+     */
+    async listKnowledgeBasesForAssistant(input: {
+        tenantId: string;
+        userId: string;
+        permissions: string[];
+    }): Promise<AssistantKnowledgeBaseCandidate[]> {
+        // manage_all 短路为租户全部未删除库，等效拥有最高权限。
+        if (input.permissions.includes('knowledge_base.manage_all')) {
+            const records = await this.prisma.knowledgeBase.findMany({
+                where: { tenantId: input.tenantId, deletedAt: null },
+                select: knowledgeBaseSelect,
+                orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+                take: 100,
+            });
+            return Promise.all(records.map(async (record) => ({
+                ...(await this.toKnowledgeBaseResult(record)),
+                myPermission: 'MANAGER' as KnowledgeBaseMemberPermission,
+            })));
+        }
+        const memberships = await this.prisma.knowledgeBaseMember.findMany({
+            where: { tenantId: input.tenantId, userId: input.userId },
+            select: { knowledgeBaseId: true, permission: true },
+        });
+        if (memberships.length === 0) return [];
+        const permissionByKnowledgeBaseId = new Map(
+            memberships.map((membership) => [
+                membership.knowledgeBaseId,
+                normalizeMemberPermission(membership.permission),
+            ]),
+        );
+        const records = await this.prisma.knowledgeBase.findMany({
+            where: {
+                tenantId: input.tenantId,
+                deletedAt: null,
+                id: { in: [...permissionByKnowledgeBaseId.keys()] },
+            },
+            select: knowledgeBaseSelect,
+            orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+            take: 100,
+        });
+        return Promise.all(records.map(async (record) => ({
+            ...(await this.toKnowledgeBaseResult(record)),
+            myPermission: permissionByKnowledgeBaseId.get(record.id) ?? 'READER',
+        })));
+    }
+
     async createKnowledgeBase(input: CreateKnowledgeBaseDto): Promise<KnowledgeBaseResult> {
         const context = this.tenantContext.require();
-        const name = input.name.trim();
-        const description = normalizeDescription(input.description);
+        return this.createKnowledgeBaseRecord({
+            tenantId: context.tenantId,
+            userId: context.userId,
+            membershipId: context.membershipId,
+            requestId: context.requestId,
+        }, input.name, input.description);
+    }
+
+    /**
+     * 助手创建知识库（工具后台执行，TenantContext 已不可用）：与公开接口共用同一
+     * 事务体，创建者自动成为 MANAGER 并写 KNOWLEDGE_BASE_CREATED 审计。
+     * 调用方必须已通过 knowledge_base.create 权限码校验（ToolPolicy）。
+     */
+    async createKnowledgeBaseForAssistant(input: {
+        tenantId: string;
+        userId: string;
+        membershipId: string;
+        requestId: string;
+        name: string;
+        description?: string | null;
+    }): Promise<KnowledgeBaseResult> {
+        return this.createKnowledgeBaseRecord({
+            tenantId: input.tenantId,
+            userId: input.userId,
+            membershipId: input.membershipId,
+            requestId: input.requestId,
+        }, input.name, input.description);
+    }
+
+    private async createKnowledgeBaseRecord(
+        context: Pick<RequestTenantContext, 'tenantId' | 'userId' | 'membershipId' | 'requestId'>,
+        rawName: string,
+        rawDescription: string | null | undefined,
+    ): Promise<KnowledgeBaseResult> {
+        const name = rawName.trim();
+        const description = normalizeDescription(rawDescription);
         const record = await this.prisma.$transaction(async (transaction) => {
             const knowledgeBase = await transaction.knowledgeBase.create({
                 data: {
@@ -383,6 +471,41 @@ export class KnowledgeService {
     }
 
     /**
+     * 显式上下文的成员权限校验（后台工具执行用，不依赖 AsyncLocalStorage）：
+     * manage_all 短路放行，否则按成员表权限等级比对；语义与 requireKnowledgeBaseAccess 一致。
+     */
+    async assertKnowledgeBaseMemberPermission(input: {
+        tenantId: string;
+        userId: string;
+        permissions: string[];
+        knowledgeBaseId: string;
+        minimumPermission: KnowledgeBaseMemberPermission;
+    }): Promise<KnowledgeBaseAccess> {
+        const knowledgeBase = await this.requireKnowledgeBase(input.tenantId, input.knowledgeBaseId);
+        if (input.permissions.includes('knowledge_base.manage_all')) return knowledgeBase;
+        const member = await this.prisma.knowledgeBaseMember.findUnique({
+            where: {
+                tenantId_knowledgeBaseId_userId: {
+                    tenantId: input.tenantId,
+                    knowledgeBaseId: input.knowledgeBaseId,
+                    userId: input.userId,
+                },
+            },
+            select: { permission: true },
+        });
+        if (!member) throw this.knowledgeBaseNotFound();
+        if (!isKnowledgeBaseMemberPermission(member.permission)
+            || permissionRank[member.permission] < permissionRank[input.minimumPermission]) {
+            throw new ForbiddenException({
+                code: 'KNOWLEDGE_BASE_MEMBER_PERMISSION_DENIED',
+                message: '知识库成员权限不足',
+                details: { required: input.minimumPermission },
+            });
+        }
+        return knowledgeBase;
+    }
+
+    /**
      * 基于知识库内容回答提问：实时折叠三层权限为可信 scope 后调 ai-service
      * answer（内部先检索再生成带引用的答案），成功写入 KnowledgeQueryLog 与审计。
      */
@@ -431,6 +554,158 @@ export class KnowledgeService {
             });
         });
         return result;
+    }
+
+    /**
+     * 助手知识库检索：与单库问答共用 ai-service answer 链路，但检索范围为
+     * 当前用户可见的全部知识库（manage_all 短路为租户全部库）。工具在后台执行，
+     * TenantContext 已不可用，因此身份与权限全部显式传入。
+     * 多库检索的 KnowledgeQueryLog.knowledgeBaseId 记空，审计记录实际检索范围。
+     */
+    async searchKnowledgeForAssistant(input: {
+        tenantId: string;
+        userId: string;
+        membershipId: string;
+        permissions: string[];
+        requestId: string;
+        query: string;
+    }): Promise<AssistantKnowledgeSearchResult> {
+        const knowledgeBaseIds = input.permissions.includes('knowledge_base.manage_all')
+            ? await this.listTenantKnowledgeBaseIds(input.tenantId)
+            : await this.listVisibleKnowledgeBaseIds(input.tenantId, input.userId);
+        if (knowledgeBaseIds.length === 0) {
+            return {
+                answer: '',
+                grounded: false,
+                insufficientEvidence: true,
+                citations: [],
+                searchedKnowledgeBaseIds: [],
+            };
+        }
+        const [departmentIds, projectIds] = await Promise.all([
+            this.resolveDepartmentTreeIds(input.tenantId, input.membershipId),
+            this.resolveVisibleProjectIds(input.tenantId, input.membershipId),
+        ]);
+        const scope: KnowledgeRetrieveScope = {
+            knowledge_base_ids: knowledgeBaseIds,
+            department_ids: departmentIds,
+            project_ids: projectIds,
+        };
+        let response: KnowledgeAnswerResponse;
+        try {
+            response = await this.gateway.answerKnowledge({
+                request_id: input.requestId,
+                tenant_id: input.tenantId,
+                user_id: input.userId,
+                query: input.query,
+                scope,
+                index_version: readIndexVersions().indexVersion,
+                embedding_profile: null,
+            });
+        } catch (error) {
+            await this.writeAssistantQueryFailureAudit(input, knowledgeBaseIds, error);
+            throw error;
+        }
+        // ai-service 的 citation 不带文档标题，按 document_id 回查业务文档补齐。
+        const titles = await this.resolveDocumentTitles(input.tenantId, response.citations);
+        const citations = response.citations.map((citation) => ({
+            id: citation.document_id,
+            title: titles.get(citation.document_id) ?? '知识库文档',
+            snippet: citation.text,
+            pageIndex: citation.page_index ?? null,
+        }));
+        const citationLog = response.citations.map((citation) => ({
+            citationId: citation.citation_id,
+            documentId: citation.document_id,
+            documentVersionId: citation.document_version_id,
+            chunkId: citation.chunk_id,
+            text: citation.text,
+            score: citation.score,
+            pageIndex: citation.page_index,
+            bbox: citation.bbox,
+        }));
+        await this.prisma.$transaction(async (transaction) => {
+            await transaction.knowledgeQueryLog.create({
+                data: {
+                    tenantId: input.tenantId,
+                    knowledgeBaseId: null,
+                    userId: input.userId,
+                    query: input.query,
+                    answer: response.answer || null,
+                    grounded: response.grounded,
+                    citations: citationLog as unknown as Prisma.InputJsonValue,
+                    latencyMs: response.execution?.latency_ms ?? null,
+                    inputTokens: response.execution?.token_usage?.input_tokens ?? null,
+                    outputTokens: response.execution?.token_usage?.output_tokens ?? null,
+                    totalTokens: response.execution?.token_usage?.total_tokens ?? null,
+                    requestId: input.requestId,
+                },
+            });
+            await this.writeAudit(transaction, input, 'KNOWLEDGE_BASE_QUERIED', 'KNOWLEDGE_BASE', null, {
+                knowledgeBaseIds,
+                grounded: response.grounded,
+                insufficientEvidence: response.insufficient_evidence,
+                citationCount: citations.length,
+                indexVersion: response.index_version,
+            });
+        });
+        return {
+            answer: response.answer,
+            grounded: response.grounded,
+            insufficientEvidence: response.insufficient_evidence,
+            citations,
+            searchedKnowledgeBaseIds: knowledgeBaseIds,
+        };
+    }
+
+    /** 租户内未删除的全部知识库 ID；仅供 manage_all 权限短路使用。 */
+    private async listTenantKnowledgeBaseIds(tenantId: string): Promise<string[]> {
+        const records = await this.prisma.knowledgeBase.findMany({
+            where: { tenantId, deletedAt: null },
+            select: { id: true },
+        });
+        return records.map((record) => record.id);
+    }
+
+    /** 按 document_id 回查文档标题；缺失的文档回退默认标题。 */
+    private async resolveDocumentTitles(
+        tenantId: string,
+        citations: KnowledgeAnswerResponse['citations'],
+    ): Promise<Map<string, string>> {
+        const documentIds = [...new Set(citations.map((citation) => citation.document_id))];
+        if (documentIds.length === 0) return new Map();
+        const documents = await this.prisma.knowledgeDocument.findMany({
+            where: { tenantId, id: { in: documentIds } },
+            select: { id: true, name: true },
+        });
+        return new Map(documents.map((document) => [document.id, document.name]));
+    }
+
+    private async writeAssistantQueryFailureAudit(
+        input: {
+            tenantId: string;
+            userId: string;
+            membershipId: string;
+            requestId: string;
+        },
+        knowledgeBaseIds: string[],
+        error: unknown,
+    ): Promise<void> {
+        await this.prisma.auditLog.create({
+            data: {
+                tenantId: input.tenantId,
+                actorUserId: input.userId,
+                actorMembershipId: input.membershipId,
+                action: 'KNOWLEDGE_BASE_QUERIED',
+                outcome: AuditOutcome.FAILURE,
+                resourceType: 'KNOWLEDGE_BASE',
+                requestId: input.requestId,
+                metadata: {
+                    knowledgeBaseIds,
+                    errorCode: error instanceof AiServiceInvocationError ? error.code : 'UNKNOWN',
+                } as Prisma.InputJsonValue,
+            },
+        });
     }
 
     /**
@@ -532,6 +807,22 @@ export class KnowledgeService {
         return memberships.map((membership) => membership.knowledgeBaseId);
     }
 
+    /** 成员权限达到最低等级的知识库 ID（转存目标库选择过滤，块 7c）。 */
+    private async listKnowledgeBaseIdsWithPermission(
+        tenantId: string,
+        userId: string,
+        minimumPermission: KnowledgeBaseMemberPermission,
+    ): Promise<string[]> {
+        const memberships = await this.prisma.knowledgeBaseMember.findMany({
+            where: { tenantId, userId },
+            select: { knowledgeBaseId: true, permission: true },
+        });
+        return memberships
+            .filter((membership) => isKnowledgeBaseMemberPermission(membership.permission)
+                && permissionRank[membership.permission] >= permissionRank[minimumPermission])
+            .map((membership) => membership.knowledgeBaseId);
+    }
+
     private async requireKnowledgeBase(tenantId: string, knowledgeBaseId: string): Promise<KnowledgeBaseRecord> {
         const knowledgeBase = await this.prisma.knowledgeBase.findFirst({
             where: { id: knowledgeBaseId, tenantId, deletedAt: null },
@@ -625,10 +916,10 @@ export class KnowledgeService {
 
     private async writeAudit(
         transaction: Prisma.TransactionClient,
-        context: ReturnType<TenantContext['require']>,
+        context: Pick<RequestTenantContext, 'tenantId' | 'userId' | 'membershipId' | 'requestId'>,
         action: string,
         resourceType: string,
-        resourceId: string,
+        resourceId: string | null,
         metadata: Record<string, unknown>,
     ): Promise<void> {
         await transaction.auditLog.create({

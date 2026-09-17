@@ -231,6 +231,76 @@ export class FileService {
         }
     }
 
+    /**
+     * 服务端物化文本快照为正式 FileObject（知识库转存链路，块 7c）：写入 COS 后落库并写审计。
+     * 不经过上传会话，只供服务端生成内容（AI 文档 / 对话消息快照）落库使用；
+     * 身份上下文显式传入，后台执行（工具链）不依赖 AsyncLocalStorage。
+     */
+    async createMaterializedFile(input: {
+        tenantId: string;
+        userId: string;
+        membershipId: string;
+        requestId: string;
+        name: string;
+        mimeType: string;
+        content: Buffer;
+    }): Promise<string> {
+        const fileId = randomUUID();
+        const objectKey = this.objectKeys.buildSourceKey({ tenantId: input.tenantId, fileId });
+        let metadata;
+        try {
+            metadata = await this.storage.putObject({
+                objectKey,
+                body: input.content,
+                contentType: input.mimeType,
+            });
+        } catch (error) {
+            if (error instanceof StorageProviderError || error instanceof TypeError) {
+                throw new BadGatewayException({ code: 'COS_PUT_FAILED', message: '暂时无法写入 COS 对象' });
+            }
+            throw error;
+        }
+        await this.prisma.$transaction(async (transaction) => {
+            await transaction.fileObject.create({
+                data: {
+                    id: fileId,
+                    tenantId: input.tenantId,
+                    originalName: input.name,
+                    purpose: FilePurpose.ATTACHMENT,
+                    storageProvider: this.storageConfig.provider,
+                    bucket: this.storageConfig.bucket,
+                    region: this.storageConfig.region,
+                    objectKey,
+                    mimeType: input.mimeType,
+                    sizeBytes: BigInt(input.content.length),
+                    etag: metadata.etag,
+                    createdBy: input.userId,
+                    updatedBy: input.userId,
+                },
+            });
+            await transaction.auditLog.create({
+                data: {
+                    tenantId: input.tenantId,
+                    actorUserId: input.userId,
+                    actorMembershipId: input.membershipId,
+                    action: 'FILE_MATERIALIZED',
+                    outcome: AuditOutcome.SUCCESS,
+                    resourceType: 'FILE',
+                    resourceId: fileId,
+                    requestId: input.requestId,
+                    metadata: {
+                        purpose: 'knowledge-snapshot',
+                        fileName: input.name,
+                        contentType: input.mimeType,
+                        sizeBytes: input.content.length,
+                        objectKey,
+                    },
+                },
+            });
+        });
+        return fileId;
+    }
+
     private async resumeExistingSession(
         session: Prisma.UploadSessionGetPayload<Record<string, never>>,
         fingerprint: string,

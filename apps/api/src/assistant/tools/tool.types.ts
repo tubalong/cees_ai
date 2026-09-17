@@ -1,5 +1,8 @@
 import type { ChatToolDefinition } from '@cees/ai-service-client';
 
+/** 对话级知识库开关控制的可检索工具名；开关关闭时该工具不进入模型工具列表。 */
+export const KNOWLEDGE_SEARCH_TOOL_NAME = 'knowledge_search';
+
 /**
  * 工具执行上下文：由 TurnRunner 从请求上下文组装后传入，
  * 工具不得自行读取 AsyncLocalStorage 或重复解析身份与权限。
@@ -19,6 +22,8 @@ export interface ToolExecutionContext {
   /** Turn 被取消时用于终止可取消的外部 I/O。 */
   signal?: AbortSignal;
   permissions: string[];
+  /** 本轮是否允许检索知识库（对话级开关）；开关关闭时模型拿不到知识库工具。 */
+  knowledgeBaseEnabled: boolean;
 }
 
 export interface ToolSource {
@@ -30,6 +35,14 @@ export interface ToolSource {
   publishedAt: string | null;
 }
 
+/** 知识库检索命中的文档引用，进公开 tool_result 事件的 citations 字段。 */
+export interface KnowledgeToolCitation {
+  id: string;
+  title: string;
+  snippet: string;
+  pageIndex: number | null;
+}
+
 /** 工具执行成功结果：正式资源引用供公开 tool_result 事件与 TOOL 消息使用。 */
 export interface ToolExecutionResult {
   /** Read-only or side-effect tools may not produce a formal Resource. */
@@ -39,6 +52,8 @@ export interface ToolExecutionResult {
   summary: string;
   /** 非资源型工具（例如联网搜索）的结构化来源。 */
   sources?: ToolSource[];
+  /** 知识库检索命中的文档引用；与 sources 互斥，进公开事件的 citations 字段。 */
+  citations?: KnowledgeToolCitation[];
 }
 
 /**

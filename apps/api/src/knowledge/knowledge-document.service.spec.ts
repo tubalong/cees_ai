@@ -1,7 +1,8 @@
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { AiServiceGateway } from '../ai-orchestration/ai-service-gateway.service';
-import { KnowledgeDocumentService } from './knowledge-document.service';
+import { FileService } from '../file/file.service';
+import { KnowledgeDocumentService, KnowledgeSourceSaveActor } from './knowledge-document.service';
 import { KnowledgeIndexingService } from './knowledge-indexing.service';
 import { KnowledgeService } from './knowledge.service';
 import { PrismaService } from '../database/prisma.service';
@@ -374,9 +375,450 @@ const FILE_OBJECT_ID = '60000000-0000-0000-0000-000000000001';
 const NEW_FILE_OBJECT_ID = '60000000-0000-0000-0000-000000000002';
 const DEPARTMENT_ID = '70000000-0000-0000-0000-000000000001';
 const PROJECT_ID = '80000000-0000-0000-0000-000000000001';
+const OTHER_KNOWLEDGE_BASE_ID = '30000000-0000-0000-0000-000000000002';
+const OTHER_MEMBERSHIP_ID = '20000000-0000-0000-0000-000000000002';
+const CONVERSATION_ID = '90000000-0000-0000-0000-000000000001';
+const MESSAGE_ID = '90000000-0000-0000-0000-000000000002';
+const OTHER_CONVERSATION_ID = '90000000-0000-0000-0000-000000000003';
 
 const kickSpy = jest.fn();
 const deleteVersionIndexSpy = jest.fn();
+const createMaterializedFileSpy = jest.fn();
+
+describe('KnowledgeDocumentService.saveFromSource', () => {
+    const actor: KnowledgeSourceSaveActor = {
+        tenantId: TENANT_ID,
+        userId: USER_ID,
+        membershipId: MEMBERSHIP_ID,
+        permissions: ['knowledge_base.document.manage'],
+        requestId: 'request-id',
+    };
+
+    it('materializes a conversation message snapshot and creates the anchored document', async () => {
+        const prisma = createPrismaMock();
+        prisma.knowledgeBase.findFirst.mockResolvedValue(knowledgeBaseRecord());
+        prisma.knowledgeBaseMember.findUnique.mockResolvedValue({ permission: 'EDITOR' });
+        prisma.knowledgeDocument.findFirst
+            .mockResolvedValueOnce(null)
+            .mockResolvedValueOnce(documentRecord({ status: 'PENDING' }));
+        prisma.conversationMessage.findFirst.mockResolvedValue(messageRecord());
+        createMaterializedFileSpy.mockResolvedValue(NEW_FILE_OBJECT_ID);
+        prisma.knowledgeDocument.create.mockResolvedValue({ id: DOCUMENT_ID });
+        prisma.documentVersion.create.mockResolvedValue({ id: VERSION_ID });
+        prisma.knowledgeDocument.update.mockResolvedValue(undefined);
+        prisma.documentVersion.findFirst.mockResolvedValue({
+            versionNumber: 1,
+            visibilityScope: 'TENANT',
+            departmentId: null,
+            projectId: null,
+        });
+        const service = createService(prisma);
+
+        const result = await service.saveFromSource(actor, {
+            knowledgeBaseId: KNOWLEDGE_BASE_ID,
+            sourceType: 'MESSAGE',
+            sourceId: MESSAGE_ID,
+            visibilityScope: 'TENANT',
+        });
+
+        expect(createMaterializedFileSpy).toHaveBeenCalledWith(expect.objectContaining({
+            tenantId: TENANT_ID,
+            mimeType: 'text/markdown',
+        }));
+        expect(prisma.knowledgeDocument.create).toHaveBeenCalledWith({
+            data: expect.objectContaining({
+                tenantId: TENANT_ID,
+                knowledgeBaseId: KNOWLEDGE_BASE_ID,
+                fileObjectId: NEW_FILE_OBJECT_ID,
+                sourceType: 'MESSAGE',
+                sourceId: MESSAGE_ID,
+            }),
+            select: { id: true },
+        });
+        expect(prisma.auditLog.create).toHaveBeenCalledWith({
+            data: expect.objectContaining({
+                action: 'KNOWLEDGE_DOCUMENT_CREATED',
+                metadata: expect.objectContaining({ sourceType: 'MESSAGE', sourceId: MESSAGE_ID }),
+            }),
+        });
+        expect(kickSpy).toHaveBeenCalled();
+        expect(result).toEqual(expect.objectContaining({ id: DOCUMENT_ID, status: 'PENDING', versionNumber: 1 }));
+    });
+
+    it('rejects saving when the member permission is below EDITOR', async () => {
+        const prisma = createPrismaMock();
+        prisma.knowledgeBase.findFirst.mockResolvedValue(knowledgeBaseRecord());
+        prisma.knowledgeBaseMember.findUnique.mockResolvedValue({ permission: 'READER' });
+        const service = createService(prisma);
+
+        await expect(service.saveFromSource(actor, {
+            knowledgeBaseId: KNOWLEDGE_BASE_ID,
+            sourceType: 'MESSAGE',
+            sourceId: MESSAGE_ID,
+            visibilityScope: 'PRIVATE',
+        })).rejects.toMatchObject({
+            response: expect.objectContaining({ code: 'KNOWLEDGE_BASE_MEMBER_PERMISSION_DENIED' }),
+        });
+        expect(prisma.conversationMessage.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('rejects a message that does not exist or belongs to another member', async () => {
+        const prisma = createPrismaMock();
+        prisma.knowledgeBase.findFirst.mockResolvedValue(knowledgeBaseRecord());
+        prisma.knowledgeBaseMember.findUnique.mockResolvedValue({ permission: 'EDITOR' });
+        prisma.knowledgeDocument.findFirst.mockResolvedValue(null);
+        prisma.conversationMessage.findFirst.mockResolvedValue(null);
+        const service = createService(prisma);
+
+        await expect(service.saveFromSource(actor, {
+            knowledgeBaseId: KNOWLEDGE_BASE_ID,
+            sourceType: 'MESSAGE',
+            sourceId: MESSAGE_ID,
+            visibilityScope: 'PRIVATE',
+        })).rejects.toMatchObject({
+            response: expect.objectContaining({ code: 'KNOWLEDGE_SOURCE_MESSAGE_NOT_FOUND' }),
+        });
+    });
+
+    it('rejects a message from another conversation when saving through the tool', async () => {
+        const prisma = createPrismaMock();
+        prisma.knowledgeBase.findFirst.mockResolvedValue(knowledgeBaseRecord());
+        prisma.knowledgeBaseMember.findUnique.mockResolvedValue({ permission: 'EDITOR' });
+        prisma.knowledgeDocument.findFirst.mockResolvedValue(null);
+        prisma.conversationMessage.findFirst.mockResolvedValue(messageRecord({
+            conversationId: OTHER_CONVERSATION_ID,
+        }));
+        const service = createService(prisma);
+
+        await expect(service.saveFromSource({ ...actor, conversationId: CONVERSATION_ID }, {
+            knowledgeBaseId: KNOWLEDGE_BASE_ID,
+            sourceType: 'MESSAGE',
+            sourceId: MESSAGE_ID,
+            visibilityScope: 'PRIVATE',
+        })).rejects.toMatchObject({
+            response: expect.objectContaining({ code: 'KNOWLEDGE_SOURCE_MESSAGE_NOT_FOUND' }),
+        });
+    });
+
+    it('rejects saving a TOOL role message', async () => {
+        const prisma = createPrismaMock();
+        prisma.knowledgeBase.findFirst.mockResolvedValue(knowledgeBaseRecord());
+        prisma.knowledgeBaseMember.findUnique.mockResolvedValue({ permission: 'EDITOR' });
+        prisma.knowledgeDocument.findFirst.mockResolvedValue(null);
+        prisma.conversationMessage.findFirst.mockResolvedValue(messageRecord({ role: 'TOOL' }));
+        const service = createService(prisma);
+
+        await expect(service.saveFromSource(actor, {
+            knowledgeBaseId: KNOWLEDGE_BASE_ID,
+            sourceType: 'MESSAGE',
+            sourceId: MESSAGE_ID,
+            visibilityScope: 'PRIVATE',
+        })).rejects.toMatchObject({
+            response: expect.objectContaining({ code: 'KNOWLEDGE_SOURCE_MESSAGE_INVALID' }),
+        });
+    });
+
+    it('rejects a generated document the user cannot read', async () => {
+        const prisma = createPrismaMock();
+        prisma.knowledgeBase.findFirst.mockResolvedValue(knowledgeBaseRecord());
+        prisma.knowledgeBaseMember.findUnique.mockResolvedValue({ permission: 'EDITOR' });
+        prisma.knowledgeDocument.findFirst.mockResolvedValue(null);
+        prisma.managedDocument.findFirst.mockResolvedValue(managedDocumentRecord());
+        createMaterializedFileSpy.mockClear();
+        const service = createService(prisma);
+
+        await expect(service.saveFromSource(actor, {
+            knowledgeBaseId: KNOWLEDGE_BASE_ID,
+            sourceType: 'DOCUMENT',
+            sourceId: DOCUMENT_ID,
+            visibilityScope: 'PRIVATE',
+        })).rejects.toMatchObject({
+            response: expect.objectContaining({ code: 'KNOWLEDGE_SOURCE_DOCUMENT_NOT_FOUND' }),
+        });
+        expect(createMaterializedFileSpy).not.toHaveBeenCalled();
+    });
+
+    it('materializes a readable generated document and names it after the title', async () => {
+        const prisma = createPrismaMock();
+        prisma.knowledgeBase.findFirst.mockResolvedValue(knowledgeBaseRecord());
+        prisma.knowledgeBaseMember.findUnique.mockResolvedValue({ permission: 'EDITOR' });
+        prisma.knowledgeDocument.findFirst
+            .mockResolvedValueOnce(null)
+            .mockResolvedValueOnce(documentRecord({ status: 'PENDING' }));
+        prisma.managedDocument.findFirst.mockResolvedValue(managedDocumentRecord());
+        prisma.membershipRole.findMany.mockResolvedValue([]);
+        createMaterializedFileSpy.mockResolvedValue(NEW_FILE_OBJECT_ID);
+        prisma.knowledgeDocument.create.mockResolvedValue({ id: DOCUMENT_ID });
+        prisma.documentVersion.create.mockResolvedValue({ id: VERSION_ID });
+        prisma.knowledgeDocument.update.mockResolvedValue(undefined);
+        prisma.documentVersion.findFirst.mockResolvedValue({
+            versionNumber: 1,
+            visibilityScope: 'PRIVATE',
+            departmentId: null,
+            projectId: null,
+        });
+        const service = createService(prisma);
+        const readableActor = { ...actor, permissions: ['knowledge_base.document.manage', 'document.read'] };
+
+        const result = await service.saveFromSource(readableActor, {
+            knowledgeBaseId: KNOWLEDGE_BASE_ID,
+            sourceType: 'DOCUMENT',
+            sourceId: DOCUMENT_ID,
+            visibilityScope: 'PRIVATE',
+        });
+
+        expect(createMaterializedFileSpy).toHaveBeenCalledWith(expect.objectContaining({ name: '项目周报.md' }));
+        expect(prisma.knowledgeDocument.create).toHaveBeenCalledWith({
+            data: expect.objectContaining({ sourceType: 'DOCUMENT', sourceId: DOCUMENT_ID, name: '项目周报' }),
+            select: { id: true },
+        });
+        expect(result).toEqual(expect.objectContaining({ id: DOCUMENT_ID, versionNumber: 1 }));
+    });
+
+    it('appends a new version when the same source is saved to the same knowledge base again', async () => {
+        const prisma = createPrismaMock();
+        prisma.knowledgeBase.findFirst.mockResolvedValue(knowledgeBaseRecord());
+        prisma.knowledgeBaseMember.findUnique.mockResolvedValue({ permission: 'EDITOR' });
+        prisma.knowledgeDocument.findFirst
+            .mockResolvedValueOnce({ id: DOCUMENT_ID, knowledgeBaseId: KNOWLEDGE_BASE_ID, currentVersionId: VERSION_ID })
+            .mockResolvedValueOnce(documentRecord({
+                status: 'PENDING',
+                fileObjectId: NEW_FILE_OBJECT_ID,
+                currentVersionId: NEW_VERSION_ID,
+            }));
+        prisma.conversationMessage.findFirst.mockResolvedValue(messageRecord());
+        createMaterializedFileSpy.mockResolvedValue(NEW_FILE_OBJECT_ID);
+        prisma.documentVersion.findFirst
+            .mockResolvedValueOnce({ versionNumber: 1 })
+            .mockResolvedValueOnce({
+                versionNumber: 2,
+                visibilityScope: 'TENANT',
+                departmentId: null,
+                projectId: null,
+            });
+        prisma.documentVersion.create.mockResolvedValue({ id: NEW_VERSION_ID });
+        prisma.knowledgeDocument.update.mockResolvedValue(undefined);
+        deleteVersionIndexSpy.mockResolvedValue({
+            request_id: 'request-id',
+            deleted_chunks: 3,
+            document_version_id: VERSION_ID,
+            index_version: 'knowledge-index-v1',
+        });
+        const service = createService(prisma);
+
+        const result = await service.saveFromSource(actor, {
+            knowledgeBaseId: KNOWLEDGE_BASE_ID,
+            sourceType: 'MESSAGE',
+            sourceId: MESSAGE_ID,
+            visibilityScope: 'TENANT',
+        });
+
+        expect(prisma.knowledgeDocument.create).not.toHaveBeenCalled();
+        expect(prisma.documentVersion.create).toHaveBeenCalledWith({
+            data: expect.objectContaining({
+                documentId: DOCUMENT_ID,
+                fileObjectId: NEW_FILE_OBJECT_ID,
+                versionNumber: 2,
+            }),
+            select: { id: true },
+        });
+        expect(prisma.knowledgeDocument.update).toHaveBeenCalledWith(expect.objectContaining({
+            data: expect.objectContaining({ status: 'PENDING', fileObjectId: NEW_FILE_OBJECT_ID }),
+        }));
+        expect(prisma.auditLog.create).toHaveBeenCalledWith({
+            data: expect.objectContaining({
+                action: 'KNOWLEDGE_DOCUMENT_VERSION_CREATED',
+                metadata: expect.objectContaining({ sourceType: 'MESSAGE', sourceId: MESSAGE_ID }),
+            }),
+        });
+        expect(deleteVersionIndexSpy).toHaveBeenCalledWith(TENANT_ID, USER_ID, VERSION_ID);
+        expect(kickSpy).toHaveBeenCalled();
+        expect(result).toEqual(expect.objectContaining({ id: DOCUMENT_ID, status: 'PENDING', versionNumber: 2 }));
+    });
+
+    it('rejects saving the same source to another knowledge base', async () => {
+        const prisma = createPrismaMock();
+        prisma.knowledgeBase.findFirst.mockResolvedValue(knowledgeBaseRecord());
+        prisma.knowledgeBaseMember.findUnique.mockResolvedValue({ permission: 'EDITOR' });
+        prisma.knowledgeDocument.findFirst.mockResolvedValue({
+            id: DOCUMENT_ID,
+            knowledgeBaseId: OTHER_KNOWLEDGE_BASE_ID,
+            currentVersionId: VERSION_ID,
+        });
+        const service = createService(prisma);
+
+        await expect(service.saveFromSource(actor, {
+            knowledgeBaseId: KNOWLEDGE_BASE_ID,
+            sourceType: 'MESSAGE',
+            sourceId: MESSAGE_ID,
+            visibilityScope: 'PRIVATE',
+        })).rejects.toMatchObject({
+            response: expect.objectContaining({ code: 'KNOWLEDGE_SOURCE_ALREADY_SAVED' }),
+        });
+        expect(prisma.conversationMessage.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('falls back to appending a version on a concurrent anchor conflict', async () => {
+        const prisma = createPrismaMock();
+        prisma.knowledgeBase.findFirst.mockResolvedValue(knowledgeBaseRecord());
+        prisma.knowledgeBaseMember.findUnique.mockResolvedValue({ permission: 'EDITOR' });
+        prisma.knowledgeDocument.findFirst
+            .mockResolvedValueOnce(null)
+            .mockResolvedValueOnce({ id: DOCUMENT_ID, knowledgeBaseId: KNOWLEDGE_BASE_ID, currentVersionId: VERSION_ID })
+            .mockResolvedValueOnce(documentRecord({
+                status: 'PENDING',
+                fileObjectId: NEW_FILE_OBJECT_ID,
+                currentVersionId: NEW_VERSION_ID,
+            }));
+        prisma.knowledgeDocument.create.mockRejectedValue(
+            new Prisma.PrismaClientKnownRequestError('duplicate', {
+                code: 'P2002',
+                clientVersion: '6.19.3',
+                meta: { target: ['tenant_id', 'source_type', 'source_id'] },
+            }),
+        );
+        prisma.conversationMessage.findFirst.mockResolvedValue(messageRecord());
+        createMaterializedFileSpy.mockResolvedValue(NEW_FILE_OBJECT_ID);
+        prisma.documentVersion.findFirst
+            .mockResolvedValueOnce({ versionNumber: 1 })
+            .mockResolvedValueOnce({
+                versionNumber: 2,
+                visibilityScope: 'TENANT',
+                departmentId: null,
+                projectId: null,
+            });
+        prisma.documentVersion.create.mockResolvedValue({ id: NEW_VERSION_ID });
+        prisma.knowledgeDocument.update.mockResolvedValue(undefined);
+        const service = createService(prisma);
+
+        const result = await service.saveFromSource(actor, {
+            knowledgeBaseId: KNOWLEDGE_BASE_ID,
+            sourceType: 'MESSAGE',
+            sourceId: MESSAGE_ID,
+            visibilityScope: 'TENANT',
+        });
+
+        expect(prisma.auditLog.create).toHaveBeenCalledWith({
+            data: expect.objectContaining({ action: 'KNOWLEDGE_DOCUMENT_VERSION_CREATED' }),
+        });
+        expect(result).toEqual(expect.objectContaining({ id: DOCUMENT_ID, versionNumber: 2 }));
+    });
+
+    it('rejects createDocument input with both fileObjectId and source fields', async () => {
+        const prisma = createPrismaMock();
+        const service = createService(prisma);
+
+        await expect(service.createDocument(KNOWLEDGE_BASE_ID, {
+            fileObjectId: FILE_OBJECT_ID,
+            sourceType: 'MESSAGE',
+            sourceId: MESSAGE_ID,
+            visibilityScope: 'PRIVATE',
+        })).rejects.toMatchObject({
+            response: expect.objectContaining({ code: 'KNOWLEDGE_DOCUMENT_SOURCE_AMBIGUOUS' }),
+        });
+        expect(prisma.knowledgeBase.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('creates an unanchored document from direct assistant content and kicks the indexer', async () => {
+        const prisma = createPrismaMock();
+        prisma.knowledgeBase.findFirst.mockResolvedValue(knowledgeBaseRecord());
+        prisma.knowledgeBaseMember.findUnique.mockResolvedValue({ permission: 'EDITOR' });
+        prisma.knowledgeDocument.findFirst.mockResolvedValue(documentRecord({ status: 'PENDING' }));
+        createMaterializedFileSpy.mockResolvedValue(NEW_FILE_OBJECT_ID);
+        prisma.knowledgeDocument.create.mockResolvedValue({ id: DOCUMENT_ID });
+        prisma.documentVersion.create.mockResolvedValue({ id: VERSION_ID });
+        prisma.knowledgeDocument.update.mockResolvedValue(undefined);
+        prisma.documentVersion.findFirst.mockResolvedValue({
+            versionNumber: 1,
+            visibilityScope: 'PRIVATE',
+            departmentId: null,
+            projectId: null,
+        });
+        const service = createService(prisma);
+        const actor: KnowledgeSourceSaveActor = {
+            tenantId: TENANT_ID,
+            userId: USER_ID,
+            membershipId: MEMBERSHIP_ID,
+            permissions: ['knowledge_base.document.manage'],
+            requestId: 'request-id',
+        };
+
+        const result = await service.saveDirectContent(actor, {
+            knowledgeBaseId: KNOWLEDGE_BASE_ID,
+            content: '林波是图巴隆公司的超级管理员。',
+            visibilityScope: 'PRIVATE',
+        });
+
+        expect(createMaterializedFileSpy).toHaveBeenCalledWith(expect.objectContaining({
+            tenantId: TENANT_ID,
+            mimeType: 'text/markdown',
+            content: expect.any(Buffer),
+        }));
+        expect(prisma.knowledgeDocument.create).toHaveBeenCalledWith({
+            data: expect.objectContaining({
+                tenantId: TENANT_ID,
+                knowledgeBaseId: KNOWLEDGE_BASE_ID,
+                fileObjectId: NEW_FILE_OBJECT_ID,
+            }),
+            select: { id: true },
+        });
+        expect(prisma.auditLog.create).toHaveBeenCalledWith({
+            data: expect.objectContaining({
+                action: 'KNOWLEDGE_DOCUMENT_CREATED',
+                metadata: expect.objectContaining({ directContent: true }),
+            }),
+        });
+        expect(kickSpy).toHaveBeenCalled();
+        expect(result).toEqual(expect.objectContaining({ id: DOCUMENT_ID, status: 'PENDING', versionNumber: 1 }));
+    });
+
+    it('rejects direct content saving when the member permission is below EDITOR', async () => {
+        const prisma = createPrismaMock();
+        prisma.knowledgeBase.findFirst.mockResolvedValue(knowledgeBaseRecord());
+        prisma.knowledgeBaseMember.findUnique.mockResolvedValue({ permission: 'READER' });
+        createMaterializedFileSpy.mockClear();
+        const service = createService(prisma);
+        const actor: KnowledgeSourceSaveActor = {
+            tenantId: TENANT_ID,
+            userId: USER_ID,
+            membershipId: MEMBERSHIP_ID,
+            permissions: ['knowledge_base.document.manage'],
+            requestId: 'request-id',
+        };
+
+        await expect(service.saveDirectContent(actor, {
+            knowledgeBaseId: KNOWLEDGE_BASE_ID,
+            content: '林波是图巴隆公司的超级管理员。',
+            visibilityScope: 'PRIVATE',
+        })).rejects.toMatchObject({
+            response: expect.objectContaining({ code: 'KNOWLEDGE_BASE_MEMBER_PERMISSION_DENIED' }),
+        });
+        expect(createMaterializedFileSpy).not.toHaveBeenCalled();
+    });
+
+    it('rejects createDocument input with only one source field', async () => {
+        const prisma = createPrismaMock();
+        const service = createService(prisma);
+
+        await expect(service.createDocument(KNOWLEDGE_BASE_ID, {
+            sourceType: 'MESSAGE',
+            visibilityScope: 'PRIVATE',
+        })).rejects.toMatchObject({
+            response: expect.objectContaining({ code: 'KNOWLEDGE_DOCUMENT_SOURCE_INCOMPLETE' }),
+        });
+    });
+
+    it('rejects createDocument input without any source', async () => {
+        const prisma = createPrismaMock();
+        const service = createService(prisma);
+
+        await expect(service.createDocument(KNOWLEDGE_BASE_ID, {
+            visibilityScope: 'PRIVATE',
+        })).rejects.toMatchObject({
+            response: expect.objectContaining({ code: 'KNOWLEDGE_DOCUMENT_SOURCE_REQUIRED' }),
+        });
+    });
+});
 
 function createService(prisma: Record<string, any>): KnowledgeDocumentService {
     const tenantContext = {
@@ -395,6 +837,9 @@ function createService(prisma: Record<string, any>): KnowledgeDocumentService {
         { answerKnowledge: jest.fn() } as unknown as AiServiceGateway,
         { deleteKnowledgeBaseIndexes: jest.fn() } as unknown as KnowledgeIndexingService,
     );
+    const fileService = {
+        createMaterializedFile: createMaterializedFileSpy,
+    } as unknown as FileService;
     const indexingService = {
         kick: kickSpy,
         deleteDocumentVersionIndex: deleteVersionIndexSpy,
@@ -403,6 +848,7 @@ function createService(prisma: Record<string, any>): KnowledgeDocumentService {
         prisma as unknown as PrismaService,
         tenantContext,
         knowledgeService,
+        fileService,
         indexingService,
     );
 }
@@ -424,6 +870,9 @@ function createPrismaMock(): Record<string, any> {
             create: jest.fn(),
         },
         fileObject: { findFirst: jest.fn() },
+        managedDocument: { findFirst: jest.fn() },
+        conversationMessage: { findFirst: jest.fn() },
+        membershipRole: { findMany: jest.fn() },
         department: { findFirst: jest.fn() },
         project: { findFirst: jest.fn() },
         auditLog: { create: jest.fn() },
@@ -455,6 +904,27 @@ function fileObjectRecord(overrides: Record<string, unknown> = {}): Record<strin
         sizeBytes: BigInt(1024),
         objectKey: 'uploads/tenant/file',
         deletedAt: null,
+        ...overrides,
+    };
+}
+
+function messageRecord(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+        role: 'USER',
+        content: '会议结论：项目延期两周。',
+        conversationId: CONVERSATION_ID,
+        createdAt: new Date('2026-09-16T08:00:00.000Z'),
+        conversation: { ownerMembershipId: MEMBERSHIP_ID, deletedAt: null },
+        ...overrides,
+    };
+}
+
+function managedDocumentRecord(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+        title: '项目周报',
+        content: '# 项目周报\n本周完成核心链路联调。',
+        visibility: 'TENANT',
+        resource: { ownerMembershipId: OTHER_MEMBERSHIP_ID, acls: [] },
         ...overrides,
     };
 }

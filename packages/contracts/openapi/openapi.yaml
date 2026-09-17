@@ -4380,6 +4380,11 @@ paths:
           required: false
           description: 上一页返回的知识库 ID
           schema: { type: string, format: uuid }
+        - name: permission
+          in: query
+          required: false
+          description: 只返回当前用户达到该成员权限的知识库（转存目标库选择）；省略时按可见范围返回
+          schema: { $ref: '#/components/schemas/KnowledgeBaseMemberPermission' }
       responses:
         '200':
           description: 知识库列表
@@ -8609,16 +8614,25 @@ components:
     CreateKnowledgeDocumentRequest:
       type: object
       additionalProperties: false
-      required: [fileObjectId, name, visibilityScope]
+      required: [visibilityScope]
       properties:
         fileObjectId:
           type: string
           format: uuid
-          description: 已上传完成的文件对象 ID
+          description: 人工上传路径：已上传完成的文件对象 ID；与 sourceType/sourceId 二选一
+        sourceType:
+          type: string
+          enum: [FILE_OBJECT, DOCUMENT, MESSAGE]
+          description: 转存路径：来源类型（附件文件 / AI 生成文档 / 对话消息），与 sourceId 配套，二选一必填
+        sourceId:
+          type: string
+          format: uuid
+          description: 转存路径：来源资源 ID，与 sourceType 配套
         name:
           type: string
           minLength: 1
           maxLength: 200
+          description: 文档名称；转存路径下省略时沿用来源资源名称
         visibilityScope:
           $ref: '#/components/schemas/KnowledgeDocumentVisibilityScope'
         departmentId:
@@ -8877,6 +8891,10 @@ components:
           allOf:
             - $ref: '#/components/schemas/ChatMode'
           description: 本轮对话执行模式；省略时使用会话的默认模式
+        knowledgeBaseEnabled:
+          type: boolean
+          default: false
+          description: 本轮是否允许检索知识库；省略时默认关闭。开启后 AI 可获得知识库检索工具，检索范围按用户权限折叠
 
     TurnStatus:
       type: string
@@ -9108,6 +9126,13 @@ components:
           items:
             $ref: '#/components/schemas/ToolSource'
           description: 联网搜索等非资源型工具返回的结构化来源；老客户端可忽略该字段
+        citations:
+          type: array
+          maxItems: 20
+          default: []
+          items:
+            $ref: '#/components/schemas/KnowledgeToolCitation'
+          description: 知识库检索工具命中的文档引用；老客户端可忽略该字段
         error:
           type: [object, 'null']
           description: 工具失败或被拒绝时的错误信息
@@ -9156,6 +9181,31 @@ components:
           type: [string, 'null']
           format: date-time
       description: 联网搜索返回的公开网页来源，不代表 CEES 正式业务资源
+
+    KnowledgeToolCitation:
+      type: object
+      additionalProperties: false
+      required: [id, title, snippet]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: 知识库文档 ID
+        title:
+          type: string
+          minLength: 1
+          maxLength: 300
+          description: 文档标题
+        snippet:
+          type: string
+          maxLength: 2000
+          description: 命中的正文片段
+        pageIndex:
+          type: [integer, 'null']
+          minimum: 0
+          description: 命中文档页码；解析器未提供页码时为 null
+      description: 知识库检索命中的文档引用，属于 CEES 正式业务资源
+
     TurnStreamCompletedEvent:
       type: object
       additionalProperties: false

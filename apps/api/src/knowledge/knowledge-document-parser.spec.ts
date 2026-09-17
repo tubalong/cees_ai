@@ -1,4 +1,11 @@
-import { MinerUDocumentParser } from './knowledge-document-parser';
+import {
+    AiServiceGateway,
+    AiServiceInvocationError,
+} from '../ai-orchestration/ai-service-gateway.service';
+import {
+    MinerUDocumentParser,
+    RoutedKnowledgeDocumentParser,
+} from './knowledge-document-parser';
 import type { StorageProvider } from '../storage/storage.types';
 
 const input = {
@@ -9,6 +16,8 @@ const input = {
     mimeType: 'application/pdf',
     sizeBytes: 1024n,
     objectKey: 'cees/staging/demo.pdf',
+    tenantId: 'tenant-1',
+    userId: 'user-1',
 };
 
 const originalEnv = { ...process.env };
@@ -189,5 +198,115 @@ describe('MinerUDocumentParser', () => {
             code: 'MINERU_DOWNLOAD_FAILED',
             retryable: true,
         });
+    });
+});
+
+describe('RoutedKnowledgeDocumentParser', () => {
+    const mineruParse = jest.fn();
+    const gatewayExtractFile = jest.fn();
+
+    function makeParser(storage = makeStorage()) {
+        return new RoutedKnowledgeDocumentParser(
+            { parse: mineruParse } as unknown as MinerUDocumentParser,
+            { extractFile: gatewayExtractFile } as unknown as AiServiceGateway,
+            storage,
+        );
+    }
+
+    beforeEach(() => {
+        mineruParse.mockReset();
+        gatewayExtractFile.mockReset();
+        // 用精确长度的 ArrayBuffer（池化 Buffer 的 .buffer 会带入相邻内存垃圾字节）。
+        global.fetch = jest.fn()
+            .mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                arrayBuffer: jest.fn().mockResolvedValue(
+                    Uint8Array.from(Buffer.from('file-bytes')).buffer,
+                ),
+            }) as unknown as typeof fetch;
+    });
+
+    const docxInput = { ...input, name: 'demo.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' };
+
+    it('docx 走本地提取路径，不调用 MinerU', async () => {
+        gatewayExtractFile.mockResolvedValue({
+            request_id: 'request-id',
+            parts: [{ type: 'text', text: '第一段\n\n第二段' }],
+            metadata: { content_type: docxInput.mimeType, engine: 'python-docx', text_length: 7 },
+        });
+        const parser = makeParser();
+        const parsed = await parser.parse(docxInput);
+
+        expect(mineruParse).not.toHaveBeenCalled();
+        expect(gatewayExtractFile).toHaveBeenCalledWith(expect.objectContaining({
+            tenant_id: 'tenant-1',
+            user_id: 'user-1',
+            filename: 'demo.docx',
+            content_type: docxInput.mimeType,
+            data_base64: Buffer.from('file-bytes').toString('base64'),
+        }));
+        expect(parsed).toMatchObject({
+            parser_name: 'extraction',
+            parser_version: 'python-docx',
+        });
+        expect(parsed.blocks).toHaveLength(2);
+        expect(parsed.blocks[0].page_index).toBeNull();
+        expect(parsed.blocks[0].bbox).toBeNull();
+    });
+
+    it('pdf 走 MinerU 路径，不调用本地提取', async () => {
+        mineruParse.mockResolvedValue({ document_id: 'doc-1', parser_name: 'mineru', blocks: [] });
+        const parser = makeParser();
+        await parser.parse(input);
+
+        expect(mineruParse).toHaveBeenCalledWith(input);
+        expect(gatewayExtractFile).not.toHaveBeenCalled();
+    });
+
+    it('ai-service 非重试错误（422 文件不支持）映射为不可重试提取失败', async () => {
+        gatewayExtractFile.mockRejectedValue(
+            new AiServiceInvocationError('UNSUPPORTED_FILE_TYPE', 'Unsupported file type', false, 422),
+        );
+        const parser = makeParser();
+        await expect(parser.parse(docxInput)).rejects.toMatchObject({
+            code: 'EXTRACTION_FAILED',
+            retryable: false,
+        });
+    });
+
+    it('ai-service 可重试错误（5xx/网络）映射为可重试服务错误', async () => {
+        gatewayExtractFile.mockRejectedValue(
+            new AiServiceInvocationError('AI_SERVICE_UNAVAILABLE', 'AI service request failed', true, 503),
+        );
+        const parser = makeParser();
+        await expect(parser.parse(docxInput)).rejects.toMatchObject({
+            code: 'EXTRACTION_SERVICE_ERROR',
+            retryable: true,
+        });
+    });
+
+    it('提取结果无文本时抛非重试空结果', async () => {
+        gatewayExtractFile.mockResolvedValue({
+            request_id: 'request-id',
+            parts: [],
+            metadata: { content_type: docxInput.mimeType, engine: 'python-docx', text_length: 0 },
+        });
+        const parser = makeParser();
+        await expect(parser.parse(docxInput)).rejects.toMatchObject({
+            code: 'EXTRACTION_EMPTY_RESULT',
+            retryable: false,
+        });
+    });
+
+    it('COS 下载失败时抛可重试下载错误', async () => {
+        const storage = makeStorage();
+        (storage.createDownloadUrl as jest.Mock).mockRejectedValue(new Error('cos down'));
+        const parser = makeParser(storage);
+        await expect(parser.parse(docxInput)).rejects.toMatchObject({
+            code: 'EXTRACTION_DOWNLOAD_FAILED',
+            retryable: true,
+        });
+        expect(gatewayExtractFile).not.toHaveBeenCalled();
     });
 });

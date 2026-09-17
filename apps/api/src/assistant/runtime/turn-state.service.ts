@@ -12,7 +12,7 @@ import { PrismaService } from '../../database/prisma.service';
 import type { PublicTurnMode, PublicTurnStreamEvent } from '../assistant.types';
 import { EventService } from '../conversation/event.service';
 import { lockConversationForUpdate } from '../conversation/conversation-transaction-lock';
-import type { ToolSource } from '../tools/tool.types';
+import type { KnowledgeToolCitation, ToolSource } from '../tools/tool.types';
 
 export interface TurnErrorDetail {
   code: string;
@@ -25,6 +25,7 @@ interface StableToolResult {
   resourceType: 'IMAGE' | 'DOCUMENT' | null;
   resourceId: string | null;
   sources: ToolSource[];
+  citations?: KnowledgeToolCitation[];
 }
 
 /**
@@ -52,6 +53,7 @@ export class TurnStateService {
     content: string | null | undefined;
     imageFileIds?: string[];
     mode: PublicTurnMode;
+    knowledgeBaseEnabled: boolean;
     executionOwner: string;
     leaseExpiresAt: Date;
   }): Promise<{ id: string } | undefined> {
@@ -95,6 +97,7 @@ export class TurnStateService {
             status: AssistantTurnStatus.RUNNING,
             stage: AssistantTurnStage.QUEUED,
             mode: input.mode,
+            knowledgeBaseEnabled: input.knowledgeBaseEnabled,
             userId: input.userId,
             membershipId: input.membershipId,
             requestId: input.requestId,
@@ -338,6 +341,7 @@ export class TurnStateService {
     resourceType: 'IMAGE' | 'DOCUMENT' | null;
     resourceId: string | null;
     sources?: ToolSource[];
+    citations?: KnowledgeToolCitation[];
   }): Promise<boolean> {
     return this.settleToolCall({
       ...input,
@@ -349,6 +353,7 @@ export class TurnStateService {
         resourceType: input.resourceType,
         resourceId: input.resourceId,
         sources: input.sources ?? [],
+        citations: input.citations ?? [],
       },
     });
   }
@@ -624,6 +629,7 @@ export class TurnStateService {
             ? { type: input.result.resourceType, id: input.result.resourceId }
             : null,
           sources: input.eventStatus === 'completed' ? input.result.sources : [],
+          citations: input.eventStatus === 'completed' ? (input.result.citations ?? []) : [],
           error: input.eventStatus === 'completed'
             ? null
             : {

@@ -34,6 +34,7 @@ import { ConversationService } from '../conversation/conversation.service';
 import { EventService } from '../conversation/event.service';
 import { ToolPolicyError, ToolPolicyService } from '../tools/tool-policy.service';
 import { ToolRegistryService } from '../tools/tool-registry';
+import { KNOWLEDGE_SEARCH_TOOL_NAME } from '../tools/tool.types';
 import { ContextBuilderService } from './context-builder.service';
 import { AssistantMessageContentService } from './message-content.service';
 import {
@@ -95,6 +96,8 @@ export class TurnRunnerService implements OnModuleDestroy {
     imageFileIds?: string[];
     /** 未显式指定时使用会话的默认模式。 */
     mode?: PublicTurnMode;
+    /** 本轮是否允许检索知识库；省略时默认关闭。 */
+    knowledgeBaseEnabled?: boolean;
   }): Promise<StartTurnResult> {
     const conversation = await this.conversationService.requireMemberConversation(input.conversationId);
     const context = this.tenantContext.require();
@@ -121,6 +124,7 @@ export class TurnRunnerService implements OnModuleDestroy {
       mode,
       input.content ?? '',
       imageFileIds,
+      input.knowledgeBaseEnabled ?? false,
     );
 
     const existing = await this.prisma.assistantTurn.findUnique({
@@ -144,6 +148,7 @@ export class TurnRunnerService implements OnModuleDestroy {
       content: input.content,
       imageFileIds,
       mode,
+      knowledgeBaseEnabled: input.knowledgeBaseEnabled ?? false,
       executionOwner: this.executionOwner,
       leaseExpiresAt: nextTurnLease(),
     });
@@ -171,6 +176,7 @@ export class TurnRunnerService implements OnModuleDestroy {
       requestId: context.requestId,
       mode,
       permissions: context.permissions,
+      knowledgeBaseEnabled: input.knowledgeBaseEnabled ?? false,
       signal: abortController.signal,
     });
 
@@ -224,6 +230,7 @@ export class TurnRunnerService implements OnModuleDestroy {
     requestId: string;
     mode: PublicTurnMode;
     permissions: string[];
+    knowledgeBaseEnabled: boolean;
     signal: AbortSignal;
   }): Promise<void> {
     try {
@@ -249,14 +256,19 @@ export class TurnRunnerService implements OnModuleDestroy {
         input.membershipId,
       );
       const allowedTools = this.toolRegistry.listAllowed(currentAuthorization.permissions);
-      if (allowedTools.length === 0) {
+      // 对话级知识库开关只管“读”：开关关闭时模型拿不到知识库检索工具；
+      // 即使模型仍发起调用，执行器还有一次开关兜底校验。
+      const gatedTools = input.knowledgeBaseEnabled
+        ? allowedTools
+        : allowedTools.filter((tool) => tool.name !== KNOWLEDGE_SEARCH_TOOL_NAME);
+      if (gatedTools.length === 0) {
         await this.runPlainTurn(input);
         return;
       }
       await this.runToolTurn({
         ...input,
         permissions: currentAuthorization.permissions,
-        allowedTools,
+        allowedTools: gatedTools,
       });
     } catch (error) {
       await this.state.failTurn(
@@ -334,6 +346,7 @@ export class TurnRunnerService implements OnModuleDestroy {
     mode: PublicTurnMode;
     permissions: string[];
     allowedTools: ReturnType<ToolRegistryService['listAllowed']>;
+    knowledgeBaseEnabled: boolean;
     signal: AbortSignal;
   }): Promise<void> {
     const { turnId, conversation } = input;
@@ -375,6 +388,9 @@ export class TurnRunnerService implements OnModuleDestroy {
       const suggestedCalls: UpstreamToolCall[] = [];
       const seenUpstreamCallIds = new Map<string, UpstreamToolCall>();
       let modelContent = '';
+      // 工具调用轮次的模型文本是「调用工具前的说明/预告」，不属于用户可见回答：
+      // 先缓存；若该轮最终没有工具调用（纯回答轮）再按序补发，保持回答的流式体验。
+      const pendingContentDeltas: DistributiveOmit<PublicTurnStreamEvent, 'seq'>[] = [];
       let completion: { latencyMs: number; finishReason: string | null } | null = null;
       let terminalError: { code: string; message: string; retryable: boolean } | null = null;
 
@@ -417,8 +433,12 @@ export class TurnRunnerService implements OnModuleDestroy {
               turnId,
               input.requestId,
             );
+            if (publicEvent.type === 'content_delta') {
+              pendingContentDeltas.push(publicEvent);
+              modelContent += publicEvent.text;
+              break;
+            }
             await this.appendPublicEvent(turnId, conversation.tenantId, publicEvent);
-            if (publicEvent.type === 'content_delta') modelContent += publicEvent.text;
           }
         }
       }
@@ -433,6 +453,10 @@ export class TurnRunnerService implements OnModuleDestroy {
         return;
       }
       if (suggestedCalls.length === 0) {
+        // 纯回答轮：补发缓存的内容增量，让最终回答仍以流式方式展示。
+        for (const pendingDelta of pendingContentDeltas) {
+          await this.appendPublicEvent(turnId, conversation.tenantId, pendingDelta);
+        }
         await this.completeTurn(turnId, conversation, modelContent, completion);
         return;
       }
@@ -450,6 +474,7 @@ export class TurnRunnerService implements OnModuleDestroy {
         membershipId: input.membershipId,
         requestId: input.requestId,
         permissions: input.permissions,
+        knowledgeBaseEnabled: input.knowledgeBaseEnabled,
         executionOwner: this.executionOwner,
         calls: suggestedCalls,
         modelStep: modelCall + 1,
@@ -484,6 +509,7 @@ export class TurnRunnerService implements OnModuleDestroy {
     membershipId: string;
     requestId: string;
     permissions: string[];
+    knowledgeBaseEnabled: boolean;
     executionOwner: string;
     calls: UpstreamToolCall[];
     modelStep: number;
@@ -614,6 +640,7 @@ export class TurnRunnerService implements OnModuleDestroy {
             executionToken,
             signal: input.signal,
             permissions: executionPermissions,
+            knowledgeBaseEnabled: input.knowledgeBaseEnabled,
           },
           approval.parsedArguments,
         );
@@ -645,6 +672,7 @@ export class TurnRunnerService implements OnModuleDestroy {
         resourceType: result.resourceType,
         resourceId: result.resourceId,
         sources: result.sources ?? [],
+        citations: result.citations ?? [],
       });
       if (!settled) {
         return { limitExceeded: false, ownershipLost: true };
@@ -863,9 +891,10 @@ function hashTurnRequest(
   mode: string,
   content: string,
   imageFileIds: readonly string[] = [],
+  knowledgeBaseEnabled = false,
 ): string {
   return createHash('sha256')
-    .update(JSON.stringify({ conversationId, mode, content, imageFileIds }))
+    .update(JSON.stringify({ conversationId, mode, content, imageFileIds, knowledgeBaseEnabled }))
     .digest('hex');
 }
 

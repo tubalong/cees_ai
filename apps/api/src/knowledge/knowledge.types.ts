@@ -21,6 +21,12 @@ export interface KnowledgeBaseListResult {
     nextCursor: string | null;
 }
 
+/** 助手可见库清单项（块 7c）：可见知识库 + 当前用户的成员权限标注。 */
+export interface AssistantKnowledgeBaseCandidate extends KnowledgeBaseResult {
+    /** 当前用户对该库的成员权限；manage_all 权限短路时统一标为 MANAGER。 */
+    myPermission: KnowledgeBaseMemberPermission;
+}
+
 export interface KnowledgeBaseMemberResult {
     id: string;
     tenantId: string;
@@ -43,6 +49,10 @@ export type KnowledgeDocumentStatus = typeof KNOWLEDGE_DOCUMENT_STATUSES[number]
 
 export const KNOWLEDGE_DOCUMENT_VISIBILITY_SCOPES = ['PRIVATE', 'DEPARTMENT', 'PROJECT', 'TENANT'] as const;
 export type KnowledgeDocumentVisibilityScope = typeof KNOWLEDGE_DOCUMENT_VISIBILITY_SCOPES[number];
+
+/** 转存来源类型（块 7c）：附件文件 / AI 生成文档 / 对话消息。 */
+export const KNOWLEDGE_DOCUMENT_SOURCE_TYPES = ['FILE_OBJECT', 'DOCUMENT', 'MESSAGE'] as const;
+export type KnowledgeDocumentSourceType = typeof KNOWLEDGE_DOCUMENT_SOURCE_TYPES[number];
 
 export interface KnowledgeDocumentResult {
     id: string;
@@ -86,4 +96,18 @@ export interface KnowledgeQueryResult {
     grounded: boolean;
     insufficientEvidence: boolean;
     citations: KnowledgeQueryCitationResult[];
+}
+
+/** 助手工具检索结果：citation 只含业务内容（文档 ID、标题、片段、页码），不含内部 chunk 标识。 */
+export interface AssistantKnowledgeSearchResult {
+    answer: string;
+    grounded: boolean;
+    insufficientEvidence: boolean;
+    citations: {
+        id: string;
+        title: string;
+        snippet: string;
+        pageIndex: number | null;
+    }[];
+    searchedKnowledgeBaseIds: string[];
 }

@@ -1,6 +1,6 @@
 # 知识库 RAG（MinerU + LlamaIndex）
 
-> 状态：分块实施中。块 1（本文档与内部契约 `index`/`retrieve`）、块 2（ai-service 内存闭环 + HTTP 路由）、块 3（NestJS 文档状态机与上传触发索引）、块 4（真实 pgvector Gateway + `index/delete`）、块 5（公开 Query API + `answer` 契约与引用校验 + 索引删除 NestJS 接线）已落地，其余按第 8 节分块计划推进。
+> 状态：分块实施中。块 1（本文档与内部契约 `index`/`retrieve`）、块 2（ai-service 内存闭环 + HTTP 路由）、块 3（NestJS 文档状态机与上传触发索引）、块 4（真实 pgvector Gateway + `index/delete`）、块 5（公开 Query API + `answer` 契约与引用校验 + 索引删除 NestJS 接线）、块 7a（解析器格式分流 + pgvector HNSW 索引）、块 7b（Assistant RAG 工具接入：`knowledge_search` 工具 + 对话级知识库开关 + 权限折叠检索）已落地，其余按第 8 节分块计划推进。
 > 最后同步：2026-09-16
 > 内部契约版本：`0.5.0`
 > 公开契约版本：`0.25.0`（公开知识库查询 API）
@@ -67,12 +67,20 @@ NestJS API   = 业务事实、权限、状态与审计层（apps/api）
 | 真实 pgvector Gateway（独立 `cees_ai_vectors` 库，upsert/delete/检索过滤下推 SQL）与 `index/delete` 路由（块 4） | `apps/ai-service/app/knowledge/pgvector_store.py`、`app/knowledge/deletion.py` |
 | 真实 Embedding provider 接入（`models.toml` `embedding_profiles`，openai_compatible + L2 归一化，块 4） | `apps/ai-service/app/embeddings/` |
 | LLMRouter 多模型路由与 `rag` role | `apps/ai-service/app/llm` |
+| 解析器格式分流：文本原生（md/txt/csv/json/docx/pptx/xlsx）走 ai-service 本地提取，pdf/图片走 MinerU，统一 `ParsedDocument` 中间格式（块 7a） | `apps/api/src/knowledge/knowledge-document-parser.ts`、`text-artifact-reader.ts` |
+| pgvector HNSW 索引（m=16 / ef_construction=64 / ef_search=64 / cosine，块 7a） | `apps/ai-service/app/knowledge/pgvector_store.py` |
+
+预留未启用（不影响验收，非缺口）：
+
+- `DocumentChunk` 表为预留的引用定位事实源，当前无读写代码：引用明细随 ai-service 检索响应携带（citation 映射 document / version / chunk / page / bbox / text），业务侧无需查表；如未来要求从业务库独立恢复/审计引用内容，再启用读写
 
 缺失：
 
-- `DocumentChunk` 仍无读写代码：块 5 的引用明细直接由 ai-service 响应携带（citation 映射 document / version / chunk / page / bbox / text），暂不启用业务侧表读写
 - 知识库归属锚点管理 API 与自动授权（3.6 节权限边界已定，块 8 实现）；当前锚点字段只存在于数据库，公开契约与 API 均不暴露
-- MinerU 真机联调已在测试环境（192.168.5.29）完成端到端验收（块 6）；生产环境以 Docker 容器方式部署 MinerU 并换用大规模 GPU 硬件；
+- MinerU 真机联调已在测试环境（192.168.5.29）完成端到端验收（块 6）；生产环境以 Docker 容器方式部署 MinerU 并换用大规模 GPU 硬件
+- Assistant RAG 工具已接入（块 7b 落地，见第 7 节）：desktop composer 的"知识库"勾选结构化传参 `knowledgeBaseEnabled`，后端据此暴露/放行 `knowledge_search` 工具
+- 对话数据转知识库未实现（块 7）
+- 助手人设未包含知识库功能告知与交流层边界（3.9 节，块 7d）
 
 ## 3. 关键决策
 
@@ -88,7 +96,8 @@ NestJS API   = 业务事实、权限、状态与审计层（apps/api）
 向量库 schema 由 ai-service 自己管理，**不进 Prisma**，治理机制（块 4 落地）：
 
 - **库**：`cees_ai_vectors` 由 `infra/database/manage-db.sh <env> create-vector-db` 在运行中的 postgres 容器里创建（CREATE DATABASE + CREATE EXTENSION vector），与业务库同实例，不新增基础设施；
-- **表**：`knowledge_chunks` 由 ai-service 首次使用时自动创建（PGVectorStore 初始化时建表并启用 vector 扩展），表名固定为 `knowledge_chunks`，向量维度由 `KNOWLEDGE_VECTOR_DIMENSION` 决定；
+- **表**：`knowledge_chunks` 由 ai-service 首次使用时自动创建（PGVectorStore 初始化时建表并启用 vector 扩展），向量维度由 `KNOWLEDGE_VECTOR_DIMENSION` 决定；LlamaIndex PGVectorStore（0.9.x）会在传入表名前加 `data_` 前缀，数据实际落在 `data_knowledge_chunks`（索引名与检索 SQL 同理按 `data_` 前缀处理）；
+- **HNSW 索引**：PGVectorStore 初始化时声明 `hnsw_kwargs`（`m=16`、`ef_construction=64`、`ef_search=64`、`vector_cosine_ops`）自动建 HNSW 索引，索引名 `data_knowledge_chunks_embedding_idx`；存量表由管理脚本补建索引（`manage-db.sh <env> create-vector-indexes`，建在 `data_knowledge_chunks` 上）。小数据量下与 IVFFlat 差异不大，HNSW 的查询性能优势随知识库规模增长体现（块 7a 已落地）；
 - **版本治理**：向量表结构不原地迁移——切换 embedding 模型或切分策略时创建新 `index_version` 并行重建，旧版本由 `index/delete` 清理（见 3.4），避免重建期间读请求落在半迁移表上。
 
 `DocumentChunk` 表保留为业务侧引用定位事实源（citation 映射 document / page / bbox 时由 NestJS 查询），其 `embedding` 字段已在块 3 迁移 0026 中删除。
@@ -186,6 +195,68 @@ ai-service 不自行推断权限。NestJS 计算可信 scope 后随检索请求�
 - `DocumentVersion` 已带 `visibilityScope` + `departmentId` / `projectId`；
 - `KnowledgeBase` 的 `departmentId` / `projectId` 锚点字段已由块 5 迁移补上（可选，二选一，都空即公司级）；公开契约 0.25.0 暂不暴露锚点字段，API 不接收/不返回锚点，自动授权未实现——当前所有知识库锚点为空，实际行为等同公司级知识库。锚点管理与自动授权在独立块（见第 8 节）实现，落地时契约、API、校验、自动授权判定与本文档同步变更。
 
+### 3.7 解析器格式分流（MinerU + 本地提取）
+
+文档按本质分两类解析路径，统一由 NestJS `KnowledgeDocumentParser` 按 mimeType 分流，知识库链路与对话附件注入共用同一分流规则：
+
+| 类别 | 格式 | 解析路径 | 依据 |
+| --- | --- | --- | --- |
+| 文本原生格式 | md / txt / csv / json / docx / pptx / xlsx | 本地确定性提取（ai-service `app/extraction`：python-docx / stdlib zip-xml / 直接读取） | 文本本来就在文件里，提取是无损、毫秒级、零模型依赖的操作 |
+| 视觉/版式格式 | pdf / 图片 | MinerU pipeline（版面分析 → OCR → 表格重建） | 文本"画"在页面上（扫描件/复杂版式），需要 GPU 模型还原 |
+
+设计要点：
+
+- 分流按 mimeType 判断（上传链路已有白名单，`apps/api/src/file/file.service.ts` 的 `ALLOWED_ATTACHMENT_CONTENT_TYPES`）；
+- 文本类提取产物无页码/bbox，包装为 `ParsedDocument` 时按段落切 block、`page_index`/`bbox` 为 null，与 MinerU 产物同构（citation 的定位信息缺失时前端不展示）；
+- 错误语义：本地提取失败不可重试（文件损坏/不支持/超过接口上限 10 MiB 直接 FAILED）；提取服务不可用（网络/5xx）可重试；MinerU 的网络错误/超时/5xx 可重试（与块 6 语义一致）；
+- **PDF 双态**：当前阶段 pdf 一律走 MinerU（块 6 已端到端验收，质量有保证）；文本型 pdf 的 pymupdf 快速路径作为可选优化延后评估；
+- docx/pptx 内嵌图片：本地提取只拿文本，内嵌视觉内容不在当前阶段解析（验收标准为"可抽取为文本"）；后续需要时把内嵌图片单独抽出走 MinerU OCR；
+- 落点：ai-service extraction 已具备文本类能力（附件注入在用）；知识库侧接入点为 NestJS 组合解析器 `RoutedKnowledgeDocumentParser`（块 7a 已落地），文本类走 `/internal/v1/files/extract`（`FileExtractionRequest`，上限 10 MiB，提取引擎记入 `parser_version`），提取文本经 `text-artifact-reader.ts` 按段落包装为 `ParsedDocument`。
+
+### 3.8 对话数据转知识库（块 7c）
+
+把对话中产生的三类数据（附件文件、AI 生成文档、对话消息）转存为知识库文档，走既有「解析 → 索引」链路。转存是写入操作，比检索的 READER 门槛更高（EDITOR），且**与对话级"知识库"检索开关解耦**：勾选开关管"读"（AI 回答时引用知识库），转存是资源级"写"动作，不依赖开关状态。AI 生成产物默认只存于受控文档（document 模块），**绝不自动全存**——进入知识库永远是显式动作（资源卡片按钮或自然语言），否则知识库沦为垃圾场。
+
+**统一物化模型（三类来源同构）**：转存 = 把来源内容物化为一个 FileObject 快照 → 首次转存 `createDocument`、重复转存 `createDocumentVersion`，与人工上传文档完全同构（同一状态机、同一索引链路、同一审计）：
+
+- 附件文件：直接复用其 FileObject；
+- AI 生成文档 / 对话消息：以当前内容物化新 FileObject（文本快照，写入 COS）。
+
+**版本演进（同源重复转存 = 追加新版本，不覆盖不新建）**：来源锚定用 `source_type`（FILE_OBJECT / DOCUMENT / MESSAGE）+ `source_id` 唯一约束（块 7c 迁移落于 KnowledgeDocument）；同源重复转存命中已有文档 → 追加 DocumentVersion（内容为最新快照），状态回 PENDING 重新解析索引，旧版本索引后台清理（"先写新后删旧"，读请求只见全旧或全新）。AI 修改受控文档**不自动同步**知识库，必须再次显式转存。
+
+**双层入口，同一落点**：
+
+1. **确定性按钮**（不经过模型）：附件卡片 / 生成文档卡片 / 消息上的"存入知识库"操作，弹确认框选目标库（列出用户 EDITOR 权限的库）与可见范围，直接调 `POST /knowledge-bases/{id}/documents`；
+2. **`save_to_knowledge` 工具**（自然语言快捷路径）：用户用自然语言表达存储意图时，模型识别意图、定位资源、提议目标库后调用；工具只是提议，落库复用同一公开接口（AI 产物与人工产物同构）。两条参数路径：引用已存在资源（`sourceType`+`sourceId`，如附件/生成文档/消息）或**内容直存**（`content`，用户口述或模型整理自用户表达的内容文本，物化为新文档、不锚定来源，每次直存都是新文档）。
+
+**目标库选择**（用户决定，AI 只提议）：自然语言明确指明 → 模型解析该库、后端校验 EDITOR；未指明且有歧义 → 模型回问用户列出候选库，绝不替用户挑；校验失败（无权限/库不存在）→ 拒绝并回喂模型更换目标。一份来源同时只存一个库（来源锚定唯一约束）；要多库存储需再次物化。转存文档可见范围默认 PRIVATE，用户在确认界面可调整。`list_knowledge_bases` 列出用户可见的全部知识库并标注各自成员权限：回答「我有哪些知识库」时如实全列；转存场景只从 EDITOR 及以上候选中提议。
+
+**三条红线**（模型侧约束，写入工具描述与系统提示词）：
+
+1. 无明确存储意图 → 模型绝不自主转存：用户未明确表达"保存/存入/收录"等意图时不得调用存储工具，不做自动知识沉淀；
+2. 转存只能引用真实资源：引用资源时工具参数必须引用已存在的资源 ID（fileObjectId / documentId / messageId），模型不得把自创文本作为来源引用；内容直存路径（`content` 参数）的内容必须来自用户明确口述或经用户确认的整理文本，模型不得编造内容写入；
+3. 目标知识库由后端校验：模型建议的目标库经 NestJS 校验用户 EDITOR 权限，校验失败拒绝并回喂模型更换目标；执行前仍走 ToolPolicy 权限码审批（第二点检查）。
+4. 工具回喂脱敏与语言约束：summary 中 `knowledge_base_id` 等内部标识只供后续工具调用引用，不得转述给用户；权限向用户说明时只用中文表述（只读/可编辑/管理员），不输出 READER/EDITOR/MANAGER 枚举词（写入工具 instruction）；对话系统提示词（ai-service `BASE_SYSTEM_PROMPT`）要求始终以简体中文回复、不向用户暴露任何内部标识（资源 ID / 文档 ID / 知识库 ID / 权限枚举）。
+5. 检索优先：`knowledge_search` 工具可用时（开关开启），用户询问人员/团队/项目/制度等内部信息类问题必须先调用检索，不得在未检索时声称没有信息或反问用户（写入 `BASE_SYSTEM_PROMPT` 与工具 description）。
+
+**落地状态（块 7c 已落地）**：
+
+- 后端：`KnowledgeDocument` 增加 `source_type` / `source_id` 锚定与部分唯一索引（同库同源唯一，跨库拒绝 `KNOWLEDGE_SOURCE_ALREADY_SAVED`）；`FileService` 提供文本物化快照；`KnowledgeDocumentService.saveFromSource` 统一承接三类来源（FILE_OBJECT / DOCUMENT / MESSAGE），首次转存 `createDocument`、同源重复转存追加新版本并回 PENDING；MESSAGE 校验租户、`conversation.ownerMembershipId === actor.membershipId`、拒绝 TOOL 角色，工具路径另限定 `conversationId`；DOCUMENT 要求用户可读；name 留空时按来源取默认（FILE_OBJECT 用原文件名、DOCUMENT 用文档标题、MESSAGE 用「对话消息 {YYYY-MM-DD HH:mm}」）；`saveDirectContent` 承接内容直存（物化 Markdown 快照 + 无锚定新建文档 + 审计 `directContent: true`，name 留空取「对话内容 {YYYY-MM-DD HH:mm}」）；`save_to_knowledge` 工具参数校验强制 `sourceType+sourceId` 与 `content` 二选一（content 上限 20000 字符）；`save_to_knowledge` / `list_knowledge_bases` 两个 Assistant 工具已注册（提议 + 后端 EDITOR 校验 + 权限码审批）；`list_knowledge_bases` 返回当前用户可见的全部知识库（任意成员等级，含 READER）并标注每个库的成员权限 `myPermission`，既回答「我有哪些知识库」也为转存提供候选（转存仅 EDITOR/MANAGER 可写，`manage_all` 短路统一标 MANAGER）；`create_knowledge_base` 工具已注册（`knowledge_base.create` 权限，WRITE 风险级）：用户明确要求创建知识库时以用户确认的名称创建（创建者自动成为 MANAGER），与公开创建接口共用同一事务体。工具回喂脱敏：summary 携带内部 ID 的 instruction 均明确「不得向用户展示」；工具调用轮次的模型文本（如「I'll check…」预告语）由 turn-runner 缓存，不发布为公开事件，纯回答轮再补发（保持最终回答流式）。
+- 桌面端（desktop）：三处确定性按钮入口——生成文档卡片、已持久化消息、附件标签，均弹确认框：列出用户 EDITOR 权限的库（`GET /knowledge-bases?permission=EDITOR&limit=100`）供选择，可见范围提供 PRIVATE / TENANT 两级（DEPARTMENT / PROJECT 需归属 id，当前 UI 不提供，后端能力完整保留）；消息入口以该消息文本为内容，名称可在确认框拟定；入口按 `knowledge_base.document.manage` 权限过滤，后端仍二次校验（红线 3）。
+
+### 3.9 助手人设中的功能告知（块 7d）
+
+对话助手（人设/系统提示词）在介绍类问题上主动告知知识库能力，并严守「交流层」边界：
+
+**触发与话术层级**：
+
+1. 用户问"你是谁 / 你能做什么"等介绍性问题：答复中带一句知识库能力（"我可以检索团队知识库，基于公司文档回答问题并标注出处"）；
+2. 用户追问"知识库是什么 / 怎么用"：详细解释功能价值与使用方式（上传文档 → 自动解析 → 提问时引用出处；对话中勾选"知识库"开关；也可在对话中让我创建知识库、把对话内容存入知识库），不展开内部实现。
+
+**交流层/系统层边界**（防泄露红线）：AI 答复永远只停留于交流层（功能价值、使用方式、业务规则），绝不涉及系统层——包括但不限于内部模块名（ai-service / NestJS / MinerU / pgvector 等）、内部错误码与权限码、模型名称与向量维度、接口路径与数据库结构、内部标识（documentId 等）。即使用户诱导（"你的系统架构是什么""用的什么数据库"），也拒绝展开并回归功能描述。落地时写入对话 role 的系统提示词，与工具执行器 summary 脱敏规范（回喂内容不含内部信息）互为呼应。
+
+**部分落地（块 7c 收尾时提前落地）**：ai-service `BASE_SYSTEM_PROMPT` 已写入三条硬约束——①始终以简体中文回复（用户明确要求其他语言除外）；②内部标识（资源 ID / 文档 ID / 知识库 ID / 权限枚举）是工具链细节，不得在答复中暴露；③`knowledge_search` 可用时，内部信息类问题必须先检索再回答，不得未检索就声称没有信息或反问用户（检索优先，同时写入工具 description）。工具调用轮次的模型预告语（如英文「I'll check…」）由 turn-runner 缓存不发布。剩余部分（介绍性问题的知识库功能告知话术、诱导提问对抗用例）仍待块 7d。
+
 ## 4. 索引流程与状态机
 
 `KnowledgeDocument` 的处理状态机由 NestJS 持久化（块 3 已落地）：
@@ -202,6 +273,7 @@ PENDING -> PARSING -> PARSED -> INDEXING -> READY
 - 上传/新版本/重试后调用 `kick()` 即时触发，与轮询共用同一把锁，不会重复处理同一文档；
 - 解析器经 `KNOWLEDGE_DOCUMENT_PARSER` 抽象注入，块 3 为 MinerU 占位实现（抛 `MINERU_NOT_CONFIGURED`），块 6 真机替换；
 - 失败按 retryable 语义处理：可重试错误回 `PENDING` 并递增 `retryCount`，达到上限（默认 3，`KNOWLEDGE_INDEX_MAX_RETRIES`）置 `FAILED`；不可重试错误直接 `FAILED`；`FAILED` 可由用户手动重试；
+- 孤儿状态回收：超过解析最长耗时 2 倍（`MINERU_API_TIMEOUT_MS` × 2，默认 60 分钟）仍停留在 `PARSING`/`INDEXING` 的文档视为处理进程已丢失（崩溃/重启），轮询时自动回 `PENDING` 重新排队（按原状态条件更新声明所有权，每轮至多 10 个），`lastError` 记录回收原因并写审计（`KNOWLEDGE_DOCUMENT_PROCESS_RECOVERED`，含原状态）；
 - 可见范围（`visibilityScope`）是版本级属性，存储在 `DocumentVersion`，索引请求从当前处理版本读取；
 - `acl_version` 仍由版本 ID 派生（`acl-{version.id 前 8 位}`）写入节点 metadata，但**不引入 ACL 版本机制**：检索 scope 的 `acl_version` 为可选字段，NestJS 检索时不传（权限由实时 scope 折叠保证），真正的 ACL 版本机制推迟到引入检索查询缓存时再设计；
 - 索引请求三元组可通过环境变量覆盖：`KNOWLEDGE_CHUNKING_VERSION`（默认 `knowledge-chunking-v1`）、`KNOWLEDGE_EMBEDDING_PROFILE`（默认 `deterministic`）、`KNOWLEDGE_INDEX_VERSION`（默认 `knowledge-index-v1`）；
@@ -224,8 +296,8 @@ PENDING -> PARSING -> PARSED -> INDEXING -> READY
 ```
 
 - 模型只输出 `citation_ids`，服务端把 ID 映射回真实来源（document / version / chunk / page / bbox / text），不允许模型编造文档 ID、页码或 URL；
-- 证据不足时返回 `grounded=false`、`insufficient_evidence=true`，不自由发挥；检索无结果时短路不调用模型；基于分数阈值的拒答延后到块 6；
-- 公开侧为同步 REST：`POST /knowledge-bases/{id}/query`（流式留到块 7 评估）；NestJS 折叠三层权限为 scope、调用 `answer`，成功写入 `KnowledgeQueryLog`（含知识库、grounded、耗时与 Token 用量）与审计，ai-service 不可用时统一映射 `503 KNOWLEDGE_QUERY_SERVICE_UNAVAILABLE` 并写失败审计；
+- 证据不足时返回 `grounded=false`、`insufficient_evidence=true`，不自由发挥；检索无结果时短路不调用模型；基于分数阈值的拒答尚未实现（原计划随块 6 落地，块 6 验收未纳入，待排期）；
+- 公开侧为同步 REST：`POST /knowledge-bases/{id}/query`（公开侧保持同步 REST，不做流式；对话工具链的引用以流式事件 `TurnStreamToolResultEvent.citations` 携带，块 7b 落地）；NestJS 折叠三层权限为 scope、调用 `answer`，成功写入 `KnowledgeQueryLog`（含知识库、grounded、耗时与 Token 用量）与审计，ai-service 不可用时统一映射 `503 KNOWLEDGE_QUERY_SERVICE_UNAVAILABLE` 并写失败审计；
 
 ## 6. 内部契约
 
@@ -242,8 +314,14 @@ PENDING -> PARSING -> PARSED -> INDEXING -> READY
 
 公开知识库问答 API（`POST /knowledge-bases/{id}/query`，块 5 已落地）与 Assistant RAG 工具都属于 NestJS 公开侧，共用上述内部契约：
 
-- 阶段 A：独立公开 Query API 已跑通「解析产物 → 索引 → 检索 → 引用」闭环（块 5 落地）；
-- 阶段 B：把 RAG 检索注册为 Assistant 工具（`knowledge_base.query` 权限码已存在），复用工具执行前二次校验、幂等与脱敏链路（块 7）。
+- 独立公开 Query API 已跑通「解析产物 → 索引 → 检索 → 引用」闭环（块 5 落地）；
+- 把 RAG 检索注册为 Assistant 工具（块 7b 已落地）：
+  - `knowledge_search` 工具（版本 1.0.0，`knowledge_base.query` 权限，READ 风险级）注册进 Assistant 工具链；
+  - 对话级开关：`CreateTurnRequest.knowledgeBaseEnabled`（可选，默认 false）决定本轮是否暴露/允许 `knowledge_search`；关闭时工具列表被过滤，且工具执行前二次校验兼底（拒绝时 `ToolPolicyError` 告知用户「未在本轮启用」）；
+  - 检索走 `KnowledgeService.searchKnowledgeForAssistant`：显式传 tenantId/userId/membershipId/permissions（后台执行不依赖 AsyncLocalStorage），`manage_all` 短路为全租户库，否则按成员可见库折叠三层 scope；ai-service 不返回标题时按 `document_id` 查 `KnowledgeDocument` 补标题；
+  - 回喂模型的 summary 只含业务内容（S1 标签/标题/snippet/pageIndex），不含 document_id/chunk_id/知识库 ID 等内部标识；
+  - 公开侧 `TurnStreamToolResultEvent` 新增可选 `citations`（兼容新增，老客户端忽略），desktop 渲染知识库引用卡片（标题+摘录+页码），并按会话 localStorage 恢复；
+  - 多库检索时 `KnowledgeQueryLog.knowledgeBaseId` 记 null，审计 `resourceId` 为 null、`metadata.knowledgeBaseIds` 记录实际范围（块 7b 落地）。
 
 ## 8. 分块实施计划
 
@@ -255,7 +333,10 @@ PENDING -> PARSING -> PARSED -> INDEXING -> READY
 | 4 | 真实 pgvector Gateway（独立 `cees_ai_vectors` database）+ `index/delete` 契约 | 块 2 | ✅ 已落地 |
 | 5 | 公开 Query API + `answer` 契约（LLMRouter rag role）+ citation 校验 + 索引删除 NestJS 接线 | 块 2、4 | ✅ 已落地 |
 | 6 | MinerU 真机联调（192.168.5.29，MinerU 3.4.5 + pipeline 后端已部署验证） | 块 3 | ✅ 已验收 |
-| 7 | Assistant RAG 工具接入（阶段 B） | 块 5 | 待开始 |
+| 7a | 解析器格式分流（3.7 节）+ pgvector HNSW 索引（3.1 节） | 块 3、6 | ✅ 已落地（真机待部署验收） |
+| 7b | Assistant RAG 工具接入：`knowledge_search` 工具注册 + 对话级知识库开关 + 权限折叠检索 | 块 5 | ✅ 已落地 |
+| 7c | 对话数据转知识库（3.8 节：双层入口 + 三条红线；附件/AI 生成文档/对话消息）+ 助手可见库清单与创建知识库工具 | 块 3、7b | ✅ 已落地 |
+| 7d | 助手人设功能告知与交流层边界（3.9 节） | 块 7b | 部分落地（语言约束与内部标识脱敏已写入 BASE_SYSTEM_PROMPT；介绍类告知话术待落地） |
 | 8 | 知识库归属锚点管理与自动授权（3.6 节：项目/部门/公司级分类、锚点人群虚拟 READER、悬挂处理） | 块 5 | 待开始 |
 
 每块独立可验证、可提交；块 2 使用内存向量库与假解析产物，不依赖 GPU 服务器。
@@ -280,4 +361,7 @@ PENDING -> PARSING -> PARSED -> INDEXING -> READY
 | 4 | pytest：Gateway upsert/delete/filter；幂等与部分失败；真实 embedding 归一化与缺失 key 拒绝 | ✅ 完成 |
 | 5 | jest 38 用例（scope 折叠、查询日志、失败审计、索引删除接线）+ pytest 全绿（answer 空结果短路、rag role、citation 校验、acl_version 可选、空白名单空数组保护）；契约校验与客户端重生成 | ✅ 完成 |
 | 6 | jest 23 用例（TS 版转换器与真机 parser 错误映射、3.4.5 服务模式响应结构）+ pytest 全绿（embedding router/维度校验、pgvector 拒绝 deterministic 前置拦截）；29 真机端到端验收通过：上传 PDF → MinerU 解析 → pgvector 索引 → READY → 查询 grounded=true 带 citations | ✅ 完成 |
-| 7 | jest：工具 approve/执行前二次校验/失败语义；契约兼容检查 | 待验证 |
+| 7a | jest 73 用例（mimeType 分流、提取错误语义、文本产物包装）+ pytest 16 用例（HNSW 索引落在 `data_knowledge_chunks`、hnsw_kwargs 每实例完整）+ ruff/tsc 全绿；29 真机 docx 上传经本地提取 READY 待部署后验收 | ✅ 本地完成 |
+| 7b | jest 34 用例（开关关闭过滤工具并二次校验拒绝、权限折叠检索（成员+manage_all）、summary 脱敏、标题补全、多库日志与审计范围）；tsc 全绿；契约兼容检查（redocly lint + api-client 重新生成）；desktop tsc + 生产构建通过（开关结构化传参、citations 卡片渲染与恢复） | ✅ 完成 |
+| 7c | jest：saveFromSource 13 用例（物化快照、EDITOR 校验、MESSAGE 归属/TOOL 拒绝、可读文档命名、同源追加版本、跨库拒绝、并发锚点冲突、source 字段互斥）+ saveDirectContent 2 用例（无锚定直存 + 权限拒绝）+ 工具 8 用例（save_to_knowledge 含 content 直存路径与二选一校验 / list_knowledge_bases 含脱敏指令：审批/EDITOR 校验/无意图不转存/引用不存在拒绝）+ 助手可见库清单 3 用例（权限标注/非成员空结果/manage_all 短路）+ create_knowledge_base 3 用例（注册/参数校验/显式上下文创建与回喂新库 id + 脱敏指令）+ turn-runner 工具轮预告语不发布 1 用例 + knowledge_search description 检索优先断言 2 例；pytest：chat context 7 用例（含语言/脱敏/检索优先约束 prompt）；tsc 全绿；契约校验 + 客户端重生成；desktop tsc + 生产构建通过（三入口 + 确认框） | ✅ 完成 |
+| 7d | jest/真机：介绍性问题带知识库功能告知；诱导提问不泄露系统层信息（抽样对抗用例） | 待验证 |
