@@ -176,6 +176,23 @@ enum HrEmployeeChangeStatus {
   EFFECTIVE
 }
 
+enum FinanceExpenseStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+  WITHDRAWN
+  CANCELLED
+  PAID
+}
+
+enum FinancePaymentMethod {
+  BANK_TRANSFER
+  CASH
+  CORPORATE_CARD
+  OTHER
+}
+
 enum TaskStatus {
   TODO
   IN_PROGRESS
@@ -361,55 +378,61 @@ enum DingTalkSyncType {
 }
 
 model Tenant {
-  id                     String                  @id @default(uuid()) @db.Uuid
-  code                   String                  @unique
-  name                   String
-  timezone               String                  @default("Asia/Shanghai")
-  status                 TenantStatus            @default(ACTIVE)
-  memberships            TenantMembership[]
-  authSessions           AuthSession[]
-  departments            Department[]
-  roles                  Role[]
-  membershipRoles        MembershipRole[]
-  rolePermissions        RolePermission[]
-  resources              Resource[]
-  managedDocuments       ManagedDocument[]
-  managedImages          ManagedImage[]
-  resourceAcls           ResourceAcl[]
-  invitations            TenantInvitation[]
-  projects               Project[]
-  assignmentPolicies     AssignmentPolicy[]
-  hrProfiles             HrProfile[]
-  hrLeaveTypes           HrLeaveType[]
-  hrLeaveBalances        HrLeaveBalance[]
-  hrLeaveRequests        HrLeaveRequest[]
-  hrAttendanceRecords    HrAttendanceRecord[]
-  hrOvertimeRequests     HrOvertimeRequest[]
-  hrEmployeeChanges      HrEmployeeChange[]
-  projectCodeSequences   ProjectCodeSequence[]
-  projectMembers         ProjectMember[]
-  projectStatusHistory   ProjectStatusHistory[]
-  tasks                  Task[]
-  taskAssignees          TaskAssignee[]
-  taskComments           TaskComment[]
-  taskAttachments        TaskAttachment[]
-  taskActivities         TaskActivity[]
-  meetings               Meeting[]
-  meetingParticipants    MeetingParticipant[]
-  meetingMinutes         MeetingMinutes[]
-  workReports            WorkReport[]
-  workReportProjects     WorkReportProject[]
-  workReportTasks        WorkReportTask[]
-  notifications          Notification[]
-  notificationRecipients NotificationRecipient[]
-  dingTalkIntegration    DingTalkIntegration?
-  dingTalkDepartments    DingTalkDepartment[]
-  dingTalkUsers          DingTalkUser[]
-  dingTalkSyncJobs       DingTalkSyncJob[]
-  createdAt              DateTime                @default(now()) @map("created_at")
-  updatedAt              DateTime                @updatedAt @map("updated_at")
-  deletedAt              DateTime?               @map("deleted_at")
-  version                Int                     @default(1)
+  id                        String                         @id @default(uuid()) @db.Uuid
+  code                      String                         @unique
+  name                      String
+  timezone                  String                         @default("Asia/Shanghai")
+  status                    TenantStatus                   @default(ACTIVE)
+  memberships               TenantMembership[]
+  authSessions              AuthSession[]
+  departments               Department[]
+  roles                     Role[]
+  membershipRoles           MembershipRole[]
+  rolePermissions           RolePermission[]
+  resources                 Resource[]
+  managedDocuments          ManagedDocument[]
+  managedImages             ManagedImage[]
+  resourceAcls              ResourceAcl[]
+  invitations               TenantInvitation[]
+  projects                  Project[]
+  assignmentPolicies        AssignmentPolicy[]
+  hrProfiles                HrProfile[]
+  hrLeaveTypes              HrLeaveType[]
+  hrLeaveBalances           HrLeaveBalance[]
+  hrLeaveRequests           HrLeaveRequest[]
+  hrAttendanceRecords       HrAttendanceRecord[]
+  hrOvertimeRequests        HrOvertimeRequest[]
+  hrEmployeeChanges         HrEmployeeChange[]
+  financeExpenseCategories  FinanceExpenseCategory[]
+  financeExpenseReports     FinanceExpenseReport[]
+  financeExpenseItems       FinanceExpenseItem[]
+  financeExpenseAttachments FinanceExpenseAttachment[]
+  financeExpenseHistories   FinanceExpenseStatusHistory[]
+  financeExpenseSequences   FinanceExpenseReportSequence[]
+  projectCodeSequences      ProjectCodeSequence[]
+  projectMembers            ProjectMember[]
+  projectStatusHistory      ProjectStatusHistory[]
+  tasks                     Task[]
+  taskAssignees             TaskAssignee[]
+  taskComments              TaskComment[]
+  taskAttachments           TaskAttachment[]
+  taskActivities            TaskActivity[]
+  meetings                  Meeting[]
+  meetingParticipants       MeetingParticipant[]
+  meetingMinutes            MeetingMinutes[]
+  workReports               WorkReport[]
+  workReportProjects        WorkReportProject[]
+  workReportTasks           WorkReportTask[]
+  notifications             Notification[]
+  notificationRecipients    NotificationRecipient[]
+  dingTalkIntegration       DingTalkIntegration?
+  dingTalkDepartments       DingTalkDepartment[]
+  dingTalkUsers             DingTalkUser[]
+  dingTalkSyncJobs          DingTalkSyncJob[]
+  createdAt                 DateTime                       @default(now()) @map("created_at")
+  updatedAt                 DateTime                       @updatedAt @map("updated_at")
+  deletedAt                 DateTime?                      @map("deleted_at")
+  version                   Int                            @default(1)
 
   @@map("tenants")
 }
@@ -441,53 +464,57 @@ model User {
 }
 
 model TenantMembership {
-  id                    String                 @id @default(uuid()) @db.Uuid
-  tenantId              String                 @map("tenant_id") @db.Uuid
-  tenant                Tenant                 @relation(fields: [tenantId], references: [id])
-  userId                String                 @map("user_id") @db.Uuid
-  user                  User                   @relation(fields: [userId], references: [id])
-  departmentId          String?                @map("department_id") @db.Uuid
-  department            Department?            @relation(fields: [departmentId], references: [id])
-  displayName           String?                @map("display_name")
-  account               String
-  normalizedAccount     String                 @map("normalized_account")
-  passwordHash          String?                @map("password_hash")
-  status                MembershipStatus       @default(ACTIVE)
-  failedLoginCount      Int                    @default(0) @map("failed_login_count")
-  lockedUntil           DateTime?              @map("locked_until")
-  lastLoginAt           DateTime?              @map("last_login_at")
-  joinedAt              DateTime               @default(now()) @map("joined_at")
-  authSessions          AuthSession[]
-  membershipRoles       MembershipRole[]
-  ownedResources        Resource[]
-  ownedProjects         Project[]              @relation("ProjectOwner")
-  completedProjects     Project[]              @relation("ProjectCompleter")
-  projectMemberships    ProjectMember[]        @relation("ProjectMembership")
-  projectStatusChanges  ProjectStatusHistory[] @relation("ProjectStatusChangedBy")
-  createdTasks          Task[]                 @relation("TaskCreatorMembership")
-  taskAssignments       TaskAssignee[]         @relation("TaskAssignmentMembership")
-  taskComments          TaskComment[]          @relation("TaskCommentAuthorMembership")
-  taskAttachments       TaskAttachment[]       @relation("TaskAttachmentCreatorMembership")
-  taskActivities        TaskActivity[]         @relation("TaskActivityActorMembership")
-  organizedMeetings     Meeting[]              @relation("MeetingOrganizerMembership")
-  meetingParticipations MeetingParticipant[]   @relation("MeetingParticipantMembership")
-  recordedMinutes       MeetingMinutes[]       @relation("MeetingMinutesRecorderMembership")
-  publishedMinutes      MeetingMinutes[]       @relation("MeetingMinutesPublisherMembership")
-  authoredWorkReports   WorkReport[]           @relation("WorkReportAuthorMembership")
-  reviewedWorkReports   WorkReport[]           @relation("WorkReportReviewerMembership")
-  dingTalkUserBindings  DingTalkUser[]
-  hrProfile             HrProfile?
-  hrLeaveBalances       HrLeaveBalance[]
-  hrLeaveRequests       HrLeaveRequest[]
-  hrAttendanceRecords   HrAttendanceRecord[]
-  hrOvertimeRequests    HrOvertimeRequest[]
-  hrEmployeeChanges     HrEmployeeChange[]
-  createdAt             DateTime               @default(now()) @map("created_at")
-  updatedAt             DateTime               @updatedAt @map("updated_at")
-  createdBy             String?                @map("created_by") @db.Uuid
-  updatedBy             String?                @map("updated_by") @db.Uuid
-  deletedAt             DateTime?              @map("deleted_at")
-  version               Int                    @default(1)
+  id                      String                        @id @default(uuid()) @db.Uuid
+  tenantId                String                        @map("tenant_id") @db.Uuid
+  tenant                  Tenant                        @relation(fields: [tenantId], references: [id])
+  userId                  String                        @map("user_id") @db.Uuid
+  user                    User                          @relation(fields: [userId], references: [id])
+  departmentId            String?                       @map("department_id") @db.Uuid
+  department              Department?                   @relation(fields: [departmentId], references: [id])
+  displayName             String?                       @map("display_name")
+  account                 String
+  normalizedAccount       String                        @map("normalized_account")
+  passwordHash            String?                       @map("password_hash")
+  status                  MembershipStatus              @default(ACTIVE)
+  failedLoginCount        Int                           @default(0) @map("failed_login_count")
+  lockedUntil             DateTime?                     @map("locked_until")
+  lastLoginAt             DateTime?                     @map("last_login_at")
+  joinedAt                DateTime                      @default(now()) @map("joined_at")
+  authSessions            AuthSession[]
+  membershipRoles         MembershipRole[]
+  ownedResources          Resource[]
+  ownedProjects           Project[]                     @relation("ProjectOwner")
+  completedProjects       Project[]                     @relation("ProjectCompleter")
+  projectMemberships      ProjectMember[]               @relation("ProjectMembership")
+  projectStatusChanges    ProjectStatusHistory[]        @relation("ProjectStatusChangedBy")
+  createdTasks            Task[]                        @relation("TaskCreatorMembership")
+  taskAssignments         TaskAssignee[]                @relation("TaskAssignmentMembership")
+  taskComments            TaskComment[]                 @relation("TaskCommentAuthorMembership")
+  taskAttachments         TaskAttachment[]              @relation("TaskAttachmentCreatorMembership")
+  taskActivities          TaskActivity[]                @relation("TaskActivityActorMembership")
+  organizedMeetings       Meeting[]                     @relation("MeetingOrganizerMembership")
+  meetingParticipations   MeetingParticipant[]          @relation("MeetingParticipantMembership")
+  recordedMinutes         MeetingMinutes[]              @relation("MeetingMinutesRecorderMembership")
+  publishedMinutes        MeetingMinutes[]              @relation("MeetingMinutesPublisherMembership")
+  authoredWorkReports     WorkReport[]                  @relation("WorkReportAuthorMembership")
+  reviewedWorkReports     WorkReport[]                  @relation("WorkReportReviewerMembership")
+  requestedExpenseReports FinanceExpenseReport[]        @relation("FinanceExpenseRequester")
+  reviewedExpenseReports  FinanceExpenseReport[]        @relation("FinanceExpenseReviewer")
+  paidExpenseReports      FinanceExpenseReport[]        @relation("FinanceExpensePayer")
+  financeStatusChanges    FinanceExpenseStatusHistory[] @relation("FinanceExpenseStatusActor")
+  dingTalkUserBindings    DingTalkUser[]
+  hrProfile               HrProfile?
+  hrLeaveBalances         HrLeaveBalance[]
+  hrLeaveRequests         HrLeaveRequest[]
+  hrAttendanceRecords     HrAttendanceRecord[]
+  hrOvertimeRequests      HrOvertimeRequest[]
+  hrEmployeeChanges       HrEmployeeChange[]
+  createdAt               DateTime                      @default(now()) @map("created_at")
+  updatedAt               DateTime                      @updatedAt @map("updated_at")
+  createdBy               String?                       @map("created_by") @db.Uuid
+  updatedBy               String?                       @map("updated_by") @db.Uuid
+  deletedAt               DateTime?                     @map("deleted_at")
+  version                 Int                           @default(1)
 
   @@unique([tenantId, userId])
   @@unique([tenantId, normalizedAccount])
@@ -567,27 +594,29 @@ model PlatformAuthSession {
 }
 
 model Department {
-  id                         String               @id @default(uuid()) @db.Uuid
-  tenantId                   String               @map("tenant_id") @db.Uuid
-  tenant                     Tenant               @relation(fields: [tenantId], references: [id])
-  parentId                   String?              @map("parent_id") @db.Uuid
-  parent                     Department?          @relation("DepartmentHierarchy", fields: [parentId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  children                   Department[]         @relation("DepartmentHierarchy")
+  id                         String                 @id @default(uuid()) @db.Uuid
+  tenantId                   String                 @map("tenant_id") @db.Uuid
+  tenant                     Tenant                 @relation(fields: [tenantId], references: [id])
+  parentId                   String?                @map("parent_id") @db.Uuid
+  parent                     Department?            @relation("DepartmentHierarchy", fields: [parentId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  children                   Department[]           @relation("DepartmentHierarchy")
   name                       String
-  normalizedName             String               @map("normalized_name")
+  normalizedName             String                 @map("normalized_name")
   description                String?
-  sortOrder                  Int                  @default(0) @map("sort_order")
-  status                     DepartmentStatus     @default(ACTIVE)
+  sortOrder                  Int                    @default(0) @map("sort_order")
+  status                     DepartmentStatus       @default(ACTIVE)
   memberships                TenantMembership[]
   projects                   Project[]
   meetings                   Meeting[]
   dingTalkDepartmentBindings DingTalkDepartment[]
-  createdAt                  DateTime             @default(now()) @map("created_at")
-  updatedAt                  DateTime             @updatedAt @map("updated_at")
-  createdBy                  String?              @map("created_by") @db.Uuid
-  updatedBy                  String?              @map("updated_by") @db.Uuid
-  deletedAt                  DateTime?            @map("deleted_at")
-  version                    Int                  @default(1)
+  financeExpenseReports      FinanceExpenseReport[]
+  financeExpenseItems        FinanceExpenseItem[]
+  createdAt                  DateTime               @default(now()) @map("created_at")
+  updatedAt                  DateTime               @updatedAt @map("updated_at")
+  createdBy                  String?                @map("created_by") @db.Uuid
+  updatedBy                  String?                @map("updated_by") @db.Uuid
+  deletedAt                  DateTime?              @map("deleted_at")
+  version                    Int                    @default(1)
 
   @@index([tenantId, parentId])
   @@index([tenantId, status, sortOrder])
@@ -827,6 +856,7 @@ model Project {
   meetings                Meeting[]
   workReportLinks         WorkReportProject[]
   assignmentPolicies      AssignmentPolicy[]
+  financeExpenseItems     FinanceExpenseItem[]
   createdAt               DateTime               @default(now()) @map("created_at")
   updatedAt               DateTime               @updatedAt @map("updated_at")
   createdBy               String?                @map("created_by") @db.Uuid
@@ -1242,27 +1272,177 @@ model HrEmployeeChange {
   @@map("hr_employee_changes")
 }
 
+model FinanceExpenseCategory {
+  id          String               @id @default(uuid()) @db.Uuid
+  tenantId    String               @map("tenant_id") @db.Uuid
+  tenant      Tenant               @relation(fields: [tenantId], references: [id])
+  code        String
+  name        String
+  description String?              @db.Text
+  enabled     Boolean              @default(true)
+  items       FinanceExpenseItem[]
+  createdAt   DateTime             @default(now()) @map("created_at")
+  updatedAt   DateTime             @updatedAt @map("updated_at")
+  createdBy   String?              @map("created_by") @db.Uuid
+  updatedBy   String?              @map("updated_by") @db.Uuid
+  deletedAt   DateTime?            @map("deleted_at")
+  version     Int                  @default(1)
+
+  @@index([tenantId, enabled])
+  @@map("finance_expense_categories")
+}
+
+model FinanceExpenseReportSequence {
+  id         String   @id @default(uuid()) @db.Uuid
+  tenantId   String   @map("tenant_id") @db.Uuid
+  tenant     Tenant   @relation(fields: [tenantId], references: [id])
+  year       Int
+  lastNumber Int      @default(0) @map("last_number")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@unique([tenantId, year])
+  @@map("finance_expense_report_sequences")
+}
+
+model FinanceExpenseReport {
+  id                    String                        @id @default(uuid()) @db.Uuid
+  tenantId              String                        @map("tenant_id") @db.Uuid
+  tenant                Tenant                        @relation(fields: [tenantId], references: [id])
+  reportNo              String                        @map("report_no")
+  requesterMembershipId String                        @map("requester_membership_id") @db.Uuid
+  requesterMembership   TenantMembership              @relation("FinanceExpenseRequester", fields: [requesterMembershipId], references: [id])
+  requesterDepartmentId String?                       @map("requester_department_id") @db.Uuid
+  requesterDepartment   Department?                   @relation(fields: [requesterDepartmentId], references: [id], onDelete: SetNull)
+  title                 String
+  description           String?                       @db.Text
+  currency              String                        @default("CNY") @db.VarChar(3)
+  totalAmount           Decimal                       @default(0) @map("total_amount") @db.Decimal(18, 2)
+  status                FinanceExpenseStatus          @default(DRAFT)
+  submittedAt           DateTime?                     @map("submitted_at")
+  reviewedBy            String?                       @map("reviewed_by") @db.Uuid
+  reviewer              TenantMembership?             @relation("FinanceExpenseReviewer", fields: [reviewedBy], references: [id], onDelete: SetNull)
+  reviewedAt            DateTime?                     @map("reviewed_at")
+  reviewComment         String?                       @map("review_comment") @db.Text
+  paidBy                String?                       @map("paid_by") @db.Uuid
+  payer                 TenantMembership?             @relation("FinanceExpensePayer", fields: [paidBy], references: [id], onDelete: SetNull)
+  paidAt                DateTime?                     @map("paid_at")
+  paymentMethod         FinancePaymentMethod?         @map("payment_method")
+  paymentReference      String?                       @map("payment_reference")
+  paymentComment        String?                       @map("payment_comment") @db.Text
+  cancelledAt           DateTime?                     @map("cancelled_at")
+  cancellationReason    String?                       @map("cancellation_reason") @db.Text
+  items                 FinanceExpenseItem[]
+  attachments           FinanceExpenseAttachment[]
+  statusHistory         FinanceExpenseStatusHistory[]
+  createdAt             DateTime                      @default(now()) @map("created_at")
+  updatedAt             DateTime                      @updatedAt @map("updated_at")
+  createdBy             String?                       @map("created_by") @db.Uuid
+  updatedBy             String?                       @map("updated_by") @db.Uuid
+  deletedAt             DateTime?                     @map("deleted_at")
+  version               Int                           @default(1)
+
+  @@unique([tenantId, reportNo])
+  @@index([tenantId, status, createdAt])
+  @@index([tenantId, requesterMembershipId, createdAt])
+  @@index([tenantId, requesterDepartmentId, status])
+  @@map("finance_expense_reports")
+}
+
+model FinanceExpenseItem {
+  id            String                     @id @default(uuid()) @db.Uuid
+  tenantId      String                     @map("tenant_id") @db.Uuid
+  tenant        Tenant                     @relation(fields: [tenantId], references: [id])
+  reportId      String                     @map("report_id") @db.Uuid
+  report        FinanceExpenseReport       @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  categoryId    String                     @map("category_id") @db.Uuid
+  category      FinanceExpenseCategory     @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  description   String
+  amount        Decimal                    @db.Decimal(18, 2)
+  taxAmount     Decimal                    @default(0) @map("tax_amount") @db.Decimal(18, 2)
+  occurredAt    DateTime                   @map("occurred_at") @db.Date
+  merchantName  String?                    @map("merchant_name")
+  invoiceNumber String?                    @map("invoice_number")
+  invoiceType   String?                    @map("invoice_type")
+  projectId     String?                    @map("project_id") @db.Uuid
+  project       Project?                   @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  departmentId  String?                    @map("department_id") @db.Uuid
+  department    Department?                @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  remark        String?                    @db.Text
+  sortOrder     Int                        @default(0) @map("sort_order")
+  attachments   FinanceExpenseAttachment[]
+  createdAt     DateTime                   @default(now()) @map("created_at")
+  updatedAt     DateTime                   @updatedAt @map("updated_at")
+  createdBy     String?                    @map("created_by") @db.Uuid
+  updatedBy     String?                    @map("updated_by") @db.Uuid
+  deletedAt     DateTime?                  @map("deleted_at")
+  version       Int                        @default(1)
+
+  @@index([tenantId, reportId, sortOrder])
+  @@index([tenantId, categoryId, occurredAt])
+  @@index([tenantId, projectId, occurredAt])
+  @@index([tenantId, departmentId, occurredAt])
+  @@map("finance_expense_items")
+}
+
+model FinanceExpenseAttachment {
+  id           String               @id @default(uuid()) @db.Uuid
+  tenantId     String               @map("tenant_id") @db.Uuid
+  tenant       Tenant               @relation(fields: [tenantId], references: [id])
+  reportId     String               @map("report_id") @db.Uuid
+  report       FinanceExpenseReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  itemId       String?              @map("item_id") @db.Uuid
+  item         FinanceExpenseItem?  @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  fileObjectId String               @map("file_object_id") @db.Uuid
+  fileObject   FileObject           @relation(fields: [fileObjectId], references: [id], onDelete: Restrict)
+  createdAt    DateTime             @default(now()) @map("created_at")
+
+  @@unique([reportId, fileObjectId])
+  @@index([tenantId, reportId])
+  @@index([fileObjectId])
+  @@map("finance_expense_attachments")
+}
+
+model FinanceExpenseStatusHistory {
+  id                String                @id @default(uuid()) @db.Uuid
+  tenantId          String                @map("tenant_id") @db.Uuid
+  tenant            Tenant                @relation(fields: [tenantId], references: [id])
+  reportId          String                @map("report_id") @db.Uuid
+  report            FinanceExpenseReport  @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  fromStatus        FinanceExpenseStatus? @map("from_status")
+  toStatus          FinanceExpenseStatus  @map("to_status")
+  actorMembershipId String                @map("actor_membership_id") @db.Uuid
+  actorMembership   TenantMembership      @relation("FinanceExpenseStatusActor", fields: [actorMembershipId], references: [id])
+  comment           String?               @db.Text
+  metadata          Json?
+  createdAt         DateTime              @default(now()) @map("created_at")
+
+  @@index([tenantId, reportId, createdAt])
+  @@map("finance_expense_status_history")
+}
+
 model FileObject {
-  id              String           @id @default(uuid()) @db.Uuid
-  tenantId        String           @map("tenant_id") @db.Uuid
-  originalName    String           @map("original_name")
-  purpose         FilePurpose      @default(ATTACHMENT)
-  storageProvider String           @default("TENCENT_COS") @map("storage_provider")
-  bucket          String
-  region          String
-  objectKey       String           @map("object_key")
-  mimeType        String           @map("mime_type")
-  sizeBytes       BigInt           @map("size_bytes")
-  checksum        String?
-  etag            String?
-  taskAttachments TaskAttachment[]
-  managedImages   ManagedImage[]
-  createdAt       DateTime         @default(now()) @map("created_at")
-  updatedAt       DateTime         @updatedAt @map("updated_at")
-  createdBy       String?          @map("created_by") @db.Uuid
-  updatedBy       String?          @map("updated_by") @db.Uuid
-  deletedAt       DateTime?        @map("deleted_at")
-  version         Int              @default(1)
+  id                        String                     @id @default(uuid()) @db.Uuid
+  tenantId                  String                     @map("tenant_id") @db.Uuid
+  originalName              String                     @map("original_name")
+  purpose                   FilePurpose                @default(ATTACHMENT)
+  storageProvider           String                     @default("TENCENT_COS") @map("storage_provider")
+  bucket                    String
+  region                    String
+  objectKey                 String                     @map("object_key")
+  mimeType                  String                     @map("mime_type")
+  sizeBytes                 BigInt                     @map("size_bytes")
+  checksum                  String?
+  etag                      String?
+  taskAttachments           TaskAttachment[]
+  managedImages             ManagedImage[]
+  financeExpenseAttachments FinanceExpenseAttachment[]
+  createdAt                 DateTime                   @default(now()) @map("created_at")
+  updatedAt                 DateTime                   @updatedAt @map("updated_at")
+  createdBy                 String?                    @map("created_by") @db.Uuid
+  updatedBy                 String?                    @map("updated_by") @db.Uuid
+  deletedAt                 DateTime?                  @map("deleted_at")
+  version                   Int                        @default(1)
 
   @@unique([bucket, objectKey])
   @@index([tenantId])

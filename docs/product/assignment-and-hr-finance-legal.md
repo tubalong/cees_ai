@@ -1,6 +1,6 @@
 # 分配策略与人财法（C 后端主体与分配）
 
-> 状态：AssignmentPolicy 与 HR 已实现（API + Desktop）；Finance/Legal 与 tasks.scope 仍为契约草案
+> 状态：AssignmentPolicy、HR 与 Finance 已实现（API + Desktop）；Legal 与 tasks.scope 仍为契约草案
 > Owner：C
 > 当前版本：AssignmentPolicy 与完整 HR 主线已落地；Finance/Legal 仅完成 OpenAPI 契约。
 
@@ -17,7 +17,7 @@
 | `AssignmentPolicy`：租户默认 + 项目覆盖 | 已实现，见下方行为说明 |
 | 通用任务 `tasks.scope` | 契约草案，待 D 落地 `tasks` 表与任务模块边界 |
 | HR 员工档案、假勤、考勤、加班、异动、报表 | 已实现，页面入口 `/hr` |
-| Finance 报销 | 契约草案，页面与 API 未实现 |
+| Finance 报销 | 已实现：类别、草稿、审批、付款、附件、统计与页面，入口 `/finance` |
 | Legal 合同台账 | 契约草案，页面与 API 未实现 |
 | P2：智能跳过请假人员 | HR 请假数据已具备，AssignmentPolicy 解析接线仍待后续迭代 |
 | 钉钉出勤同步 | 暂停，恢复后实现 |
@@ -67,12 +67,14 @@
 - 通用任务改造影响 `tasks` 表，需与 D 协调 `apps/api/src/task/**` 的边界。
 - 人财法聚合数据供 B 的老板经营概况消费。
 - D 的预算与支出依赖 C 的财务域数据。
+- 财务页面提供审批和付款历史、组合筛选、全租户报销视图与项目支出聚合。
 
 ## 6. 待确认与暂缓
 
 - `DataScopeResolverService` 已具备解析能力；HR/Finance/Legal 落地时按资源类型接入。
 - `tasks.scope` 的枚举、索引和迁移待 D 实现。
-- Finance/Legal 的状态机、数据范围与审批边界仍是契约草案。
+- Finance 状态机、数据范围与审批边界见 [财务报销与支出数据设计](../architecture/finance-expense-management.md)。
+- Legal 的状态机、数据范围与审批边界仍是契约草案。
 - 钉钉出勤同步当前暂停。
 
 ## 7. 验收基线

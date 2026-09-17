@@ -1,6 +1,6 @@
 # 人财法数据契约
 
-> 状态：HR 已实现；Finance 与 Legal 仍为契约草案
+> 状态：HR 与 Finance 已实现；Legal 仍为契约草案
 > Owner：C
 > 关联：`packages/contracts/openapi/openapi.yaml`
 
@@ -24,8 +24,10 @@
 
 - 报销类别为租户级字典，编码租户内唯一。
 - 报销单包含 `FinanceExpenseItem` 明细，`totalAmount` 由服务端以明细求和校验。
-- 状态机为 `DRAFT → SUBMITTED → APPROVED | REJECTED → PAID`，当前契约只暴露创建与统一审批。
+- 状态机覆盖草稿、提交、撤回、拒绝后重编、批准、取消和付款。
+- 附件复用 `FileObject`，金额使用 `DECIMAL(18,2)`，审批和付款写入状态历史与审计。
 - D 的预算与支出消费 C 的财务域数据时，只读聚合，不直接写回报销事实。
+- 完整设计见 [财务报销与支出数据设计](finance-expense-management.md)。
 
 ## 4. Legal 合同台账
 

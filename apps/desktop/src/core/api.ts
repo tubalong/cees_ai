@@ -2230,3 +2230,121 @@ export async function getHrHeadcountReport(): Promise<{ asOf: string; total: num
 export async function getHrLeaveSummaryReport(year: number): Promise<{ year: number; totalRequestedDays: number; totalApprovedDays: number; byLeaveType: Array<{ leaveTypeId: string; leaveTypeName: string; requestedDays: number; approvedDays: number }> }> { return authorizedRequest(`v1/hr/reports/leave-summary?year=${year}`); }
 export async function getHrAttendanceSummaryReport(dateFrom: string, dateTo: string): Promise<{ dateFrom: string; dateTo: string; normalDays: number; lateCount: number; earlyLeaveCount: number; absentDays: number; leaveDays: number }> { return authorizedRequest(`v1/hr/reports/attendance-summary?dateFrom=${dateFrom}&dateTo=${dateTo}`); }
 export async function getHrOvertimeSummaryReport(dateFrom: string, dateTo: string): Promise<{ dateFrom: string; dateTo: string; totalHours: number; byMember: Array<{ membershipId: string; displayName: string; overtimeHours: number }> }> { return authorizedRequest(`v1/hr/reports/overtime-summary?dateFrom=${dateFrom}&dateTo=${dateTo}`); }
+
+export type FinanceExpenseStatus = 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN' | 'CANCELLED' | 'PAID';
+export type FinancePaymentMethod = 'BANK_TRANSFER' | 'CASH' | 'CORPORATE_CARD' | 'OTHER';
+
+export interface FinanceExpenseCategory {
+    id: string; tenantId: string; code: string; name: string; description?: string | null;
+    enabled: boolean; version: number; createdAt: string; updatedAt: string;
+}
+
+export interface FinanceExpenseItemInput {
+    categoryId: string; description: string; amount: number; taxAmount?: number; occurredAt: string;
+    merchantName?: string | null; invoiceNumber?: string | null; invoiceType?: string | null;
+    projectId?: string | null; departmentId?: string | null; remark?: string | null;
+}
+
+export interface FinanceExpenseItem extends FinanceExpenseItemInput {
+    id: string; reportId: string; taxAmount: number; sortOrder: number; version: number; createdAt: string;
+}
+
+export interface FinanceExpenseAttachment {
+    id: string; reportId: string; itemId?: string | null; fileObjectId: string;
+    originalName: string; mimeType: string; sizeBytes: number; createdAt: string;
+}
+
+export interface FinanceExpenseStatusHistory {
+    id: string; reportId: string; fromStatus?: FinanceExpenseStatus | null; toStatus: FinanceExpenseStatus;
+    actorMembershipId: string; comment?: string | null; createdAt: string;
+}
+
+export interface FinanceExpenseReport {
+    id: string; tenantId: string; reportNo: string; requesterMembershipId: string; requesterDepartmentId?: string | null;
+    title: string; description?: string | null; currency: string; totalAmount: number; status: FinanceExpenseStatus;
+    submittedAt?: string | null; reviewedBy?: string | null; reviewedAt?: string | null; reviewComment?: string | null;
+    paidBy?: string | null; paidAt?: string | null; paymentMethod?: FinancePaymentMethod | null;
+    paymentReference?: string | null; paymentComment?: string | null; cancelledAt?: string | null;
+    cancellationReason?: string | null; items: FinanceExpenseItem[]; attachments: FinanceExpenseAttachment[];
+    statusHistory: FinanceExpenseStatusHistory[]; version: number; createdAt: string; updatedAt: string;
+}
+
+export interface FinanceExpenseReportInput {
+    title: string; description?: string | null; currency?: string; items: FinanceExpenseItemInput[]; attachmentIds?: string[];
+}
+
+export interface FinanceExpenseSummary {
+    currency: string; reportCount: number; submittedAmount: number; approvedAmount: number; paidAmount: number;
+    pendingApprovalCount: number; pendingApprovalAmount: number; pendingPaymentCount: number; pendingPaymentAmount: number;
+    byCategory: Array<{ categoryId: string; categoryName: string; amount: number }>;
+}
+
+export interface FinanceExpenseReportFilters {
+    keyword?: string; status?: FinanceExpenseStatus; requesterMembershipId?: string; departmentId?: string;
+    projectId?: string; categoryId?: string; dateFrom?: string; dateTo?: string;
+}
+
+export interface FinanceProjectSpend {
+    projectId: string; currency: string; submittedAmount: number; approvedAmount: number; paidAmount: number;
+}
+
+export async function listFinanceExpenseCategories(): Promise<{ items: FinanceExpenseCategory[] }> {
+    return authorizedRequest('v1/finance/expense-categories');
+}
+export async function createFinanceExpenseCategory(input: { code: string; name: string; description?: string | null; enabled?: boolean }): Promise<FinanceExpenseCategory> {
+    return authorizedRequest('v1/finance/expense-categories', { method: 'POST', body: JSON.stringify(input) });
+}
+export async function updateFinanceExpenseCategory(id: string, input: { code?: string; name?: string; description?: string | null; enabled?: boolean; version: number }): Promise<FinanceExpenseCategory> {
+    return authorizedRequest(`v1/finance/expense-categories/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(input) });
+}
+export async function deleteFinanceExpenseCategory(id: string, version: number): Promise<void> {
+    return authorizedRequest(`v1/finance/expense-categories/${encodeURIComponent(id)}?version=${version}`, { method: 'DELETE' });
+}
+export async function listFinanceExpenseReports(filters: FinanceExpenseReportFilters = {}): Promise<CursorPage<FinanceExpenseReport>> {
+    const query = new URLSearchParams({ limit: '100' });
+    if (filters.keyword?.trim()) query.set('keyword', filters.keyword.trim());
+    if (filters.status) query.set('status', filters.status);
+    if (filters.requesterMembershipId) query.set('requesterMembershipId', filters.requesterMembershipId);
+    if (filters.departmentId) query.set('departmentId', filters.departmentId);
+    if (filters.projectId) query.set('projectId', filters.projectId);
+    if (filters.categoryId) query.set('categoryId', filters.categoryId);
+    if (filters.dateFrom) query.set('dateFrom', filters.dateFrom);
+    if (filters.dateTo) query.set('dateTo', filters.dateTo);
+    return authorizedRequest(`v1/finance/expense-reports?${query}`);
+}
+export async function getFinanceExpenseReport(id: string): Promise<FinanceExpenseReport> {
+    return authorizedRequest(`v1/finance/expense-reports/${encodeURIComponent(id)}`);
+}
+export async function createFinanceExpenseReport(input: FinanceExpenseReportInput): Promise<FinanceExpenseReport> {
+    return authorizedRequest('v1/finance/expense-reports', { method: 'POST', body: JSON.stringify(input) });
+}
+export async function updateFinanceExpenseReport(id: string, input: FinanceExpenseReportInput & { version: number }): Promise<FinanceExpenseReport> {
+    return authorizedRequest(`v1/finance/expense-reports/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(input) });
+}
+export async function deleteFinanceExpenseReport(id: string, version: number): Promise<void> {
+    return authorizedRequest(`v1/finance/expense-reports/${encodeURIComponent(id)}?version=${version}`, { method: 'DELETE' });
+}
+export async function submitFinanceExpenseReport(id: string, version: number): Promise<FinanceExpenseReport> {
+    return authorizedRequest(`v1/finance/expense-reports/${encodeURIComponent(id)}/submit`, { method: 'POST', body: JSON.stringify({ version }) });
+}
+export async function withdrawFinanceExpenseReport(id: string, version: number, reason?: string): Promise<FinanceExpenseReport> {
+    return authorizedRequest(`v1/finance/expense-reports/${encodeURIComponent(id)}/withdraw`, { method: 'POST', body: JSON.stringify({ version, reason }) });
+}
+export async function cancelFinanceExpenseReport(id: string, version: number, reason?: string): Promise<FinanceExpenseReport> {
+    return authorizedRequest(`v1/finance/expense-reports/${encodeURIComponent(id)}/cancel`, { method: 'POST', body: JSON.stringify({ version, reason }) });
+}
+export async function reviewFinanceExpenseReport(id: string, input: { decision: 'APPROVE' | 'REJECT'; comment?: string | null; version: number }): Promise<FinanceExpenseReport> {
+    return authorizedRequest(`v1/finance/expense-reports/${encodeURIComponent(id)}/review`, { method: 'POST', body: JSON.stringify(input) });
+}
+export async function markFinanceExpenseReportPaid(id: string, input: { paidAt: string; paymentMethod: FinancePaymentMethod; paymentReference: string; comment?: string | null; version: number }): Promise<FinanceExpenseReport> {
+    return authorizedRequest(`v1/finance/expense-reports/${encodeURIComponent(id)}/mark-paid`, { method: 'POST', body: JSON.stringify(input) });
+}
+export async function getFinanceExpenseSummary(dateFrom: string, dateTo: string): Promise<FinanceExpenseSummary> {
+    return authorizedRequest(`v1/finance/reports/expense-summary?dateFrom=${dateFrom}&dateTo=${dateTo}`);
+}
+export async function getFinanceProjectSpend(projectId: string, dateFrom?: string, dateTo?: string, currency = 'CNY'): Promise<FinanceProjectSpend> {
+    const query = new URLSearchParams({ projectId, currency });
+    if (dateFrom) query.set('dateFrom', dateFrom);
+    if (dateTo) query.set('dateTo', dateTo);
+    return authorizedRequest(`v1/finance/reports/project-spend?${query}`);
+}

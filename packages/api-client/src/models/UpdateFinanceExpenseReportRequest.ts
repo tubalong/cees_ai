@@ -3,11 +3,12 @@
 /* tslint:disable */
 /* eslint-disable */
 import type { FinanceExpenseItemInput } from './FinanceExpenseItemInput';
-export type CreateFinanceExpenseReportRequest = {
+export type UpdateFinanceExpenseReportRequest = {
     title: string;
     description?: string | null;
     currency?: string;
     items: Array<FinanceExpenseItemInput>;
     attachmentIds?: Array<string>;
+    version: number;
 };
 

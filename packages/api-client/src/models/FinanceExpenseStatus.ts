@@ -7,5 +7,7 @@ export enum FinanceExpenseStatus {
     SUBMITTED = 'SUBMITTED',
     APPROVED = 'APPROVED',
     REJECTED = 'REJECTED',
+    WITHDRAWN = 'WITHDRAWN',
+    CANCELLED = 'CANCELLED',
     PAID = 'PAID',
 }
