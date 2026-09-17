@@ -1,6 +1,6 @@
 # 知识库 RAG（MinerU + LlamaIndex）
 
-> 状态：分块实施中。块 1（本文档与内部契约 `index`/`retrieve`）、块 2（ai-service 内存闭环 + HTTP 路由）、块 3（NestJS 文档状态机与上传触发索引）、块 4（真实 pgvector Gateway + `index/delete`）、块 5（公开 Query API + `answer` 契约与引用校验 + 索引删除 NestJS 接线）、块 6（MinerU 真机联调验收）、块 7a（解析器格式分流 + pgvector HNSW 索引）、块 7b（Assistant RAG 工具接入：`knowledge_search` 工具 + 对话级知识库开关 + 权限折叠检索）、块 7c（对话数据转知识库：双层入口 + 助手工具）、块 8（知识库归属锚点管理与自动授权 + 权限码收敛 + 知识管理页面）已落地；块 7d（助手人设功能告知）部分落地，按第 8 节分块计划推进。
+> 状态：分块实施中。块 1（本文档与内部契约 `index`/`retrieve`）、块 2（ai-service 内存闭环 + HTTP 路由）、块 3（NestJS 文档状态机与上传触发索引）、块 4（真实 pgvector Gateway + `index/delete`）、块 5（公开 Query API + `answer` 契约与引用校验 + 索引删除 NestJS 接线）、块 6（MinerU 真机联调验收）、块 7a（解析器格式分流 + pgvector HNSW 索引）、块 7b（Assistant RAG 工具接入：`knowledge_search` 工具 + 对话级知识库开关 + 权限折叠检索）、块 7c（对话数据转知识库：双层入口 + 助手工具）、块 8（知识库归属锚点管理与自动授权 + 权限码收敛 + 知识管理页面与文档管理面板）已落地；块 7d（助手人设功能告知）部分落地，按第 8 节分块计划推进。
 > 最后同步：2026-09-17
 > 内部契约版本：`0.5.0`
 > 公开契约版本：`0.28.0`（公开知识库管理/查询 API）

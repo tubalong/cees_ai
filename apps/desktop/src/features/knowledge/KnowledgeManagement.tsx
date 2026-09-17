@@ -4,12 +4,14 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 import {
     addKnowledgeBaseMember, createKnowledgeBase, deleteKnowledgeBase, hasStoredSession,
-    listDepartments, listKnowledgeBaseMembers, listKnowledgeBases, listProjects,
-    listTenantMembers, removeKnowledgeBaseMember, updateKnowledgeBase, updateKnowledgeBaseMember,
+    listDepartments, listKnowledgeBaseMembers, listKnowledgeBases, listKnowledgeDocuments, listProjects,
+    listTenantMembers, removeKnowledgeBaseMember, retryKnowledgeDocument, updateKnowledgeBase,
+    updateKnowledgeBaseMember, uploadAttachmentFile, uploadKnowledgeDocument,
     type DepartmentNode, type KnowledgeBaseMemberPermission, type KnowledgeBaseMemberSummary,
-    type KnowledgeBaseSummary, type KnowledgeBaseVisibilityScope, type MeResult,
+    type KnowledgeBaseSummary, type KnowledgeBaseVisibilityScope, type KnowledgeDocumentResult, type MeResult,
 } from '../../core/api';
 import { useDateFormatter, useI18n } from '../../core/i18n';
+import KnowledgeDocumentUploader, { type KnowledgeDocumentUploadInput } from './KnowledgeDocumentUploader';
 import '../../styles/shared.css';
 import './knowledge.css';
 
@@ -38,6 +40,27 @@ const permissionColors: Record<KnowledgeBaseMemberPermission, string> = {
     EDITOR: 'blue',
     MANAGER: 'gold',
 };
+
+const documentStatusLabels: Record<KnowledgeDocumentResult['status'], string> = {
+    PENDING: '等待处理',
+    PARSING: '解析中',
+    PARSED: '已解析',
+    INDEXING: '索引中',
+    READY: '已就绪',
+    FAILED: '处理失败',
+};
+
+const documentStatusColors: Record<KnowledgeDocumentResult['status'], string> = {
+    PENDING: 'default',
+    PARSING: 'processing',
+    PARSED: 'processing',
+    INDEXING: 'processing',
+    READY: 'success',
+    FAILED: 'error',
+};
+
+/** 处理中的文档状态：存在则每 5 秒轮询列表，全部落定后停止。 */
+const PROCESSING_DOCUMENT_STATUSES: Array<KnowledgeDocumentResult['status']> = ['PENDING', 'PARSING', 'PARSED', 'INDEXING'];
 
 interface KnowledgeBaseFormValues {
     name: string;
@@ -100,6 +123,8 @@ export default function KnowledgeManagement({ authContext, onSessionExpired }: K
     const [addMemberMembershipId, setAddMemberMembershipId] = useState<string>();
     const [addMemberPermission, setAddMemberPermission] = useState<KnowledgeBaseMemberPermission>('READER');
     const [addMemberSubmitting, setAddMemberSubmitting] = useState(false);
+    const [uploadOpen, setUploadOpen] = useState(false);
+    const [uploading, setUploading] = useState(false);
 
     const basesQuery = useQuery({ queryKey: ['knowledge-bases', keyword], queryFn: () => listKnowledgeBases({ keyword }) });
     const departmentsQuery = useQuery({ queryKey: ['departments'], queryFn: () => listDepartments() });
@@ -111,12 +136,25 @@ export default function KnowledgeManagement({ authContext, onSessionExpired }: K
     const projects = projectsQuery.data?.items ?? [];
     const selected = bases.find((kb) => kb.id === selectedId) ?? bases[0];
     const selectedManaged = selected ? isManager(selected) : false;
+    // 文档写入门槛为库内 EDITOR 及以上（后端对上传/重试校验 EDITOR 等级）。
+    const selectedEditable = selected ? selected.myPermission === 'EDITOR' || isManager(selected) : false;
 
     // 成员列表仅对 MANAGER 开放（后端对 listMembers 校验 MANAGER 等级）。
     const membersQuery = useQuery({
         queryKey: ['knowledge-base-members', selected?.id],
         queryFn: () => listKnowledgeBaseMembers(selected!.id),
         enabled: Boolean(selected?.id) && selectedManaged,
+    });
+
+    // 文档列表对所有可见成员开放；存在处理中的文档时每 5 秒轮询，全部落定后停止。
+    const documentsQuery = useQuery({
+        queryKey: ['knowledge-base-documents', selected?.id],
+        queryFn: () => listKnowledgeDocuments(selected!.id),
+        enabled: Boolean(selected?.id),
+        refetchInterval: (query) => {
+            const items = query.state.data?.items ?? [];
+            return items.some((document) => PROCESSING_DOCUMENT_STATUSES.includes(document.status)) ? 5000 : false;
+        },
     });
 
     useEffect(() => {
@@ -126,6 +164,7 @@ export default function KnowledgeManagement({ authContext, onSessionExpired }: K
     const departmentTree = useMemo(() => buildDepartmentTree(departments), [departments]);
     const refreshBases = () => void queryClient.invalidateQueries({ queryKey: ['knowledge-bases'] });
     const refreshMembers = () => void queryClient.invalidateQueries({ queryKey: ['knowledge-base-members'] });
+    const refreshDocuments = () => void queryClient.invalidateQueries({ queryKey: ['knowledge-base-documents'] });
 
     const openCreate = (): void => {
         setFormValues(emptyFormValues);
@@ -251,6 +290,35 @@ export default function KnowledgeManagement({ authContext, onSessionExpired }: K
         }
     };
 
+    const submitUpload = async ({ file, name }: KnowledgeDocumentUploadInput): Promise<void> => {
+        if (!selected) return;
+        setUploading(true);
+        try {
+            // 文件先直传 COS 登记为文件对象，再关联创建文档进入解析索引队列；
+            // 库内上传统一按 PRIVATE（仅知识库成员可见）提交，不做文档级范围选择。
+            const fileObjectId = await uploadAttachmentFile(file);
+            await uploadKnowledgeDocument(selected.id, { fileObjectId, name, visibilityScope: 'PRIVATE' });
+            message.success(t('文档已提交解析，处理完成后即可检索'));
+            setUploadOpen(false);
+            refreshDocuments();
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : t('上传失败'));
+        } finally {
+            setUploading(false);
+        }
+    };
+
+    const handleRetryDocument = async (document: KnowledgeDocumentResult): Promise<void> => {
+        if (!selected) return;
+        try {
+            await retryKnowledgeDocument(selected.id, document.id);
+            message.success(t('文档已重新进入处理队列'));
+            refreshDocuments();
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : t('操作失败'));
+        }
+    };
+
     const existingMemberIds = new Set((membersQuery.data?.items ?? []).map((member) => member.membershipId));
     const memberCandidates = (tenantMembersQuery.data?.items ?? [])
         .filter((member) => member.status === 'ACTIVE')
@@ -302,6 +370,51 @@ export default function KnowledgeManagement({ authContext, onSessionExpired }: K
         },
     ];
 
+    const documentColumns = [
+        {
+            title: t('文档名称'),
+            key: 'name',
+            render: (document: KnowledgeDocumentResult) => <span className="kb-member-cell">
+                <strong>{document.name}</strong>
+                {document.status === 'FAILED' && document.lastError
+                    ? <small className="kb-doc-error">{document.lastError}</small>
+                    : null}
+            </span>,
+        },
+        {
+            title: t('状态'),
+            key: 'status',
+            width: 110,
+            render: (document: KnowledgeDocumentResult) => <Tag color={documentStatusColors[document.status]}>{t(documentStatusLabels[document.status])}</Tag>,
+        },
+        {
+            title: t('版本'),
+            key: 'versionNumber',
+            width: 70,
+            render: (document: KnowledgeDocumentResult) => `v${document.versionNumber}`,
+        },
+        {
+            title: t('可见范围'),
+            key: 'visibilityScope',
+            width: 100,
+            render: (document: KnowledgeDocumentResult) => <Tag>{document.visibilityScope === 'PRIVATE' ? t('仅成员') : t('全员')}</Tag>,
+        },
+        {
+            title: t('创建时间'),
+            key: 'createdAt',
+            width: 150,
+            render: (document: KnowledgeDocumentResult) => formatDate(document.createdAt),
+        },
+        {
+            title: t('操作'),
+            key: 'actions',
+            width: 90,
+            render: (document: KnowledgeDocumentResult) => document.status === 'FAILED' && selectedEditable
+                ? <Button size="small" onClick={() => void handleRetryDocument(document)}>{t('重试')}</Button>
+                : <span className="kb-muted">—</span>,
+        },
+    ];
+
     return <div className="workspace-page knowledge-management-page">
         <header className="workspace-page-header">
             <div><h1>{t('知识管理')}</h1><p>{t('沉淀、组织并安全共享企业知识')}</p></div>
@@ -344,6 +457,21 @@ export default function KnowledgeManagement({ authContext, onSessionExpired }: K
                             <Descriptions.Item label={t('创建时间')}>{formatDate(selected.createdAt)}</Descriptions.Item>
                             <Descriptions.Item label={t('更新时间')}>{formatDate(selected.updatedAt)}</Descriptions.Item>
                         </Descriptions>
+                    </section>
+                    <section className="surface-panel kb-documents-panel">
+                        <div className="panel-heading">
+                            <h3>{t('文档管理')}</h3>
+                            {selectedEditable && <Button size="small" type="primary" icon={<PlusOutlined />} onClick={() => setUploadOpen(true)}>{t('上传文档')}</Button>}
+                        </div>
+                        <Table<KnowledgeDocumentResult>
+                            rowKey="id"
+                            columns={documentColumns}
+                            dataSource={documentsQuery.data?.items ?? []}
+                            loading={documentsQuery.isLoading}
+                            pagination={false}
+                            size="small"
+                            locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('暂无文档，点击「上传文档」添加 PDF、Word、Excel 等内容')} /> }}
+                        />
                     </section>
                     <section className="surface-panel kb-members-panel">
                         <div className="panel-heading">
@@ -430,5 +558,12 @@ export default function KnowledgeManagement({ authContext, onSessionExpired }: K
                 /></label>
             </div>
         </Modal>
+
+        <KnowledgeDocumentUploader
+            open={uploadOpen}
+            submitting={uploading}
+            onCancel={() => setUploadOpen(false)}
+            onSubmit={(input) => void submitUpload(input)}
+        />
     </div>;
 }

@@ -187,12 +187,14 @@ class MobileApi {
       options: Options(headers: {'Idempotency-Key': idempotencyKey}),
       data: {'purpose': 'attachment', 'fileName': fileName, 'contentType': contentType, 'sizeBytes': sizeBytes},
     ));
-    final uploadUrl = data['uploadUrl'] ?? data['putUrl'] ?? data['url'];
+    // 后端返回嵌套结构：upload: { method, url, headers }，fileId 为文件对象 ID；顶层字段为兼容回退。
+    final nested = (data['upload'] ?? const <String, dynamic>{}) as Map;
+    final uploadUrl = nested['url'] ?? data['uploadUrl'] ?? data['putUrl'] ?? data['url'];
     if (uploadUrl is! String) throw StateError('上传会话响应缺少直传地址');
-    final rawHeaders = data['uploadHeaders'] ?? data['headers'] ?? const {};
+    final rawHeaders = nested['headers'] ?? data['uploadHeaders'] ?? data['headers'] ?? const {};
     final headers = <String, String>{};
     (rawHeaders as Map).forEach((key, value) { if (value is String) headers['$key'] = value; });
-    return {'uploadSessionId': data['id'] ?? data['uploadSessionId'], 'fileObjectId': data['fileObjectId'] ?? data['fileId'], 'uploadUrl': uploadUrl, 'uploadHeaders': headers};
+    return {'uploadSessionId': data['uploadSessionId'] ?? data['id'], 'fileObjectId': data['fileId'] ?? data['fileObjectId'], 'uploadUrl': uploadUrl, 'uploadHeaders': headers};
   }
 
   Future<void> uploadToPresignedUrl(String url, Map<String, String> headers, Stream<List<int>> byteStream, int contentLength, String contentType) async {
