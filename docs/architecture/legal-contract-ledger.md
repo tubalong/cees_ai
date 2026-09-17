@@ -1,6 +1,6 @@
 # Legal 合同台账设计
 
-> 状态：契约已冻结，API、Prisma 与 Desktop 待实现
+> 状态：已实现（OpenAPI 0.28.0 + Prisma migration 0034 + NestJS API + Desktop）
 > Owner：C
 > 契约版本：`0.28.0`
 > 更新日期：2026-09-17
@@ -46,7 +46,7 @@ AI 后续只能生成合同草稿或风险建议；正式合同台账仍由 Nest
 
 ## 3. 领域模型
 
-实现阶段计划增加以下 Prisma 模型，数据库结构只通过提交入库的 Prisma migration 演进。
+以下 Prisma 模型已通过 `apps/api/prisma/migrations/0034_c_legal_contract_fullstack/migration.sql` 落地，数据库结构只通过提交入库的 Prisma migration 演进。
 
 ### 3.1 `LegalContract`
 
@@ -286,7 +286,16 @@ B 的老板经营概况通过 Legal 应用服务的只读聚合方法消费：
 - 响应新增归属、附件、状态历史和生命周期字段。
 - 新增状态动作与汇总接口。
 
-实现分支必须新增 Prisma migration，并在数据库文档中链接实际 migration 名称。由于当前没有 Legal 正式表和生产数据，本次不需要历史数据回填；若实现前发现外部调用已依赖旧草案，必须先完成调用方兼容调整。
+实现已新增 Prisma migration `0034_c_legal_contract_fullstack`，并在数据库文档中登记。此前没有 Legal 正式表和生产数据，因此不需要历史数据回填。
+
+## 12. 实现落点
+
+- Prisma：`LegalContractSequence`、`LegalContract`、`LegalContractAttachment`、`LegalContractStatusHistory`。
+- API：`apps/api/src/legal/**`，包含数据范围、乐观锁、审计、状态动作、汇总与租户时区日期处理。
+- 后台任务：统一 `BackgroundJobsService` 自动把合同推进为 `PENDING_RENEWAL` 或 `EXPIRED`，系统历史与审计的操作者为空。
+- Desktop：`apps/desktop/src/features/legal/**`，入口 `/legal`，提供概览、筛选、登记、附件、详情和生命周期操作。
+- 测试：`apps/api/src/legal/legal.service.spec.ts` 覆盖数据范围、自动编号、签署校验、乐观锁和自动生命周期。
+- 当前未实现范围仍包括法务审批、用印、电子签章、AI 条款审查及付款计划。
 
 ## 14. 验收基线
 

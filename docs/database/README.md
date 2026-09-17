@@ -251,6 +251,24 @@ Tenant
 - `0030_c_assignment_policy` 创建上述枚举、表、索引、外键和 PostgreSQL 中文注释；
 - 分配解析不落表，结果只用于预览或由任务模块消费，正式分配结果仍写任务模块；
 - 详细业务规则见 `docs/product/assignment-and-hr-finance-legal.md` 和 `docs/api/assignment-and-hr-finance-legal-api.md`。
+
+## 14. Legal 合同台账模型
+
+```text
+Tenant
+  ├── LegalContractSequence
+  └── LegalContract
+        ├── LegalContractAttachment -> FileObject
+        └── LegalContractStatusHistory
+```
+
+- `legal_contracts` 保存租户内唯一合同编号、交易对方、类型、金额、有效期、负责人、部门、项目和生命周期状态；
+- `legal_contract_sequences` 按“租户 + 年份”维护自动编号序列；
+- `legal_contract_attachments` 复用正式 `FileObject`，不复制对象存储数据；
+- `legal_contract_status_history` 保存人工和系统状态流转，系统动作的 `actor_membership_id` 为空；
+- `0034_c_legal_contract_fullstack` 创建 Legal 枚举、四张表、索引、外键与 PostgreSQL 中文注释；
+- 合同使用软删除和 `version` 乐观锁，只有草稿允许删除；到期判断按租户时区自然日执行；
+- 详细规则见 `docs/architecture/legal-contract-ledger.md`。
 ## AI 调用计量模型
 
 ```text

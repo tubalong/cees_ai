@@ -1,6 +1,6 @@
 # 分配策略与人财法 API
 
-> 状态：AssignmentPolicy、HR 与 Finance 已实现；Legal 契约已冻结待实现，tasks.scope 仍为契约草案
+> 状态：AssignmentPolicy、HR、Finance 与 Legal 已实现；tasks.scope 仍为契约草案
 > Owner：C
 > 关联：[通用任务 tasks.scope 方案](../architecture/task-scope-proposal.md)、[人财法数据契约](../architecture/hr-finance-legal-data-contract.md)、[Legal 合同台账设计](../architecture/legal-contract-ledger.md)
 
@@ -123,7 +123,7 @@ GET    /api/v1/finance/reports/project-spend
 - 报销单包含明细数组，`totalAmount` 由服务端与明细求和校验。
 - 审批通过统一 `review` 接口，`decision = APPROVE | REJECT`。
 
-## 4. Legal 合同台账（契约已冻结，待实现）
+## 4. Legal 合同台账（已实现）
 
 ```text
 GET    /api/v1/legal/contracts
@@ -165,6 +165,8 @@ GET    /api/v1/legal/reports/contract-summary
 - 汇总返回各状态数量、即将到期数量及按币种分组的生效和到期金额。
 - 老板经营概况复用 Legal 应用服务聚合，不直接读取或修改 Legal 数据表。
 - 完整规则见 [Legal 合同台账设计](../architecture/legal-contract-ledger.md)。
+- 实现位置：`apps/api/src/legal/**`；数据库迁移：`0034_c_legal_contract_fullstack`；Desktop 入口：`/legal`。
+- 自动到期与续签提醒由统一后台任务执行，系统动作保留状态历史和审计记录。
 
 ## 5. 老板经营概况与租户联网检索策略（契约草案）
 

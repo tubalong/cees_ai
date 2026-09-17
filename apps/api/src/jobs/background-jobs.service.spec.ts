@@ -18,13 +18,14 @@ describe('BackgroundJobsService', () => {
         const prisma = createPrismaMock();
         const redis = createRedisMock({ setIfAbsent: jest.fn().mockResolvedValue(false) });
         const notifications = createNotificationMock();
-        const service = new BackgroundJobsService(prisma as unknown as PrismaService, redis as unknown as RedisService, notifications as unknown as NotificationService);
+        const service = createService(prisma, redis, notifications);
 
         await expect(service.runOnce(NOW)).resolves.toEqual({
             skipped: true,
             expiredUploadSessions: 0,
             expiredAiActionDrafts: 0,
             workReportReminderNotifications: 0,
+            legalContractTransitions: 0,
         });
         expect(prisma.uploadSession.updateMany).not.toHaveBeenCalled();
     });
@@ -35,7 +36,7 @@ describe('BackgroundJobsService', () => {
         prisma.aIActionDraft.updateMany.mockResolvedValue({ count: 1 });
         prisma.tenantMembership.findMany.mockResolvedValue([]);
         const redis = createRedisMock();
-        const service = new BackgroundJobsService(prisma as unknown as PrismaService, redis as unknown as RedisService, createNotificationMock() as unknown as NotificationService);
+        const service = createService(prisma, redis);
 
         await expect(service.runOnce(NOW)).resolves.toEqual(expect.objectContaining({
             skipped: false,
@@ -64,7 +65,7 @@ describe('BackgroundJobsService', () => {
         ]);
         prisma.workReport.findMany.mockResolvedValue([{ authorMembershipId: MEMBERSHIP_ID }]);
         const notifications = createNotificationMock();
-        const service = new BackgroundJobsService(prisma as unknown as PrismaService, createRedisMock() as unknown as RedisService, notifications as unknown as NotificationService);
+        const service = createService(prisma, createRedisMock(), notifications);
 
         await expect(service.runOnce(NOW)).resolves.toEqual(expect.objectContaining({
             workReportReminderNotifications: 1,
@@ -82,7 +83,7 @@ describe('BackgroundJobsService', () => {
         prisma.tenantMembership.findMany.mockResolvedValue([{ id: MEMBERSHIP_ID, tenantId: TENANT_ID, userId: USER_ID }]);
         prisma.workReport.findMany.mockResolvedValue([{ authorMembershipId: MEMBERSHIP_ID }]);
         const notifications = createNotificationMock();
-        const service = new BackgroundJobsService(prisma as unknown as PrismaService, createRedisMock() as unknown as RedisService, notifications as unknown as NotificationService);
+        const service = createService(prisma, createRedisMock(), notifications);
 
         await expect(service.runOnce(NOW)).resolves.toEqual(expect.objectContaining({ workReportReminderNotifications: 0 }));
         expect(notifications.createForUsers).not.toHaveBeenCalled();
@@ -102,7 +103,7 @@ describe('BackgroundJobsService', () => {
             { id: otherTenantId, timezone: 'UTC' },
         ]);
         const notifications = createNotificationMock();
-        const service = new BackgroundJobsService(prisma as unknown as PrismaService, createRedisMock() as unknown as RedisService, notifications as unknown as NotificationService);
+        const service = createService(prisma, createRedisMock(), notifications);
 
         // 2026-09-11T23:30Z 在东八区已经是 9 月 12 日 07:30，因此“昨天”分别是 09-11 与 09-10。
         const result = await service.runOnce(new Date('2026-09-11T23:30:00.000Z'));
@@ -158,4 +159,18 @@ function createRedisMock(overrides: Record<string, jest.Mock> = {}): Record<stri
 
 function createNotificationMock(): Record<string, any> {
     return { createForUsers: jest.fn().mockResolvedValue('notification-id') };
+}
+
+function createService(
+    prisma: Record<string, any>,
+    redis: Record<string, any>,
+    notifications = createNotificationMock(),
+): BackgroundJobsService {
+    const legalService = { processLifecycle: jest.fn().mockResolvedValue(0) };
+    return new BackgroundJobsService(
+        prisma as unknown as PrismaService,
+        redis as unknown as RedisService,
+        notifications as unknown as NotificationService,
+        legalService as any,
+    );
 }
