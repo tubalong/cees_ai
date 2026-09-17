@@ -86,7 +86,8 @@ describe('ListKnowledgeBasesTool', () => {
             expect.objectContaining({ knowledge_base_id: 'kb-2', name: '公司制度库', my_permission: 'READER' }),
         ]);
         expect(summary.instruction).toContain('save_to_knowledge');
-        expect(summary.instruction).toContain('READER');
+        expect(summary.instruction).toContain('不要输出 READER/EDITOR/MANAGER');
+        expect(summary.instruction).toContain('不要向用户展示 knowledge_base_id');
     });
 
     it('instructs the model to stop when the user is not a member of any knowledge base', async () => {

@@ -388,6 +388,9 @@ export class TurnRunnerService implements OnModuleDestroy {
       const suggestedCalls: UpstreamToolCall[] = [];
       const seenUpstreamCallIds = new Map<string, UpstreamToolCall>();
       let modelContent = '';
+      // 工具调用轮次的模型文本是「调用工具前的说明/预告」，不属于用户可见回答：
+      // 先缓存；若该轮最终没有工具调用（纯回答轮）再按序补发，保持回答的流式体验。
+      const pendingContentDeltas: DistributiveOmit<PublicTurnStreamEvent, 'seq'>[] = [];
       let completion: { latencyMs: number; finishReason: string | null } | null = null;
       let terminalError: { code: string; message: string; retryable: boolean } | null = null;
 
@@ -430,8 +433,12 @@ export class TurnRunnerService implements OnModuleDestroy {
               turnId,
               input.requestId,
             );
+            if (publicEvent.type === 'content_delta') {
+              pendingContentDeltas.push(publicEvent);
+              modelContent += publicEvent.text;
+              break;
+            }
             await this.appendPublicEvent(turnId, conversation.tenantId, publicEvent);
-            if (publicEvent.type === 'content_delta') modelContent += publicEvent.text;
           }
         }
       }
@@ -446,6 +453,10 @@ export class TurnRunnerService implements OnModuleDestroy {
         return;
       }
       if (suggestedCalls.length === 0) {
+        // 纯回答轮：补发缓存的内容增量，让最终回答仍以流式方式展示。
+        for (const pendingDelta of pendingContentDeltas) {
+          await this.appendPublicEvent(turnId, conversation.tenantId, pendingDelta);
+        }
         await this.completeTurn(turnId, conversation, modelContent, completion);
         return;
       }

@@ -64,7 +64,8 @@ export class CreateKnowledgeBaseTool implements OnModuleInit {
             description: input.description as string | undefined,
         });
         // knowledge_base_id 是后续 save_to_knowledge 的参数引用，必须进模型上下文；
-        // 其余只放业务内容（名称），供用户确认创建结果。
+        // 其余只放业务内容（名称），供用户确认创建结果。instruction 同时约束模型
+        // 不得把内部标识转述给用户（内部 ID 与权限枚举只用于工具调用）。
         return {
             resourceType: null,
             resourceId: null,
@@ -73,6 +74,8 @@ export class CreateKnowledgeBaseTool implements OnModuleInit {
                 knowledge_base_id: knowledgeBase.id,
                 name: knowledgeBase.name,
                 instruction: '知识库已创建，当前用户是该库管理员。'
+                    + '回答用户时只提及知识库名称与创建成功，用「管理员」等中文表述权限，'
+                    + '不得向用户展示 knowledge_base_id 或任何权限枚举值（如 MANAGER）。'
                     + '用户想继续把对话内容存入新库时调用 save_to_knowledge 并传对应 knowledge_base_id。',
             }),
         };

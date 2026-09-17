@@ -90,5 +90,7 @@ describe('CreateKnowledgeBaseTool', () => {
         expect(summary.knowledge_base_id).toBe('kb-1');
         expect(summary.name).toBe('产品知识库');
         expect(summary.instruction).toContain('save_to_knowledge');
+        // 内部标识与权限枚举只用于工具调用，不得转述给用户。
+        expect(summary.instruction).toContain('不得向用户展示 knowledge_base_id');
     });
 });

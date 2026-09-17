@@ -215,8 +215,10 @@ describe('TurnRunnerService', () => {
             afterSeq: 0,
         }));
 
+        // 第二轮纯回答轮的 content_delta 为延迟补发（见 turn-runner 工具轮缓存逻辑），
+        // 排在实时发布的 usage 之后。
         expect(events.map((event) => event.type)).toEqual([
-            'started', 'status', 'tool_call', 'tool_result', 'started', 'content_delta', 'usage', 'completed',
+            'started', 'status', 'tool_call', 'tool_result', 'started', 'usage', 'content_delta', 'completed',
         ]);
         const toolCallEvent = events.find((event) => event.type === 'tool_call');
         const toolResultEvent = events.find((event) => event.type === 'tool_result');
@@ -249,6 +251,68 @@ describe('TurnRunnerService', () => {
         // 公开事件只携带稳定资源引用，不携带任何签名 URL；
         // 下载地址一律由前端经 GET /v1/images/{imageId} 按需签发。
         expect(JSON.stringify(events)).not.toContain('signed-image-url');
+    });
+
+    it('hides tool-call preamble text and still streams the final answer', async () => {
+        const harness = createHarness({
+            allowedTools: [chatTool('generate_image')],
+            toolTurnStreams: [
+                // 第一轮：模型在调用工具前输出英文预告语（真实场景里这类文本不应展示给用户）。
+                () => (async function* preambleStream() {
+                    yield toolTurnStartedEvent();
+                    yield {
+                        type: 'content_delta',
+                        text: 'I will generate the image for you.',
+                    } as ToolTurnStreamEvent;
+                    yield {
+                        type: 'tool_calls',
+                        tool_calls: [{ id: 'call_1', name: 'generate_image', arguments: { prompt: '一只猫' } }],
+                    } as ToolTurnStreamEvent;
+                    yield { type: 'completed', latency_ms: 1, finish_reason: 'tool_calls' } as ToolTurnStreamEvent;
+                })(),
+                () => secondRoundCompletedStream(),
+            ],
+        });
+        harness.contextBuilder.buildToolTurnMessages
+            .mockResolvedValueOnce({
+                summary: null,
+                items: [{ role: 'user', content: [{ type: 'text', text: '帮我画一只猫' }] }],
+            })
+            .mockResolvedValueOnce({
+                summary: null,
+                items: [
+                    { role: 'user', content: [{ type: 'text', text: '帮我画一只猫' }] },
+                    {
+                        role: 'assistant',
+                        content: null,
+                        tool_calls: [{ id: 'call_1', name: 'generate_image', arguments: { prompt: '一只猫' } }],
+                    },
+                    {
+                        role: 'tool',
+                        content: [{ type: 'text', text: 'image generated' }],
+                        tool_call_id: 'call_1',
+                        name: 'generate_image',
+                    },
+                ],
+            });
+
+        await harness.service.startTurn({
+            conversationId: CONVERSATION_ID,
+            idempotencyKey: 'key-preamble',
+            content: '帮我画一只猫',
+            mode: 'standard',
+        });
+        const events = await consumeAll(await harness.service.subscribeTurn({
+            conversationId: CONVERSATION_ID,
+            turnId: TURN_ID,
+            afterSeq: 0,
+        }));
+
+        // 工具调用轮的预告语不得发布；纯回答轮的最终答复仍以 content_delta 流式发布。
+        const contents = events.filter((event) => event.type === 'content_delta');
+        expect(contents).toHaveLength(1);
+        expect(contents[0]).toMatchObject({ type: 'content_delta', text: '图片已经生成好了！' });
+        expect(JSON.stringify(events)).not.toContain('I will generate');
     });
 
     it('executes web search and publishes structured sources through the tool result', async () => {
