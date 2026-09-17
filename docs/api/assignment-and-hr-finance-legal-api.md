@@ -1,8 +1,8 @@
 # 分配策略与人财法 API
 
-> 状态：AssignmentPolicy、HR 与 Finance 已实现；Legal 与 tasks.scope 仍为契约草案
+> 状态：AssignmentPolicy、HR 与 Finance 已实现；Legal 契约已冻结待实现，tasks.scope 仍为契约草案
 > Owner：C
-> 关联：[通用任务 tasks.scope 方案](../architecture/task-scope-proposal.md)、[人财法数据契约](../architecture/hr-finance-legal-data-contract.md)
+> 关联：[通用任务 tasks.scope 方案](../architecture/task-scope-proposal.md)、[人财法数据契约](../architecture/hr-finance-legal-data-contract.md)、[Legal 合同台账设计](../architecture/legal-contract-ledger.md)
 
 ## 1. 分配策略（已实现）
 
@@ -91,7 +91,7 @@ GET    /api/v1/hr/reports/overtime-summary
 - 人事异动审批通过后同步员工档案；目标部门变化同步 `TenantMembership.departmentId`。
 - 全部 HR 资源按租户隔离并接入 `DataScopeResolverService`、乐观锁和审计。
 
-## 3. Finance 报销（契约草案）
+## 3. Finance 报销（已实现）
 
 ```text
 GET    /api/v1/finance/expense-categories
@@ -123,7 +123,7 @@ GET    /api/v1/finance/reports/project-spend
 - 报销单包含明细数组，`totalAmount` 由服务端与明细求和校验。
 - 审批通过统一 `review` 接口，`decision = APPROVE | REJECT`。
 
-## 4. Legal 合同台账（契约草案）
+## 4. Legal 合同台账（契约已冻结，待实现）
 
 ```text
 GET    /api/v1/legal/contracts
@@ -131,7 +131,40 @@ POST   /api/v1/legal/contracts
 GET    /api/v1/legal/contracts/{contractId}
 PATCH  /api/v1/legal/contracts/{contractId}
 DELETE /api/v1/legal/contracts/{contractId}?version={version}
+POST   /api/v1/legal/contracts/{contractId}/activate
+POST   /api/v1/legal/contracts/{contractId}/mark-pending-renewal
+POST   /api/v1/legal/contracts/{contractId}/renew
+POST   /api/v1/legal/contracts/{contractId}/terminate
+POST   /api/v1/legal/contracts/{contractId}/archive
+GET    /api/v1/legal/reports/contract-summary
 ```
+
+### 4.1 创建与修改
+
+- 新建合同固定为 `DRAFT`，普通创建和修改请求不能直接指定 `status`。
+- `contractNo` 未传时由服务端按租户和年份自动生成；手工编号和自动编号均要求租户内唯一。
+- `type` 和 `ownerMembershipId` 必填；`currency` 默认 `CNY`，`renewalReminderDays` 默认 30。
+- `endDate` 可空，支持无固定期限合同；不为空时必须大于或等于 `startDate`。
+- 附件通过 `attachmentIds` 关联当前租户已有 `FileObject`，单合同最多 20 个。
+- 普通修改必须携带 `version`；状态变化只能通过动作接口完成。
+
+### 4.2 状态动作
+
+- `activate`：`DRAFT -> ACTIVE`，要求合同已填写 `signedAt`。
+- `mark-pending-renewal`：`ACTIVE -> PENDING_RENEWAL`，要求存在 `endDate`。
+- `renew`：`PENDING_RENEWAL/EXPIRED -> ACTIVE`，要求 `newEndDate` 晚于原到期日期。
+- `terminate`：`ACTIVE/PENDING_RENEWAL -> TERMINATED`，必须填写终止日期和原因。
+- `archive`：`EXPIRED/TERMINATED -> ARCHIVED`。
+- 后台任务按租户时区处理进入续签窗口和合同到期，并写状态历史与系统审计。
+
+### 4.3 查询、数据范围与汇总
+
+- 列表支持关键字、状态、类型、负责人、部门、项目、币种、到期日期和到期窗口筛选。
+- `SELF` 按负责人过滤，部门范围按合同归属部门过滤，项目范围按合同关联项目过滤。
+- `legal.contract.manage_all` 必须与接口要求的操作权限组合使用，只放宽当前租户内数据范围，不绕过状态机和乐观锁。
+- 汇总返回各状态数量、即将到期数量及按币种分组的生效和到期金额。
+- 老板经营概况复用 Legal 应用服务聚合，不直接读取或修改 Legal 数据表。
+- 完整规则见 [Legal 合同台账设计](../architecture/legal-contract-ledger.md)。
 
 ## 5. 老板经营概况与租户联网检索策略（契约草案）
 

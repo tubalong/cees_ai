@@ -16,7 +16,7 @@
 - [用户个人资料管理](user-profile-management.md)：成员查询并修改自己在当前租户内的展示资料。
 - [密码修改与凭证安全](../security/password-management.md)：租户成员与平台管理员修改自己的密码。
 - [钉钉组织架构与人员同步](dingtalk-organization-sync.md)：一个租户绑定一个钉钉企业，验证凭证并同步外部部门和人员镜像。
-- [分配策略与人财法](assignment-and-hr-finance-legal.md)：AssignmentPolicy 与完整 HR 主线已实现；通用任务范围与 Finance/Legal 仍为契约草案。
+- [分配策略与人财法](assignment-and-hr-finance-legal.md)：AssignmentPolicy、完整 HR 与 Finance 已实现；Legal 契约已冻结待实现。
 
 待补充。建议按以下维度维护：
 
