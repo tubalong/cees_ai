@@ -17,6 +17,9 @@ export type HrProfile = {
     employmentType?: string | null;
     managerMembershipId?: string | null;
     entryDate?: string | null;
+    /**
+     * 离职日期，由离职或解除人事异动写入
+     */
     leaveDate?: string | null;
     /**
      * 敏感字段；无 hr.profile.sensitive.read 时返回脱敏值

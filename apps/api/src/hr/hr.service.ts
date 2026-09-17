@@ -1,9 +1,10 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import {
     AuditOutcome, HrAttendanceSource, HrAttendanceStatus, HrEmployeeChangeStatus, HrEmployeeChangeType,
-    HrLeaveRequestStatus, HrOvertimeRequestStatus, HrProfileStatus, MembershipStatus, Prisma,
+    HrLeaveRequestStatus, HrLeaveUnit, HrOvertimeRequestStatus, HrProfileStatus, MembershipStatus, Prisma,
 } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
+import { DEFAULT_TENANT_TIMEZONE, localDateKey } from '../common/tenant-time';
 import { DataScopeResolverService } from '../rbac/data-scope-resolver.service';
 import { TENANT_ADMIN_ROLE_CODE } from '../rbac/permission-catalog';
 import { TenantContext } from '../tenant/tenant-context';
@@ -55,6 +56,7 @@ export class HrService {
     async createProfile(input: CreateHrProfileDto): Promise<JsonRecord> {
         const context = this.tenantContext.require();
         this.assertSensitiveProfileWrite(input);
+        this.assertOffboardingFieldsViaEmployeeChange(input);
         const membership = await this.requireMembership(input.membershipId);
         await this.assertMembershipAccess(input.membershipId);
         await this.validateProfileReferences(input.departmentId, input.managerMembershipId);
@@ -88,6 +90,14 @@ export class HrService {
     async updateProfile(membershipId: string, input: UpdateHrProfileDto): Promise<JsonRecord> {
         const context = this.tenantContext.require();
         this.assertSensitiveProfileWrite(input);
+        this.assertOffboardingFieldsViaEmployeeChange(input);
+        if (input.departmentId !== undefined && !context.permissions.includes('department.member.assign')) {
+            throw new ForbiddenException({
+                code: 'AUTH_PERMISSION_DENIED',
+                message: '权限不足',
+                details: { required: ['department.member.assign'] },
+            });
+        }
         await this.assertMembershipAccess(membershipId);
         await this.requireProfile(membershipId);
         await this.validateProfileReferences(input.departmentId, input.managerMembershipId);
@@ -99,6 +109,12 @@ export class HrService {
                 });
                 if (updated.count !== 1) throw this.versionConflict();
                 const result = await transaction.hrProfile.findFirstOrThrow({ where: { tenantId: context.tenantId, membershipId, deletedAt: null } });
+                if (input.departmentId !== undefined) {
+                    await transaction.tenantMembership.updateMany({
+                        where: { tenantId: context.tenantId, id: membershipId, deletedAt: null },
+                        data: { departmentId: input.departmentId, updatedBy: context.userId, version: { increment: 1 } },
+                    });
+                }
                 await this.audit(transaction, 'HR_PROFILE_UPDATED', 'HR_PROFILE', result.id, { membershipId });
                 return result;
             });
@@ -219,24 +235,47 @@ export class HrService {
         if (startAt >= endAt) throw new BadRequestException({ code: 'HR_DATE_RANGE_INVALID', message: '请假结束时间必须晚于开始时间' });
         const leaveType = await this.requireLeaveType(input.leaveTypeId);
         if (!leaveType.enabled) throw new BadRequestException({ code: 'HR_LEAVE_TYPE_DISABLED', message: '请假类型已停用' });
+        const { durationDays, allocations } = deriveLeaveDuration(
+            startAt, endAt, leaveType.unit, await this.tenantTimeZone(), input.durationDays,
+        );
+        if (durationDays < MIN_LEAVE_DURATION_DAYS) {
+            throw new BadRequestException({ code: 'HR_LEAVE_DURATION_TOO_SHORT',
+                message: '请假时间段折算后的时长过短，按小时请假至少需要覆盖 0.01 天' });
+        }
+        if (input.durationDays !== undefined && Math.abs(input.durationDays - durationDays) > DURATION_TOLERANCE) {
+            throw new BadRequestException({ code: 'HR_LEAVE_DURATION_MISMATCH',
+                message: `请假时长与申请时间折算结果不一致，按当前假期单位应为 ${durationDays} 天` });
+        }
         const item = await this.prisma.$transaction(async (transaction) => {
-            const balance = await transaction.hrLeaveBalance.findFirst({ where: {
-                tenantId: context.tenantId, membershipId: context.membershipId, leaveTypeId: input.leaveTypeId,
-                year: startAt.getUTCFullYear(), deletedAt: null,
-            } });
-            if (!balance || decimal(balance.remainingDays) < input.durationDays) {
-                throw new ConflictException({ code: 'HR_LEAVE_BALANCE_INSUFFICIENT', message: '可用假期余额不足' });
+            const overlap = await transaction.hrLeaveRequest.findFirst({ where: {
+                tenantId: context.tenantId, membershipId: context.membershipId, deletedAt: null,
+                status: { in: [HrLeaveRequestStatus.SUBMITTED, HrLeaveRequestStatus.APPROVED] },
+                startAt: { lt: endAt }, endAt: { gt: startAt },
+            }, select: { id: true } });
+            if (overlap) throw new ConflictException({
+                code: 'HR_LEAVE_REQUEST_OVERLAP', message: '该时间段已有待审批或已批准的请假申请',
+            });
+            const reserves = await this.resolveLeaveBalances(transaction, context.membershipId, input.leaveTypeId, allocations);
+            for (const { allocation, balance } of reserves) {
+                if (decimal(balance.remainingDays) < allocation.days) throw new ConflictException({
+                    code: 'HR_LEAVE_BALANCE_INSUFFICIENT', message: `${allocation.year} 年可用假期余额不足`,
+                });
             }
             const request = await transaction.hrLeaveRequest.create({ data: {
                 tenantId: context.tenantId, membershipId: context.membershipId, leaveTypeId: input.leaveTypeId,
-                startAt, endAt, durationDays: input.durationDays, reason: normalizeNullable(input.reason),
+                startAt, endAt, durationDays, yearAllocations: allocations as unknown as Prisma.InputJsonValue,
+                reason: normalizeNullable(input.reason),
                 status: HrLeaveRequestStatus.SUBMITTED, createdBy: context.userId, updatedBy: context.userId,
             } });
-            await transaction.hrLeaveBalance.update({ where: { id: balance.id }, data: {
-                pendingDays: { increment: input.durationDays }, remainingDays: { decrement: input.durationDays },
-                updatedBy: context.userId, version: { increment: 1 },
-            } });
-            await this.audit(transaction, 'HR_LEAVE_REQUEST_SUBMITTED', 'HR_LEAVE_REQUEST', request.id);
+            for (const { allocation, balance } of reserves) {
+                await transaction.hrLeaveBalance.update({ where: { id: balance.id }, data: {
+                    pendingDays: { increment: allocation.days }, remainingDays: { decrement: allocation.days },
+                    updatedBy: context.userId, version: { increment: 1 },
+                } });
+            }
+            await this.audit(transaction, 'HR_LEAVE_REQUEST_SUBMITTED', 'HR_LEAVE_REQUEST', request.id, {
+                yearAllocations: allocations as unknown as Prisma.InputJsonValue,
+            });
             return request;
         });
         return toLeaveRequest(item);
@@ -252,20 +291,25 @@ export class HrService {
         const context = this.tenantContext.require();
         const request = await this.requireLeaveRequest(id);
         await this.assertMembershipAccess(request.membershipId);
+        this.assertNotSelfReview(request.membershipId);
         if (request.status !== HrLeaveRequestStatus.SUBMITTED) throw this.stateConflict('请假申请不是待审批状态');
         const status = input.decision === 'APPROVE' ? HrLeaveRequestStatus.APPROVED : HrLeaveRequestStatus.REJECTED;
         const item = await this.prisma.$transaction(async (transaction) => {
-            const balance = await this.requireBalanceForRequest(transaction, request);
+            const reserves = await this.resolveLeaveBalances(
+                transaction, request.membershipId, request.leaveTypeId, leaveYearAllocations(request),
+            );
             const changed = await transaction.hrLeaveRequest.updateMany({
                 where: { id, tenantId: context.tenantId, status: HrLeaveRequestStatus.SUBMITTED, version: input.version },
                 data: { status, reviewedBy: context.membershipId, reviewedAt: new Date(),
                     reviewComment: normalizeNullable(input.comment), updatedBy: context.userId, version: { increment: 1 } },
             });
             if (changed.count !== 1) throw this.versionConflict();
-            await transaction.hrLeaveBalance.update({ where: { id: balance.id }, data: input.decision === 'APPROVE'
-                ? { pendingDays: { decrement: request.durationDays }, usedDays: { increment: request.durationDays }, version: { increment: 1 } }
-                : { pendingDays: { decrement: request.durationDays }, remainingDays: { increment: request.durationDays }, version: { increment: 1 } },
-            });
+            for (const { allocation, balance } of reserves) {
+                await transaction.hrLeaveBalance.update({ where: { id: balance.id }, data: input.decision === 'APPROVE'
+                    ? { pendingDays: { decrement: allocation.days }, usedDays: { increment: allocation.days }, version: { increment: 1 } }
+                    : { pendingDays: { decrement: allocation.days }, remainingDays: { increment: allocation.days }, version: { increment: 1 } },
+                });
+            }
             await this.audit(transaction, 'HR_LEAVE_REQUEST_REVIEWED', 'HR_LEAVE_REQUEST', id, { decision: input.decision });
             return transaction.hrLeaveRequest.findUniqueOrThrow({ where: { id } });
         });
@@ -349,6 +393,7 @@ export class HrService {
         const context = this.tenantContext.require();
         const existing = await this.requireAttendance(id);
         await this.assertMembershipAccess(existing.membershipId);
+        this.assertNotSelfReview(existing.membershipId);
         const item = await this.prisma.$transaction(async (transaction) => {
             const changed = await transaction.hrAttendanceRecord.updateMany({
                 where: { id, tenantId: context.tenantId, deletedAt: null, version: input.version },
@@ -401,6 +446,7 @@ export class HrService {
     async reviewOvertimeRequest(id: string, input: ReviewRequestDto): Promise<JsonRecord> {
         const item = await this.requireOvertime(id);
         await this.assertMembershipAccess(item.membershipId);
+        this.assertNotSelfReview(item.membershipId);
         if (item.status !== HrOvertimeRequestStatus.SUBMITTED) throw this.stateConflict('加班申请不是待审批状态');
         const status = input.decision === 'APPROVE' ? HrOvertimeRequestStatus.APPROVED : HrOvertimeRequestStatus.REJECTED;
         return toOvertimeRequest(await this.reviewOvertime(id, input, status));
@@ -457,6 +503,7 @@ export class HrService {
         const context = this.tenantContext.require();
         const item = await this.requireEmployeeChange(id);
         await this.assertMembershipAccess(item.membershipId);
+        this.assertNotSelfReview(item.membershipId);
         if (item.status !== HrEmployeeChangeStatus.SUBMITTED) throw this.stateConflict('人事异动不是待审批状态');
         const result = await this.prisma.$transaction(async (transaction) => {
             const status = input.decision === 'APPROVE' ? HrEmployeeChangeStatus.EFFECTIVE : HrEmployeeChangeStatus.REJECTED;
@@ -573,17 +620,21 @@ export class HrService {
         const context = this.tenantContext.require();
         if (![HrLeaveRequestStatus.SUBMITTED, HrLeaveRequestStatus.APPROVED].includes(request.status)) throw this.stateConflict('当前请假申请不能取消');
         const item = await this.prisma.$transaction(async (transaction) => {
-            const balance = await this.requireBalanceForRequest(transaction, request);
+            const reserves = await this.resolveLeaveBalances(
+                transaction, request.membershipId, request.leaveTypeId, leaveYearAllocations(request),
+            );
             const changed = await transaction.hrLeaveRequest.updateMany({
                 where: { id: request.id, tenantId: context.tenantId, status: request.status, version },
                 data: { status: HrLeaveRequestStatus.CANCELLED, reviewComment: normalizeNullable(reason) ?? request.reviewComment,
                     updatedBy: context.userId, version: { increment: 1 } },
             });
             if (changed.count !== 1) throw this.versionConflict();
-            await transaction.hrLeaveBalance.update({ where: { id: balance.id }, data: request.status === HrLeaveRequestStatus.SUBMITTED
-                ? { pendingDays: { decrement: request.durationDays }, remainingDays: { increment: request.durationDays }, version: { increment: 1 } }
-                : { usedDays: { decrement: request.durationDays }, remainingDays: { increment: request.durationDays }, version: { increment: 1 } },
-            });
+            for (const { allocation, balance } of reserves) {
+                await transaction.hrLeaveBalance.update({ where: { id: balance.id }, data: request.status === HrLeaveRequestStatus.SUBMITTED
+                    ? { pendingDays: { decrement: allocation.days }, remainingDays: { increment: allocation.days }, version: { increment: 1 } }
+                    : { usedDays: { decrement: allocation.days }, remainingDays: { increment: allocation.days }, version: { increment: 1 } },
+                });
+            }
             await this.audit(transaction, action, 'HR_LEAVE_REQUEST', request.id);
             return transaction.hrLeaveRequest.findUniqueOrThrow({ where: { id: request.id } });
         });
@@ -777,13 +828,42 @@ export class HrService {
         return item;
     }
 
-    private async requireBalanceForRequest(transaction: Prisma.TransactionClient, request: Record<string, any>): Promise<Record<string, any>> {
-        const balance = await transaction.hrLeaveBalance.findFirst({ where: {
-            tenantId: request.tenantId, membershipId: request.membershipId, leaveTypeId: request.leaveTypeId,
-            year: request.startAt.getUTCFullYear(), deletedAt: null,
-        } });
-        if (!balance) throw new ConflictException({ code: 'HR_LEAVE_BALANCE_NOT_FOUND', message: '请假余额记录不存在' });
-        return balance;
+    private async resolveLeaveBalances(
+        transaction: Prisma.TransactionClient,
+        membershipId: string,
+        leaveTypeId: string,
+        allocations: LeaveYearAllocation[],
+    ): Promise<Array<{ allocation: LeaveYearAllocation; balance: Record<string, any> }>> {
+        const { tenantId } = this.tenantContext.require();
+        const resolved: Array<{ allocation: LeaveYearAllocation; balance: Record<string, any> }> = [];
+        for (const allocation of allocations) {
+            const balance = await transaction.hrLeaveBalance.findFirst({ where: {
+                tenantId, membershipId, leaveTypeId, year: allocation.year, deletedAt: null,
+            } });
+            if (!balance) throw new ConflictException({
+                code: 'HR_LEAVE_BALANCE_NOT_FOUND', message: `${allocation.year} 年请假余额记录不存在`,
+            });
+            resolved.push({ allocation, balance });
+        }
+        return resolved;
+    }
+
+    private async tenantTimeZone(): Promise<string> {
+        const { tenantId } = this.tenantContext.require();
+        const tenant = await this.prisma.tenant.findFirst({
+            where: { id: tenantId, deletedAt: null }, select: { timezone: true },
+        });
+        return tenant?.timezone || DEFAULT_TENANT_TIMEZONE;
+    }
+
+    private assertNotSelfReview(targetMembershipId: string): void {
+        const context = this.tenantContext.require();
+        if (targetMembershipId === context.membershipId) {
+            throw new ForbiddenException({
+                code: 'HR_SELF_REVIEW_FORBIDDEN',
+                message: '不能审批本人提交的 HR 申请，请由其他具备审批权限的成员处理',
+            });
+        }
     }
 
     private async validateProfileReferences(departmentId?: string | null, managerId?: string | null): Promise<void> {
@@ -798,6 +878,22 @@ export class HrService {
                 code: 'HR_PROFILE_SENSITIVE_PERMISSION_DENIED',
                 message: '缺少管理员工敏感档案字段的权限',
                 details: { required: ['hr.profile.sensitive.manage'] },
+            });
+        }
+    }
+
+    /** 离职状态与离职日期是人事异动的结果，禁止通过档案编辑直接写入。 */
+    private assertOffboardingFieldsViaEmployeeChange(input: CreateHrProfileDto | UpdateHrProfileDto): void {
+        if ('status' in input && input.status === HrProfileStatus.TERMINATED) {
+            throw new BadRequestException({
+                code: 'HR_PROFILE_TERMINATION_REQUIRES_CHANGE',
+                message: '离职状态必须通过离职或解除人事异动审批后写入',
+            });
+        }
+        if (input.leaveDate !== undefined) {
+            throw new BadRequestException({
+                code: 'HR_PROFILE_LEAVE_DATE_REQUIRES_CHANGE',
+                message: '离职日期必须通过离职或解除人事异动审批后写入',
             });
         }
     }
@@ -932,8 +1028,103 @@ function toLeaveBalance(item: Record<string, any>): JsonRecord {
 function toLeaveRequest(item: Record<string, any>): JsonRecord {
     return { ...base(item), membershipId: item.membershipId, leaveTypeId: item.leaveTypeId,
         startAt: item.startAt.toISOString(), endAt: item.endAt.toISOString(), durationDays: decimal(item.durationDays),
+        yearAllocations: leaveYearAllocations(item),
         reason: item.reason, status: item.status, reviewedBy: item.reviewedBy,
         reviewedAt: item.reviewedAt?.toISOString() ?? null, reviewComment: item.reviewComment };
+}
+
+interface LeaveYearAllocation {
+    year: number;
+    days: number;
+}
+
+/** 一个工作日折算的小时数，用于按小时请假类型的额度换算。 */
+const WORKDAY_HOURS = 8;
+const HALF_DAY_DAYS = 0.5;
+const DURATION_TOLERANCE = 0.005;
+const MIN_LEAVE_DURATION_DAYS = 0.01;
+
+/** 历史数据没有年度拆分时，按开始年度的 UTC 年份单年占用，保持迁移前语义。 */
+function leaveYearAllocations(item: Record<string, any>): LeaveYearAllocation[] {
+    const raw = item.yearAllocations;
+    if (Array.isArray(raw) && raw.length > 0) {
+        return raw
+            .map((entry: Record<string, unknown>) => ({ year: Number(entry?.year), days: Number(entry?.days) }))
+            .filter((entry: LeaveYearAllocation) => Number.isInteger(entry.year) && Number.isFinite(entry.days) && entry.days > 0);
+    }
+    return [{ year: new Date(item.startAt).getUTCFullYear(), days: decimal(item.durationDays) }];
+}
+
+/**
+ * 服务端权威折算请假时长并按租户本地年度拆分额度占用。
+ * DAY 与 HALF_DAY 以租户本地自然日为准（起止当日均计入）；HOUR 按实际时长除以标准工作日小时数。
+ */
+function deriveLeaveDuration(
+    startAt: Date,
+    endAt: Date,
+    unit: HrLeaveUnit,
+    timeZone: string,
+    requested?: number,
+): { durationDays: number; allocations: LeaveYearAllocation[] } {
+    const yearDays = localDaysByYear(startAt, endAt, timeZone);
+    const calendarDays = sum(yearDays.map((entry) => entry.days));
+    let durationDays: number;
+    if (unit === HrLeaveUnit.HOUR) {
+        durationDays = roundDays((endAt.getTime() - startAt.getTime()) / 3_600_000 / WORKDAY_HOURS);
+    } else if (unit === HrLeaveUnit.HALF_DAY && requested !== undefined
+        && Math.abs(requested - (calendarDays - HALF_DAY_DAYS)) < DURATION_TOLERANCE) {
+        durationDays = roundDays(calendarDays - HALF_DAY_DAYS);
+    } else {
+        durationDays = calendarDays;
+    }
+    return { durationDays, allocations: allocateAcrossYears(yearDays, durationDays, calendarDays, unit) };
+}
+
+/** 起止时刻覆盖的租户本地自然日，按本地年度分组统计天数。 */
+function localDaysByYear(startAt: Date, endAt: Date, timeZone: string): Array<{ year: number; days: number }> {
+    const startKey = localDateKey(timeZone, startAt);
+    const endKey = localDateKey(timeZone, endAt);
+    const startIndex = localDayIndex(startKey);
+    const endIndex = localDayIndex(endKey);
+    const result: Array<{ year: number; days: number }> = [];
+    for (let year = Number(startKey.slice(0, 4)); year <= Number(endKey.slice(0, 4)); year += 1) {
+        const first = Math.max(startIndex, localDayIndex(`${year}-01-01`));
+        const last = Math.min(endIndex, localDayIndex(`${year}-12-31`));
+        if (last >= first) result.push({ year, days: last - first + 1 });
+    }
+    return result;
+}
+
+function allocateAcrossYears(
+    yearDays: Array<{ year: number; days: number }>,
+    durationDays: number,
+    calendarDays: number,
+    unit: HrLeaveUnit,
+): LeaveYearAllocation[] {
+    const allocations: LeaveYearAllocation[] = yearDays.map((entry) => ({ year: entry.year, days: entry.days }));
+    if (allocations.length === 1) return [{ year: allocations[0].year, days: durationDays }];
+    if (unit === HrLeaveUnit.HALF_DAY && Math.abs(durationDays - (calendarDays - HALF_DAY_DAYS)) < DURATION_TOLERANCE) {
+        const last = allocations[allocations.length - 1];
+        last.days = roundDays(last.days - HALF_DAY_DAYS);
+        return allocations.filter((entry) => entry.days > 0);
+    }
+    if (durationDays === calendarDays) return allocations;
+    const ratio = durationDays / calendarDays;
+    let assigned = 0;
+    allocations.forEach((entry, index) => {
+        entry.days = index === allocations.length - 1 ? 0 : roundDays(entry.days * ratio);
+        assigned += entry.days;
+    });
+    allocations[allocations.length - 1].days = roundDays(durationDays - assigned);
+    return allocations.filter((entry) => entry.days > 0);
+}
+
+function localDayIndex(dateKey: string): number {
+    return Math.round(Date.parse(`${dateKey}T00:00:00.000Z`) / 86_400_000);
+}
+
+function roundDays(value: number): number {
+    return Math.round(value * 100) / 100;
 }
 
 function toAttendanceRecord(item: Record<string, any>): JsonRecord {

@@ -89,6 +89,11 @@ GET    /api/v1/hr/reports/overtime-summary
 - 客户端不得把脱敏值作为修改请求回写；缺少敏感字段管理权限时应从请求体移除这些字段。
 - 请假审批通过统一 `review` 接口完成，`decision = APPROVE | REJECT`。
 - 请假提交冻结余额，审批、撤回和取消在同一事务中更新余额和申请状态。
+- 创建请假申请时 `durationDays` 为可选的一致性校验值，服务端按申请时间与假期单位折算后以服务端结果为准；不一致返回 `400 HR_LEAVE_DURATION_MISMATCH`，折算结果低于 0.01 天返回 `400 HR_LEAVE_DURATION_TOO_SHORT`。
+- 请假响应新增 `yearAllocations`，按租户本地年度给出额度占用明细；跨年度申请会同时占用多个年度余额。
+- 同一成员待审批或已批准的时间段不可重叠，重叠返回 `409 HR_LEAVE_REQUEST_OVERLAP`；缺少对应年度余额记录返回 `409 HR_LEAVE_BALANCE_NOT_FOUND`。
+- 请假、加班、考勤修正和人事异动的审批人不能是申请本人，命中返回 `403 HR_SELF_REVIEW_FORBIDDEN`。
+- 员工档案 `PATCH` 不接受 `status = TERMINATED` 与 `leaveDate`，分别返回 `400 HR_PROFILE_TERMINATION_REQUIRES_CHANGE`、`400 HR_PROFILE_LEAVE_DATE_REQUIRES_CHANGE`；档案部门变更会同步租户成员部门并要求 `department.member.assign`。
 - 考勤导入单批最多 500 条，返回逐条失败位置与原因，不因单条失败回滚整批。
 - 人事异动审批通过后同步员工档案；目标部门变化同步 `TenantMembership.departmentId`。
 - `RESIGNATION` 或 `TERMINATION` 审批通过时，同一事务停用对应租户成员、撤销全部未撤销会话并记录 `HR_OFFBOARDING_SUBJECT_DISABLED` 审计；主体记录不软删除。

@@ -2355,14 +2355,15 @@ export interface HrProfile {
 
 export interface HrLeaveType { id: string; code: string; name: string; unit: HrLeaveUnit; paid: boolean; defaultDays?: number | null; enabled: boolean; version: number; }
 export interface HrLeaveBalance { id: string; membershipId: string; leaveTypeId: string; year: number; totalDays: number; usedDays: number; pendingDays: number; remainingDays: number; unit: HrLeaveUnit; version: number; }
-export interface HrLeaveRequest { id: string; membershipId: string; leaveTypeId: string; startAt: string; endAt: string; durationDays: number; reason?: string | null; status: HrRequestStatus; reviewedBy?: string | null; reviewedAt?: string | null; reviewComment?: string | null; version: number; createdAt: string; updatedAt: string; }
+export interface HrLeaveYearAllocation { year: number; days: number }
+export interface HrLeaveRequest { id: string; membershipId: string; leaveTypeId: string; startAt: string; endAt: string; durationDays: number; yearAllocations: HrLeaveYearAllocation[]; reason?: string | null; status: HrRequestStatus; reviewedBy?: string | null; reviewedAt?: string | null; reviewComment?: string | null; version: number; createdAt: string; updatedAt: string; }
 export interface HrAttendanceRecord { id: string; membershipId: string; workDate: string; checkInAt?: string | null; checkOutAt?: string | null; status: HrAttendanceStatus; source: 'MANUAL' | 'IMPORT' | 'DINGTALK'; note?: string | null; reviewedBy?: string | null; reviewedAt?: string | null; version: number; }
 export interface HrOvertimeRequest { id: string; membershipId: string; startAt: string; endAt: string; durationHours: number; reason: string; status: HrRequestStatus; reviewedBy?: string | null; reviewedAt?: string | null; reviewComment?: string | null; version: number; createdAt: string; }
 export interface HrEmployeeChange { id: string; membershipId: string; type: HrEmployeeChangeType; effectiveDate: string; fromDepartmentId?: string | null; toDepartmentId?: string | null; fromPosition?: string | null; toPosition?: string | null; fromManagerMembershipId?: string | null; toManagerMembershipId?: string | null; reason?: string | null; status: HrEmployeeChangeStatus; reviewedBy?: string | null; reviewedAt?: string | null; reviewComment?: string | null; version: number; createdAt: string; }
 
 export interface HrProfileInput {
     membershipId?: string; employeeNo?: string | null; departmentId?: string | null; position?: string | null;
-    employmentType?: string | null; managerMembershipId?: string | null; entryDate?: string | null; leaveDate?: string | null;
+    employmentType?: string | null; managerMembershipId?: string | null; entryDate?: string | null;
     phone?: string | null; email?: string | null; idType?: string | null; idNumber?: string | null;
     emergencyContactName?: string | null; emergencyContactPhone?: string | null; educationLevel?: string | null;
     costCenter?: string | null; jobLevel?: string | null; probationEndDate?: string | null; regularDate?: string | null;
@@ -2382,7 +2383,7 @@ export async function deleteHrLeaveType(id: string, version: number): Promise<vo
 export async function listHrLeaveBalances(year?: number): Promise<{ items: HrLeaveBalance[] }> { return authorizedRequest<{ items: HrLeaveBalance[] }>(`v1/hr/leave-balances${year ? `?year=${year}` : ''}`); }
 export async function adjustHrLeaveBalance(input: { membershipId: string; leaveTypeId: string; year: number; deltaDays: number; reason: string }): Promise<HrLeaveBalance> { return authorizedRequest<HrLeaveBalance>('v1/hr/leave-balances/adjust', { method: 'POST', body: JSON.stringify(input) }); }
 export async function listHrLeaveRequests(status?: HrRequestStatus): Promise<CursorPage<HrLeaveRequest>> { return authorizedRequest<CursorPage<HrLeaveRequest>>(`v1/hr/leave-requests?limit=100${status ? `&status=${status}` : ''}`); }
-export async function createHrLeaveRequest(input: { leaveTypeId: string; startAt: string; endAt: string; durationDays: number; reason?: string | null }): Promise<HrLeaveRequest> { return authorizedRequest<HrLeaveRequest>('v1/hr/leave-requests', { method: 'POST', body: JSON.stringify(input) }); }
+export async function createHrLeaveRequest(input: { leaveTypeId: string; startAt: string; endAt: string; durationDays?: number; reason?: string | null }): Promise<HrLeaveRequest> { return authorizedRequest<HrLeaveRequest>('v1/hr/leave-requests', { method: 'POST', body: JSON.stringify(input) }); }
 export async function reviewHrLeaveRequest(id: string, decision: 'APPROVE' | 'REJECT', version: number, comment?: string): Promise<HrLeaveRequest> { return authorizedRequest<HrLeaveRequest>(`v1/hr/leave-requests/${encodeURIComponent(id)}/review`, { method: 'POST', body: JSON.stringify({ decision, version, comment }) }); }
 export async function withdrawHrLeaveRequest(id: string, version: number): Promise<HrLeaveRequest> { return authorizedRequest<HrLeaveRequest>(`v1/hr/leave-requests/${encodeURIComponent(id)}/withdraw`, { method: 'POST', body: JSON.stringify({ version }) }); }
 export async function cancelHrLeaveRequest(id: string, version: number, reason?: string): Promise<HrLeaveRequest> { return authorizedRequest<HrLeaveRequest>(`v1/hr/leave-requests/${encodeURIComponent(id)}/cancel`, { method: 'POST', body: JSON.stringify({ version, reason }) }); }

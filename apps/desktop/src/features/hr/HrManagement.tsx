@@ -25,6 +25,9 @@ export default function HrManagement({ authContext, onSessionExpired }: { authCo
     const { message, modal } = AntdApp.useApp();
     const [dialog, setDialog] = useState<Dialog>(null);
     const [editingProfile, setEditingProfile] = useState<HrProfile>();
+    const profileStatusOptions = editingProfile?.status === 'TERMINATED'
+        ? [{ label: '离职（由人事异动维护）', value: 'TERMINATED', disabled: true }, ...editableProfileStatusOptions]
+        : editableProfileStatusOptions;
     const [editingLeaveType, setEditingLeaveType] = useState<HrLeaveType>();
     const [editingAttendance, setEditingAttendance] = useState<HrAttendanceRecord>();
     const [attendanceImportText, setAttendanceImportText] = useState('');
@@ -41,6 +44,7 @@ export default function HrManagement({ authContext, onSessionExpired }: { authCo
         message.error(error instanceof Error ? error.message : '操作失败');
     };
     const refresh = (): void => { void queryClient.invalidateQueries({ queryKey: ['hr'] }); };
+    const isOwnRecord = (membershipId: string): boolean => membershipId === authContext.membership.id;
     const mutation = useMutation({ mutationFn: async (work: () => Promise<unknown>) => work(), onSuccess: () => { message.success('操作成功'); setDialog(null); refresh(); }, onError: handleError });
 
     const membersQuery = useQuery({ queryKey: ['hr', 'members'], queryFn: () => listTenantMembers(), enabled: anyHrPermission(permissions) });
@@ -67,6 +71,9 @@ export default function HrManagement({ authContext, onSessionExpired }: { authCo
     };
     const submitProfile = async (): Promise<void> => {
         const values = normalizeEmptyValues(await profileForm.validateFields());
+        // 离职状态与离职日期由人事异动审批写入，档案表单不再提交这两个字段。
+        delete values.leaveDate;
+        if (editingProfile?.status === 'TERMINATED') delete values.status;
         const canSubmitSensitiveProfile = canManageSensitiveProfile && (!editingProfile || canReadSensitiveProfile);
         const payload = canSubmitSensitiveProfile ? values : omitSensitiveProfileFields(values);
         mutation.mutate(() => editingProfile ? updateHrProfile(editingProfile.membershipId, { ...payload, version: editingProfile.version }) : createHrProfile(payload));
@@ -103,7 +110,7 @@ export default function HrManagement({ authContext, onSessionExpired }: { authCo
         { title: '时间', render: (_: unknown, item: { startAt: string; endAt: string }) => `${formatTime(item.startAt)} — ${formatTime(item.endAt)}` },
         { title: '天数', dataIndex: 'durationDays' }, { title: '状态', dataIndex: 'status', render: statusTag },
         { title: '操作', render: (_: unknown, item: any) => <Space>
-            {item.status === 'SUBMITTED' && permissions.has('hr.leave.approve') && <><Button size="small" onClick={() => mutation.mutate(() => reviewHrLeaveRequest(item.id, 'APPROVE', item.version))}>通过</Button><Button size="small" danger onClick={() => mutation.mutate(() => reviewHrLeaveRequest(item.id, 'REJECT', item.version))}>拒绝</Button></>}
+            {item.status === 'SUBMITTED' && !isOwnRecord(item.membershipId) && permissions.has('hr.leave.approve') && <><Button size="small" onClick={() => mutation.mutate(() => reviewHrLeaveRequest(item.id, 'APPROVE', item.version))}>通过</Button><Button size="small" danger onClick={() => mutation.mutate(() => reviewHrLeaveRequest(item.id, 'REJECT', item.version))}>拒绝</Button></>}
             {item.status === 'SUBMITTED' && item.membershipId === authContext.membership.id && permissions.has('hr.leave.request') && <Button size="small" onClick={() => mutation.mutate(() => withdrawHrLeaveRequest(item.id, item.version))}>撤回</Button>}
             {['SUBMITTED', 'APPROVED'].includes(item.status) && permissions.has('hr.leave.manage_all') && <Button size="small" danger onClick={() => mutation.mutate(() => cancelHrLeaveRequest(item.id, item.version))}>取消</Button>}
         </Space> },
@@ -136,7 +143,7 @@ export default function HrManagement({ authContext, onSessionExpired }: { authCo
             { title: '状态', dataIndex: 'status', render: statusTag }, { title: '来源', dataIndex: 'source' },
             { title: '操作', render: (_: unknown, item: HrAttendanceRecord) => <Space>
                 {permissions.has('hr.attendance.manage') && <Button size="small" onClick={() => { setEditingAttendance(item); attendanceForm.setFieldsValue(item); setDialog('attendance'); }}>编辑</Button>}
-                {permissions.has('hr.attendance.approve') && item.status === 'EXCEPTION' && <Button size="small" onClick={() => mutation.mutate(() => reviewHrAttendanceRecord(item.id, 'APPROVE', item.version))}>确认修正</Button>}
+                {permissions.has('hr.attendance.approve') && item.status === 'EXCEPTION' && !isOwnRecord(item.membershipId) && <Button size="small" onClick={() => mutation.mutate(() => reviewHrAttendanceRecord(item.id, 'APPROVE', item.version))}>确认修正</Button>}
             </Space> },
         ]} />
     </Card>;
@@ -148,7 +155,7 @@ export default function HrManagement({ authContext, onSessionExpired }: { authCo
             { title: '小时', dataIndex: 'durationHours' }, { title: '原因', dataIndex: 'reason' },
             { title: '状态', dataIndex: 'status', render: statusTag },
             { title: '操作', render: (_: unknown, item: any) => <Space>
-                {item.status === 'SUBMITTED' && permissions.has('hr.overtime.approve') && <><Button size="small" onClick={() => mutation.mutate(() => reviewHrOvertimeRequest(item.id, 'APPROVE', item.version))}>通过</Button><Button size="small" danger onClick={() => mutation.mutate(() => reviewHrOvertimeRequest(item.id, 'REJECT', item.version))}>拒绝</Button></>}
+                {item.status === 'SUBMITTED' && !isOwnRecord(item.membershipId) && permissions.has('hr.overtime.approve') && <><Button size="small" onClick={() => mutation.mutate(() => reviewHrOvertimeRequest(item.id, 'APPROVE', item.version))}>通过</Button><Button size="small" danger onClick={() => mutation.mutate(() => reviewHrOvertimeRequest(item.id, 'REJECT', item.version))}>拒绝</Button></>}
                 {item.status === 'SUBMITTED' && item.membershipId === authContext.membership.id && permissions.has('hr.overtime.request') && <Button size="small" onClick={() => mutation.mutate(() => cancelHrOvertimeRequest(item.id, item.version))}>撤销</Button>}
             </Space> },
         ]} />
@@ -162,7 +169,7 @@ export default function HrManagement({ authContext, onSessionExpired }: { authCo
             { title: '目标职位', dataIndex: 'toPosition', render: (value: string | null) => value || '-' },
             { title: '状态', dataIndex: 'status', render: statusTag },
             { title: '操作', render: (_: unknown, item: HrEmployeeChange) => <Space>
-                {item.status === 'SUBMITTED' && permissions.has('hr.employee_change.approve') && <><Button size="small" onClick={() => mutation.mutate(() => reviewHrEmployeeChange(item.id, 'APPROVE', item.version))}>通过并生效</Button><Button size="small" danger onClick={() => mutation.mutate(() => reviewHrEmployeeChange(item.id, 'REJECT', item.version))}>拒绝</Button></>}
+                {item.status === 'SUBMITTED' && !isOwnRecord(item.membershipId) && permissions.has('hr.employee_change.approve') && <><Button size="small" onClick={() => mutation.mutate(() => reviewHrEmployeeChange(item.id, 'APPROVE', item.version))}>通过并生效</Button><Button size="small" danger onClick={() => mutation.mutate(() => reviewHrEmployeeChange(item.id, 'REJECT', item.version))}>拒绝</Button></>}
                 {['DRAFT', 'SUBMITTED', 'APPROVED'].includes(item.status) && permissions.has('hr.employee_change.manage') && <Button size="small" onClick={() => mutation.mutate(() => cancelHrEmployeeChange(item.id, item.version))}>撤销</Button>}
             </Space> },
         ]} />
@@ -205,10 +212,9 @@ export default function HrManagement({ authContext, onSessionExpired }: { authCo
                 <Col span={12}><Form.Item name="idType" label="证件类型"><Input placeholder="身份证/护照" disabled={!canManageSensitiveProfile || Boolean(editingProfile && !canReadSensitiveProfile)} /></Form.Item></Col>
                 <Col span={12}><Form.Item name="idNumber" label="证件号码"><Input disabled={!canManageSensitiveProfile || Boolean(editingProfile && !canReadSensitiveProfile)} /></Form.Item></Col>
                 <Col span={12}><Form.Item name="educationLevel" label="学历"><Input /></Form.Item></Col>
-                <Col span={12}><Form.Item name="leaveDate" label="离职日期"><Input type="date" /></Form.Item></Col>
                 <Col span={12}><Form.Item name="emergencyContactName" label="紧急联系人"><Input disabled={!canManageSensitiveProfile || Boolean(editingProfile && !canReadSensitiveProfile)} /></Form.Item></Col>
                 <Col span={12}><Form.Item name="emergencyContactPhone" label="紧急联系电话"><Input disabled={!canManageSensitiveProfile || Boolean(editingProfile && !canReadSensitiveProfile)} /></Form.Item></Col>
-                {editingProfile && <Col span={12}><Form.Item name="status" label="状态"><Select options={profileStatusOptions} /></Form.Item></Col>}
+                {editingProfile && <Col span={12}><Form.Item name="status" label="状态" tooltip="离职状态由离职或解除人事异动维护"><Select options={profileStatusOptions} /></Form.Item></Col>}
             </Row></Form>
         </Modal>
 
@@ -224,7 +230,8 @@ export default function HrManagement({ authContext, onSessionExpired }: { authCo
         </Modal>
 
         <Modal open={dialog === 'leave'} title="发起请假" confirmLoading={mutation.isPending} onCancel={() => setDialog(null)} onOk={() => void leaveForm.validateFields().then((values) => mutation.mutate(() => createHrLeaveRequest({ ...values, startAt: dateTimeValue(values.startAt), endAt: dateTimeValue(values.endAt) })))}>
-            <Form form={leaveForm} layout="vertical"><Form.Item name="leaveTypeId" label="假期类型" rules={[{ required: true }]}><Select options={(leaveTypesQuery.data?.items ?? []).filter((item) => item.enabled).map((item) => ({ label: item.name, value: item.id }))} /></Form.Item><Row gutter={16}><Col span={12}><Form.Item name="startAt" label="开始时间" rules={[{ required: true }]}><Input type="datetime-local" /></Form.Item></Col><Col span={12}><Form.Item name="endAt" label="结束时间" rules={[{ required: true }]}><Input type="datetime-local" /></Form.Item></Col></Row><Form.Item name="durationDays" label="请假天数" rules={[{ required: true }]}><InputNumber min={0.5} step={0.5} className="hr-full" /></Form.Item><Form.Item name="reason" label="原因"><Input.TextArea /></Form.Item></Form>
+            <Alert type="info" showIcon message="时长由服务端折算" description="请假天数按申请时间与假期单位在服务端计算，跨年度申请会分别占用对应年度余额。" style={{ marginBottom: 16 }} />
+            <Form form={leaveForm} layout="vertical"><Form.Item name="leaveTypeId" label="假期类型" rules={[{ required: true }]}><Select options={(leaveTypesQuery.data?.items ?? []).filter((item) => item.enabled).map((item) => ({ label: item.name, value: item.id }))} /></Form.Item><Row gutter={16}><Col span={12}><Form.Item name="startAt" label="开始时间" rules={[{ required: true }]}><Input type="datetime-local" /></Form.Item></Col><Col span={12}><Form.Item name="endAt" label="结束时间" rules={[{ required: true }]}><Input type="datetime-local" /></Form.Item></Col></Row><Form.Item name="reason" label="原因"><Input.TextArea /></Form.Item></Form>
         </Modal>
 
         <Modal open={dialog === 'attendance'} title={editingAttendance ? '编辑考勤记录' : '新增考勤记录'} confirmLoading={mutation.isPending} onCancel={() => setDialog(null)} onOk={() => void attendanceForm.validateFields().then((values) => mutation.mutate(() => editingAttendance ? updateHrAttendanceRecord(editingAttendance.id, { ...values, checkInAt: optionalDateTimeValue(values.checkInAt), checkOutAt: optionalDateTimeValue(values.checkOutAt), version: editingAttendance.version }) : createHrAttendanceRecord({ ...values, checkInAt: optionalDateTimeValue(values.checkInAt), checkOutAt: optionalDateTimeValue(values.checkOutAt) })))}>
@@ -271,7 +278,7 @@ function HrReports({ enabled }: { enabled: boolean }): JSX.Element {
     </Space>;
 }
 
-const profileStatusOptions = [{ label: '在职', value: 'ACTIVE' }, { label: '停职', value: 'SUSPENDED' }, { label: '离职', value: 'TERMINATED' }, { label: '休假中', value: 'ON_LEAVE' }];
+const editableProfileStatusOptions = [{ label: '在职', value: 'ACTIVE' }, { label: '停职', value: 'SUSPENDED' }, { label: '休假中', value: 'ON_LEAVE' }];
 const unitOptions = [{ label: '天', value: 'DAY' }, { label: '半天', value: 'HALF_DAY' }, { label: '小时', value: 'HOUR' }];
 const attendanceStatusOptions: Array<{ label: string; value: HrAttendanceStatus }> = [
     ['正常', 'NORMAL'], ['迟到', 'LATE'], ['早退', 'EARLY_LEAVE'], ['缺勤', 'ABSENT'], ['请假', 'LEAVE'], ['加班', 'OVERTIME'], ['异常', 'EXCEPTION'], ['已修正', 'CORRECTED'],

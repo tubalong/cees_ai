@@ -15,6 +15,7 @@
 - `phone`、`email`、`idType`、`idNumber`、`emergencyContactName`、`emergencyContactPhone` 为敏感字段；普通 `hr.profile.read` 只能读取脱敏值，完整读取和写入分别需要 `hr.profile.sensitive.read`、`hr.profile.sensitive.manage`。
 - 请假申请创建后默认进入可审批流程；审批接口使用统一 `review`，`decision = APPROVE | REJECT`。
 - 请假余额由请假类型、年份和成员确定，不承载额度扣减之外的复杂考勤规则。
+- 请假时长由服务端按申请时间与假期单位折算；`HrLeaveRequest.yearAllocations` 保存按租户本地年度拆分的额度占用，历史数据为空时按开始年度单年占用回退。
 - Prisma 迁移 `0032_c_hr_fullstack` 创建七张 HR 业务表和对应权限，正式数据只由 NestJS 写入。
 - 请假余额变更与请假状态变更必须处于同一数据库事务，避免重复扣减或返还。
 - 考勤、加班、人事异动和报表查询统一折叠角色数据范围；租户管理员默认获得全部新增 HR 权限。

@@ -208,6 +208,7 @@ export type { HrLeaveTypeList } from './models/HrLeaveTypeList';
 export type { HrLeaveTypeListResponseEnvelope } from './models/HrLeaveTypeListResponseEnvelope';
 export type { HrLeaveTypeResponseEnvelope } from './models/HrLeaveTypeResponseEnvelope';
 export { HrLeaveUnit } from './models/HrLeaveUnit';
+export type { HrLeaveYearAllocation } from './models/HrLeaveYearAllocation';
 export type { HrOvertimeRequest } from './models/HrOvertimeRequest';
 export type { HrOvertimeRequestList } from './models/HrOvertimeRequestList';
 export type { HrOvertimeRequestListResponseEnvelope } from './models/HrOvertimeRequestListResponseEnvelope';
