@@ -340,6 +340,67 @@ export async function getDocument(documentId: string): Promise<ManagedDocumentDe
     return authorizedRequest<ManagedDocumentDetail>(`v1/documents/${encodeURIComponent(documentId)}`);
 }
 
+export type KnowledgeSourceType = 'FILE_OBJECT' | 'DOCUMENT' | 'MESSAGE';
+
+export type KnowledgeDocumentVisibilityScope = 'PRIVATE' | 'DEPARTMENT' | 'PROJECT' | 'TENANT';
+
+export interface KnowledgeBaseSummary {
+    id: string;
+    tenantId: string;
+    name: string;
+    description: string | null;
+    memberCount: number;
+    createdBy: string | null;
+    updatedBy: string | null;
+    version: number;
+    createdAt: string;
+    updatedAt: string;
+}
+
+export interface KnowledgeDocumentResult {
+    id: string;
+    tenantId: string;
+    knowledgeBaseId: string;
+    name: string;
+    status: 'PENDING' | 'PARSING' | 'PARSED' | 'INDEXING' | 'READY' | 'FAILED';
+    fileObjectId: string;
+    versionNumber: number;
+    currentVersionId: string;
+    retryCount: number;
+    lastError: string | null;
+    visibilityScope: KnowledgeDocumentVisibilityScope;
+    departmentId: string | null;
+    projectId: string | null;
+    createdBy: string | null;
+    updatedBy: string | null;
+    version: number;
+    createdAt: string;
+    updatedAt: string;
+}
+
+/** 转存目标库候选：当前用户达到 EDITOR 成员权限的知识库（块 7c）。 */
+export async function listWritableKnowledgeBases(): Promise<{ items: KnowledgeBaseSummary[]; nextCursor: string | null }> {
+    return authorizedRequest<{ items: KnowledgeBaseSummary[]; nextCursor: string | null }>('v1/knowledge-bases?permission=EDITOR&limit=100');
+}
+
+/** 对话数据转知识库：附件 / AI 生成文档 / 对话消息走统一转存端点（块 7c）。 */
+export async function createKnowledgeDocument(knowledgeBaseId: string, input: {
+    sourceType: KnowledgeSourceType;
+    sourceId: string;
+    name?: string;
+    visibilityScope: KnowledgeDocumentVisibilityScope;
+}): Promise<KnowledgeDocumentResult> {
+    return authorizedRequest<KnowledgeDocumentResult>(`v1/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/documents`, {
+        method: 'POST',
+        body: JSON.stringify({
+            sourceType: input.sourceType,
+            sourceId: input.sourceId,
+            name: input.name?.trim() || undefined,
+            visibilityScope: input.visibilityScope,
+        }),
+    });
+}
+
 async function authorizedRequest<T>(path: string, init: RequestInit = {}, retry = true): Promise<T> {
     const accessToken = getStoredValue(ACCESS_TOKEN_KEY);
     if (!accessToken) throw new Error('登录状态已失效，请重新登录');
