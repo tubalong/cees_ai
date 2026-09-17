@@ -1,6 +1,6 @@
 # 人财法数据契约
 
-> 状态：HR 与 Finance 已实现；Legal 契约已冻结待实现
+> 状态：HR、Finance 与 Legal 已实现
 > Owner：C
 > 关联：`packages/contracts/openapi/openapi.yaml`、[Legal 合同台账设计](legal-contract-ledger.md)
 
@@ -12,12 +12,15 @@
 
 - 员工档案以 `membershipId` 为关联主键，避免复制租户成员账号状态。
 - 档案字段只包含 HR 展示和审批所需信息；账号、部门和角色仍由租户成员体系维护。
+- `phone`、`email`、`idType`、`idNumber`、`emergencyContactName`、`emergencyContactPhone` 为敏感字段；普通 `hr.profile.read` 只能读取脱敏值，完整读取和写入分别需要 `hr.profile.sensitive.read`、`hr.profile.sensitive.manage`。
 - 请假申请创建后默认进入可审批流程；审批接口使用统一 `review`，`decision = APPROVE | REJECT`。
 - 请假余额由请假类型、年份和成员确定，不承载额度扣减之外的复杂考勤规则。
 - Prisma 迁移 `0032_c_hr_fullstack` 创建七张 HR 业务表和对应权限，正式数据只由 NestJS 写入。
 - 请假余额变更与请假状态变更必须处于同一数据库事务，避免重复扣减或返还。
 - 考勤、加班、人事异动和报表查询统一折叠角色数据范围；租户管理员默认获得全部新增 HR 权限。
-- 人事异动审批为正式写入动作，审批通过后同步员工档案及必要的组织归属。
+- 人事异动审批为正式写入动作，审批通过后同步员工档案及必要的组织归属；批准离职或解除时，在同一事务内将对应 `TenantMembership` 置为 `DISABLED` 并撤销全部有效会话，保留主体和业务历史。
+- 最后一名有效 `tenant_admin` 不允许通过离职审批被停用，必须先完成管理员交接。
+- 迁移 `0035_c_hr_offboarding_sensitive_fields` 注册敏感字段读写权限，并默认授予已有租户管理员。
 - 钉钉自动出勤同步仍暂停；`HrAttendanceSource.DINGTALK` 仅用于恢复后的来源兼容。
 
 ## 3. Finance 报销

@@ -1,5 +1,7 @@
-import { ConflictException } from '@nestjs/common';
-import { HrLeaveRequestStatus, HrLeaveUnit } from '@prisma/client';
+import { ConflictException, ForbiddenException } from '@nestjs/common';
+import {
+    HrEmployeeChangeStatus, HrEmployeeChangeType, HrLeaveRequestStatus, HrLeaveUnit, HrProfileStatus, MembershipStatus,
+} from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
 import { DataScopeResolverService } from '../rbac/data-scope-resolver.service';
 import { TenantContext } from '../tenant/tenant-context';
@@ -59,6 +61,123 @@ describe('HrService', () => {
             data: expect.objectContaining({ pendingDays: { decrement: 2 }, usedDays: { increment: 2 } }),
         }));
     });
+
+    it('masks sensitive profile fields without sensitive read permission', async () => {
+        const prisma = createPrismaMock();
+        prisma.hrProfile.findFirst.mockResolvedValue(profileRecord());
+        const service = createService(prisma, ['hr.profile.read']);
+
+        const result = await service.getProfile(MEMBERSHIP_ID);
+
+        expect(result).toEqual(expect.objectContaining({
+            phone: '138****8000',
+            email: 'z***@example.com',
+            idType: '***',
+            idNumber: '**************1234',
+            emergencyContactName: '张*',
+            emergencyContactPhone: '139****0000',
+        }));
+    });
+
+    it('returns full sensitive profile fields with sensitive read permission', async () => {
+        const prisma = createPrismaMock();
+        prisma.hrProfile.findFirst.mockResolvedValue(profileRecord());
+        const service = createService(prisma, ['hr.profile.read', 'hr.profile.sensitive.read']);
+
+        const result = await service.getProfile(MEMBERSHIP_ID);
+
+        expect(result).toEqual(expect.objectContaining({
+            phone: '13812348000',
+            email: 'zhangsan@example.com',
+            idType: '身份证',
+            idNumber: '110101199001011234',
+            emergencyContactName: '张三',
+            emergencyContactPhone: '13912340000',
+        }));
+    });
+
+    it('rejects sensitive profile updates without sensitive manage permission', async () => {
+        const service = createService(createPrismaMock(), ['hr.profile.manage']);
+
+        await expect(service.updateProfile(MEMBERSHIP_ID, { phone: '13812348000', version: 1 }))
+            .rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('allows sensitive profile updates with sensitive manage permission', async () => {
+        const prisma = createPrismaMock();
+        prisma.hrProfile.findFirst.mockResolvedValue(profileRecord());
+        prisma.hrProfile.updateMany.mockResolvedValue({ count: 1 });
+        prisma.hrProfile.findFirstOrThrow.mockResolvedValue(profileRecord({ phone: '13800000000', version: 2 }));
+        const service = createService(prisma, ['hr.profile.manage', 'hr.profile.sensitive.manage', 'hr.profile.sensitive.read']);
+
+        const result = await service.updateProfile(MEMBERSHIP_ID, { phone: '13800000000', version: 1 });
+
+        expect(result.phone).toBe('13800000000');
+        expect(prisma.hrProfile.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+            data: expect.objectContaining({ phone: '13800000000' }),
+        }));
+    });
+
+    it.each([HrEmployeeChangeType.RESIGNATION, HrEmployeeChangeType.TERMINATION])(
+        'disables the tenant subject and revokes sessions for approved %s',
+        async (type) => {
+            const prisma = createPrismaMock();
+            prisma.hrEmployeeChange.findFirst.mockResolvedValue(employeeChangeRecord({ type }));
+            prisma.hrEmployeeChange.updateMany.mockResolvedValue({ count: 1 });
+            prisma.hrEmployeeChange.findUniqueOrThrow.mockResolvedValue(employeeChangeRecord({
+                type,
+                status: HrEmployeeChangeStatus.EFFECTIVE,
+                version: 2,
+            }));
+            prisma.hrProfile.updateMany.mockResolvedValue({ count: 1 });
+            prisma.tenantMembership.findFirst.mockResolvedValue(membershipRecord());
+            prisma.tenantMembership.updateMany.mockResolvedValue({ count: 1 });
+            prisma.authSession.updateMany.mockResolvedValue({ count: 2 });
+            const service = createService(prisma, ['hr.employee_change.approve']);
+
+            await service.reviewEmployeeChange(EMPLOYEE_CHANGE_ID, { decision: 'APPROVE', version: 1 });
+
+            expect(prisma.hrProfile.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+                data: expect.objectContaining({ leaveDate: expect.any(Date), status: HrProfileStatus.TERMINATED }),
+            }));
+            expect(prisma.tenantMembership.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+                data: expect.objectContaining({ status: MembershipStatus.DISABLED }),
+            }));
+            expect(prisma.authSession.updateMany).toHaveBeenCalledWith({
+                where: { tenantId: TENANT_ID, membershipId: OFFBOARDED_MEMBERSHIP_ID, revokedAt: null },
+                data: { revokedAt: expect.any(Date) },
+            });
+            expect(prisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+                data: expect.objectContaining({
+                    action: 'HR_OFFBOARDING_SUBJECT_DISABLED',
+                    resourceType: 'TENANT_MEMBERSHIP',
+                    resourceId: OFFBOARDED_MEMBERSHIP_ID,
+                    metadata: {
+                        employeeChangeId: EMPLOYEE_CHANGE_ID,
+                        employeeChangeType: type,
+                        revokedSessionCount: 2,
+                    },
+                }),
+            }));
+        },
+    );
+
+    it('prevents offboarding the last active tenant administrator', async () => {
+        const prisma = createPrismaMock();
+        prisma.hrEmployeeChange.findFirst.mockResolvedValue(employeeChangeRecord());
+        prisma.hrEmployeeChange.updateMany.mockResolvedValue({ count: 1 });
+        prisma.hrProfile.updateMany.mockResolvedValue({ count: 1 });
+        prisma.tenantMembership.findFirst.mockResolvedValue(membershipRecord({
+            membershipRoles: [{ role: { code: 'tenant_admin' } }],
+        }));
+        prisma.tenantMembership.count.mockResolvedValue(0);
+        const service = createService(prisma, ['hr.employee_change.approve']);
+
+        await expect(service.reviewEmployeeChange(EMPLOYEE_CHANGE_ID, { decision: 'APPROVE', version: 1 }))
+            .rejects.toMatchObject({ response: expect.objectContaining({ code: 'TENANT_LAST_ADMIN' }) });
+        expect(prisma.tenantMembership.updateMany).not.toHaveBeenCalled();
+        expect(prisma.authSession.updateMany).not.toHaveBeenCalled();
+    });
 });
 
 const TENANT_ID = '10000000-0000-0000-0000-000000000001';
@@ -67,11 +186,13 @@ const MEMBERSHIP_ID = '50000000-0000-0000-0000-000000000001';
 const LEAVE_TYPE_ID = '60000000-0000-0000-0000-000000000001';
 const BALANCE_ID = '70000000-0000-0000-0000-000000000001';
 const REQUEST_ID = '80000000-0000-0000-0000-000000000001';
+const OFFBOARDED_MEMBERSHIP_ID = '50000000-0000-0000-0000-000000000002';
+const EMPLOYEE_CHANGE_ID = '90000000-0000-0000-0000-000000000001';
 
-function createService(prisma: Record<string, any>): HrService {
+function createService(prisma: Record<string, any>, permissions: string[] = []): HrService {
     const tenantContext = { require: jest.fn().mockReturnValue({
         tenantId: TENANT_ID, userId: USER_ID, membershipId: MEMBERSHIP_ID, requestId: 'request-id',
-        roles: ['tenant_admin'], permissions: [],
+        roles: ['tenant_admin'], permissions,
     }) } as unknown as TenantContext;
     const scope = { resolve: jest.fn().mockResolvedValue({ tenantWide: true, membershipIds: [], departmentIds: [], projectIds: [], scopes: [] }) } as unknown as DataScopeResolverService;
     return new HrService(prisma as unknown as PrismaService, tenantContext, scope);
@@ -82,6 +203,10 @@ function createPrismaMock(): Record<string, any> {
         hrLeaveType: { findFirst: jest.fn() },
         hrLeaveBalance: { findFirst: jest.fn(), update: jest.fn() },
         hrLeaveRequest: { findFirst: jest.fn(), create: jest.fn(), updateMany: jest.fn(), findUniqueOrThrow: jest.fn() },
+        hrProfile: { findFirst: jest.fn(), updateMany: jest.fn(), findFirstOrThrow: jest.fn() },
+        hrEmployeeChange: { findFirst: jest.fn(), updateMany: jest.fn(), findUniqueOrThrow: jest.fn() },
+        tenantMembership: { findFirst: jest.fn(), updateMany: jest.fn(), count: jest.fn() },
+        authSession: { updateMany: jest.fn() },
         auditLog: { create: jest.fn() },
         $transaction: jest.fn(),
     };
@@ -100,4 +225,36 @@ function leaveRequestRecord(overrides: Record<string, unknown> = {}): Record<str
         startAt: new Date('2026-09-21T01:00:00.000Z'), endAt: new Date('2026-09-22T09:00:00.000Z'),
         durationDays: 2, reason: '年假', status: HrLeaveRequestStatus.SUBMITTED, reviewedBy: null, reviewedAt: null,
         reviewComment: null, version: 1, createdAt: new Date('2026-09-17T00:00:00.000Z'), updatedAt: new Date('2026-09-17T00:00:00.000Z'), ...overrides };
+}
+
+function profileRecord(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+        id: '51000000-0000-0000-0000-000000000001', tenantId: TENANT_ID, membershipId: MEMBERSHIP_ID,
+        employeeNo: 'E001', displayName: '张三', departmentId: null, position: '工程师', employmentType: '全职',
+        managerMembershipId: null, entryDate: new Date('2026-01-01T00:00:00.000Z'), leaveDate: null,
+        phone: '13812348000', email: 'zhangsan@example.com', idType: '身份证', idNumber: '110101199001011234',
+        emergencyContactName: '张三', emergencyContactPhone: '13912340000', educationLevel: '本科', costCenter: null,
+        jobLevel: 'P5', probationEndDate: null, regularDate: null, workLocation: '上海', status: HrProfileStatus.ACTIVE,
+        version: 1, createdAt: new Date('2026-01-01T00:00:00.000Z'), updatedAt: new Date('2026-09-17T00:00:00.000Z'),
+        ...overrides,
+    };
+}
+
+function employeeChangeRecord(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+        id: EMPLOYEE_CHANGE_ID, tenantId: TENANT_ID, membershipId: OFFBOARDED_MEMBERSHIP_ID,
+        type: HrEmployeeChangeType.RESIGNATION, effectiveDate: new Date('2026-09-30T00:00:00.000Z'),
+        fromDepartmentId: null, toDepartmentId: null, fromPosition: '工程师', toPosition: null,
+        fromManagerMembershipId: null, toManagerMembershipId: null, reason: '个人原因',
+        status: HrEmployeeChangeStatus.SUBMITTED, reviewedBy: null, reviewedAt: null, reviewComment: null,
+        version: 1, createdAt: new Date('2026-09-17T00:00:00.000Z'), updatedAt: new Date('2026-09-17T00:00:00.000Z'),
+        ...overrides,
+    };
+}
+
+function membershipRecord(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+        id: OFFBOARDED_MEMBERSHIP_ID, tenantId: TENANT_ID, departmentId: null, status: MembershipStatus.ACTIVE,
+        membershipRoles: [], version: 1, ...overrides,
+    };
 }

@@ -98,7 +98,7 @@ export class HrService {
             errors: {
                 400: `请求字段校验失败`,
                 401: `登录状态无效或已过期`,
-                403: `缺少 hr.profile.manage 权限`,
+                403: `缺少 hr.profile.manage 权限；提交敏感字段时还需 hr.profile.sensitive.manage 权限`,
                 409: `该成员已有员工档案`,
             },
         });
@@ -155,7 +155,7 @@ export class HrService {
             errors: {
                 400: `请求字段校验失败`,
                 401: `登录状态无效或已过期`,
-                403: `缺少 hr.profile.manage 权限或数据范围不足`,
+                403: `缺少 hr.profile.manage 权限或数据范围不足；提交敏感字段时还需 hr.profile.sensitive.manage 权限`,
                 404: `员工档案不存在`,
                 409: `乐观锁版本冲突`,
             },
@@ -917,7 +917,7 @@ export class HrService {
     }
     /**
      * 审批人事异动
-     * @returns HrEmployeeChangeResponseEnvelope 审批后的人事异动
+     * @returns HrEmployeeChangeResponseEnvelope 审批后的人事异动；批准离职或解除时同步停用租户成员并撤销其全部有效会话，历史主体记录保留
      * @throws ApiError
      */
     public static reviewHrEmployeeChange({

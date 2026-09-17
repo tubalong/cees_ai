@@ -85,10 +85,14 @@ GET    /api/v1/hr/reports/overtime-summary
 ```
 
 - 员工档案以 `membershipId` 为标识，避免复制成员账号状态。
+- 员工档案敏感字段为手机号、邮箱、证件类型、证件号码、紧急联系人姓名和电话。`hr.profile.read` 返回脱敏值；完整读取需 `hr.profile.sensitive.read`，请求中出现任一敏感字段时需 `hr.profile.sensitive.manage`。
+- 客户端不得把脱敏值作为修改请求回写；缺少敏感字段管理权限时应从请求体移除这些字段。
 - 请假审批通过统一 `review` 接口完成，`decision = APPROVE | REJECT`。
 - 请假提交冻结余额，审批、撤回和取消在同一事务中更新余额和申请状态。
 - 考勤导入单批最多 500 条，返回逐条失败位置与原因，不因单条失败回滚整批。
 - 人事异动审批通过后同步员工档案；目标部门变化同步 `TenantMembership.departmentId`。
+- `RESIGNATION` 或 `TERMINATION` 审批通过时，同一事务停用对应租户成员、撤销全部未撤销会话并记录 `HR_OFFBOARDING_SUBJECT_DISABLED` 审计；主体记录不软删除。
+- 若目标成员是最后一名有效租户管理员，接口返回 `409 TENANT_LAST_ADMIN`，管理员交接完成后方可批准离职。
 - 全部 HR 资源按租户隔离并接入 `DataScopeResolverService`、乐观锁和审计。
 
 ## 3. Finance 报销（已实现）

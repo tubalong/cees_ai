@@ -2,6 +2,9 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
+/**
+ * 创建员工档案。提交任一敏感字段需要 hr.profile.sensitive.manage 权限。
+ */
 export type CreateHrProfileRequest = {
     membershipId: string;
     employeeNo?: string | null;
