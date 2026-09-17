@@ -40,6 +40,9 @@ describe('KnowledgeSearchTool', () => {
         expect(definition?.parameters).toEqual(expect.objectContaining({
             required: ['query'],
         }));
+        // 检索优先约束：内部信息类问题必须先检索，禁止未检索就反问用户。
+        expect(definition?.description).toContain('必须先调用本工具检索知识库');
+        expect(definition?.description).toContain('不得向用户反问');
     });
 
     it('validates and normalizes model arguments', () => {

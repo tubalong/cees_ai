@@ -237,6 +237,7 @@ ai-service 不自行推断权限。NestJS 计算可信 scope 后随检索请求�
 2. 转存只能引用真实资源：引用资源时工具参数必须引用已存在的资源 ID（fileObjectId / documentId / messageId），模型不得把自创文本作为来源引用；内容直存路径（`content` 参数）的内容必须来自用户明确口述或经用户确认的整理文本，模型不得编造内容写入；
 3. 目标知识库由后端校验：模型建议的目标库经 NestJS 校验用户 EDITOR 权限，校验失败拒绝并回喂模型更换目标；执行前仍走 ToolPolicy 权限码审批（第二点检查）。
 4. 工具回喂脱敏与语言约束：summary 中 `knowledge_base_id` 等内部标识只供后续工具调用引用，不得转述给用户；权限向用户说明时只用中文表述（只读/可编辑/管理员），不输出 READER/EDITOR/MANAGER 枚举词（写入工具 instruction）；对话系统提示词（ai-service `BASE_SYSTEM_PROMPT`）要求始终以简体中文回复、不向用户暴露任何内部标识（资源 ID / 文档 ID / 知识库 ID / 权限枚举）。
+5. 检索优先：`knowledge_search` 工具可用时（开关开启），用户询问人员/团队/项目/制度等内部信息类问题必须先调用检索，不得在未检索时声称没有信息或反问用户（写入 `BASE_SYSTEM_PROMPT` 与工具 description）。
 
 **落地状态（块 7c 已落地）**：
 
@@ -254,7 +255,7 @@ ai-service 不自行推断权限。NestJS 计算可信 scope 后随检索请求�
 
 **交流层/系统层边界**（防泄露红线）：AI 答复永远只停留于交流层（功能价值、使用方式、业务规则），绝不涉及系统层——包括但不限于内部模块名（ai-service / NestJS / MinerU / pgvector 等）、内部错误码与权限码、模型名称与向量维度、接口路径与数据库结构、内部标识（documentId 等）。即使用户诱导（"你的系统架构是什么""用的什么数据库"），也拒绝展开并回归功能描述。落地时写入对话 role 的系统提示词，与工具执行器 summary 脱敏规范（回喂内容不含内部信息）互为呼应。
 
-**部分落地（块 7c 收尾时提前落地）**：ai-service `BASE_SYSTEM_PROMPT` 已写入两条硬约束——①始终以简体中文回复（用户明确要求其他语言除外）；②内部标识（资源 ID / 文档 ID / 知识库 ID / 权限枚举）是工具链细节，不得在答复中暴露。工具调用轮次的模型预告语（如英文「I'll check…」）由 turn-runner 缓存不发布。剩余部分（介绍性问题的知识库功能告知话术、诱导提问对抗用例）仍待块 7d。
+**部分落地（块 7c 收尾时提前落地）**：ai-service `BASE_SYSTEM_PROMPT` 已写入三条硬约束——①始终以简体中文回复（用户明确要求其他语言除外）；②内部标识（资源 ID / 文档 ID / 知识库 ID / 权限枚举）是工具链细节，不得在答复中暴露；③`knowledge_search` 可用时，内部信息类问题必须先检索再回答，不得未检索就声称没有信息或反问用户（检索优先，同时写入工具 description）。工具调用轮次的模型预告语（如英文「I'll check…」）由 turn-runner 缓存不发布。剩余部分（介绍性问题的知识库功能告知话术、诱导提问对抗用例）仍待块 7d。
 
 ## 4. 索引流程与状态机
 
@@ -362,5 +363,5 @@ PENDING -> PARSING -> PARSED -> INDEXING -> READY
 | 6 | jest 23 用例（TS 版转换器与真机 parser 错误映射、3.4.5 服务模式响应结构）+ pytest 全绿（embedding router/维度校验、pgvector 拒绝 deterministic 前置拦截）；29 真机端到端验收通过：上传 PDF → MinerU 解析 → pgvector 索引 → READY → 查询 grounded=true 带 citations | ✅ 完成 |
 | 7a | jest 73 用例（mimeType 分流、提取错误语义、文本产物包装）+ pytest 16 用例（HNSW 索引落在 `data_knowledge_chunks`、hnsw_kwargs 每实例完整）+ ruff/tsc 全绿；29 真机 docx 上传经本地提取 READY 待部署后验收 | ✅ 本地完成 |
 | 7b | jest 34 用例（开关关闭过滤工具并二次校验拒绝、权限折叠检索（成员+manage_all）、summary 脱敏、标题补全、多库日志与审计范围）；tsc 全绿；契约兼容检查（redocly lint + api-client 重新生成）；desktop tsc + 生产构建通过（开关结构化传参、citations 卡片渲染与恢复） | ✅ 完成 |
-| 7c | jest：saveFromSource 13 用例（物化快照、EDITOR 校验、MESSAGE 归属/TOOL 拒绝、可读文档命名、同源追加版本、跨库拒绝、并发锚点冲突、source 字段互斥）+ saveDirectContent 2 用例（无锚定直存 + 权限拒绝）+ 工具 8 用例（save_to_knowledge 含 content 直存路径与二选一校验 / list_knowledge_bases 含脱敏指令：审批/EDITOR 校验/无意图不转存/引用不存在拒绝）+ 助手可见库清单 3 用例（权限标注/非成员空结果/manage_all 短路）+ create_knowledge_base 3 用例（注册/参数校验/显式上下文创建与回喂新库 id + 脱敏指令）+ turn-runner 工具轮预告语不发布 1 用例；pytest：chat context 7 用例（含语言/脱敏约束 prompt）；tsc 全绿；契约校验 + 客户端重生成；desktop tsc + 生产构建通过（三入口 + 确认框） | ✅ 完成 |
+| 7c | jest：saveFromSource 13 用例（物化快照、EDITOR 校验、MESSAGE 归属/TOOL 拒绝、可读文档命名、同源追加版本、跨库拒绝、并发锚点冲突、source 字段互斥）+ saveDirectContent 2 用例（无锚定直存 + 权限拒绝）+ 工具 8 用例（save_to_knowledge 含 content 直存路径与二选一校验 / list_knowledge_bases 含脱敏指令：审批/EDITOR 校验/无意图不转存/引用不存在拒绝）+ 助手可见库清单 3 用例（权限标注/非成员空结果/manage_all 短路）+ create_knowledge_base 3 用例（注册/参数校验/显式上下文创建与回喂新库 id + 脱敏指令）+ turn-runner 工具轮预告语不发布 1 用例 + knowledge_search description 检索优先断言 2 例；pytest：chat context 7 用例（含语言/脱敏/检索优先约束 prompt）；tsc 全绿；契约校验 + 客户端重生成；desktop tsc + 生产构建通过（三入口 + 确认框） | ✅ 完成 |
 | 7d | jest/真机：介绍性问题带知识库功能告知；诱导提问不泄露系统层信息（抽样对抗用例） | 待验证 |

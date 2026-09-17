@@ -42,6 +42,7 @@
 - Assistant 的 `list_knowledge_bases` 工具列出当前用户可见的全部知识库（含只读库）并标注每个库的成员权限（READER/EDITOR/MANAGER），回答「我有哪些知识库」；转存候选只取 EDITOR 及以上；
 - Assistant 的 `create_knowledge_base` 工具在用户明确要求时创建知识库（`knowledge_base.create` 权限，创建者自动成为 MANAGER），名称与说明须经用户确认；
 - 对话侧脱敏与语言约束：知识库 ID、权限枚举（READER/EDITOR/MANAGER）等内部标识不得出现在 AI 答复中（答复统一用简体中文，权限用「只读/可编辑/管理员」表述）；工具调用过程中的模型预告语不对用户展示；
+- 检索优先：开关开启时，人员/团队/项目/制度等内部信息类问题必须先检索知识库再回答，不得未检索就声称没有信息或反问用户；
 - 来源锚定字段、部分唯一索引与迁移落于 `20260916094414_add_knowledge_document_source_anchor`。
 
 ## 2. 知识库可见范围

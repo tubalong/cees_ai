@@ -26,7 +26,9 @@ export class KnowledgeSearchTool implements OnModuleInit {
         name: 'knowledge_search',
         version: '1.0.0',
         displayName: '知识库检索',
-        description: '检索当前用户可见知识库中的文档内容，返回带引用的回答。回答项目内部资料或历史文档问题时使用。',
+        description: '检索当前用户可见知识库中的文档内容，返回带引用的回答。'
+            + '用户询问公司人员、团队、项目、制度等内部信息时，必须先调用本工具检索知识库；'
+            + '没有检索过就不得声称没有信息，也不得向用户反问要求补充线索。',
         parameters: {
             type: 'object',
             properties: {
