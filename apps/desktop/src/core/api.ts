@@ -474,7 +474,8 @@ export interface KnowledgeBaseMemberSummary {
 }
 
 export async function listKnowledgeBaseMembers(knowledgeBaseId: string): Promise<CursorPage<KnowledgeBaseMemberSummary>> {
-    return authorizedRequest<CursorPage<KnowledgeBaseMemberSummary>>(`v1/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/members?limit=100`);
+    // 契约未定义 limit 参数（后端固定每页最多 100 条），传递未知参数会被 DTO 白名单拒绝。
+    return authorizedRequest<CursorPage<KnowledgeBaseMemberSummary>>(`v1/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/members`);
 }
 
 export async function addKnowledgeBaseMember(knowledgeBaseId: string, membershipId: string, permission: KnowledgeBaseMemberPermission): Promise<KnowledgeBaseMemberSummary> {
