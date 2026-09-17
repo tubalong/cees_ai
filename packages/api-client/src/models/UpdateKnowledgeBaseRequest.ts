@@ -11,13 +11,13 @@ export type UpdateKnowledgeBaseRequest = {
      */
     visibilityScope?: KnowledgeBaseVisibilityScope;
     /**
-     * 归属部门，必须属于当前租户；仅 DEPARTMENT 时使用
+     * 归属部门，必须属于当前租户；仅 DEPARTMENT 时使用，传 null 清除锚点
      */
-    departmentId?: string;
+    departmentId?: string | null;
     /**
-     * 归属项目，必须属于当前租户；仅 PROJECT 时使用
+     * 归属项目，必须属于当前租户；仅 PROJECT 时使用，传 null 清除锚点
      */
-    projectId?: string;
+    projectId?: string | null;
     version: number;
 };
 

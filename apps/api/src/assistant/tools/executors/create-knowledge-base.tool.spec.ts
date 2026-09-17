@@ -51,6 +51,7 @@ describe('CreateKnowledgeBaseTool', () => {
             departmentId: null,
             projectId: null,
             memberCount: 1,
+            myPermission: 'MANAGER',
             createdBy: 'u-1',
             updatedBy: 'u-1',
             version: 1,

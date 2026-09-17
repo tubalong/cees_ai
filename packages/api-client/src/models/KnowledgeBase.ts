@@ -2,6 +2,7 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
+import type { KnowledgeBaseMemberPermission } from './KnowledgeBaseMemberPermission';
 import type { KnowledgeBaseVisibilityScope } from './KnowledgeBaseVisibilityScope';
 export type KnowledgeBase = {
     id: string;
@@ -18,6 +19,10 @@ export type KnowledgeBase = {
      */
     projectId: string | null;
     memberCount: number;
+    /**
+     * 当前用户对该库的成员等级；锚点人群与 read_all 恒 READER，manage_all 恒 MANAGER
+     */
+    myPermission: KnowledgeBaseMemberPermission;
     createdBy: string | null;
     updatedBy: string | null;
     version: number;

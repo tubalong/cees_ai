@@ -19,6 +19,7 @@ describe('KnowledgeService', () => {
             id: KNOWLEDGE_BASE_ID,
             name: '产品知识库',
             memberCount: 1,
+            myPermission: 'MANAGER',
         }));
         expect(prisma.knowledgeBaseMember.create).toHaveBeenCalledWith({
             data: expect.objectContaining({
@@ -133,7 +134,7 @@ describe('KnowledgeService', () => {
         const result = await service.listKnowledgeBases({ limit: 20 });
 
         expect(result.items).toHaveLength(1);
-        expect(result.items[0]).toEqual(expect.objectContaining({ id: KNOWLEDGE_BASE_ID, visibilityScope: 'TENANT' }));
+        expect(result.items[0]).toEqual(expect.objectContaining({ id: KNOWLEDGE_BASE_ID, visibilityScope: 'TENANT', myPermission: 'READER' }));
         // 第二次 findMany 是页面主查询，锚点库必须被并入可见范围。
         expect(prisma.knowledgeBase.findMany).toHaveBeenNthCalledWith(2, expect.objectContaining({
             where: expect.objectContaining({ id: { in: [KNOWLEDGE_BASE_ID] } }),
@@ -167,12 +168,13 @@ describe('KnowledgeService', () => {
         prisma.knowledgeBaseMember.count.mockResolvedValue(1);
         const service = createService(prisma, ['knowledge_base.manage_all']);
 
-        await service.listKnowledgeBases({ limit: 20 });
+        const result = await service.listKnowledgeBases({ limit: 20 });
 
         expect(prisma.knowledgeBaseMember.findMany).not.toHaveBeenCalled();
         expect(prisma.knowledgeBase.findMany).toHaveBeenCalledWith(expect.objectContaining({
             where: expect.objectContaining({ tenantId: TENANT_ID, deletedAt: null, id: undefined }),
         }));
+        expect(result.items[0]).toEqual(expect.objectContaining({ myPermission: 'MANAGER' }));
     });
 
     it('allows read_all members to list all tenant knowledge bases', async () => {
@@ -181,12 +183,13 @@ describe('KnowledgeService', () => {
         prisma.knowledgeBaseMember.count.mockResolvedValue(1);
         const service = createService(prisma, ['knowledge_base.read_all']);
 
-        await service.listKnowledgeBases({ limit: 20 });
+        const result = await service.listKnowledgeBases({ limit: 20 });
 
         expect(prisma.knowledgeBaseMember.findMany).not.toHaveBeenCalled();
         expect(prisma.knowledgeBase.findMany).toHaveBeenCalledWith(expect.objectContaining({
             where: expect.objectContaining({ tenantId: TENANT_ID, deletedAt: null, id: undefined }),
         }));
+        expect(result.items[0]).toEqual(expect.objectContaining({ myPermission: 'READER' }));
     });
 
     it('filters the list by a minimum member permission', async () => {
@@ -209,6 +212,7 @@ describe('KnowledgeService', () => {
             where: expect.objectContaining({ id: { in: [KNOWLEDGE_BASE_ID] } }),
         }));
         expect(result.items).toHaveLength(1);
+        expect(result.items[0]).toEqual(expect.objectContaining({ myPermission: 'EDITOR' }));
     });
 
     it('lists all visible knowledge bases for the assistant with permission labels', async () => {
@@ -323,7 +327,7 @@ describe('KnowledgeService', () => {
 
         const result = await service.getKnowledgeBase(KNOWLEDGE_BASE_ID);
 
-        expect(result).toEqual(expect.objectContaining({ id: KNOWLEDGE_BASE_ID, visibilityScope: 'TENANT', memberCount: 1 }));
+        expect(result).toEqual(expect.objectContaining({ id: KNOWLEDGE_BASE_ID, visibilityScope: 'TENANT', memberCount: 1, myPermission: 'READER' }));
     });
 
     it('audits visibility scope changes when updating a knowledge base anchor', async () => {

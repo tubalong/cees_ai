@@ -8598,6 +8598,7 @@ components:
         - departmentId
         - projectId
         - memberCount
+        - myPermission
         - createdBy
         - updatedBy
         - version
@@ -8627,6 +8628,9 @@ components:
         memberCount:
           type: integer
           minimum: 0
+        myPermission:
+          $ref: '#/components/schemas/KnowledgeBaseMemberPermission'
+          description: 当前用户对该库的成员等级；锚点人群与 read_all 恒 READER，manage_all 恒 MANAGER
         createdBy:
           type: [string, 'null']
           format: uuid
@@ -8830,13 +8834,13 @@ components:
           $ref: '#/components/schemas/KnowledgeBaseVisibilityScope'
           description: 归属范围；未提供的锚点字段保持现值
         departmentId:
-          type: string
+          type: [string, 'null']
           format: uuid
-          description: 归属部门，必须属于当前租户；仅 DEPARTMENT 时使用
+          description: 归属部门，必须属于当前租户；仅 DEPARTMENT 时使用，传 null 清除锚点
         projectId:
-          type: string
+          type: [string, 'null']
           format: uuid
-          description: 归属项目，必须属于当前租户；仅 PROJECT 时使用
+          description: 归属项目，必须属于当前租户；仅 PROJECT 时使用，传 null 清除锚点
         version:
           type: integer
           minimum: 1

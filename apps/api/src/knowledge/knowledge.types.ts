@@ -16,6 +16,8 @@ export interface KnowledgeBaseResult {
     departmentId: string | null;
     projectId: string | null;
     memberCount: number;
+    /** 当前用户对该库的成员等级（锚点人群/read_all 恒 READER，manage_all 恒 MANAGER）；页面据此控制编辑与成员管理入口。 */
+    myPermission: KnowledgeBaseMemberPermission;
     createdBy: string | null;
     updatedBy: string | null;
     version: number;
