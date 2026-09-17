@@ -377,7 +377,7 @@ export default function KnowledgeManagement({ authContext, onSessionExpired }: K
         >
             <div className="form-grid">
                 <label><span>{t('知识库名称')}</span><Input value={formValues.name} maxLength={200} onChange={(event) => setFormValues({ ...formValues, name: event.target.value })} placeholder={t('请输入知识库名称')} /></label>
-                <label><span>{t('描述')}</span><Input.TextArea rows={3} value={formValues.description} maxLength={1000} onChange={(event) => setFormValues({ ...formValues, description: event.target.value })} placeholder={t('简要说明知识库用途')} /></label>
+                <label><span>{t('描述')}</span><Input.TextArea rows={3} value={formValues.description} maxLength={2000} onChange={(event) => setFormValues({ ...formValues, description: event.target.value })} placeholder={t('简要说明知识库用途')} /></label>
                 <label><span>{t('归属范围')}</span><Select<KnowledgeBaseVisibilityScope>
                     value={formValues.visibilityScope}
                     options={Object.entries(scopeLabels).map(([value, label]) => ({ value: value as KnowledgeBaseVisibilityScope, label: t(label) }))}

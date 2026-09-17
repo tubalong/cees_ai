@@ -2,7 +2,7 @@
 
 > 状态：第一至五阶段已落地（知识库与成员管理、文档上传与处理状态机、公开知识库查询、对话数据转知识库、权限收敛与归属锚点+知识管理页面）
 > 最后同步：2026-09-17
-> 公开契约版本：`0.27.0`
+> 公开契约版本：`0.28.0`
 
 ## 1. 阶段范围
 
@@ -45,6 +45,13 @@
 - 检索优先：开关开启时，人员/团队/项目/制度等内部信息类问题必须先检索知识库再回答，不得未检索就声称没有信息或反问用户；
 - 来源锚定字段、部分唯一索引与迁移落于 `20260916094414_add_knowledge_document_source_anchor`。
 
+第五阶段落地权限收敛与归属锚点、知识管理页面：
+
+- 权限码收敛为五码（`knowledge_base.create`/`read`/`read_all`/`query`/`manage_all`），删除与库内成员等级重叠的 `update`/`delete`/`member.manage`/`document.manage` 旧码，旧码持有者不降权（写操作深度改由库内成员等级驱动）；迁移 `20260917064450_converge_knowledge_base_permissions`；
+- 知识库归属锚点：`visibilityScope`（PRIVATE/DEPARTMENT/PROJECT/TENANT）+ `departmentId`/`projectId` 二选一互斥，锚点人群（部门树成员/项目成员/全员）动态计算为虚拟 `READER`（不物化成员行，只覆盖库级浏览）；创建/修改校验归属属于当前租户（`KNOWLEDGE_BASE_SCOPE_INVALID`）；迁移 `20260917065945_knowledge_base_visibility_scope`；
+- 公开知识库响应增加 `myPermission` 标注当前用户成员等级（`manage_all` 恒 MANAGER、成员等级优先、其余恒 READER），前端据此控制编辑/成员管理入口；
+- 桌面端「知识管理」页面：库列表与搜索、创建/修改（含归属表单：部门树/项目选择）、删除、成员管理（添加/改级/移除，创建者保留 MANAGER 不可降级移除）；页面入口按 `knowledge_base.read`、创建按 `knowledge_base.create`、编辑与成员管理按 `myPermission` 为 MANAGER（或 `manage_all`）。
+
 ## 2. 知识库可见范围
 
 所有查询都自动使用当前 JWT 中的 `tenantId`，客户端不能提交租户 ID 来改变数据范围：
@@ -86,7 +93,7 @@
 | `POST /knowledge-bases/{knowledgeBaseId}/documents` | 关联文件对象或转存来源（附件/AI 生成文档/对话消息）创建文档，进入处理队列 | `knowledge_base.read` + EDITOR |
 | `POST /knowledge-bases/{knowledgeBaseId}/documents/{documentId}/versions` | 上传新版本，重新进入处理队列 | `knowledge_base.read` + EDITOR |
 | `POST /knowledge-bases/{knowledgeBaseId}/documents/{documentId}/retry` | 重试处理失败的文档 | `knowledge_base.read` + EDITOR |
-| `POST /knowledge-bases/{knowledgeBaseId}/query` | 按知识库内容回答问题，返回带引用的答案 | `knowledge_base.query` + 知识库可见范围 |
+| `POST /knowledge-bases/{knowledgeBaseId}/query` | 按知识库内容回答问题，返回带引用的答案 | `knowledge_base.query` + 知识库成员（锚点人群虚拟 READER 不覆盖 AI 问答） |
 
 权限码（租户级开关）收敛为五码：`knowledge_base.create`（创建）、`knowledge_base.read`（查看自己可访问的知识库，所有写操作的基础门槛）、`knowledge_base.query`（知识库问答的 AI 额度）、`knowledge_base.read_all`（只读查看当前租户全部知识库）与 `knowledge_base.manage_all`（读写管理当前租户全部知识库）。写操作的深度由库内成员等级校验（对象级）：编辑资料/成员管理要求 `MANAGER`，文档写入要求 `EDITOR`。
 
@@ -179,7 +186,7 @@ KnowledgeBase
 
 `KnowledgeBaseMember` 以 `tenantId + knowledgeBaseId + userId` 保证成员关系唯一。知识库删除采用软删除；成员关系当前没有 `deletedAt` 字段，移除采用硬删除。
 
-数据库迁移为 `apps/api/prisma/migrations/0015_knowledge_base_management/migration.sql`（第一阶段）、`0026_knowledge_document_indexing/migration.sql`（第二阶段：处理状态机字段、可见范围下沉 `DocumentVersion`、删除 `DocumentChunk.embedding`）、`0028_knowledge_query_api/migration.sql`（第三阶段：知识库锚点字段、成员权限枚举、`KnowledgeQueryLog` 扩展）、`20260916084227_assistant_knowledge_tool`（Assistant RAG 工具接入：对话级知识库开关字段）与 `20260916094414_add_knowledge_document_source_anchor`（第四阶段：来源锚定字段与部分唯一索引）。
+数据库迁移为 `apps/api/prisma/migrations/0015_knowledge_base_management/migration.sql`（第一阶段）、`0026_knowledge_document_indexing/migration.sql`（第二阶段：处理状态机字段、可见范围下沉 `DocumentVersion`、删除 `DocumentChunk.embedding`）、`0028_knowledge_query_api/migration.sql`（第三阶段：知识库锚点字段、成员权限枚举、`KnowledgeQueryLog` 扩展）、`20260916084227_assistant_knowledge_tool`（Assistant RAG 工具接入：对话级知识库开关字段）、`20260916094414_add_knowledge_document_source_anchor`（第四阶段：来源锚定字段与部分唯一索引）、`20260917064450_converge_knowledge_base_permissions`（第五阶段：权限码收敛为五码）与 `20260917065945_knowledge_base_visibility_scope`（第五阶段：库级归属锚点字段）。
 
 ## 7. 后续阶段
 

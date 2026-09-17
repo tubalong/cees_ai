@@ -1,9 +1,9 @@
 # 知识库 RAG（MinerU + LlamaIndex）
 
-> 状态：分块实施中。块 1（本文档与内部契约 `index`/`retrieve`）、块 2（ai-service 内存闭环 + HTTP 路由）、块 3（NestJS 文档状态机与上传触发索引）、块 4（真实 pgvector Gateway + `index/delete`）、块 5（公开 Query API + `answer` 契约与引用校验 + 索引删除 NestJS 接线）、块 7a（解析器格式分流 + pgvector HNSW 索引）、块 7b（Assistant RAG 工具接入：`knowledge_search` 工具 + 对话级知识库开关 + 权限折叠检索）已落地，其余按第 8 节分块计划推进。
-> 最后同步：2026-09-16
+> 状态：分块实施中。块 1（本文档与内部契约 `index`/`retrieve`）、块 2（ai-service 内存闭环 + HTTP 路由）、块 3（NestJS 文档状态机与上传触发索引）、块 4（真实 pgvector Gateway + `index/delete`）、块 5（公开 Query API + `answer` 契约与引用校验 + 索引删除 NestJS 接线）、块 6（MinerU 真机联调验收）、块 7a（解析器格式分流 + pgvector HNSW 索引）、块 7b（Assistant RAG 工具接入：`knowledge_search` 工具 + 对话级知识库开关 + 权限折叠检索）、块 7c（对话数据转知识库：双层入口 + 助手工具）、块 8（知识库归属锚点管理与自动授权 + 权限码收敛 + 知识管理页面）已落地；块 7d（助手人设功能告知）部分落地，按第 8 节分块计划推进。
+> 最后同步：2026-09-17
 > 内部契约版本：`0.5.0`
-> 公开契约版本：`0.25.0`（公开知识库查询 API）
+> 公开契约版本：`0.28.0`（公开知识库管理/查询 API）
 
 ## 1. 目标与边界
 
@@ -76,11 +76,8 @@ NestJS API   = 业务事实、权限、状态与审计层（apps/api）
 
 缺失：
 
-- 知识库归属锚点管理 API 与自动授权（3.6 节权限边界已定，块 8 实现）；当前锚点字段只存在于数据库，公开契约与 API 均不暴露
 - MinerU 真机联调已在测试环境（192.168.5.29）完成端到端验收（块 6）；生产环境以 Docker 容器方式部署 MinerU 并换用大规模 GPU 硬件
-- Assistant RAG 工具已接入（块 7b 落地，见第 7 节）：desktop composer 的"知识库"勾选结构化传参 `knowledgeBaseEnabled`，后端据此暴露/放行 `knowledge_search` 工具
-- 对话数据转知识库未实现（块 7）
-- 助手人设未包含知识库功能告知与交流层边界（3.9 节，块 7d）
+- 助手人设未包含知识库功能告知话术与诱导提问对抗用例（3.9 节，块 7d 剩余部分；语言约束与内部标识脱敏已提前落地）
 
 ## 3. 关键决策
 
