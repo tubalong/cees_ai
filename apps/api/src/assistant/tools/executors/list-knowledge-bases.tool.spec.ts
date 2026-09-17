@@ -27,7 +27,7 @@ describe('ListKnowledgeBasesTool', () => {
         expect(definition?.validate({})).toEqual({});
     });
 
-    it('returns candidate knowledge bases with ids for the follow-up tool call', async () => {
+    it('returns visible knowledge bases with permission labels for the follow-up tool call', async () => {
         knowledgeService.listKnowledgeBasesForAssistant.mockResolvedValue([
             {
                 id: 'kb-1',
@@ -40,6 +40,20 @@ describe('ListKnowledgeBasesTool', () => {
                 version: 1,
                 createdAt: new Date(),
                 updatedAt: new Date(),
+                myPermission: 'EDITOR',
+            },
+            {
+                id: 'kb-2',
+                tenantId: 't-1',
+                name: '公司制度库',
+                description: null,
+                memberCount: 8,
+                createdBy: null,
+                updatedBy: null,
+                version: 1,
+                createdAt: new Date(),
+                updatedAt: new Date(),
+                myPermission: 'READER',
             },
         ]);
         const result = await definition!.execute({
@@ -64,16 +78,18 @@ describe('ListKnowledgeBasesTool', () => {
         expect(result.resourceType).toBeNull();
         expect(result.resourceId).toBeNull();
         const summary = JSON.parse(result.summary) as {
-            candidates: { knowledge_base_id: string; name: string }[];
+            candidates: { knowledge_base_id: string; name: string; my_permission: string }[];
             instruction: string;
         };
         expect(summary.candidates).toEqual([
-            expect.objectContaining({ knowledge_base_id: 'kb-1', name: '产品知识库' }),
+            expect.objectContaining({ knowledge_base_id: 'kb-1', name: '产品知识库', my_permission: 'EDITOR' }),
+            expect.objectContaining({ knowledge_base_id: 'kb-2', name: '公司制度库', my_permission: 'READER' }),
         ]);
         expect(summary.instruction).toContain('save_to_knowledge');
+        expect(summary.instruction).toContain('READER');
     });
 
-    it('instructs the model to stop when there is no writable knowledge base', async () => {
+    it('instructs the model to stop when the user is not a member of any knowledge base', async () => {
         knowledgeService.listKnowledgeBasesForAssistant.mockResolvedValue([]);
         const result = await definition!.execute({
             tenantId: 't-1',
@@ -91,6 +107,6 @@ describe('ListKnowledgeBasesTool', () => {
 
         const summary = JSON.parse(result.summary) as { candidates: unknown[]; instruction: string };
         expect(summary.candidates).toEqual([]);
-        expect(summary.instruction).toContain('没有可写入的知识库');
+        expect(summary.instruction).toContain('不在任何知识库的成员列表中');
     });
 });

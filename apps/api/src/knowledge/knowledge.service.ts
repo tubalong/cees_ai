@@ -25,6 +25,7 @@ import {
 import { KnowledgeIndexingService, readIndexVersions } from './knowledge-indexing.service';
 import {
     KNOWLEDGE_BASE_MEMBER_PERMISSIONS,
+    AssistantKnowledgeBaseCandidate,
     AssistantKnowledgeSearchResult,
     KnowledgeBaseMemberListResult,
     KnowledgeBaseMemberPermission,
@@ -136,29 +137,53 @@ export class KnowledgeService {
     }
 
     /**
-     * 助手候选库列表（转存目标库选择，块 7c）：只返回当前用户达到 EDITOR 成员权限的知识库；
+     * 助手可见库清单（回答“我有哪些知识库”与转存目标库选择，块 7c）：返回当前用户
+     * 可见（任意成员等级，含 READER）的全部知识库，并标注每个库的成员权限；
      * 工具在后台执行，TenantContext 已不可用，因此身份与权限全部显式传入。
      */
     async listKnowledgeBasesForAssistant(input: {
         tenantId: string;
         userId: string;
         permissions: string[];
-    }): Promise<KnowledgeBaseResult[]> {
-        const visibleIds = input.permissions.includes('knowledge_base.manage_all')
-            ? undefined
-            : await this.listKnowledgeBaseIdsWithPermission(input.tenantId, input.userId, 'EDITOR');
-        if (visibleIds && visibleIds.length === 0) return [];
+    }): Promise<AssistantKnowledgeBaseCandidate[]> {
+        // manage_all 短路为租户全部未删除库，等效拥有最高权限。
+        if (input.permissions.includes('knowledge_base.manage_all')) {
+            const records = await this.prisma.knowledgeBase.findMany({
+                where: { tenantId: input.tenantId, deletedAt: null },
+                select: knowledgeBaseSelect,
+                orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+                take: 100,
+            });
+            return Promise.all(records.map(async (record) => ({
+                ...(await this.toKnowledgeBaseResult(record)),
+                myPermission: 'MANAGER' as KnowledgeBaseMemberPermission,
+            })));
+        }
+        const memberships = await this.prisma.knowledgeBaseMember.findMany({
+            where: { tenantId: input.tenantId, userId: input.userId },
+            select: { knowledgeBaseId: true, permission: true },
+        });
+        if (memberships.length === 0) return [];
+        const permissionByKnowledgeBaseId = new Map(
+            memberships.map((membership) => [
+                membership.knowledgeBaseId,
+                normalizeMemberPermission(membership.permission),
+            ]),
+        );
         const records = await this.prisma.knowledgeBase.findMany({
             where: {
                 tenantId: input.tenantId,
                 deletedAt: null,
-                id: visibleIds ? { in: visibleIds } : undefined,
+                id: { in: [...permissionByKnowledgeBaseId.keys()] },
             },
             select: knowledgeBaseSelect,
             orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
             take: 100,
         });
-        return Promise.all(records.map((record) => this.toKnowledgeBaseResult(record)));
+        return Promise.all(records.map(async (record) => ({
+            ...(await this.toKnowledgeBaseResult(record)),
+            myPermission: permissionByKnowledgeBaseId.get(record.id) ?? 'READER',
+        })));
     }
 
     async createKnowledgeBase(input: CreateKnowledgeBaseDto): Promise<KnowledgeBaseResult> {

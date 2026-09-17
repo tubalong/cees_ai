@@ -84,13 +84,16 @@ describe('KnowledgeService', () => {
         expect(result.items).toHaveLength(1);
     });
 
-    it('lists candidate knowledge bases for the assistant with EDITOR permission filtering', async () => {
+    it('lists all visible knowledge bases for the assistant with permission labels', async () => {
         const prisma = createPrismaMock();
         prisma.knowledgeBaseMember.findMany.mockResolvedValue([
             { knowledgeBaseId: KNOWLEDGE_BASE_ID, permission: 'EDITOR' },
             { knowledgeBaseId: OTHER_KNOWLEDGE_BASE_ID, permission: 'READER' },
         ]);
-        prisma.knowledgeBase.findMany.mockResolvedValue([knowledgeBaseRecord()]);
+        prisma.knowledgeBase.findMany.mockResolvedValue([
+            knowledgeBaseRecord(),
+            knowledgeBaseRecord({ id: OTHER_KNOWLEDGE_BASE_ID, name: '公司制度库' }),
+        ]);
         prisma.knowledgeBaseMember.count.mockResolvedValue(1);
         const service = createService(prisma, ['knowledge_base.read']);
 
@@ -101,10 +104,45 @@ describe('KnowledgeService', () => {
         });
 
         expect(prisma.knowledgeBase.findMany).toHaveBeenCalledWith(expect.objectContaining({
-            where: expect.objectContaining({ id: { in: [KNOWLEDGE_BASE_ID] } }),
+            where: expect.objectContaining({
+                id: { in: [KNOWLEDGE_BASE_ID, OTHER_KNOWLEDGE_BASE_ID] },
+            }),
             take: 100,
         }));
-        expect(result).toHaveLength(1);
+        expect(result).toHaveLength(2);
+        expect(result[0]).toEqual(expect.objectContaining({ id: KNOWLEDGE_BASE_ID, myPermission: 'EDITOR' }));
+        expect(result[1]).toEqual(expect.objectContaining({ id: OTHER_KNOWLEDGE_BASE_ID, myPermission: 'READER' }));
+    });
+
+    it('returns no candidates when the user is not a member of any knowledge base', async () => {
+        const prisma = createPrismaMock();
+        prisma.knowledgeBaseMember.findMany.mockResolvedValue([]);
+        const service = createService(prisma, ['knowledge_base.read']);
+
+        const result = await service.listKnowledgeBasesForAssistant({
+            tenantId: TENANT_ID,
+            userId: USER_ID,
+            permissions: ['knowledge_base.read'],
+        });
+
+        expect(result).toEqual([]);
+        expect(prisma.knowledgeBase.findMany).not.toHaveBeenCalled();
+    });
+
+    it('labels every candidate MANAGER for the assistant when manage_all shortcuts', async () => {
+        const prisma = createPrismaMock();
+        prisma.knowledgeBase.findMany.mockResolvedValue([knowledgeBaseRecord()]);
+        prisma.knowledgeBaseMember.count.mockResolvedValue(1);
+        const service = createService(prisma, ['knowledge_base.manage_all']);
+
+        const result = await service.listKnowledgeBasesForAssistant({
+            tenantId: TENANT_ID,
+            userId: USER_ID,
+            permissions: ['knowledge_base.manage_all'],
+        });
+
+        expect(prisma.knowledgeBaseMember.findMany).not.toHaveBeenCalled();
+        expect(result).toEqual([expect.objectContaining({ id: KNOWLEDGE_BASE_ID, myPermission: 'MANAGER' })]);
     });
 
     it('rejects an update with a stale version', async () => {

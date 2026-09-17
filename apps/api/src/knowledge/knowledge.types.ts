@@ -21,6 +21,12 @@ export interface KnowledgeBaseListResult {
     nextCursor: string | null;
 }
 
+/** 助手可见库清单项（块 7c）：可见知识库 + 当前用户的成员权限标注。 */
+export interface AssistantKnowledgeBaseCandidate extends KnowledgeBaseResult {
+    /** 当前用户对该库的成员权限；manage_all 权限短路时统一标为 MANAGER。 */
+    myPermission: KnowledgeBaseMemberPermission;
+}
+
 export interface KnowledgeBaseMemberResult {
     id: string;
     tenantId: string;
