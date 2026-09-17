@@ -1204,6 +1204,7 @@ model HrLeaveRequest {
   startAt       DateTime             @map("start_at")
   endAt         DateTime             @map("end_at")
   durationDays  Decimal              @map("duration_days") @db.Decimal(10, 2)
+  yearAllocations Json?              @map("year_allocations")
   reason        String?
   status        HrLeaveRequestStatus @default(DRAFT)
   reviewedBy    String?              @map("reviewed_by") @db.Uuid

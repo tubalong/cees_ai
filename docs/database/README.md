@@ -8,7 +8,7 @@
 通知中心与后台任务见 [通知中心与后台任务](../product/notification-center.md)。
 工作台与数据看板见 [工作台与数据看板](../product/dashboard-workbench.md)。
 
-> 新环境使用 `prisma migrate deploy` 执行全部已提交迁移（包含 `0035_c_hr_offboarding_sensitive_fields`）；全部迁移完成后与当前 `schema.prisma` 保持一致。
+> 新环境使用 `prisma migrate deploy` 执行全部已提交迁移（包含 `0036_c_hr_leave_integrity`）；全部迁移完成后与当前 `schema.prisma` 保持一致。
 
 - `apps/api/prisma/schema.prisma` 是数据模型唯一事实源，迁移提交 `prisma/migrations`。
 - 新建表和字段必须在同一迁移中使用 `COMMENT ON TABLE`、`COMMENT ON COLUMN` 添加 PostgreSQL 注释；`0003_organization_departments_and_database_comments` 已补齐此前全部业务表和字段注释。
@@ -30,6 +30,7 @@ TenantMembership ── HrEmployeeChange
 
 - `0032_c_hr_fullstack` 创建员工档案、假期类型、假期余额、请假申请、考勤记录、加班申请和人事异动表；
 - `0035_c_hr_offboarding_sensitive_fields` 不新增业务字段，注册员工档案敏感字段读写权限；离职审批复用 `tenant_memberships.status` 与 `auth_sessions.revoked_at` 完成主体停用和会话撤销；
+- `0036_c_hr_leave_integrity` 为 `hr_leave_requests` 增加 `year_allocations` JSONB 列，保存按租户本地年度拆分的额度占用；请假时长改由服务端折算，`duration_days` 语义不变但不再采信客户端传值；
 - 员工档案与成员一对一；活跃工号、假期类型编码、年度余额和每日考勤使用唯一索引约束；
 - 各表保留 `tenant_id`、审计创建/更新人、软删除和 `version` 乐观锁字段；
 - HR 聚合报表不创建快照表，直接读取正式业务事实并应用当前角色数据范围。

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CEES AI API
-  version: 0.29.0
+  version: 0.30.0
   description: 以本文件为唯一事实源的公开 API 契约。资源与操作按 docs/api 约定补充。
 
 servers:
@@ -5421,7 +5421,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/HrProfileResponseEnvelope' }
-        '400': { description: 请求字段校验失败 }
+        '400': { description: 请求字段校验失败；status=TERMINATED 或 leaveDate 必须通过人事异动写入（HR_PROFILE_TERMINATION_REQUIRES_CHANGE、HR_PROFILE_LEAVE_DATE_REQUIRES_CHANGE） }
         '401': { description: 登录状态无效或已过期 }
         '403': { description: 缺少 hr.profile.manage 权限或数据范围不足；提交敏感字段时还需 hr.profile.sensitive.manage 权限 }
         '404': { description: 员工档案不存在 }
@@ -5527,9 +5527,10 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/HrLeaveRequestResponseEnvelope' }
-        '400': { description: 请求字段校验失败 }
+        '400': { description: 请求字段校验失败；折算时长过短返回 HR_LEAVE_DURATION_TOO_SHORT，durationDays 与服务端按申请时间折算的结果不一致时返回 HR_LEAVE_DURATION_MISMATCH }
         '401': { description: 登录状态无效或已过期 }
         '403': { description: 缺少 hr.leave.request 权限 }
+        '409': { description: 与本人待审批或已批准的请假时间重叠（HR_LEAVE_REQUEST_OVERLAP）、对应年度余额记录缺失（HR_LEAVE_BALANCE_NOT_FOUND）或可用余额不足（HR_LEAVE_BALANCE_INSUFFICIENT） }
 
   /hr/leave-requests/{leaveRequestId}/review:
     parameters:
@@ -5556,7 +5557,7 @@ paths:
               schema: { $ref: '#/components/schemas/HrLeaveRequestResponseEnvelope' }
         '400': { description: 请求字段校验失败 }
         '401': { description: 登录状态无效或已过期 }
-        '403': { description: 缺少 hr.leave.approve 权限或数据范围不足 }
+        '403': { description: 缺少 hr.leave.approve 权限或数据范围不足；不能审批本人申请（HR_SELF_REVIEW_FORBIDDEN） }
         '404': { description: 请假申请不存在 }
         '409': { description: 请假申请状态或版本冲突 }
   /hr/leave-types/{leaveTypeId}:
@@ -5849,7 +5850,7 @@ paths:
               schema: { $ref: '#/components/schemas/HrAttendanceRecordResponseEnvelope' }
         '400': { description: 请求字段校验失败 }
         '401': { description: 登录状态无效或已过期 }
-        '403': { description: 缺少 hr.attendance.approve 权限或数据范围不足 }
+        '403': { description: 缺少 hr.attendance.approve 权限或数据范围不足；不能审批本人考勤（HR_SELF_REVIEW_FORBIDDEN） }
         '404': { description: 考勤记录不存在 }
         '409': { description: 考勤记录状态或版本冲突 }
 
@@ -5976,7 +5977,7 @@ paths:
               schema: { $ref: '#/components/schemas/HrOvertimeRequestResponseEnvelope' }
         '400': { description: 请求字段校验失败 }
         '401': { description: 登录状态无效或已过期 }
-        '403': { description: 缺少 hr.overtime.approve 权限或数据范围不足 }
+        '403': { description: 缺少 hr.overtime.approve 权限或数据范围不足；不能审批本人加班申请（HR_SELF_REVIEW_FORBIDDEN） }
         '404': { description: 加班申请不存在 }
         '409': { description: 加班申请状态或版本冲突 }
 
@@ -6106,7 +6107,7 @@ paths:
               schema: { $ref: '#/components/schemas/HrEmployeeChangeResponseEnvelope' }
         '400': { description: 请求字段校验失败 }
         '401': { description: 登录状态无效或已过期 }
-        '403': { description: 缺少 hr.employee_change.approve 权限或数据范围不足 }
+        '403': { description: 缺少 hr.employee_change.approve 权限或数据范围不足；不能审批本人人事异动（HR_SELF_REVIEW_FORBIDDEN） }
         '404': { description: 人事异动不存在 }
         '409': { description: 人事异动状态或版本冲突 }
 
@@ -7157,7 +7158,7 @@ components:
         employmentType: { type: [string, 'null'], maxLength: 32 }
         managerMembershipId: { type: [string, 'null'], format: uuid }
         entryDate: { type: [string, 'null'], format: date }
-        leaveDate: { type: [string, 'null'], format: date }
+        leaveDate: { type: [string, 'null'], format: date, description: 离职日期，由离职或解除人事异动写入 }
         phone: { type: [string, 'null'], maxLength: 64, description: 敏感字段；无 hr.profile.sensitive.read 时返回脱敏值 }
         email: { type: [string, 'null'], maxLength: 120, description: 敏感字段；无 hr.profile.sensitive.read 时返回脱敏值 }
         idType: { type: [string, 'null'], maxLength: 32, description: 敏感字段；无 hr.profile.sensitive.read 时返回脱敏值 }
@@ -7197,7 +7198,7 @@ components:
         employmentType: { type: [string, 'null'], maxLength: 32 }
         managerMembershipId: { type: [string, 'null'], format: uuid }
         entryDate: { type: [string, 'null'], format: date }
-        leaveDate: { type: [string, 'null'], format: date }
+        leaveDate: { type: [string, 'null'], format: date, description: 仅由人事异动写入；请求中携带时返回 400 HR_PROFILE_LEAVE_DATE_REQUIRES_CHANGE }
         phone: { type: [string, 'null'], maxLength: 64 }
         email: { type: [string, 'null'], maxLength: 120 }
         idType: { type: [string, 'null'], maxLength: 32 }
@@ -7222,7 +7223,7 @@ components:
         employmentType: { type: [string, 'null'], maxLength: 32 }
         managerMembershipId: { type: [string, 'null'], format: uuid }
         entryDate: { type: [string, 'null'], format: date }
-        leaveDate: { type: [string, 'null'], format: date }
+        leaveDate: { type: [string, 'null'], format: date, description: 仅由人事异动写入；请求中携带时返回 400 HR_PROFILE_LEAVE_DATE_REQUIRES_CHANGE }
         phone: { type: [string, 'null'], maxLength: 64 }
         email: { type: [string, 'null'], maxLength: 120 }
         idType: { type: [string, 'null'], maxLength: 32 }
@@ -7235,7 +7236,7 @@ components:
         probationEndDate: { type: [string, 'null'], format: date }
         regularDate: { type: [string, 'null'], format: date }
         workLocation: { type: [string, 'null'], maxLength: 160 }
-        status: { $ref: '#/components/schemas/HrProfileStatus' }
+        status: { allOf: [{ $ref: '#/components/schemas/HrProfileStatus' }], description: 不能设置为 TERMINATED（返回 400 HR_PROFILE_TERMINATION_REQUIRES_CHANGE）；离职与解除必须通过人事异动审批 }
         version: { type: integer, minimum: 1 }
 
     HrLeaveUnit:
@@ -7333,6 +7334,7 @@ components:
 
     HrLeaveRequest:
       type: object
+      description: 请假申请。durationDays 由服务端按申请时间与假期单位折算，yearAllocations 为按租户本地年度拆分的额度占用明细。
       required:
         - id
         - tenantId
@@ -7353,6 +7355,10 @@ components:
         startAt: { type: string, format: date-time }
         endAt: { type: string, format: date-time }
         durationDays: { type: number, minimum: 0 }
+        yearAllocations:
+          type: array
+          items: { $ref: '#/components/schemas/HrLeaveYearAllocation' }
+          description: 按租户本地年度拆分的额度占用；跨年度申请会占用多个年度余额
         reason: { type: [string, 'null'], maxLength: 2000 }
         status: { $ref: '#/components/schemas/HrLeaveRequestStatus' }
         reviewedBy: { type: [string, 'null'], format: uuid }
@@ -7373,14 +7379,22 @@ components:
 
     CreateHrLeaveRequestRequest:
       type: object
+      description: 创建请假申请。durationDays 为可选一致性校验值，服务端按申请时间与假期单位折算后以服务端结果为准。
       additionalProperties: false
-      required: [leaveTypeId, startAt, endAt, durationDays]
+      required: [leaveTypeId, startAt, endAt]
       properties:
         leaveTypeId: { type: string, format: uuid }
         startAt: { type: string, format: date-time }
         endAt: { type: string, format: date-time }
-        durationDays: { type: number, minimum: 0 }
+        durationDays: { type: number, minimum: 0, description: 可选；与服务端折算结果不一致时返回 400 HR_LEAVE_DURATION_MISMATCH }
         reason: { type: [string, 'null'], maxLength: 2000 }
+
+    HrLeaveYearAllocation:
+      type: object
+      required: [year, days]
+      properties:
+        year: { type: integer, minimum: 2000, maximum: 2100 }
+        days: { type: number, minimum: 0 }
 
     ReviewHrLeaveRequestRequest:
       type: object

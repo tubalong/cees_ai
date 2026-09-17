@@ -153,7 +153,7 @@ export class HrService {
             body: requestBody,
             mediaType: 'application/json',
             errors: {
-                400: `请求字段校验失败`,
+                400: `请求字段校验失败；status=TERMINATED 或 leaveDate 必须通过人事异动写入（HR_PROFILE_TERMINATION_REQUIRES_CHANGE、HR_PROFILE_LEAVE_DATE_REQUIRES_CHANGE）`,
                 401: `登录状态无效或已过期`,
                 403: `缺少 hr.profile.manage 权限或数据范围不足；提交敏感字段时还需 hr.profile.sensitive.manage 权限`,
                 404: `员工档案不存在`,
@@ -271,9 +271,10 @@ export class HrService {
             body: requestBody,
             mediaType: 'application/json',
             errors: {
-                400: `请求字段校验失败`,
+                400: `请求字段校验失败；折算时长过短返回 HR_LEAVE_DURATION_TOO_SHORT，durationDays 与服务端按申请时间折算的结果不一致时返回 HR_LEAVE_DURATION_MISMATCH`,
                 401: `登录状态无效或已过期`,
                 403: `缺少 hr.leave.request 权限`,
+                409: `与本人待审批或已批准的请假时间重叠（HR_LEAVE_REQUEST_OVERLAP）、对应年度余额记录缺失（HR_LEAVE_BALANCE_NOT_FOUND）或可用余额不足（HR_LEAVE_BALANCE_INSUFFICIENT）`,
             },
         });
     }
@@ -303,7 +304,7 @@ export class HrService {
             errors: {
                 400: `请求字段校验失败`,
                 401: `登录状态无效或已过期`,
-                403: `缺少 hr.leave.approve 权限或数据范围不足`,
+                403: `缺少 hr.leave.approve 权限或数据范围不足；不能审批本人申请（HR_SELF_REVIEW_FORBIDDEN）`,
                 404: `请假申请不存在`,
                 409: `请假申请状态或版本冲突`,
             },
@@ -652,7 +653,7 @@ export class HrService {
             errors: {
                 400: `请求字段校验失败`,
                 401: `登录状态无效或已过期`,
-                403: `缺少 hr.attendance.approve 权限或数据范围不足`,
+                403: `缺少 hr.attendance.approve 权限或数据范围不足；不能审批本人考勤（HR_SELF_REVIEW_FORBIDDEN）`,
                 404: `考勤记录不存在`,
                 409: `考勤记录状态或版本冲突`,
             },
@@ -795,7 +796,7 @@ export class HrService {
             errors: {
                 400: `请求字段校验失败`,
                 401: `登录状态无效或已过期`,
-                403: `缺少 hr.overtime.approve 权限或数据范围不足`,
+                403: `缺少 hr.overtime.approve 权限或数据范围不足；不能审批本人加班申请（HR_SELF_REVIEW_FORBIDDEN）`,
                 404: `加班申请不存在`,
                 409: `加班申请状态或版本冲突`,
             },
@@ -941,7 +942,7 @@ export class HrService {
             errors: {
                 400: `请求字段校验失败`,
                 401: `登录状态无效或已过期`,
-                403: `缺少 hr.employee_change.approve 权限或数据范围不足`,
+                403: `缺少 hr.employee_change.approve 权限或数据范围不足；不能审批本人人事异动（HR_SELF_REVIEW_FORBIDDEN）`,
                 404: `人事异动不存在`,
                 409: `人事异动状态或版本冲突`,
             },

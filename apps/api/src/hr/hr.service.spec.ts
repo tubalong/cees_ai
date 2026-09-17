@@ -178,6 +178,112 @@ describe('HrService', () => {
         expect(prisma.tenantMembership.updateMany).not.toHaveBeenCalled();
         expect(prisma.authSession.updateMany).not.toHaveBeenCalled();
     });
+
+    it('derives the leave duration on the server and rejects a mismatching client value', async () => {
+        const prisma = createPrismaMock();
+        prisma.hrLeaveType.findFirst.mockResolvedValue({ id: LEAVE_TYPE_ID, enabled: true, unit: HrLeaveUnit.DAY });
+        const service = createService(prisma, ['hr.leave.request']);
+
+        await expect(service.createLeaveRequest({
+            leaveTypeId: LEAVE_TYPE_ID,
+            startAt: '2026-09-21T01:00:00.000Z',
+            endAt: '2026-09-22T09:00:00.000Z',
+            durationDays: 0.5,
+        })).rejects.toMatchObject({
+            response: expect.objectContaining({ code: 'HR_LEAVE_DURATION_MISMATCH' }),
+        });
+        expect(prisma.hrLeaveRequest.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects a sub-minute hourly leave request that rounds down to zero days', async () => {
+        const prisma = createPrismaMock();
+        prisma.hrLeaveType.findFirst.mockResolvedValue({ id: LEAVE_TYPE_ID, enabled: true, unit: HrLeaveUnit.HOUR });
+        const service = createService(prisma, ['hr.leave.request']);
+
+        await expect(service.createLeaveRequest({
+            leaveTypeId: LEAVE_TYPE_ID,
+            startAt: '2026-09-21T01:00:00.000Z',
+            endAt: '2026-09-21T01:00:30.000Z',
+        })).rejects.toMatchObject({
+            response: expect.objectContaining({ code: 'HR_LEAVE_DURATION_TOO_SHORT' }),
+        });
+        expect(prisma.hrLeaveRequest.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects a leave request overlapping an existing submitted request', async () => {
+        const prisma = createPrismaMock();
+        prisma.hrLeaveType.findFirst.mockResolvedValue({ id: LEAVE_TYPE_ID, enabled: true, unit: HrLeaveUnit.DAY });
+        prisma.hrLeaveRequest.findFirst.mockResolvedValue({ id: REQUEST_ID });
+        const service = createService(prisma, ['hr.leave.request']);
+
+        await expect(service.createLeaveRequest({
+            leaveTypeId: LEAVE_TYPE_ID,
+            startAt: '2026-09-21T01:00:00.000Z',
+            endAt: '2026-09-22T09:00:00.000Z',
+        })).rejects.toMatchObject({
+            response: expect.objectContaining({ code: 'HR_LEAVE_REQUEST_OVERLAP' }),
+        });
+        expect(prisma.hrLeaveRequest.create).not.toHaveBeenCalled();
+    });
+
+    it('splits a cross-year leave request across both years and reserves each year', async () => {
+        const prisma = createPrismaMock();
+        prisma.hrLeaveType.findFirst.mockResolvedValue({ id: LEAVE_TYPE_ID, enabled: true, unit: HrLeaveUnit.DAY });
+        prisma.hrLeaveBalance.findFirst.mockResolvedValue(balanceRecord({ remainingDays: 10 }));
+        prisma.hrLeaveRequest.create.mockImplementation(async ({ data }: Record<string, any>) =>
+            leaveRequestRecord({ ...data, id: REQUEST_ID }));
+        const service = createService(prisma, ['hr.leave.request']);
+
+        const result = await service.createLeaveRequest({
+            leaveTypeId: LEAVE_TYPE_ID,
+            startAt: '2026-12-28T00:00:00.000Z',
+            endAt: '2027-01-05T00:00:00.000Z',
+        });
+
+        expect(result.durationDays).toBe(9);
+        expect(result.yearAllocations).toEqual([{ year: 2026, days: 4 }, { year: 2027, days: 5 }]);
+        expect(prisma.hrLeaveRequest.create).toHaveBeenCalledWith(expect.objectContaining({
+            data: expect.objectContaining({ yearAllocations: [{ year: 2026, days: 4 }, { year: 2027, days: 5 }] }),
+        }));
+        expect(prisma.hrLeaveBalance.update).toHaveBeenCalledTimes(2);
+    });
+
+    it('prevents reviewing your own leave request', async () => {
+        const prisma = createPrismaMock();
+        prisma.hrLeaveRequest.findFirst.mockResolvedValue(leaveRequestRecord({ membershipId: MEMBERSHIP_ID }));
+        const service = createService(prisma, ['hr.leave.approve']);
+
+        await expect(service.reviewLeaveRequest(REQUEST_ID, { decision: 'APPROVE', version: 1 }))
+            .rejects.toMatchObject({ response: expect.objectContaining({ code: 'HR_SELF_REVIEW_FORBIDDEN' }) });
+        expect(prisma.hrLeaveBalance.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects profile status and leave date edits that bypass employee changes', async () => {
+        const prisma = createPrismaMock();
+        const service = createService(prisma, ['hr.profile.manage']);
+
+        await expect(service.updateProfile(MEMBERSHIP_ID, { status: HrProfileStatus.TERMINATED, version: 1 }))
+            .rejects.toMatchObject({ response: expect.objectContaining({ code: 'HR_PROFILE_TERMINATION_REQUIRES_CHANGE' }) });
+        await expect(service.updateProfile(MEMBERSHIP_ID, { leaveDate: '2026-09-30', version: 1 }))
+            .rejects.toMatchObject({ response: expect.objectContaining({ code: 'HR_PROFILE_LEAVE_DATE_REQUIRES_CHANGE' }) });
+        expect(prisma.hrProfile.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('syncs the tenant membership department when the profile department changes', async () => {
+        const prisma = createPrismaMock();
+        prisma.hrProfile.findFirst.mockResolvedValue(profileRecord());
+        prisma.hrProfile.updateMany.mockResolvedValue({ count: 1 });
+        prisma.hrProfile.findFirstOrThrow.mockResolvedValue(profileRecord({ departmentId: DEPARTMENT_ID, version: 2 }));
+        prisma.department.findFirst.mockResolvedValue({ id: DEPARTMENT_ID });
+        prisma.tenantMembership.findMany.mockResolvedValue([]);
+        const service = createService(prisma, ['hr.profile.manage', 'department.member.assign']);
+
+        await service.updateProfile(MEMBERSHIP_ID, { departmentId: DEPARTMENT_ID, version: 1 });
+
+        expect(prisma.tenantMembership.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+            data: expect.objectContaining({ departmentId: DEPARTMENT_ID }),
+        }));
+    });
 });
 
 const TENANT_ID = '10000000-0000-0000-0000-000000000001';
@@ -188,6 +294,8 @@ const BALANCE_ID = '70000000-0000-0000-0000-000000000001';
 const REQUEST_ID = '80000000-0000-0000-0000-000000000001';
 const OFFBOARDED_MEMBERSHIP_ID = '50000000-0000-0000-0000-000000000002';
 const EMPLOYEE_CHANGE_ID = '90000000-0000-0000-0000-000000000001';
+const REQUESTER_MEMBERSHIP_ID = '50000000-0000-0000-0000-000000000003';
+const DEPARTMENT_ID = '40000000-0000-0000-0000-000000000001';
 
 function createService(prisma: Record<string, any>, permissions: string[] = []): HrService {
     const tenantContext = { require: jest.fn().mockReturnValue({
@@ -205,7 +313,9 @@ function createPrismaMock(): Record<string, any> {
         hrLeaveRequest: { findFirst: jest.fn(), create: jest.fn(), updateMany: jest.fn(), findUniqueOrThrow: jest.fn() },
         hrProfile: { findFirst: jest.fn(), updateMany: jest.fn(), findFirstOrThrow: jest.fn() },
         hrEmployeeChange: { findFirst: jest.fn(), updateMany: jest.fn(), findUniqueOrThrow: jest.fn() },
-        tenantMembership: { findFirst: jest.fn(), updateMany: jest.fn(), count: jest.fn() },
+        tenantMembership: { findFirst: jest.fn(), findMany: jest.fn(), updateMany: jest.fn(), count: jest.fn() },
+        tenant: { findFirst: jest.fn() },
+        department: { findFirst: jest.fn() },
         authSession: { updateMany: jest.fn() },
         auditLog: { create: jest.fn() },
         $transaction: jest.fn(),
@@ -221,7 +331,7 @@ function balanceRecord(overrides: Record<string, unknown> = {}): Record<string, 
 }
 
 function leaveRequestRecord(overrides: Record<string, unknown> = {}): Record<string, unknown> {
-    return { id: REQUEST_ID, tenantId: TENANT_ID, membershipId: MEMBERSHIP_ID, leaveTypeId: LEAVE_TYPE_ID,
+    return { id: REQUEST_ID, tenantId: TENANT_ID, membershipId: REQUESTER_MEMBERSHIP_ID, leaveTypeId: LEAVE_TYPE_ID,
         startAt: new Date('2026-09-21T01:00:00.000Z'), endAt: new Date('2026-09-22T09:00:00.000Z'),
         durationDays: 2, reason: '年假', status: HrLeaveRequestStatus.SUBMITTED, reviewedBy: null, reviewedAt: null,
         reviewComment: null, version: 1, createdAt: new Date('2026-09-17T00:00:00.000Z'), updatedAt: new Date('2026-09-17T00:00:00.000Z'), ...overrides };

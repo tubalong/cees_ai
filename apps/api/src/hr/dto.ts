@@ -118,7 +118,8 @@ export class CreateHrLeaveRequestDto {
     @IsUUID() leaveTypeId!: string;
     @IsDateString() startAt!: string;
     @IsDateString() endAt!: string;
-    @IsNumber() @Min(0.01) durationDays!: number;
+    /** 可选一致性校验值；服务端按申请时间与假期单位折算后以服务端结果为准。 */
+    @IsOptional() @IsNumber() @Min(0.01) durationDays?: number;
     @IsOptional() @IsString() @MaxLength(2000) reason?: string | null;
 }
 
