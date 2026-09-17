@@ -13,7 +13,7 @@ DELETE /knowledge-bases/{knowledgeBaseId}?version={version}
 POST   /knowledge-bases/{knowledgeBaseId}/query
 ```
 
-创建知识库时，当前登录用户自动获得 `MANAGER`。列表普通成员只返回自己加入的知识库；`knowledge_base.manage_all` 可以查询当前租户全部知识库。`permission` 可选，传入 `READER`/`EDITOR`/`MANAGER` 时只返回当前用户达到该成员权限的知识库（转存目标库选择用）。
+创建知识库时，当前登录用户自动获得 `MANAGER`。列表普通成员只返回自己加入的知识库；`knowledge_base.manage_all`（读写全部）或 `knowledge_base.read_all`（只读全部）可以查询当前租户全部知识库。`permission` 可选，传入 `READER`/`EDITOR`/`MANAGER` 时只返回当前用户达到该成员权限的知识库（转存目标库选择用）。
 
 ## 知识库成员
 
