@@ -6,12 +6,14 @@ import type { ToolDefinition, ToolExecutionContext, ToolExecutionResult } from '
 const SOURCE_TYPES = ['FILE_OBJECT', 'DOCUMENT', 'MESSAGE'] as const;
 const VISIBILITY_VALUES = ['PRIVATE', 'DEPARTMENT', 'PROJECT', 'TENANT'] as const;
 const MAX_NAME_LENGTH = 200;
+const MAX_CONTENT_LENGTH = 20000;
 
 /**
- * save_to_knowledge 工具执行器（块 7c）：把对话中已存在的资源（附件 / AI 生成文档 /
- * 对话消息）转存到用户确认的目标知识库。只做参数校验与业务调用；权限、循环、批准与
- * 额度由 ToolRegistry/ToolPolicy 统一处理，禁止在执行器内重复实现。
+ * save_to_knowledge 工具执行器（块 7c）：把对话资源（附件 / AI 生成文档 / 对话消息）
+ * 或模型整理好的内容文本存入用户确认的目标知识库。只做参数校验与业务调用；权限、循环、
+ * 批准与额度由 ToolRegistry/ToolPolicy 统一处理，禁止在执行器内重复实现。
  * 三条红线写入描述：无明确存储意图不调用、只引用真实资源 ID、目标库由后端校验 EDITOR。
+ * 用户口述要保存的内容（并非已存在的资源）时，模型整理为文本走 content 直存路径。
  */
 @Injectable()
 export class SaveToKnowledgeTool implements OnModuleInit {
@@ -28,8 +30,9 @@ export class SaveToKnowledgeTool implements OnModuleInit {
         name: 'save_to_knowledge',
         version: '1.0.0',
         displayName: '存入知识库',
-        description: '把用户指定的对话资源（附件文件、AI 生成文档或对话消息）存入用户指定的知识库。'
-            + '仅在用户明确表达保存/存入/收录意图时调用；sourceType 与 sourceId 必须引用已存在的真实资源；'
+        description: '把用户指定的对话资源（附件文件、AI 生成文档或对话消息）或模型整理好的内容文本存入用户指定的知识库。'
+            + '仅在用户明确表达保存/存入/收录意图时调用；引用已存在资源时用 sourceType 与 sourceId，必须引用真实存在的资源；'
+            + '用户口述要保存的内容（不是已存在的资源）时，把内容整理为纯文本通过 content 参数直接存入；'
             + '目标知识库须经用户确认（可先用 list_knowledge_bases 列出候选库），绝不替用户挑选。',
         parameters: {
             type: 'object',
@@ -37,11 +40,15 @@ export class SaveToKnowledgeTool implements OnModuleInit {
                 sourceType: {
                     type: 'string',
                     enum: [...SOURCE_TYPES],
-                    description: '来源类型：FILE_OBJECT 附件文件，DOCUMENT AI 生成文档，MESSAGE 对话消息',
+                    description: '来源类型：FILE_OBJECT 附件文件，DOCUMENT AI 生成文档，MESSAGE 对话消息；与 sourceId 成对使用，不能与 content 同时提供',
                 },
                 sourceId: {
                     type: 'string',
                     description: '来源资源 ID（附件文件 ID / 生成文档 ID / 对话消息 ID），必须引用已存在的资源',
+                },
+                content: {
+                    type: 'string',
+                    description: '要保存的内容文本：用户口述内容或你整理好的内容；与 sourceType/sourceId 二选一，不能同时提供',
                 },
                 knowledgeBaseId: {
                     type: 'string',
@@ -65,7 +72,7 @@ export class SaveToKnowledgeTool implements OnModuleInit {
                     description: '可见范围为 PROJECT 时必填的项目 ID',
                 },
             },
-            required: ['sourceType', 'sourceId', 'knowledgeBaseId'],
+            required: ['knowledgeBaseId'],
             additionalProperties: false,
         },
         requiredPermissions: ['knowledge_base.document.manage'],
@@ -78,7 +85,7 @@ export class SaveToKnowledgeTool implements OnModuleInit {
         context: ToolExecutionContext,
         input: Record<string, unknown>,
     ): Promise<ToolExecutionResult> {
-        const document = await this.knowledgeDocumentService.saveFromSource({
+        const actor = {
             tenantId: context.tenantId,
             userId: context.userId,
             membershipId: context.membershipId,
@@ -86,15 +93,25 @@ export class SaveToKnowledgeTool implements OnModuleInit {
             requestId: context.requestId,
             // 工具红线：MESSAGE 来源必须属于当前会话，不允许跨会话引用。
             conversationId: context.conversationId,
-        }, {
-            knowledgeBaseId: input.knowledgeBaseId as string,
-            sourceType: input.sourceType as (typeof SOURCE_TYPES)[number],
-            sourceId: input.sourceId as string,
-            name: input.name as string | undefined,
-            visibilityScope: input.visibilityScope as (typeof VISIBILITY_VALUES)[number],
-            departmentId: input.departmentId as string | undefined,
-            projectId: input.projectId as string | undefined,
-        });
+        };
+        const document = typeof input.content === 'string'
+            ? await this.knowledgeDocumentService.saveDirectContent(actor, {
+                knowledgeBaseId: input.knowledgeBaseId as string,
+                content: input.content,
+                name: input.name as string | undefined,
+                visibilityScope: input.visibilityScope as (typeof VISIBILITY_VALUES)[number],
+                departmentId: input.departmentId as string | undefined,
+                projectId: input.projectId as string | undefined,
+            })
+            : await this.knowledgeDocumentService.saveFromSource(actor, {
+                knowledgeBaseId: input.knowledgeBaseId as string,
+                sourceType: input.sourceType as (typeof SOURCE_TYPES)[number],
+                sourceId: input.sourceId as string,
+                name: input.name as string | undefined,
+                visibilityScope: input.visibilityScope as (typeof VISIBILITY_VALUES)[number],
+                departmentId: input.departmentId as string | undefined,
+                projectId: input.projectId as string | undefined,
+            });
         return {
             resourceType: null,
             resourceId: null,
@@ -112,20 +129,35 @@ function validateSaveToKnowledgeArguments(input: unknown): Record<string, unknow
     }
     const raw = input as Record<string, unknown>;
 
-    if (!SOURCE_TYPES.includes(raw.sourceType as (typeof SOURCE_TYPES)[number])) {
-        throw new Error(`sourceType 必须是 ${SOURCE_TYPES.join('/')} 之一`);
-    }
-    if (typeof raw.sourceId !== 'string' || raw.sourceId.trim().length === 0) {
-        throw new Error('sourceId 必须是非空字符串');
-    }
     if (typeof raw.knowledgeBaseId !== 'string' || raw.knowledgeBaseId.trim().length === 0) {
         throw new Error('knowledgeBaseId 必须是非空字符串');
     }
+    const hasSourceType = raw.sourceType !== undefined && raw.sourceType !== null;
+    const hasSourceId = typeof raw.sourceId === 'string' && raw.sourceId.trim().length > 0;
+    const hasContent = typeof raw.content === 'string' && raw.content.trim().length > 0;
+    // 两条路径二选一：引用已存在资源（sourceType+sourceId），或直存整理后的内容文本。
+    if (hasSourceType !== hasSourceId) {
+        throw new Error('sourceType 与 sourceId 必须成对提供');
+    }
+    if (hasSourceType === hasContent) {
+        throw new Error('sourceType/sourceId 与 content 必须且只能提供一组');
+    }
     const parsed: Record<string, unknown> = {
-        sourceType: raw.sourceType,
-        sourceId: raw.sourceId.trim(),
         knowledgeBaseId: raw.knowledgeBaseId.trim(),
     };
+    if (hasSourceType) {
+        if (!SOURCE_TYPES.includes(raw.sourceType as (typeof SOURCE_TYPES)[number])) {
+            throw new Error(`sourceType 必须是 ${SOURCE_TYPES.join('/')} 之一`);
+        }
+        parsed.sourceType = raw.sourceType;
+        parsed.sourceId = (raw.sourceId as string).trim();
+    } else {
+        const content = (raw.content as string).trim();
+        if (content.length > MAX_CONTENT_LENGTH) {
+            throw new Error(`content 不能超过 ${MAX_CONTENT_LENGTH} 字符`);
+        }
+        parsed.content = content;
+    }
 
     if (raw.name !== undefined && raw.name !== null) {
         if (typeof raw.name !== 'string' || raw.name.trim().length === 0) {

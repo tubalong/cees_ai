@@ -251,6 +251,93 @@ export class KnowledgeDocumentService {
         }
     }
 
+    /**
+     * 助手内容直存（块 7c 扩展）：把模型整理好的内容文本（用户口述 / AI 整理）直接
+     * 物化为知识库文档，不锚定来源资源，每次直存都是新文档。写入门槛同为 EDITOR，
+     * 身份上下文显式传入，工具后台执行可用。
+     */
+    async saveDirectContent(
+        actor: KnowledgeSourceSaveActor,
+        input: {
+            knowledgeBaseId: string;
+            content: string;
+            name?: string;
+            visibilityScope: KnowledgeDocumentVisibilityScope;
+            departmentId?: string | null;
+            projectId?: string | null;
+        },
+    ): Promise<KnowledgeDocumentResult> {
+        await this.knowledgeService.assertKnowledgeBaseMemberPermission({
+            tenantId: actor.tenantId,
+            userId: actor.userId,
+            permissions: actor.permissions,
+            knowledgeBaseId: input.knowledgeBaseId,
+            minimumPermission: 'EDITOR',
+        });
+        const scope = await this.resolveVisibilityScope(
+            actor.tenantId,
+            input.visibilityScope,
+            input.departmentId,
+            input.projectId,
+        );
+        const name = input.name?.trim() || `对话内容 ${formatSnapshotTime(new Date())}`;
+        const fileObjectId = await this.fileService.createMaterializedFile({
+            tenantId: actor.tenantId,
+            userId: actor.userId,
+            membershipId: actor.membershipId,
+            requestId: actor.requestId,
+            name: `${sanitizeFileName(name)}.md`,
+            mimeType: 'text/markdown',
+            content: Buffer.from(input.content, 'utf8'),
+        });
+        try {
+            const documentId = await this.prisma.$transaction(async (transaction) => {
+                const created = await transaction.knowledgeDocument.create({
+                    data: {
+                        tenantId: actor.tenantId,
+                        knowledgeBaseId: input.knowledgeBaseId,
+                        fileObjectId,
+                        name,
+                        createdBy: actor.userId,
+                        updatedBy: actor.userId,
+                    },
+                    select: { id: true },
+                });
+                const version = await transaction.documentVersion.create({
+                    data: {
+                        tenantId: actor.tenantId,
+                        documentId: created.id,
+                        fileObjectId,
+                        versionNumber: 1,
+                        visibilityScope: scope.visibilityScope,
+                        departmentId: scope.departmentId,
+                        projectId: scope.projectId,
+                        createdBy: actor.userId,
+                    },
+                    select: { id: true },
+                });
+                await transaction.knowledgeDocument.update({
+                    where: { id: created.id },
+                    data: { currentVersionId: version.id },
+                });
+                await this.writeAudit(transaction, actor, 'KNOWLEDGE_DOCUMENT_CREATED', created.id, {
+                    knowledgeBaseId: input.knowledgeBaseId,
+                    name,
+                    fileObjectId,
+                    documentVersionId: version.id,
+                    visibilityScope: scope.visibilityScope,
+                    directContent: true,
+                });
+                return created.id;
+            });
+            void this.indexingService.kick();
+            return this.requireDocumentAsActor(actor, input.knowledgeBaseId, documentId);
+        } catch (error) {
+            if (isUniqueConstraintError(error)) throw this.fileObjectInUse();
+            throw error;
+        }
+    }
+
     /** 解析来源为物化快照：FILE_OBJECT 直接复用，DOCUMENT/MESSAGE 物化文本快照到 COS。 */
     private async resolveSourceSnapshot(
         actor: KnowledgeSourceSaveActor,

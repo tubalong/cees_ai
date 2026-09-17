@@ -719,6 +719,83 @@ describe('KnowledgeDocumentService.saveFromSource', () => {
         expect(prisma.knowledgeBase.findFirst).not.toHaveBeenCalled();
     });
 
+    it('creates an unanchored document from direct assistant content and kicks the indexer', async () => {
+        const prisma = createPrismaMock();
+        prisma.knowledgeBase.findFirst.mockResolvedValue(knowledgeBaseRecord());
+        prisma.knowledgeBaseMember.findUnique.mockResolvedValue({ permission: 'EDITOR' });
+        prisma.knowledgeDocument.findFirst.mockResolvedValue(documentRecord({ status: 'PENDING' }));
+        createMaterializedFileSpy.mockResolvedValue(NEW_FILE_OBJECT_ID);
+        prisma.knowledgeDocument.create.mockResolvedValue({ id: DOCUMENT_ID });
+        prisma.documentVersion.create.mockResolvedValue({ id: VERSION_ID });
+        prisma.knowledgeDocument.update.mockResolvedValue(undefined);
+        prisma.documentVersion.findFirst.mockResolvedValue({
+            versionNumber: 1,
+            visibilityScope: 'PRIVATE',
+            departmentId: null,
+            projectId: null,
+        });
+        const service = createService(prisma);
+        const actor: KnowledgeSourceSaveActor = {
+            tenantId: TENANT_ID,
+            userId: USER_ID,
+            membershipId: MEMBERSHIP_ID,
+            permissions: ['knowledge_base.document.manage'],
+            requestId: 'request-id',
+        };
+
+        const result = await service.saveDirectContent(actor, {
+            knowledgeBaseId: KNOWLEDGE_BASE_ID,
+            content: '林波是图巴隆公司的超级管理员。',
+            visibilityScope: 'PRIVATE',
+        });
+
+        expect(createMaterializedFileSpy).toHaveBeenCalledWith(expect.objectContaining({
+            tenantId: TENANT_ID,
+            mimeType: 'text/markdown',
+            content: expect.any(Buffer),
+        }));
+        expect(prisma.knowledgeDocument.create).toHaveBeenCalledWith({
+            data: expect.objectContaining({
+                tenantId: TENANT_ID,
+                knowledgeBaseId: KNOWLEDGE_BASE_ID,
+                fileObjectId: NEW_FILE_OBJECT_ID,
+            }),
+            select: { id: true },
+        });
+        expect(prisma.auditLog.create).toHaveBeenCalledWith({
+            data: expect.objectContaining({
+                action: 'KNOWLEDGE_DOCUMENT_CREATED',
+                metadata: expect.objectContaining({ directContent: true }),
+            }),
+        });
+        expect(kickSpy).toHaveBeenCalled();
+        expect(result).toEqual(expect.objectContaining({ id: DOCUMENT_ID, status: 'PENDING', versionNumber: 1 }));
+    });
+
+    it('rejects direct content saving when the member permission is below EDITOR', async () => {
+        const prisma = createPrismaMock();
+        prisma.knowledgeBase.findFirst.mockResolvedValue(knowledgeBaseRecord());
+        prisma.knowledgeBaseMember.findUnique.mockResolvedValue({ permission: 'READER' });
+        createMaterializedFileSpy.mockClear();
+        const service = createService(prisma);
+        const actor: KnowledgeSourceSaveActor = {
+            tenantId: TENANT_ID,
+            userId: USER_ID,
+            membershipId: MEMBERSHIP_ID,
+            permissions: ['knowledge_base.document.manage'],
+            requestId: 'request-id',
+        };
+
+        await expect(service.saveDirectContent(actor, {
+            knowledgeBaseId: KNOWLEDGE_BASE_ID,
+            content: '林波是图巴隆公司的超级管理员。',
+            visibilityScope: 'PRIVATE',
+        })).rejects.toMatchObject({
+            response: expect.objectContaining({ code: 'KNOWLEDGE_BASE_MEMBER_PERMISSION_DENIED' }),
+        });
+        expect(createMaterializedFileSpy).not.toHaveBeenCalled();
+    });
+
     it('rejects createDocument input with only one source field', async () => {
         const prisma = createPrismaMock();
         const service = createService(prisma);
