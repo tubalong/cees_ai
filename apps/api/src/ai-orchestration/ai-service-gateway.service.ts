@@ -13,6 +13,8 @@ import {
   invokeChat as requestChatInvocation,
   invokeLlm,
   renderDocumentDocx as requestRenderDocumentDocx,
+  renderDocumentPdf as requestRenderDocumentPdf,
+  renderDocumentPptx as requestRenderDocumentPptx,
   streamChat as requestChatStream,
   streamChatToolTurn as requestToolTurnStream,
   type ChatInvokeResponse,
@@ -40,6 +42,8 @@ import {
   type KnowledgeIndexRequest,
   type KnowledgeIndexResponse,
   type RenderDocxRequest,
+  type RenderPdfRequest,
+  type RenderPptxRequest,
   type StreamExecutionMetadata,
   type TokenUsage,
   type ToolTurnRequest,
@@ -376,6 +380,28 @@ export class AiServiceGateway {
    */
   async renderDocumentDocx(input: RenderDocxRequest): Promise<Buffer> {
     const result = await requestRenderDocumentDocx({ client: this.getClient(), body: input });
+    if (result.error) throw this.toInvocationError(result.error, result.response?.status);
+    if (!result.data) throw this.emptyResponseError();
+    return Buffer.from(await result.data.arrayBuffer());
+  }
+
+  /**
+   * 调用 ai-service 文档 PDF 渲染路由：PdfRenderer 对结构化 DocumentSpec 做
+   * 确定性渲染（内嵌 CJK 字体），不调用 LLM、不产生 Token 指标，返回 PDF 字节。
+   */
+  async renderDocumentPdf(input: RenderPdfRequest): Promise<Buffer> {
+    const result = await requestRenderDocumentPdf({ client: this.getClient(), body: input });
+    if (result.error) throw this.toInvocationError(result.error, result.response?.status);
+    if (!result.data) throw this.emptyResponseError();
+    return Buffer.from(await result.data.arrayBuffer());
+  }
+
+  /**
+   * 调用 ai-service 文档 PPTX 渲染路由：PptxRenderer 对结构化 PptxSpec 做
+   * 确定性渲染，不调用 LLM、不产生 Token 指标，返回 PPTX 字节。
+   */
+  async renderDocumentPptx(input: RenderPptxRequest): Promise<Buffer> {
+    const result = await requestRenderDocumentPptx({ client: this.getClient(), body: input });
     if (result.error) throw this.toInvocationError(result.error, result.response?.status);
     if (!result.data) throw this.emptyResponseError();
     return Buffer.from(await result.data.arrayBuffer());
