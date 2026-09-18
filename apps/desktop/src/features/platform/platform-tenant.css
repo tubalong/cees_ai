@@ -45,9 +45,9 @@
     height: 42px;
     display: grid;
     place-items: center;
-    color: #565cf6;
+    color: var(--primary);
     border-radius: 8px;
-    background: #eef0ff;
+    background: var(--primary-soft);
     font-size: 21px;
     font-style: normal;
 }

@@ -53,7 +53,7 @@
 }
 
 .platform-account>.anticon {
-    color: #565cf6;
+    color: var(--primary);
     font-size: 20px;
 }
 
@@ -106,9 +106,9 @@
     height: 40px;
     display: grid;
     place-items: center;
-    color: #565cf6;
+    color: var(--primary);
     border-radius: 7px;
-    background: #eef0ff;
+    background: var(--primary-soft);
     font-size: 20px;
     font-style: normal;
 }
@@ -183,9 +183,9 @@
     height: 28px;
     display: grid;
     place-items: center;
-    color: #565cf6;
+    color: var(--primary);
     border-radius: 6px;
-    background: #eef0ff;
+    background: var(--primary-soft);
     font-style: normal;
 }
 

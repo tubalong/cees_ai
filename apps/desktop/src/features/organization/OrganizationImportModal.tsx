@@ -143,7 +143,7 @@ export default function OrganizationImportModal({ open, tenantCode, onClose, onI
             const departmentRows = readImportSheet(departmentSheet, ['部门路径']);
             const memberRows = readImportSheet(memberSheet, ['姓名', '部门路径']);
             if (!departmentRows.length) {
-                message.error(t('部门 Sheet 中没有找到包含「部门路径」的表头')); 
+                message.error(t('部门 Sheet 中没有找到包含「部门路径」的表头'));
                 return;
             }
             if (!memberRows.length) {
@@ -368,9 +368,9 @@ export default function OrganizationImportModal({ open, tenantCode, onClose, onI
                     <Upload accept=".xlsx" showUploadList={false} beforeUpload={(file) => { void handleFile(file); return false; }}>
                         <Button icon={<UploadOutlined />} loading={parsing}>{t('上传填写后的 Excel')}</Button>
                     </Upload>
-                    {fileName && <small style={{ color: 'var(--cees-muted)' }}>{fileName}</small>}
+                    {fileName && <small style={{ color: 'var(--muted)' }}>{fileName}</small>}
                 </div>
-                <small style={{ color: 'var(--cees-muted)' }}>{t('模板包含「部门」和「人员」两个 Sheet；部门路径用 / 分隔层级，人员登录账号留空时自动按拼音生成建议')}</small>
+                <small style={{ color: 'var(--muted)' }}>{t('模板包含「部门」和「人员」两个 Sheet；部门路径用 / 分隔层级，人员登录账号留空时自动按拼音生成建议')}</small>
 
                 {members.length > 0 && <>
                     <div className="form-grid">
@@ -420,14 +420,14 @@ export default function OrganizationImportModal({ open, tenantCode, onClose, onI
                                 },
                             ]}
                         />
-                        {Object.keys(suggestedAccounts).length > 0 && <small style={{ color: 'var(--cees-muted)' }}>{t('账号列为自动生成的拼音建议，可直接修改')}</small>}
+                        {Object.keys(suggestedAccounts).length > 0 && <small style={{ color: 'var(--muted)' }}>{t('账号列为自动生成的拼音建议，可直接修改')}</small>}
                     </section>
                     {issueMessages.length > 0 && <Alert type="error" showIcon icon={<ExclamationCircleOutlined />} message={t('校验问题')} description={<ul style={{ margin: 0, paddingLeft: 18 }}>{issueMessages.map((item) => <li key={item}>{item}</li>)}</ul>} />}
                     <div className="task-toolbar">
                         <Button loading={validating} onClick={() => void runValidate()}>{t('校验数据')}</Button>
                         <Button type="primary" disabled={!validation?.valid} loading={confirming} onClick={() => void runConfirm()}>{t('确认导入')}</Button>
                         {validation && <Tag color={validation.valid ? 'success' : 'error'}>{validation.valid ? t('校验通过') : t('校验未通过')}</Tag>}
-                        {validation && <small style={{ color: 'var(--cees-muted)' }}>{t('新建部门 {create} · 复用 {reuse} · 成员 {member}', { create: validation.summary.departmentCreateCount, reuse: validation.summary.departmentReuseCount, member: validation.summary.memberCount })}</small>}
+                        {validation && <small style={{ color: 'var(--muted)' }}>{t('新建部门 {create} · 复用 {reuse} · 成员 {member}', { create: validation.summary.departmentCreateCount, reuse: validation.summary.departmentReuseCount, member: validation.summary.memberCount })}</small>}
                     </div>
                 </>}
                 {parsing && <div className="data-loading"><Spin /></div>}

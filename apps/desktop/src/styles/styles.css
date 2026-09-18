@@ -1,9 +1,38 @@
 @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap');
 
 :root {
-    color: #182230;
-    background: #f3f5f7;
+    /* 语义设计令牌（唯一来源） */
+    --workspace-bg: #f4f6f9;
+    --surface: #ffffff;
+    --surface-soft: #f8f9fb;
+    --line: #e8ebf1;
+    --text: #202432;
+    --muted: #858c9b;
+    --primary: #565cf6;
+    --primary-rgb: 86, 92, 246;
+    --primary-soft: #eef0ff;
+
+    /* 兼容别名：preferences 面板等历史用法，统一指向语义令牌 */
+    --app-background: var(--workspace-bg);
+    --app-surface: var(--surface);
+    --app-surface-soft: var(--surface-soft);
+    --app-border: var(--line);
+    --app-text: var(--text);
+    --app-muted: var(--muted);
+
+    color: var(--text);
+    background: var(--workspace-bg);
     font-family: "Manrope", "Noto Sans SC", sans-serif;
+}
+
+:root[data-theme='dark'] {
+    --workspace-bg: #111214;
+    --surface: #1a1b1f;
+    --surface-soft: #222328;
+    --line: #303238;
+    --text: #f2f3f5;
+    --muted: #a1a5ae;
+    --primary-soft: #292b4d;
 }
 
 * {
@@ -14,7 +43,7 @@ body {
     margin: 0;
     min-width: 320px;
     min-height: 100vh;
-    background: #f3f5f7;
+    background: var(--workspace-bg);
 }
 
 .session-loading {
@@ -33,7 +62,7 @@ body {
     align-items: center;
     gap: 10px;
     padding: 0 20px;
-    border-bottom: 1px solid #edf0f2;
+    border-bottom: 1px solid var(--line);
 }
 
 .brand-mark {
@@ -41,7 +70,7 @@ body {
     height: 30px;
     display: grid;
     place-items: center;
-    background: #1677ff;
+    background: var(--primary);
     color: white;
     font-weight: 600;
     border-radius: 6px;
@@ -54,7 +83,7 @@ body {
 }
 
 .brand small {
-    color: #7a8594;
+    color: var(--muted);
     font-size: 11px;
     margin-top: 1px;
 }

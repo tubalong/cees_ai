@@ -72,7 +72,7 @@ export default function NotificationCenter({ authContext, onSessionExpired, onUn
                 <Switch size="small" checked={unreadOnly} onChange={setUnreadOnly} />{t('仅看未读')}
             </label>
             <span style={{ flex: 1 }} />
-            <small style={{ color: 'var(--cees-muted)' }}>{t('未读 {count} 条', { count: unreadCount })}</small>
+            <small style={{ color: 'var(--muted)' }}>{t('未读 {count} 条', { count: unreadCount })}</small>
         </div>
         <section className="surface-panel">
             {notificationsQuery.isLoading ? <div className="data-loading"><Spin /></div> : notifications.length ? <div className="task-list">
@@ -80,8 +80,8 @@ export default function NotificationCenter({ authContext, onSessionExpired, onUn
                     <BellOutlined style={{ marginTop: 4 }} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                         <strong style={{ display: 'block' }}>{notification.title}</strong>
-                        {notification.content && <small style={{ display: 'block', color: 'var(--cees-muted)', marginTop: 2, whiteSpace: 'pre-wrap' }}>{notification.content}</small>}
-                        <small style={{ display: 'block', marginTop: 4, color: 'var(--cees-muted)' }}>
+                        {notification.content && <small style={{ display: 'block', color: 'var(--muted)', marginTop: 2, whiteSpace: 'pre-wrap' }}>{notification.content}</small>}
+                        <small style={{ display: 'block', marginTop: 4, color: 'var(--muted)' }}>
                             {notification.relationType && <Tag style={{ marginRight: 6 }}>{notification.relationType}</Tag>}
                             {notification.createdAt ? formatDate(notification.createdAt) : ''}
                         </small>

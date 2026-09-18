@@ -164,7 +164,7 @@ export default function WorkReportPage({ authContext, onSessionExpired }: WorkRe
                     <label><span>{t('报告类型')}</span><Select<WorkReportType> style={{ width: '100%' }} value={createForm.type} onChange={(value) => setCreateForm({ ...createForm, type: value })} options={Object.entries(reportTypeLabels).map(([value, label]) => ({ value: value as WorkReportType, label: t(label) }))} /></label>
                     <label><span>{t('周期开始日期')}</span><input type="date" value={createForm.periodStart} onChange={(event) => setCreateForm({ ...createForm, periodStart: event.target.value })} /></label>
                 </div>
-                {createForm.type === 'WEEKLY' && <small style={{ color: 'var(--cees-muted)' }}>{t('周报开始日期必须是周一，结束日期由服务端按该周周日计算')}</small>}
+                {createForm.type === 'WEEKLY' && <small style={{ color: 'var(--muted)' }}>{t('周报开始日期必须是周一，结束日期由服务端按该周周日计算')}</small>}
                 <label><span>{t('报告内容')}</span><Input.TextArea rows={8} value={createForm.content} onChange={(event) => setCreateForm({ ...createForm, content: event.target.value })} /></label>
             </div>
         </Modal>

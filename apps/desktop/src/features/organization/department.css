@@ -40,8 +40,8 @@
 
 .department-root.is-active,
 .department-node-row.is-active {
-    color: #565cf6;
-    background: #eef0ff;
+    color: var(--primary);
+    background: var(--primary-soft);
 }
 
 .department-root span,

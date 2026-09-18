@@ -39,8 +39,8 @@
 
 .role-list>button:hover,
 .role-list>button.is-active {
-    color: #565cf6;
-    background: #eef0ff;
+    color: var(--primary);
+    background: var(--primary-soft);
 }
 
 .role-list>button>i {
@@ -96,9 +96,9 @@
     height: 42px;
     display: grid;
     place-items: center;
-    color: #565cf6;
+    color: var(--primary);
     border-radius: 8px;
-    background: #eef0ff;
+    background: var(--primary-soft);
     font-size: 21px;
     font-style: normal;
 }
@@ -133,7 +133,7 @@
 }
 
 .role-summary-grid .anticon {
-    color: #565cf6;
+    color: var(--primary);
     font-size: 18px;
 }
 
@@ -172,7 +172,7 @@
 
 .permission-groups h4 {
     margin: 0 0 8px;
-    color: #565cf6;
+    color: var(--primary);
     font-size: 12px;
 }
 
