@@ -186,7 +186,7 @@
 }
 
 .assignment-resolve-result .assignment-summary-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .assignment-candidate-tags {

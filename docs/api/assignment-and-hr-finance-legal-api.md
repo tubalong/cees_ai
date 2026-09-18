@@ -2,7 +2,7 @@
 
 > 状态：AssignmentPolicy、HR、Finance 与 Legal 已实现；tasks.scope 仍为契约草案
 > Owner：C
-> 关联：[通用任务 tasks.scope 方案](../architecture/task-scope-proposal.md)、[人财法数据契约](../architecture/hr-finance-legal-data-contract.md)、[Legal 合同台账设计](../architecture/legal-contract-ledger.md)
+> 关联：[通用任务 tasks.scope 方案](../architecture/task-scope-proposal.md)、[分配策略请假可用性过滤](../architecture/assignment-leave-availability.md)、[人财法数据契约](../architecture/hr-finance-legal-data-contract.md)、[Legal 合同台账设计](../architecture/legal-contract-ledger.md)
 
 ## 1. 分配策略（已实现）
 
@@ -27,7 +27,8 @@ POST   /api/v1/assignment/policies/resolve
 - `level = PROJECT` 创建项目覆盖策略，必须传当前租户有效项目的 `projectId`。
 - `candidatePool` 支持 `membershipIds`、`departmentIds`、`projectIds`，服务端去重。
 - 同租户、同 `domain`、同 `level`、同 `projectId` 只允许一条活跃策略。
-- `skipOnLeave` 当前只保存策略规则，实际请假过滤在 P2 接入。
+- `skipOnLeave` 开启后，解析请求可传 `availabilityWindow.startAt/endAt`；服务端只过滤与该窗口重叠的 `APPROVED` 请假，返回 `skippedOnLeave` 和 `leaveFilterApplied`。未提供时间窗口时保持候选人兼容返回，不静默按“今天”过滤。
+- 候选池过滤后为空时，按 `fallbackMode` 扩展候选人，并对兜底候选人再次执行相同请假过滤；解析接口只返回候选结果，不创建或修改正式任务。
 - `fallbackMode` 为 `NONE`、`PROJECT_MEMBERS` 或 `TENANT_MEMBERS`。
 - `enabled` 默认为 `true`。
 - 修改接口支持局部更新，必须携带 `version` 做乐观锁。
@@ -41,7 +42,8 @@ POST   /api/v1/assignment/policies/resolve
 
 - `POST /assignment/policies/resolve` 只做候选池解析预览，不创建任务或写正式分配结果。
 - 请求体：`domain`、可选 `projectId`、可选 `context.sourceType/sourceId`。
-- 返回：`matchedPolicyId`、`domain`、`level`、`candidates`、`skippedOnLeave`、`fallbackMode`、`sourceTrace`、`resolvedAt`。
+- 返回：`matchedPolicyId`、`domain`、`level`、`candidates`、`skippedOnLeave`、`leaveFilterApplied`、`fallbackMode`、`sourceTrace`、`resolvedAt`。
+- `availabilityWindow` 是通用可用时间窗口，不绑定 D 的 Task 表；开始时间必须早于结束时间，非法窗口返回 `400 ASSIGNMENT_AVAILABILITY_WINDOW_INVALID`。
 - 解析顺序：项目覆盖策略优先，其次租户默认策略。
 - 候选池为空时按策略 `fallbackMode` 兜底。
 - 解析成功写 `ASSIGNMENT_POLICY_RESOLVED` 审计事件。

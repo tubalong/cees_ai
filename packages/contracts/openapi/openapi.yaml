@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CEES AI API
-  version: 0.30.0
+  version: 0.31.0
   description: 以本文件为唯一事实源的公开 API 契约。资源与操作按 docs/api 约定补充。
 
 servers:
@@ -5370,7 +5370,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/AssignmentPolicyResolveResponseEnvelope' }
-        '400': { description: 请求字段校验失败 }
+        '400': { description: 请求字段校验失败或可用时间窗口无效（ASSIGNMENT_AVAILABILITY_WINDOW_INVALID） }
         '401': { description: 登录状态无效或已过期 }
         '403': { description: 缺少 assignment.policy.read 权限 }
 
@@ -7131,6 +7131,14 @@ components:
         sourceType: { type: string, minLength: 1, maxLength: 64 }
         sourceId: { type: string, format: uuid }
 
+    AssignmentPolicyAvailabilityWindow:
+      type: object
+      additionalProperties: false
+      required: [startAt, endAt]
+      properties:
+        startAt: { type: string, format: date-time, description: 候选人需要保持可用的开始时间 }
+        endAt: { type: string, format: date-time, description: 候选人需要保持可用的结束时间，必须晚于 startAt }
+
     AssignmentPolicyResolveRequest:
       type: object
       additionalProperties: false
@@ -7139,6 +7147,7 @@ components:
         domain: { $ref: '#/components/schemas/AssignmentPolicyDomain' }
         projectId: { type: [string, 'null'], format: uuid }
         context: { $ref: '#/components/schemas/AssignmentPolicyResolveContext' }
+        availabilityWindow: { $ref: '#/components/schemas/AssignmentPolicyAvailabilityWindow' }
 
     AssignmentPolicySourceTrace:
       type: object
@@ -7157,6 +7166,7 @@ components:
         - level
         - candidates
         - skippedOnLeave
+        - leaveFilterApplied
         - fallbackMode
         - sourceTrace
         - resolvedAt
@@ -7172,6 +7182,7 @@ components:
           type: array
           uniqueItems: true
           items: { type: string, format: uuid }
+        leaveFilterApplied: { type: boolean, description: 是否实际使用 availabilityWindow 查询并过滤已批准请假 }
         fallbackMode: { $ref: '#/components/schemas/AssignmentPolicyFallbackMode' }
         sourceTrace: { $ref: '#/components/schemas/AssignmentPolicySourceTrace' }
         resolvedAt: { type: string, format: date-time }

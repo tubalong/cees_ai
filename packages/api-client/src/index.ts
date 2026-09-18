@@ -20,6 +20,7 @@ export type { ApiErrorDetail } from './models/ApiErrorDetail';
 export type { ApplyDingTalkMappingRequest } from './models/ApplyDingTalkMappingRequest';
 export type { AssignmentCandidatePool } from './models/AssignmentCandidatePool';
 export type { AssignmentPolicy } from './models/AssignmentPolicy';
+export type { AssignmentPolicyAvailabilityWindow } from './models/AssignmentPolicyAvailabilityWindow';
 export { AssignmentPolicyDomain } from './models/AssignmentPolicyDomain';
 export { AssignmentPolicyFallbackMode } from './models/AssignmentPolicyFallbackMode';
 export { AssignmentPolicyLevel } from './models/AssignmentPolicyLevel';

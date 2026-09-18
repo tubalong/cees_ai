@@ -41,6 +41,7 @@ export interface AssignmentPolicyResolveResult {
     level: AssignmentPolicyLevel;
     candidates: string[];
     skippedOnLeave: string[];
+    leaveFilterApplied: boolean;
     fallbackMode: AssignmentPolicyFallbackMode;
     sourceTrace: AssignmentPolicySourceTrace;
     resolvedAt: string;

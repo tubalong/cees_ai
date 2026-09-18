@@ -12,6 +12,10 @@ export type AssignmentPolicyResolveResult = {
     level: AssignmentPolicyLevel;
     candidates: Array<string>;
     skippedOnLeave: Array<string>;
+    /**
+     * 是否实际使用 availabilityWindow 查询并过滤已批准请假
+     */
+    leaveFilterApplied: boolean;
     fallbackMode: AssignmentPolicyFallbackMode;
     sourceTrace: AssignmentPolicySourceTrace;
     resolvedAt: string;

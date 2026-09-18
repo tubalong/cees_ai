@@ -172,7 +172,7 @@ export class AssignmentService {
             body: requestBody,
             mediaType: 'application/json',
             errors: {
-                400: `请求字段校验失败`,
+                400: `请求字段校验失败或可用时间窗口无效（ASSIGNMENT_AVAILABILITY_WINDOW_INVALID）`,
                 401: `登录状态无效或已过期`,
                 403: `缺少 assignment.policy.read 权限`,
             },

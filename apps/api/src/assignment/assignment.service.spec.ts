@@ -7,6 +7,7 @@ import {
     Prisma,
 } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
+import { HrAvailabilityService } from '../hr/hr-availability.service';
 import { TenantContext } from '../tenant/tenant-context';
 import { AssignmentService } from './assignment.service';
 import { CreateAssignmentPolicyDto, ResolveAssignmentPolicyDto, UpdateAssignmentPolicyDto } from './dto';
@@ -138,6 +139,73 @@ describe('AssignmentService', () => {
         expect(result.candidates).toEqual([MEMBERSHIP_ID, SECOND_MEMBERSHIP_ID]);
         expect(result.fallbackMode).toBe(AssignmentPolicyFallbackMode.TENANT_MEMBERS);
     });
+
+    it('filters candidates whose approved leave overlaps the availability window', async () => {
+        const prisma = createPrismaMock();
+        prisma.assignmentPolicy.findFirst.mockResolvedValue(policyRecord({
+            skipOnLeave: true,
+            candidatePool: { membershipIds: [MEMBERSHIP_ID, SECOND_MEMBERSHIP_ID], departmentIds: [], projectIds: [] },
+        }));
+        prisma.tenantMembership.findMany.mockResolvedValue([{ id: MEMBERSHIP_ID }, { id: SECOND_MEMBERSHIP_ID }]);
+        const availability = createAvailabilityMock();
+        availability.filterMembersOnApprovedLeave.mockResolvedValue({
+            availableMembershipIds: [SECOND_MEMBERSHIP_ID],
+            skippedMembershipIds: [MEMBERSHIP_ID],
+            applied: true,
+        });
+        const service = createService(prisma, availability);
+
+        const result = await service.resolvePolicy(resolveInput({
+            availabilityWindow: { startAt: '2026-09-21T01:00:00.000Z', endAt: '2026-09-21T09:00:00.000Z' },
+        }));
+
+        expect(result.candidates).toEqual([SECOND_MEMBERSHIP_ID]);
+        expect(result.skippedOnLeave).toEqual([MEMBERSHIP_ID]);
+        expect(result.leaveFilterApplied).toBe(true);
+        expect(availability.filterMembersOnApprovedLeave).toHaveBeenCalledWith(
+            TENANT_ID,
+            [MEMBERSHIP_ID, SECOND_MEMBERSHIP_ID],
+            { startAt: new Date('2026-09-21T01:00:00.000Z'), endAt: new Date('2026-09-21T09:00:00.000Z') },
+        );
+    });
+
+    it('filters fallback candidates again after the primary pool is unavailable', async () => {
+        const prisma = createPrismaMock();
+        prisma.assignmentPolicy.findFirst.mockResolvedValue(policyRecord({
+            skipOnLeave: true,
+            fallbackMode: AssignmentPolicyFallbackMode.TENANT_MEMBERS,
+        }));
+        prisma.tenantMembership.findMany
+            .mockResolvedValueOnce([{ id: MEMBERSHIP_ID }])
+            .mockResolvedValueOnce([{ id: MEMBERSHIP_ID }, { id: SECOND_MEMBERSHIP_ID }]);
+        const availability = createAvailabilityMock();
+        availability.filterMembersOnApprovedLeave
+            .mockResolvedValueOnce({ availableMembershipIds: [], skippedMembershipIds: [MEMBERSHIP_ID], applied: true })
+            .mockResolvedValueOnce({ availableMembershipIds: [SECOND_MEMBERSHIP_ID], skippedMembershipIds: [MEMBERSHIP_ID], applied: true });
+        const service = createService(prisma, availability);
+
+        const result = await service.resolvePolicy(resolveInput({
+            availabilityWindow: { startAt: '2026-09-21T01:00:00.000Z', endAt: '2026-09-21T09:00:00.000Z' },
+        }));
+
+        expect(result.candidates).toEqual([SECOND_MEMBERSHIP_ID]);
+        expect(result.skippedOnLeave).toEqual([MEMBERSHIP_ID]);
+        expect(availability.filterMembersOnApprovedLeave).toHaveBeenCalledTimes(2);
+    });
+
+    it('keeps compatibility when no availability window is provided', async () => {
+        const prisma = createPrismaMock();
+        prisma.assignmentPolicy.findFirst.mockResolvedValue(policyRecord({ skipOnLeave: true }));
+        prisma.tenantMembership.findMany.mockResolvedValue([{ id: MEMBERSHIP_ID }]);
+        const availability = createAvailabilityMock();
+        const service = createService(prisma, availability);
+
+        const result = await service.resolvePolicy(resolveInput());
+
+        expect(result.candidates).toEqual([MEMBERSHIP_ID]);
+        expect(result.skippedOnLeave).toEqual([]);
+        expect(result.leaveFilterApplied).toBe(false);
+    });
 });
 
 const TENANT_ID = '10000000-0000-0000-0000-000000000001';
@@ -149,7 +217,7 @@ const POLICY_ID = '40000000-0000-0000-0000-000000000001';
 const PROJECT_ID = '70000000-0000-0000-0000-000000000001';
 const DEPARTMENT_ID = '60000000-0000-0000-0000-000000000001';
 
-function createService(prisma: Record<string, any>): AssignmentService {
+function createService(prisma: Record<string, any>, availability = createAvailabilityMock()): AssignmentService {
     const tenantContext = {
         require: jest.fn().mockReturnValue({
             tenantId: TENANT_ID,
@@ -160,7 +228,17 @@ function createService(prisma: Record<string, any>): AssignmentService {
             permissions: ['assignment.policy.read', 'assignment.policy.manage'],
         }),
     } as unknown as TenantContext;
-    return new AssignmentService(prisma as unknown as PrismaService, tenantContext);
+    return new AssignmentService(prisma as unknown as PrismaService, tenantContext, availability as unknown as HrAvailabilityService);
+}
+
+function createAvailabilityMock(): Record<string, jest.Mock> {
+    return {
+        filterMembersOnApprovedLeave: jest.fn(async (_tenantId: string, membershipIds: string[], window?: unknown) => ({
+            availableMembershipIds: membershipIds,
+            skippedMembershipIds: [],
+            applied: Boolean(window),
+        })),
+    };
 }
 
 function createPrismaMock(): Record<string, any> {
@@ -194,8 +272,8 @@ function createInput(overrides: Partial<CreateAssignmentPolicyDto> = {}): Create
     };
 }
 
-function resolveInput(): ResolveAssignmentPolicyDto {
-    return { domain: AssignmentPolicyDomain.TASK };
+function resolveInput(overrides: Partial<ResolveAssignmentPolicyDto> = {}): ResolveAssignmentPolicyDto {
+    return { domain: AssignmentPolicyDomain.TASK, ...overrides };
 }
 
 function policyRecord(overrides: Record<string, any> = {}): Record<string, any> {

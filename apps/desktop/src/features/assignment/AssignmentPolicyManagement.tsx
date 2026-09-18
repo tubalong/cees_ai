@@ -86,7 +86,12 @@ export default function AssignmentPolicyManagement({ authContext, onSessionExpir
     const [editingPolicy, setEditingPolicy] = useState<AssignmentPolicy>();
     const [resolveResult, setResolveResult] = useState<AssignmentPolicyResolveResult>();
     const [form] = Form.useForm<PolicyFormValues>();
-    const [resolveForm] = Form.useForm<{ domain: AssignmentPolicyDomain; projectId?: string }>();
+    const [resolveForm] = Form.useForm<{
+        domain: AssignmentPolicyDomain;
+        projectId?: string;
+        availabilityStartAt?: string;
+        availabilityEndAt?: string;
+    }>();
     const { message, modal } = AntdApp.useApp();
     const { t } = useI18n();
     const queryClient = useQueryClient();
@@ -283,11 +288,42 @@ export default function AssignmentPolicyManagement({ authContext, onSessionExpir
         </Modal>
 
         <Modal title={t('分配策略解析预览')} open={resolveOpen} onCancel={() => setResolveOpen(false)} footer={null} width={720}>
-            <Form form={resolveForm} layout="vertical" onFinish={(values) => resolveMutation.mutate(values)}>
+            <Form form={resolveForm} layout="vertical" onFinish={(values) => resolveMutation.mutate({
+                domain: values.domain,
+                projectId: values.projectId,
+                availabilityWindow: values.availabilityStartAt && values.availabilityEndAt
+                    ? { startAt: values.availabilityStartAt, endAt: values.availabilityEndAt }
+                    : undefined,
+            })}>
                 <div className="assignment-form-grid">
                     <Form.Item name="domain" label={t('业务领域')} rules={[{ required: true, message: t('请选择领域') }]}><Select options={domainOptions.map((option) => ({ ...option, label: t(option.label) }))} /></Form.Item>
                     <Form.Item name="projectId" label={t('项目')}><Select allowClear showSearch optionFilterProp="label" options={projectOptions} placeholder={t('无项目时使用租户默认')} /></Form.Item>
+                    <Form.Item
+                        name="availabilityStartAt"
+                        label={t('可用窗口开始时间')}
+                        dependencies={['availabilityEndAt']}
+                        rules={[({ getFieldValue }) => ({
+                            validator: (_, value) => value || !getFieldValue('availabilityEndAt')
+                                ? Promise.resolve()
+                                : Promise.reject(new Error(t('请同时填写可用窗口开始和结束时间'))),
+                        })]}
+                    >
+                        <Input placeholder="2026-09-21T09:00:00+08:00" />
+                    </Form.Item>
+                    <Form.Item
+                        name="availabilityEndAt"
+                        label={t('可用窗口结束时间')}
+                        dependencies={['availabilityStartAt']}
+                        rules={[({ getFieldValue }) => ({
+                            validator: (_, value) => value || !getFieldValue('availabilityStartAt')
+                                ? Promise.resolve()
+                                : Promise.reject(new Error(t('请同时填写可用窗口开始和结束时间'))),
+                        })]}
+                    >
+                        <Input placeholder="2026-09-21T18:00:00+08:00" />
+                    </Form.Item>
                 </div>
+                <Alert type="info" showIcon message={t('开启跳过请假时，只有填写时间窗口才会过滤与窗口重叠的已批准请假')} />
                 <Button type="primary" htmlType="submit" loading={resolveMutation.isPending} icon={<FileSearchOutlined />}>{t('开始解析')}</Button>
             </Form>
             {resolveResult && <div className="assignment-resolve-result">
@@ -296,10 +332,15 @@ export default function AssignmentPolicyManagement({ authContext, onSessionExpir
                     <div><PartitionOutlined /><span>{t('命中层级')}<strong>{t(levelLabel(resolveResult.level))}</strong></span></div>
                     <div><TeamOutlined /><span>{t('候选人数')}<strong>{resolveResult.candidates.length}</strong></span></div>
                     <div><FileSearchOutlined /><span>{t('跳过请假')}<strong>{resolveResult.skippedOnLeave.length}</strong></span></div>
+                    <div><FileSearchOutlined /><span>{t('请假过滤')}<strong>{resolveResult.leaveFilterApplied ? t('已执行') : t('未执行')}</strong></span></div>
                     <div><ReloadOutlined /><span>{t('兜底模式')}<strong>{t(fallbackLabel(resolveResult.fallbackMode))}</strong></span></div>
                 </div>
                 <h4>{t('候选成员')}</h4>
                 {resolveResult.candidates.length > 0 ? <div className="assignment-candidate-tags">{resolveResult.candidates.map((membershipId) => <Tag key={membershipId}>{memberMap.get(membershipId) ?? membershipId}</Tag>)}</div> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('暂无候选成员')} />}
+                {resolveResult.skippedOnLeave.length > 0 && <>
+                    <h4>{t('因请假跳过')}</h4>
+                    <div className="assignment-candidate-tags">{resolveResult.skippedOnLeave.map((membershipId) => <Tag color="orange" key={membershipId}>{memberMap.get(membershipId) ?? membershipId}</Tag>)}</div>
+                </>}
             </div>}
         </Modal>
     </div>;
