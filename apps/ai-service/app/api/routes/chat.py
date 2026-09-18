@@ -40,7 +40,12 @@ from app.chat.compactor import ChatCompactor
 from app.chat.orchestrator import ChatOrchestrator, PreparedChat
 from app.chat.tool_turn import PreparedToolTurn, ToolTurnOrchestrator
 from app.core.config import ModelProfile
-from app.core.errors import AIServiceError, ProviderPermanentError, ProviderTransientError
+from app.core.errors import (
+    AIServiceError,
+    ProviderPermanentError,
+    ProviderTransientError,
+    describe_provider_rejection,
+)
 from app.core.runtime import AppRuntime
 from app.core.security import require_internal_token
 from app.llm.router import LLMRouter, RoutingResult
@@ -267,12 +272,28 @@ async def _tool_turn_stream_events(
             retryable=True,
         )
         return
-    except ProviderPermanentError:
+    except ProviderPermanentError as exc:
+        rejection = describe_provider_rejection(
+            exc,
+            profile=routed.profile_name,
+            provider=routed.profile.provider,
+            model=routed.profile.model,
+            api_key_env=routed.profile.api_key_env,
+        )
+        logger.warning(
+            "llm tool turn stream terminated by provider rejection",
+            extra={
+                "request_id": payload.request_id,
+                "profile": routed.profile_name,
+                "upstream_status": exc.status_code,
+                "error_code": rejection.code,
+            },
+        )
         yield _encode_stream_error(
             request_id=payload.request_id,
-            code="CHAT_STREAM_FAILED",
-            message="The provider terminated the tool turn stream",
-            retryable=False,
+            code=rejection.code,
+            message=rejection.message,
+            retryable=rejection.retryable,
         )
         return
     except Exception as exc:
@@ -408,12 +429,28 @@ async def _chat_stream_events(
             retryable=True,
         )
         return
-    except ProviderPermanentError:
+    except ProviderPermanentError as exc:
+        rejection = describe_provider_rejection(
+            exc,
+            profile=routed.profile_name,
+            provider=routed.profile.provider,
+            model=routed.profile.model,
+            api_key_env=routed.profile.api_key_env,
+        )
+        logger.warning(
+            "llm chat stream terminated by provider rejection",
+            extra={
+                "request_id": payload.request_id,
+                "profile": routed.profile_name,
+                "upstream_status": exc.status_code,
+                "error_code": rejection.code,
+            },
+        )
         yield _encode_stream_error(
             request_id=payload.request_id,
-            code="CHAT_STREAM_FAILED",
-            message="The provider terminated the chat stream",
-            retryable=False,
+            code=rejection.code,
+            message=rejection.message,
+            retryable=rejection.retryable,
         )
         return
     except Exception as exc:

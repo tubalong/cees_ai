@@ -11,12 +11,20 @@ from typing import Any
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError, ValidationError
 
-from app.core.config import ModelCapability, ModelCatalog, ModelProfile, ModelRole, OutputMode
+from app.core.config import (
+    ModelCapability,
+    ModelCatalog,
+    ModelProfile,
+    ModelRole,
+    OutputMode,
+    is_configured_secret,
+)
 from app.core.errors import (
     AIServiceError,
     ProviderOutputError,
     ProviderPermanentError,
     ProviderTransientError,
+    describe_provider_rejection,
 )
 from app.llm.providers import create_provider
 from app.llm.types import (
@@ -165,11 +173,15 @@ class LLMRouter:
                     request_id=request_id,
                 ) from exc
             except ProviderPermanentError as exc:
-                raise AIServiceError(
-                    "LLM_UNAVAILABLE",
-                    "The selected provider rejected the invocation",
-                    status_code=503,
+                raise _permanent_rejection_error(
+                    action="invocation",
+                    exc=exc,
                     request_id=request_id,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    profile_name=profile_name,
+                    profile=profile,
+                    attempt=index + 1,
                 ) from exc
 
         raise AIServiceError(
@@ -257,11 +269,15 @@ class LLMRouter:
                 if profile_override is not None:
                     break
             except ProviderPermanentError as exc:
-                raise AIServiceError(
-                    "LLM_UNAVAILABLE",
-                    "The selected provider rejected the streaming invocation",
-                    status_code=503,
+                raise _permanent_rejection_error(
+                    action="streaming invocation",
+                    exc=exc,
                     request_id=request_id,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    profile_name=profile_name,
+                    profile=profile,
+                    attempt=index + 1,
                 ) from exc
 
         raise AIServiceError(
@@ -362,11 +378,15 @@ class LLMRouter:
                     request_id=request_id,
                 ) from exc
             except ProviderPermanentError as exc:
-                raise AIServiceError(
-                    "LLM_UNAVAILABLE",
-                    "The selected provider rejected the tool invocation",
-                    status_code=503,
+                raise _permanent_rejection_error(
+                    action="tool invocation",
+                    exc=exc,
                     request_id=request_id,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    profile_name=profile_name,
+                    profile=profile,
+                    attempt=index + 1,
                 ) from exc
 
         raise AIServiceError(
@@ -459,11 +479,15 @@ class LLMRouter:
                 if profile_override is not None:
                     break
             except ProviderPermanentError as exc:
-                raise AIServiceError(
-                    "LLM_UNAVAILABLE",
-                    "The selected provider rejected the tool streaming invocation",
-                    status_code=503,
+                raise _permanent_rejection_error(
+                    action="tool streaming invocation",
+                    exc=exc,
                     request_id=request_id,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    profile_name=profile_name,
+                    profile=profile,
+                    attempt=index + 1,
                 ) from exc
 
         raise AIServiceError(
@@ -601,12 +625,17 @@ class LLMRouter:
     @staticmethod
     def _build_provider(profile_name: str, profile: ModelProfile) -> LLMProvider:
         api_key = os.getenv(profile.api_key_env) if profile.api_key_env else None
+        # 占位值（change_me）与缺失等价：否则上游会以 401 拒绝，并被误报成
+        # “The selected provider rejected the tool streaming invocation”。
+        if not is_configured_secret(api_key):
+            api_key = None
         try:
             return create_provider(profile, api_key)
         except ValueError as exc:
             raise AIServiceError(
                 "AI_SERVICE_NOT_READY",
-                f"Profile {profile_name} is not configured",
+                f"Profile {profile_name} is not configured "
+                f"(missing or example value for {profile.api_key_env})",
                 status_code=503,
                 retryable=True,
             ) from exc
@@ -682,3 +711,53 @@ def _contains_remote_ref(value: Any) -> bool:
 
 def _requires_vision(messages: list[ChatMessage]) -> bool:
     return any(content_has_image(message.content) for message in messages)
+
+
+def _permanent_rejection_error(
+    *,
+    action: str,
+    exc: ProviderPermanentError,
+    request_id: str,
+    tenant_id: str,
+    user_id: str,
+    profile_name: str,
+    profile: ModelProfile,
+    attempt: int,
+) -> AIServiceError:
+    """把 Provider 的永久失败（4xx 等）转成可诊断的错误。
+
+    Provider 的 4xx 不触发跨 profile 回退，但真实原因（密钥无效、账号欠费、
+    图片不被接受等）只存在于上游响应里。这里按状态码分类成不同的错误码与提示，
+    并记录命中的 profile/model 与上游细节，避免出现无法定位的
+    "The selected provider rejected the tool streaming invocation"。
+    """
+    rejection = describe_provider_rejection(
+        exc,
+        profile=profile_name,
+        provider=profile.provider,
+        model=profile.model,
+        api_key_env=profile.api_key_env,
+    )
+    logger.warning(
+        "llm provider permanently rejected the request",
+        extra={
+            "request_id": request_id,
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "profile": profile_name,
+            "provider": profile.provider,
+            "model": profile.model,
+            "attempt": attempt,
+            "action": action,
+            "error_category": type(exc).__name__,
+            "upstream_status": exc.status_code,
+            "error_code": rejection.code,
+        },
+    )
+    return AIServiceError(
+        rejection.code,
+        rejection.message,
+        status_code=rejection.status_code,
+        retryable=rejection.retryable,
+        request_id=request_id,
+    )

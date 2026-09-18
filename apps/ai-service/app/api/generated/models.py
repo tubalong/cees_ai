@@ -512,6 +512,26 @@ class PageBreakBlock(BaseModel):
     type: Literal['page_break']
 
 
+class ImageBlock(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['image']
+    url: constr(min_length=1, max_length=2048) = Field(
+        ...,
+        description='Image location the renderer downloads (COS signed URL or data URL). Callers must only pass locations the reader is allowed to see.',
+    )
+    alt: constr(min_length=1, max_length=256) | None = Field(
+        None,
+        description='Alternative text; used as the placeholder label when the image cannot be fetched.',
+    )
+    caption: constr(min_length=1, max_length=256) | None = None
+    width_ratio: confloat(ge=0.2, le=1.0) | None = Field(
+        1,
+        description='Share of the content width the image occupies; height follows the source aspect ratio.',
+    )
+
+
 class DocumentSection(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
@@ -525,7 +545,8 @@ class DocumentSection(BaseModel):
             | NumberedListBlock
             | TableBlock
             | QuoteBlock
-            | PageBreakBlock,
+            | PageBreakBlock
+            | ImageBlock,
             Field(discriminator='type'),
         ]
     ] = Field(..., max_length=100, min_length=1)
@@ -590,6 +611,131 @@ class RenderDocxRequest(BaseModel):
     user_id: constr(min_length=1, max_length=128)
     document: DocumentSpec
     document_options: DocumentOptions
+
+
+class RenderPdfRequest(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    request_id: constr(min_length=1, max_length=128)
+    tenant_id: constr(min_length=1, max_length=128)
+    user_id: constr(min_length=1, max_length=128)
+    document: DocumentSpec
+    document_options: DocumentOptions
+
+
+class PptxParagraphBlock(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['paragraph']
+    text: constr(min_length=1, max_length=5000)
+
+
+class PptxBulletListBlock(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['bullet_list']
+    items: list[constr(min_length=1, max_length=2000)] = Field(
+        ..., max_length=20, min_length=1
+    )
+
+
+class PptxNumberedListBlock(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['numbered_list']
+    items: list[constr(min_length=1, max_length=2000)] = Field(
+        ..., max_length=20, min_length=1
+    )
+
+
+class PptxTableBlock(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['table']
+    columns: list[constr(min_length=1, max_length=256)] = Field(
+        ..., max_length=8, min_length=1
+    )
+    rows: list[list[constr(max_length=2000)]] = Field(..., max_length=40, min_length=1)
+
+
+class PptxQuoteBlock(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['quote']
+    text: constr(min_length=1, max_length=2000)
+    attribution: constr(min_length=1, max_length=256) | None = None
+
+
+class PptxImageBlock(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['image']
+    url: constr(min_length=1, max_length=2048) = Field(
+        ..., description='COS URL of the image to embed.'
+    )
+    alt: constr(min_length=1, max_length=256) | None = None
+    caption: constr(min_length=1, max_length=256) | None = None
+
+
+class Layout(StrEnum):
+    title = 'title'
+    title_and_content = 'title_and_content'
+    section_header = 'section_header'
+    two_column = 'two_column'
+    blank = 'blank'
+
+
+class PptxSlide(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    title: constr(min_length=1, max_length=256)
+    layout: Layout = 'title_and_content'
+    blocks: list[
+        Annotated[
+            PptxParagraphBlock
+            | PptxBulletListBlock
+            | PptxNumberedListBlock
+            | PptxTableBlock
+            | PptxQuoteBlock
+            | PptxImageBlock,
+            Field(discriminator='type'),
+        ]
+    ] = Field(..., max_length=50, min_length=1)
+
+
+class Theme(StrEnum):
+    brand = 'brand'
+    neutral = 'neutral'
+
+
+class PptxSpec(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    schema_version: Literal['1.0']
+    title: constr(min_length=1, max_length=256)
+    subtitle: constr(min_length=1, max_length=512) | None = None
+    theme: Theme | None = 'brand'
+    slides: list[PptxSlide] = Field(..., max_length=100, min_length=1)
+
+
+class RenderPptxRequest(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    request_id: constr(min_length=1, max_length=128)
+    tenant_id: constr(min_length=1, max_length=128)
+    user_id: constr(min_length=1, max_length=128)
+    pptx: PptxSpec
+    options: DocumentOptions
 
 
 class TextOutput(BaseModel):

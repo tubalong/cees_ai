@@ -18,6 +18,8 @@ dependencies = [
     "pydantic-settings",
     "pymupdf>=1.28.2",
     "python-docx",
+    "python-pptx",
+    "reportlab",
     "sqlalchemy",
     "uvicorn[standard]",
 ]

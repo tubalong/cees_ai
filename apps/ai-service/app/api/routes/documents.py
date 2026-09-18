@@ -11,6 +11,8 @@ from app.api.generated.models import (
     ExecutionMetadata,
     Provider,
     RenderDocxRequest,
+    RenderPdfRequest,
+    RenderPptxRequest,
     TokenUsage,
 )
 from app.core.errors import AIServiceError
@@ -23,6 +25,8 @@ from app.documents.docx_renderer import (
     RenderedDocx,
     content_disposition,
 )
+from app.documents.pdf_renderer import PDF_MEDIA_TYPE, PdfRenderer, RenderedPdf
+from app.documents.pptx_renderer import PPTX_MEDIA_TYPE, PptxRenderer, RenderedPptx
 from app.llm.router import LLMRouter, RoutingResult
 
 router = APIRouter(
@@ -79,6 +83,16 @@ DOCX_RESPONSE = {
         }
     },
 }
+PDF_RESPONSE = {
+    "description": "PDF document rendered",
+    "headers": DOCX_HEADERS,
+    "content": {PDF_MEDIA_TYPE: {"schema": {"type": "string", "format": "binary"}}},
+}
+PPTX_RESPONSE = {
+    "description": "PPTX presentation rendered",
+    "headers": DOCX_HEADERS,
+    "content": {PPTX_MEDIA_TYPE: {"schema": {"type": "string", "format": "binary"}}},
+}
 
 
 @router.post(
@@ -124,6 +138,42 @@ async def render_document_docx(payload: RenderDocxRequest) -> Response:
         request_id=payload.request_id,
     )
     return _docx_response(rendered, payload.request_id)
+
+
+@router.post(
+    "/render-pdf",
+    response_class=Response,
+    response_model=None,
+    operation_id="renderDocumentPdf",
+    summary="Render a DocumentSpec as PDF",
+    response_description="PDF document rendered",
+    responses={200: PDF_RESPONSE, **RENDER_ERROR_RESPONSES},
+)
+async def render_document_pdf(payload: RenderPdfRequest) -> Response:
+    rendered = PdfRenderer().render(
+        payload.document,
+        payload.document_options,
+        request_id=payload.request_id,
+    )
+    return _pdf_response(rendered, payload.request_id)
+
+
+@router.post(
+    "/render-pptx",
+    response_class=Response,
+    response_model=None,
+    operation_id="renderDocumentPptx",
+    summary="Render a PptxSpec as PPTX",
+    response_description="PPTX presentation rendered",
+    responses={200: PPTX_RESPONSE, **RENDER_ERROR_RESPONSES},
+)
+async def render_document_pptx(payload: RenderPptxRequest) -> Response:
+    rendered = PptxRenderer().render(
+        payload.pptx,
+        payload.options,
+        request_id=payload.request_id,
+    )
+    return _pptx_response(rendered, payload.request_id)
 
 
 @router.post(
@@ -214,6 +264,35 @@ def _docx_response(
         media_type=DOCX_MEDIA_TYPE,
         headers=headers,
     )
+
+
+def _pdf_response(rendered: RenderedPdf, request_id: str) -> Response:
+    return Response(
+        content=rendered.content,
+        media_type=PDF_MEDIA_TYPE,
+        headers={
+            "Cache-Control": "no-store",
+            "Content-Disposition": _content_disposition(rendered.filename, "document.pdf"),
+            "X-Request-Id": _header_value(request_id),
+        },
+    )
+
+
+def _pptx_response(rendered: RenderedPptx, request_id: str) -> Response:
+    return Response(
+        content=rendered.content,
+        media_type=PPTX_MEDIA_TYPE,
+        headers={
+            "Cache-Control": "no-store",
+            "Content-Disposition": _content_disposition(rendered.filename, "presentation.pptx"),
+            "X-Request-Id": _header_value(request_id),
+        },
+    )
+
+
+def _content_disposition(filename: str, ascii_fallback: str) -> str:
+    encoded_filename = quote(filename, safe="")
+    return f"attachment; filename=\"{ascii_fallback}\"; filename*=UTF-8''{encoded_filename}"
 
 
 def _header_value(value: str) -> str:

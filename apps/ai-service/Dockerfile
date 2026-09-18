@@ -16,6 +16,8 @@ RUN uv sync --locked --no-dev --no-install-project
 
 COPY app ./app
 COPY config ./config
+COPY scripts ./scripts
+RUN python scripts/download_fonts.py
 
 EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

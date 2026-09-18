@@ -28,8 +28,8 @@ timeout_seconds = 60.0
 max_retries = 1
 structured_output_method = "function_calling"
 
-# Dedicated multimodal chat profile. Keep it disabled until a real vision-capable
-# model and VISION_LLM_API_KEY are provided. When enabled, add "vision-primary"
+# Dedicated multimodal chat profile. Replace model/base_url and provide a real
+# VISION_LLM_API_KEY; readiness rejects the example values. Add "vision-primary"
 # to the roles that may receive image_url content parts.
 [profiles.vision-primary]
 enabled = true

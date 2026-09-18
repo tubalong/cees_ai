@@ -43,9 +43,13 @@ timeout_seconds = 60.0
 max_retries = 1
 structured_output_method = "function_calling"
 
-# Dedicated multimodal chat profile. Keep it disabled until a real vision-capable
-# model and VISION_LLM_API_KEY are provided. When enabled, add "vision-primary"
-# to the roles that may receive image_url content parts.
+# Dedicated multimodal chat profile. DeepSeek `deepseek-flash` accepts `image_url`
+# content parts, so this dev profile is enabled. VISION_LLM_API_KEY must hold a real
+# key (never the .env.example placeholder), otherwise ai-service reports the profile
+# as not configured instead of failing opaquely at request time.
+# `vision-primary` is listed in the roles that may receive `image_url` content
+# parts (default, orchestrator). Point this at a dedicated vision model and key in
+# staging and production.
 [profiles.vision-primary]
 enabled = true
 provider = "deepseek"

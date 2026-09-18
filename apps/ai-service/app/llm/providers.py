@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -9,7 +10,12 @@ from langchain_openai import ChatOpenAI
 from openai import APIConnectionError, APIStatusError, APITimeoutError, RateLimitError
 
 from app.core.config import ModelProfile, OutputMode
-from app.core.errors import ProviderOutputError, ProviderPermanentError, ProviderTransientError
+from app.core.errors import (
+    PROVIDER_DETAIL_MAX_CHARS,
+    ProviderOutputError,
+    ProviderPermanentError,
+    ProviderTransientError,
+)
 from app.llm.types import (
     ChatMessage,
     InvocationOptions,
@@ -22,6 +28,8 @@ from app.llm.types import (
     ToolCallingResult,
     content_to_text,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class MockLLMProvider:
@@ -115,6 +123,29 @@ class OpenAICompatibleProvider:
                 ) from parsing_error
             parsed = structured.get("parsed")
             if not isinstance(parsed, dict):
+                raw = structured.get("raw")
+                raw_tool_calls = None
+                raw_content = None
+                if raw is not None:
+                    tool_calls = getattr(raw, "tool_calls", None) or []
+                    raw_tool_calls = [
+                        {
+                            "name": getattr(tc, "name", None),
+                            "args": repr(getattr(tc, "args", None))[:500],
+                        }
+                        for tc in tool_calls
+                    ]
+                    raw_content = repr(getattr(raw, "content", None))[:500]
+                logger.warning(
+                    "provider structured output is not an object",
+                    extra={
+                        "parsed_type": type(parsed).__name__,
+                        "parsed_preview": repr(parsed)[:300],
+                        "schema_name": options.schema_name,
+                        "raw_tool_calls": raw_tool_calls,
+                        "raw_content": raw_content,
+                    },
+                )
                 raise ProviderOutputError("provider returned non-object structured output")
             raw = structured.get("raw")
             return ProviderResult(
@@ -127,13 +158,16 @@ class OpenAICompatibleProvider:
         except APIStatusError as exc:
             if exc.status_code >= 500:
                 raise ProviderTransientError(f"provider status {exc.status_code}") from exc
-            raise ProviderPermanentError(f"provider status {exc.status_code}") from exc
+            raise _provider_status_error(exc) from exc
         except ProviderOutputError:
             raise
         except ProviderPermanentError:
             raise
         except Exception as exc:
-            raise ProviderPermanentError(type(exc).__name__) from exc
+            raise ProviderPermanentError(
+                type(exc).__name__,
+                upstream_detail=str(exc)[:PROVIDER_DETAIL_MAX_CHARS] or None,
+            ) from exc
 
     async def stream(
         self, messages: list[ChatMessage], options: InvocationOptions
@@ -162,11 +196,14 @@ class OpenAICompatibleProvider:
         except APIStatusError as exc:
             if exc.status_code >= 500:
                 raise ProviderTransientError(f"provider status {exc.status_code}") from exc
-            raise ProviderPermanentError(f"provider status {exc.status_code}") from exc
+            raise _provider_status_error(exc) from exc
         except ProviderPermanentError:
             raise
         except Exception as exc:
-            raise ProviderPermanentError(type(exc).__name__) from exc
+            raise ProviderPermanentError(
+                type(exc).__name__,
+                upstream_detail=str(exc)[:PROVIDER_DETAIL_MAX_CHARS] or None,
+            ) from exc
 
     async def invoke_with_tools(
         self, messages: list[ChatMessage], options: InvocationOptions
@@ -190,13 +227,16 @@ class OpenAICompatibleProvider:
         except APIStatusError as exc:
             if exc.status_code >= 500:
                 raise ProviderTransientError(f"provider status {exc.status_code}") from exc
-            raise ProviderPermanentError(f"provider status {exc.status_code}") from exc
+            raise _provider_status_error(exc) from exc
         except ProviderOutputError:
             raise
         except ProviderPermanentError:
             raise
         except Exception as exc:
-            raise ProviderPermanentError(type(exc).__name__) from exc
+            raise ProviderPermanentError(
+                type(exc).__name__,
+                upstream_detail=str(exc)[:PROVIDER_DETAIL_MAX_CHARS] or None,
+            ) from exc
 
     async def stream_with_tools(
         self, messages: list[ChatMessage], options: InvocationOptions
@@ -246,16 +286,79 @@ class OpenAICompatibleProvider:
         except APIStatusError as exc:
             if exc.status_code >= 500:
                 raise ProviderTransientError(f"provider status {exc.status_code}") from exc
-            raise ProviderPermanentError(f"provider status {exc.status_code}") from exc
+            raise _provider_status_error(exc) from exc
         except ProviderOutputError:
             raise
         except ProviderPermanentError:
             raise
         except Exception as exc:
-            raise ProviderPermanentError(type(exc).__name__) from exc
+            raise ProviderPermanentError(
+                type(exc).__name__,
+                upstream_detail=str(exc)[:PROVIDER_DETAIL_MAX_CHARS] or None,
+            ) from exc
 
     def _bind_tools(self, tools: tuple[dict[str, Any], ...]) -> Any:
         return self.chat_model.bind_tools(list(tools), tool_choice="auto")
+
+
+def _provider_status_error(exc: APIStatusError) -> ProviderPermanentError:
+    """把上游 4xx 转成带状态码与响应正文的永久失败。
+
+    401/403、402 与 400 类错误在上层需要映射为不同的错误码与提示，因此这里必须
+    保留状态码；否则上层只能看到 "provider status 401" 这样的字符串。
+    """
+    return ProviderPermanentError(
+        f"provider status {exc.status_code}",
+        status_code=exc.status_code,
+        upstream_detail=_upstream_detail(exc),
+    )
+
+
+def _upstream_detail(exc: APIStatusError) -> str | None:
+    """提取上游错误正文中可诊断的部分（不含请求头与凭据）。"""
+    for candidate in (_body_error_message(exc), _response_error_message(exc)):
+        if candidate:
+            return candidate[:PROVIDER_DETAIL_MAX_CHARS]
+    text = str(exc).strip()
+    return text[:PROVIDER_DETAIL_MAX_CHARS] or None
+
+
+def _body_error_message(exc: APIStatusError) -> str | None:
+    body = getattr(exc, "body", None)
+    if not isinstance(body, dict):
+        return None
+    error = body.get("error")
+    if isinstance(error, dict):
+        message = error.get("message")
+        if isinstance(message, str) and message.strip():
+            return message.strip()
+    elif isinstance(error, str) and error.strip():
+        return error.strip()
+    message = body.get("message")
+    if isinstance(message, str) and message.strip():
+        return message.strip()
+    return None
+
+
+def _response_error_message(exc: APIStatusError) -> str | None:
+    response = getattr(exc, "response", None)
+    if response is None:
+        return None
+    try:
+        payload = response.json()
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    error = payload.get("error")
+    if isinstance(error, dict):
+        message = error.get("message")
+        if isinstance(message, str) and message.strip():
+            return message.strip()
+    message = payload.get("message")
+    if isinstance(message, str) and message.strip():
+        return message.strip()
+    return None
 
 
 def create_provider(profile: ModelProfile, api_key: str | None = None) -> LLMProvider:
