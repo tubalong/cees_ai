@@ -19,7 +19,7 @@
 | HR 员工档案、假勤、考勤、加班、异动、报表 | 已实现，页面入口 `/hr` |
 | Finance 报销 | 已实现：类别、草稿、审批、付款、附件、统计与页面，入口 `/finance` |
 | Legal 合同台账 | 已实现：台账、附件、状态机、到期任务、汇总与页面，入口 `/legal` |
-| P2：智能跳过请假人员 | HR 请假数据已具备，AssignmentPolicy 解析接线仍待后续迭代 |
+| P2：智能跳过请假人员 | 已完成基础能力：按通用时间窗口过滤已批准请假；正式任务创建和落库接线待 D |
 | 钉钉出勤同步 | 暂停，恢复后实现 |
 
 ## 3. AssignmentPolicy 已落地行为
@@ -29,7 +29,9 @@
 - 候选池支持 `membershipIds`、`departmentIds`、`projectIds` 三类来源。
 - 解析优先级：项目覆盖策略优先；未命中时回退租户默认策略。
 - 候选池为空时按 `fallbackMode` 回退到 `PROJECT_MEMBERS` 或 `TENANT_MEMBERS`，`NONE` 不兜底。
-- `skipOnLeave` 当前返回 `skippedOnLeave` 占位数组，真实请假过滤在 P2 接入。
+- `skipOnLeave` 开启后，解析预览可传时间窗口，服务端过滤与窗口重叠的已批准请假；候选池为空时先执行兜底，再次过滤兜底候选人。没有时间窗口时不按当前日期猜测，保持兼容返回。
+- 当前只完成候选人解析和可用性过滤，不创建正式任务、不写任务负责人；D 完成任务模型后再接入正式分配。
+- 详细时间窗口、过滤顺序、审计与 D 接线边界见 [分配策略请假可用性过滤](../architecture/assignment-leave-availability.md)。
 - 创建、修改、删除、解析均写审计事件；删除为软删除并使用 `version` 乐观锁。
 - 同租户、同领域、同层级、同项目只允许一条活跃策略；删除后可重建。
 - 页面入口：`/assignment`，导航显示权限为 `assignment.policy.read`。

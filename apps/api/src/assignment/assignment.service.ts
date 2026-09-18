@@ -13,6 +13,7 @@ import {
     Prisma,
 } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
+import { AvailabilityWindow, HrAvailabilityService } from '../hr/hr-availability.service';
 import { TenantContext } from '../tenant/tenant-context';
 import { AssignmentCandidatePool, AssignmentPolicy, AssignmentPolicyResolveResult } from './assignment.types';
 import {
@@ -29,6 +30,7 @@ export class AssignmentService {
     constructor(
         private readonly prisma: PrismaService,
         private readonly tenantContext: TenantContext,
+        private readonly memberAvailability: HrAvailabilityService,
     ) { }
 
     async listPolicies(query: ListAssignmentPoliciesQueryDto): Promise<{ items: AssignmentPolicy[]; nextCursor: string | null }> {
@@ -228,6 +230,7 @@ export class AssignmentService {
         if (input.projectId) {
             await this.requireProject(context.tenantId, input.projectId);
         }
+        const availabilityWindow = parseAvailabilityWindow(input.availabilityWindow);
 
         const resolvedAt = new Date().toISOString();
         let policy = input.projectId
@@ -245,6 +248,7 @@ export class AssignmentService {
                 level: input.projectId ? AssignmentPolicyLevel.PROJECT : AssignmentPolicyLevel.TENANT,
                 candidates: [],
                 skippedOnLeave: [],
+                leaveFilterApplied: false,
                 fallbackMode: AssignmentPolicyFallbackMode.NONE,
                 sourceTrace: {
                     policyId: null,
@@ -258,15 +262,28 @@ export class AssignmentService {
 
         const candidatePool = normalizeCandidatePool(policy.candidatePool as Prisma.JsonValue);
         let candidates = await this.expandCandidatePool(context.tenantId, candidatePool);
-        const skippedOnLeave: string[] = [];
+        let skippedOnLeave: string[] = [];
+        let leaveFilterApplied = false;
 
         if (policy.skipOnLeave) {
-            // P2 接入真实请假数据后，这里按当前日期/任务时间过滤候选成员。
-            // 本阶段只保留规则字段和返回结构，不静默过滤或写入结果。
+            const filtered = await this.memberAvailability.filterMembersOnApprovedLeave(
+                context.tenantId, candidates, availabilityWindow,
+            );
+            candidates = filtered.availableMembershipIds;
+            skippedOnLeave = filtered.skippedMembershipIds;
+            leaveFilterApplied = filtered.applied;
         }
 
         if (candidates.length === 0) {
             candidates = await this.expandFallback(context.tenantId, policy.fallbackMode, input.projectId ?? null);
+            if (policy.skipOnLeave) {
+                const filtered = await this.memberAvailability.filterMembersOnApprovedLeave(
+                    context.tenantId, candidates, availabilityWindow,
+                );
+                candidates = filtered.availableMembershipIds;
+                skippedOnLeave = [...new Set([...skippedOnLeave, ...filtered.skippedMembershipIds])].sort();
+                leaveFilterApplied = leaveFilterApplied || filtered.applied;
+            }
         }
 
         const result: AssignmentPolicyResolveResult = {
@@ -275,6 +292,7 @@ export class AssignmentService {
             level: policy.level,
             candidates: [...new Set(candidates)].sort(),
             skippedOnLeave,
+            leaveFilterApplied,
             fallbackMode: policy.fallbackMode,
             sourceTrace: {
                 policyId: policy.id,
@@ -303,6 +321,9 @@ export class AssignmentService {
                     matchedLevel: result.level,
                     candidatesCount: result.candidates.length,
                     skippedOnLeaveCount: result.skippedOnLeave.length,
+                    leaveFilterApplied: result.leaveFilterApplied,
+                    availabilityStartAt: availabilityWindow?.startAt.toISOString() ?? null,
+                    availabilityEndAt: availabilityWindow?.endAt.toISOString() ?? null,
                     fallbackMode: result.fallbackMode,
                 },
             },
@@ -468,6 +489,16 @@ function normalizeCandidatePool(input: unknown): AssignmentCandidatePool {
 
 function uniqueUuids(value: unknown): string[] {
     return [...new Set(Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [])];
+}
+
+function parseAvailabilityWindow(input?: { startAt: string; endAt: string }): AvailabilityWindow | undefined {
+    if (!input) return undefined;
+    const startAt = new Date(input.startAt);
+    const endAt = new Date(input.endAt);
+    if (Number.isNaN(startAt.getTime()) || Number.isNaN(endAt.getTime()) || startAt >= endAt) {
+        throw new BadRequestException({ code: 'ASSIGNMENT_AVAILABILITY_WINDOW_INVALID', message: '可用时间窗口结束时间必须晚于开始时间' });
+    }
+    return { startAt, endAt };
 }
 
 function normalizeDescription(description: string | null | undefined): string | null {

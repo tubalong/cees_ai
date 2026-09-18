@@ -3,6 +3,7 @@ import {
     ArrayUnique,
     IsArray,
     IsBoolean,
+    IsDateString,
     IsEnum,
     IsInt,
     IsOptional,
@@ -139,6 +140,14 @@ export class AssignmentPolicyResolveContextDto {
     sourceId!: string;
 }
 
+export class AssignmentPolicyAvailabilityWindowDto {
+    @IsDateString()
+    startAt!: string;
+
+    @IsDateString()
+    endAt!: string;
+}
+
 export class ResolveAssignmentPolicyDto {
     @IsEnum(AssignmentPolicyDomain)
     domain!: AssignmentPolicyDomain;
@@ -151,6 +160,11 @@ export class ResolveAssignmentPolicyDto {
     @Type(() => AssignmentPolicyResolveContextDto)
     @ValidateNested()
     context?: AssignmentPolicyResolveContextDto;
+
+    @IsOptional()
+    @Type(() => AssignmentPolicyAvailabilityWindowDto)
+    @ValidateNested()
+    availabilityWindow?: AssignmentPolicyAvailabilityWindowDto;
 }
 
 export class DeleteAssignmentPolicyQueryDto {

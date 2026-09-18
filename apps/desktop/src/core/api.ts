@@ -2293,6 +2293,7 @@ export interface AssignmentPolicyResolveInput {
     domain: AssignmentPolicyDomain;
     projectId?: string;
     context?: { sourceType: string; sourceId: string };
+    availabilityWindow?: { startAt: string; endAt: string };
 }
 
 export interface AssignmentPolicyResolveResult {
@@ -2301,6 +2302,7 @@ export interface AssignmentPolicyResolveResult {
     level: AssignmentPolicyLevel;
     candidates: string[];
     skippedOnLeave: string[];
+    leaveFilterApplied: boolean;
     fallbackMode: AssignmentPolicyFallbackMode;
     sourceTrace: {
         policyId: string | null;

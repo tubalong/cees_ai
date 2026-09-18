@@ -1,6 +1,6 @@
 # 通用任务 tasks.scope 方案（C/D 协调草案）
 
-> 状态：AssignmentPolicy 解析预览已实现；`tasks.scope` 仍未落地，待 D 实现
+> 状态：AssignmentPolicy 解析预览与请假时间窗口过滤已实现；`tasks.scope` 仍未落地，待 D 实现
 > Owner：C（与 D 协调）
 > 关联：`apps/api/src/task/**`（D）、`apps/api/src/assignment/**`（C）
 
@@ -32,9 +32,11 @@ CROSS_FUNCTIONAL   项目外/跨职能任务，可指派给任意有效租户成
 ## 4. 分配策略接入
 
 - 任务分配前调用 `POST /api/v1/assignment/policies/resolve` 预览命中的策略。
-- 返回 `matchedPolicyId`、`level`、`candidates`、`skippedOnLeave`、`fallbackMode` 和 `sourceTrace`。
+- Task 后续把计划执行时间映射为通用 `availabilityWindow.startAt/endAt`，不要求 Assignment 依赖任务表结构。
+- 返回 `matchedPolicyId`、`level`、`candidates`、`skippedOnLeave`、`leaveFilterApplied`、`fallbackMode` 和 `sourceTrace`。
 - 策略未命中时 `matchedPolicyId = null`，由任务模块回退到项目成员或租户成员。
-- 请假跳过先基于策略规则返回候选，实际智能跳过在 P2 接入考勤/请假数据后增强。
+- `skipOnLeave` 已按时间窗口过滤重叠的已批准请假，fallback 候选也执行相同过滤；正式任务负责人写入前仍需由 D 再次校验。
+- 详细规则见 [分配策略请假可用性过滤](assignment-leave-availability.md)。
 
 ## 5. 审计与数据范围
 
@@ -46,4 +48,4 @@ CROSS_FUNCTIONAL   项目外/跨职能任务，可指派给任意有效租户成
 
 - 项目外任务可创建并指派给任意有效租户成员。
 - 任务来源可追溯。
-- 分配解析结果已有测试覆盖；真实请假跳过逻辑待 P2 接入请假数据后补测。
+- 分配解析和真实请假跳过已有测试覆盖；任务落库与二次校验待 D 接入。
