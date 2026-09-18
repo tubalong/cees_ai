@@ -17,6 +17,10 @@ import { DashboardModule } from './dashboard/dashboard.module';
 import { AssistantModule } from './assistant/assistant.module';
 import { KnowledgeModule } from './knowledge/knowledge.module';
 import { DingTalkModule } from './dingtalk/dingtalk.module';
+import { AssignmentModule } from './assignment/assignment.module';
+import { HrModule } from './hr/hr.module';
+import { FinanceModule } from './finance/finance.module';
+import { LegalModule } from './legal/legal.module';
 
 @Module({}) export class IntegrationModule { }
 @Module({}) export class CommonModule { }
@@ -24,5 +28,6 @@ import { DingTalkModule } from './dingtalk/dingtalk.module';
 export const BusinessModules: Type[] = [
     OrganizationModule, RbacModule, UserModule, ProjectModule, TaskModule, AssistantModule, WorkReportModule,
     FileModule, KnowledgeModule, ResourceModule, DocumentModule, MeetingModule, NotificationModule, DashboardModule,
-    AiOrchestrationModule, IntegrationModule, AuditModule, CommonModule, JobsModule, DingTalkModule,
+    AiOrchestrationModule, IntegrationModule, AuditModule, CommonModule, JobsModule, DingTalkModule, AssignmentModule,
+    HrModule, FinanceModule, LegalModule,
 ];

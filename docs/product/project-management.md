@@ -2,9 +2,9 @@
 
 ## 1. 落地状态
 
-截至 2026-09-09，本功能已经落地项目 CRUD、项目成员、负责人转移、项目状态机、完成后只读、归档恢复、乐观锁和租户审计。项目任务、评论、附件和动态接口已经落地，详细规则见 [项目任务管理](task-management.md)。
+截至 2026-09-16，本功能已经落地项目 CRUD、服务端自动编码、项目成员、负责人转移、项目状态机、完成后只读、归档恢复、乐观锁和租户审计。项目任务、评论、附件和动态接口已经落地，详细规则见 [项目任务管理](task-management.md)。
 
-公开契约以 `packages/contracts/openapi/openapi.yaml` 的 `0.13.1` 为准，项目 NestJS 实现在 `apps/api/src/project`，任务实现在 `apps/api/src/task`；数据库迁移包括 `0005_project_management`、`0006_task_management` 和 `0007_task_database_comments`。
+公开契约以 `packages/contracts/openapi/openapi.yaml` 的 `0.27.0` 为准，项目 NestJS 实现在 `apps/api/src/project`，任务实现在 `apps/api/src/task`；数据库迁移包括 `0005_project_management`、`0006_task_management`、`0007_task_database_comments` 和 `0031_project_code_sequence_and_timestamps`。
 
 ## 2. 租户与可见性边界
 
@@ -21,6 +21,17 @@ AND（当前项目成员 OR 拥有 project.manage_all）
 - 无权访问项目时统一返回 `404 PROJECT_NOT_FOUND`，避免泄露项目是否存在；
 - 平台超级管理员身份不直接绕过租户业务权限，必须使用有效租户成员身份进入项目；
 - 第一版项目不接入通用 `ResourceAcl`，项目范围由项目成员关系负责。
+
+桌面端创建项目时只填写名称，并先选择部门筛选范围（可选“所有部门”）再选择负责人和初始成员；人员选项只展示成员 `displayName`。项目说明在创建后通过项目详情编辑。选择具体部门时只展示该部门直属有效成员，选择“所有部门”时展示全部有效成员；该选择同时作为项目归属部门，选择“所有部门”时保存为空。归属部门是业务归属、筛选和统计字段，**不会**把项目开放给该部门。界面仅用一行提示“只有项目成员可以查看该项目”。
+
+## 2.1 项目编码
+
+- 编码由服务端分配，客户端不提交 `code`，创建弹窗也不展示编码；创建成功后才返回并提示，例如 `PRJ-2026-1`；
+- 格式为 `PRJ-<年>-<序号>`，序号按“租户 + 租户时区年份”从 1 递增，跨年重新从 1 开始；
+- 年份取租户时区（`tenants.timezone`）下的自然年，因此跨年重置点是租户本地 1 月 1 日 00:00；
+- 分配与项目写入在同一事务内完成，`project_code_sequences` 的行锁保证并发创建不重号，`(tenantId, normalizedCode)` 唯一约束兜底；
+- 编码创建后不可修改；序号只增不减，软删除的项目不回收编号，历史编码（`PRJ-001`、`legacy-*` 等）保持原样且不参与自动编号；
+- 租户调整时区只会改变跨年那段时间的年份归属，不会产生重复编码。
 
 ## 3. 项目角色
 
@@ -55,6 +66,18 @@ PLANNING / ACTIVE / PAUSED ─cancel──> CANCELLED
 - 已完成项目继续工作前必须先 `reopen`；归档项目先 `restore` 为 `COMPLETED`，需要工作时再 `reopen`；
 - 每次状态变化写入 `project_status_history`，同时写入租户 `audit_logs`。
 
+## 4.1 项目时间字段
+
+项目不再由创建人填写开始和结束日期，改为三个只读系统时间戳：
+
+| 字段 | 写入时机 | 清除时机 |
+| --- | --- | --- |
+| `startedAt`（首次启动时间） | 首次 `start`（`PLANNING` → `ACTIVE`） | 不清除，暂停/恢复/重新开启都不覆盖 |
+| `completedAt`（完成时间） | `complete` | `reopen` |
+| `closedAt`（关闭时间） | `cancel` 与 `archive` | `restore`（归档恢复到已完成）、`reopen` |
+
+因此已完成项目用完成时间表达；被取消或归档关闭的项目用关闭时间表达。`complete` 同时写入 `completedByMembershipId` 和 `completionSummary`，`reopen` 一并清空。
+
 ## 5. 删除与历史保留
 
 项目删除只用于录入错误且还没有任务等业务数据的项目。删除采用软删除，并同步软删除项目成员关系。
@@ -82,12 +105,13 @@ PLANNING / ACTIVE / PAUSED ─cancel──> CANCELLED
 
 ## 7. 数据模型
 
-- `projects`：项目编码、名称、部门、唯一负责人、状态、时间范围、完成信息和版本；
+- `projects`：项目编码、名称、部门、唯一负责人、状态、首次启动/完成/关闭时间、完成信息和版本；
+- `project_code_sequences`：按 `tenant_id + year` 保存项目编码当前序号；
 - `project_members`：项目与租户成员关系及 `OWNER/MANAGER/MEMBER` 角色；
 - `project_status_history`：不可变的项目状态变化记录；
 - `tasks.project_id`：用于任务访问隔离、完成校验和删除保护；任务接口已经实现。
 
-项目编码只允许英文、数字、下划线和连字符，同租户按规范化小写编码唯一。迁移 `0005_project_management` 会为旧项目生成 `legacy-<uuid片段>` 编码，并把旧 `user_id` 项目成员关系映射到同租户 Membership；无法映射时迁移主动失败，避免静默归错租户。
+项目编码同租户按规范化小写唯一。迁移 `0005_project_management` 会为旧项目生成 `legacy-<uuid片段>` 编码，并把旧 `user_id` 项目成员关系映射到同租户 Membership；迁移 `0031_project_code_sequence_and_timestamps` 新增 `project_code_sequences`、把 `starts_at` 重命名为 `started_at`、删除人工填写的 `ends_at` 并新增 `closed_at`。**迁移会删除历史计划结束日期**，历史 `starts_at` 值保留但语义变为“首次启动时间”。
 
 ## 8. 权限目录
 

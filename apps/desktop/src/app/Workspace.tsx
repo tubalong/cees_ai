@@ -1,14 +1,15 @@
 import {
     AppstoreOutlined, BankOutlined, BellOutlined, BookOutlined, CheckCircleOutlined,
-    CodeOutlined, CopyOutlined, DatabaseOutlined, FileTextOutlined, FolderOutlined,
+    CloudSyncOutlined, CodeOutlined, CopyOutlined, DatabaseOutlined, FileProtectOutlined, FileTextOutlined, FolderOutlined,
     HomeOutlined, LogoutOutlined, MenuFoldOutlined, MenuUnfoldOutlined, MessageOutlined, MoreOutlined,
-    PlusOutlined, ProjectOutlined, SafetyCertificateOutlined, SearchOutlined, SettingOutlined,
+    PartitionOutlined, PlusOutlined, ProjectOutlined, SafetyCertificateOutlined, SearchOutlined, SettingOutlined,
     CalendarOutlined, NotificationOutlined, ProfileOutlined,
-    StarOutlined, TeamOutlined, UserOutlined,
+    TeamOutlined, UserOutlined,
 } from '@ant-design/icons';
 import { App as AntdApp, Avatar, Badge, Button, Empty, Image as AntImage, Input, Modal, Select, Spin, Tag, Tooltip, Dropdown } from 'antd';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, ArrowRight, BookOpen, Download, ExternalLink, Eye, FileImage, FileText as FileTextIcon, Globe2, ImagePlus, Pencil, RotateCw, Send, Trash2, Upload, X } from 'lucide-react';
+// import { ArrowLeft, ArrowRight, BookOpen, Download, ExternalLink, Eye, FileImage, FileText as FileTextIcon, Globe2, ImagePlus, Pencil, RotateCw, Send, Trash2, Upload, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, BookOpen, Download, ExternalLink, Eye, FileImage, FileText as FileTextIcon, Globe2, ImagePlus, Pencil, RotateCw, Save, Send, Trash2, Upload, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -16,17 +17,25 @@ import remarkGfm from 'remark-gfm';
 import {
     cancelTurn, createConversation, createTurn, deleteConversation, getConversation, getDashboardOverview, getDashboardTodos, getDashboardUpcomingMeetings, getDocument, getImage, replayTurnEvents, updateConversation, uploadAttachmentFile,
     getUnreadNotificationCount, hasStoredSession, listConversations, listDocuments, listTenantMembers, logout,
+    createKnowledgeDocument, deleteKnowledgeDocument, listWritableKnowledgeBases,
     type Conversation, type ConversationMessage, type DashboardOverview, type DashboardTodoItem, type DashboardUpcomingMeeting, type ImageAccess,
     type TurnStreamEvent,
+    type KnowledgeBaseSummary, type KnowledgeSourceType,
     type ManagedDocumentSummary, type MeResult, type TenantMember,
 } from '../core/api';
 import MeetingManagement from '../features/meetings/MeetingManagement';
+import DingTalkOrganizationPage from '../features/dingtalk/DingTalkOrganizationPage';
 import NotificationCenter from '../features/notifications/NotificationCenter';
 import OrganizationManagement from '../features/organization/OrganizationManagement';
 import ProjectManagement from '../features/projects/ProjectManagement';
 import WorkReportPage from '../features/reports/WorkReportPage';
 import ProfileSettings from '../features/profile/ProfileSettings';
 import RoleManagement from '../features/roles/RoleManagement';
+import AssignmentPolicyManagement from '../features/assignment/AssignmentPolicyManagement';
+import HrManagement from '../features/hr/HrManagement';
+import FinanceManagement from '../features/finance/FinanceManagement';
+import LegalContractManagement from '../features/legal/LegalContractManagement';
+import KnowledgeManagement from '../features/knowledge/KnowledgeManagement';
 import { useDateFormatter, useI18n } from '../core/i18n';
 
 interface WebviewElement extends HTMLWebViewElement {
@@ -55,6 +64,11 @@ const navItems: NavItem[] = [
     { path: '/applications', label: '应用中心', icon: <AppstoreOutlined /> },
     { path: '/architecture', label: '架构管理', icon: <TeamOutlined /> },
     { path: '/roles', label: '角色权限', icon: <SafetyCertificateOutlined /> },
+    { path: '/assignment', label: '分配策略', icon: <PartitionOutlined /> },
+    { path: '/hr', label: '人力资源', icon: <UserOutlined /> },
+    { path: '/finance', label: '财务管理', icon: <BankOutlined /> },
+    { path: '/legal', label: '合同台账', icon: <FileProtectOutlined /> },
+    { path: '/dingtalk', label: '钉钉管理', icon: <CloudSyncOutlined /> },
     { path: '/knowledge', label: '知识管理', icon: <BookOutlined /> },
     { path: '/notifications', label: '通知中心', icon: <NotificationOutlined /> },
 ];
@@ -71,11 +85,20 @@ const appItems = [
 ];
 
 const navPermissionByPath: Record<string, string> = {
+    '/assignment': 'assignment.policy.read',
     '/roles': 'role.read',
     '/projects': 'project.read',
     '/meetings': 'meeting.read',
     '/reports': 'work_report.read',
+    '/knowledge': 'knowledge_base.read',
     '/notifications': 'notification.read',
+};
+
+const navAnyPermissionByPath: Record<string, string[]> = {
+    '/dingtalk': ['dingtalk.integration.read', 'dingtalk.organization.read', 'dingtalk.organization.mapping.preview'],
+    '/hr': ['hr.profile.read', 'hr.leave.read', 'hr.attendance.read', 'hr.overtime.read', 'hr.employee_change.read', 'hr.report.read'],
+    '/finance': ['finance.expense.read', 'finance.expense.request', 'finance.expense.approve', 'finance.expense.manage_all'],
+    '/legal': ['legal.contract.read', 'legal.contract.create', 'legal.contract.update', 'legal.contract.delete', 'legal.contract.manage_all'],
 };
 
 interface WorkspaceProps {
@@ -120,7 +143,11 @@ function SideNavigation({ collapsed, permissions, unreadCount, onToggle, onLogou
             {!collapsed && <span><strong>CEES AI</strong><small>{t('企业智能工作台')}</small></span>}
         </div>
         <nav className="nav-list">
-            {navItems.filter((item) => !navPermissionByPath[item.path] || permissions.includes(navPermissionByPath[item.path])).map((item) => <Tooltip key={item.path} title={collapsed ? t(item.label) : ''} placement="right">
+            {navItems.filter((item) => {
+                const requiredPermission = navPermissionByPath[item.path];
+                const anyPermissions = navAnyPermissionByPath[item.path];
+                return (!requiredPermission || permissions.includes(requiredPermission)) && (!anyPermissions || anyPermissions.some((permission) => permissions.includes(permission)));
+            }).map((item) => <Tooltip key={item.path} title={collapsed ? t(item.label) : ''} placement="right">
                 <button className={`nav-item ${location.pathname === item.path ? 'is-active' : ''}`} type="button" onClick={() => navigate(item.path)}>
                     {item.path === '/notifications' ? <Badge count={unreadCount} size="small" offset={[2, -2]}>{item.icon}</Badge> : item.icon}{!collapsed && <span>{t(item.label)}</span>}
                 </button>
@@ -213,6 +240,9 @@ interface LocalChatMessage {
     content: string;
     resources?: ChatResource[];
     sources?: ChatSource[];
+    citations?: ChatCitation[];
+    /** 已持久化的历史消息才有稳定 message id，才能转存到知识库（块 7c）。 */
+    persisted?: boolean;
 }
 
 interface ChatResource {
@@ -230,8 +260,27 @@ interface ChatSource {
     publishedAt?: string | null;
 }
 
-function ChatResourceCard({ resource, onPreviewDocument }: { resource: ChatResource; onPreviewDocument: (document: { id: string; title: string; content: string }) => void }): JSX.Element {
+interface ChatCitation {
+    id: string;
+    title: string;
+    snippet: string;
+    pageIndex?: number | null;
+    knowledgeBaseId?: string | null;
+    deletable?: boolean;
+    /** 本地标记：该文档已在当前客户端被删除，历史缓存恢复时直接展示已删除态。 */
+    deleted?: boolean;
+}
+
+/** 转存目标：确定性按钮携带的来源三元组，弹确认框选目标库与可见范围（块 7c）。 */
+interface SaveTarget {
+    sourceType: KnowledgeSourceType;
+    sourceId: string;
+    defaultName?: string;
+}
+
+function ChatResourceCard({ resource, onPreviewDocument, onSaveToKnowledge }: { resource: ChatResource; onPreviewDocument: (document: { id: string; title: string; content: string }) => void; onSaveToKnowledge: (target: SaveTarget) => void }): JSX.Element {
     const { message } = AntdApp.useApp();
+    const { t } = useI18n();
     const [image, setImage] = useState<ImageAccess>();
     const [documentTitle, setDocumentTitle] = useState('生成文档');
     const [documentContent, setDocumentContent] = useState<string>();
@@ -255,7 +304,7 @@ function ChatResourceCard({ resource, onPreviewDocument }: { resource: ChatResou
     return <div className={`chat-resource ${resource.type.toLowerCase()}`}>
         {resource.type === 'IMAGE' && <>{image || resource.url ? <AntImage className="chat-resource-image" src={image?.url ?? resource.url ?? undefined} alt="AI 生成图片" preview={{ mask: '点击放大' }} /> : <Spin size="small" />}<Button size="small" disabled={!image && !resource.url} icon={<Download size={15} />} onClick={() => void download()}>{'下载'}</Button></>}
         {resource.type === 'DOCUMENT' && <>
-            <div className="chat-resource-header"><span><FileTextIcon size={17} />{documentTitle}</span><span className="chat-resource-actions"><Button size="small" disabled={documentContent === undefined} icon={<Eye size={15} />} onClick={() => documentContent !== undefined && onPreviewDocument({ id: resource.id, title: documentTitle, content: documentContent })}>{'查看内容'}</Button><Button size="small" disabled={documentContent === undefined} icon={<Download size={15} />} onClick={() => void download()}>{'下载'}</Button></span></div>
+            <div className="chat-resource-header"><span><FileTextIcon size={17} />{documentTitle}</span><span className="chat-resource-actions"><Button size="small" icon={<Save size={15} />} onClick={() => onSaveToKnowledge({ sourceType: 'DOCUMENT', sourceId: resource.id, defaultName: documentTitle })}>{t('存入知识库')}</Button><Button size="small" disabled={documentContent === undefined} icon={<Eye size={15} />} onClick={() => documentContent !== undefined && onPreviewDocument({ id: resource.id, title: documentTitle, content: documentContent })}>{'查看内容'}</Button><Button size="small" disabled={documentContent === undefined} icon={<Download size={15} />} onClick={() => void download()}>{'下载'}</Button></span></div>
         </>}
     </div>;
 }
@@ -268,9 +317,133 @@ function ChatSourceCard({ source }: { source: ChatSource }): JSX.Element {
     </a>;
 }
 
-function AssistantPage(): JSX.Element {
+interface GroupedCitation {
+    id: string;
+    title: string;
+    knowledgeBaseId?: string | null;
+    deletable?: boolean;
+    /** 本地标记：该文档已在当前客户端被删除，历史缓存恢复时直接展示已删除态。 */
+    deleted?: boolean;
+    fragments: Array<{ snippet: string; pageIndex?: number | null }>;
+}
+
+/** 同一文档的多个命中片段合并为一张引用卡片，避免标题重复刷屏。 */
+function groupCitations(citations: ChatCitation[]): GroupedCitation[] {
+    const order: string[] = [];
+    const groups = new Map<string, GroupedCitation>();
+    for (const citation of citations) {
+        const existing = groups.get(citation.id);
+        if (existing) {
+            existing.fragments.push({ snippet: citation.snippet, pageIndex: citation.pageIndex });
+            continue;
+        }
+        order.push(citation.id);
+        groups.set(citation.id, { id: citation.id, title: citation.title, knowledgeBaseId: citation.knowledgeBaseId, deletable: citation.deletable, deleted: citation.deleted, fragments: [{ snippet: citation.snippet, pageIndex: citation.pageIndex }] });
+    }
+    return order.map((id) => groups.get(id) as GroupedCitation);
+}
+
+/** 知识库引用卡片：点击展开查看完整命中片段（默认截断两行，同文档多片段合并展示）；deletable 时提供删除入口（二次确认）。 */
+function KnowledgeCitationCard({ citation, onDeleted }: { citation: GroupedCitation; onDeleted?: (citationId: string) => void }): JSX.Element {
     const { t } = useI18n();
     const { message } = AntdApp.useApp();
+    const [expanded, setExpanded] = useState(false);
+    const [deleted, setDeleted] = useState(citation.deleted === true);
+    const multiple = citation.fragments.length > 1;
+    const confirmDelete = (): void => {
+        const knowledgeBaseId = citation.knowledgeBaseId;
+        if (!knowledgeBaseId) return;
+        Modal.confirm({
+            title: t('删除文档'),
+            content: t('删除后文档将无法被知识库检索引用，确认删除吗？'),
+            okText: t('删除'),
+            okButtonProps: { danger: true },
+            cancelText: t('取消'),
+            onOk: async () => {
+                try {
+                    await deleteKnowledgeDocument(knowledgeBaseId, citation.id);
+                    setDeleted(true);
+                    onDeleted?.(citation.id);
+                    message.success(t('文档已删除'));
+                } catch (error) {
+                    message.error(error instanceof Error ? error.message : t('删除失败'));
+                }
+            },
+        });
+    };
+    if (deleted) return <div className="chat-source chat-citation is-deleted">
+        <span className="chat-source-heading"><BookOpen size={15} /><strong>{citation.title}</strong><em className="chat-citation-page">{t('已删除')}</em></span>
+    </div>;
+    const fragments = expanded ? citation.fragments : citation.fragments.slice(0, 1);
+    return <div className={`chat-source chat-citation${expanded ? ' is-expanded' : ''}`} onClick={() => setExpanded((value) => !value)} title={expanded ? t('点击收起') : t('点击展开完整片段')}>
+        <span className="chat-source-heading"><BookOpen size={15} /><strong>{citation.title}</strong>{multiple && <em className="chat-citation-count">{t('{count} 处引用', { count: citation.fragments.length })}</em>}</span>
+        {fragments.map((fragment, index) => <span className="chat-source-snippet" key={index}>{fragment.pageIndex !== null && fragment.pageIndex !== undefined && <em className="chat-citation-page">{t('第 {page} 页', { page: fragment.pageIndex + 1 })}</em>}{fragment.snippet}</span>)}
+        {citation.deletable && citation.knowledgeBaseId && <button className="chat-citation-delete" type="button" title={t('删除文档')} onClick={(event) => { event.stopPropagation(); confirmDelete(); }}><Trash2 size={13} /></button>}
+    </div>;
+}
+
+/** 转存确认框：选目标库（用户 EDITOR 权限的库）与可见范围，直接调转存端点（块 7c）。 */
+function SaveToKnowledgeModal({ target, onClose, onSaved }: {
+    target: SaveTarget;
+    onClose: () => void;
+    onSaved: (document: { name: string }) => void;
+}): JSX.Element {
+    const { t } = useI18n();
+    const { message } = AntdApp.useApp();
+    const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBaseSummary[]>();
+    const [knowledgeBaseId, setKnowledgeBaseId] = useState<string>();
+    const [name, setName] = useState(target.defaultName ?? '');
+    const [visibilityScope, setVisibilityScope] = useState<'PRIVATE' | 'TENANT'>('PRIVATE');
+    const [saving, setSaving] = useState(false);
+    useEffect(() => {
+        void listWritableKnowledgeBases()
+            .then((result) => {
+                setKnowledgeBases(result.items);
+                if (result.items.length === 1) setKnowledgeBaseId(result.items[0].id);
+            })
+            .catch((error) => message.error(error instanceof Error ? error.message : t('加载知识库失败')));
+    }, []);
+    const submit = async (): Promise<void> => {
+        if (!knowledgeBaseId || saving) return;
+        setSaving(true);
+        try {
+            const document = await createKnowledgeDocument(knowledgeBaseId, {
+                sourceType: target.sourceType,
+                sourceId: target.sourceId,
+                name: name.trim() || undefined,
+                visibilityScope,
+            });
+            onSaved(document);
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : t('转存失败'));
+        } finally {
+            setSaving(false);
+        }
+    };
+    return <Modal open title={t('存入知识库')} okText={t('确定')} cancelText={t('取消')} confirmLoading={saving}
+        okButtonProps={{ disabled: !knowledgeBaseId }}
+        onOk={() => void submit()}
+        onCancel={onClose}>
+        <div className="save-to-knowledge-form">
+            <div className="save-to-knowledge-field"><label>{t('文档名称')}</label><Input value={name} maxLength={200} onChange={(event) => setName(event.target.value)} placeholder={t('留空则使用默认名称')} /></div>
+            <div className="save-to-knowledge-field"><label>{t('目标知识库')}</label>
+                {knowledgeBases === undefined
+                    ? <Spin size="small" />
+                    : knowledgeBases.length
+                        ? <Select value={knowledgeBaseId} onChange={setKnowledgeBaseId} options={knowledgeBases.map((item) => ({ value: item.id, label: item.name }))} />
+                        : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('没有可写入的知识库')} />}
+            </div>
+            <div className="save-to-knowledge-field"><label>{t('可见范围')}</label>
+                <Select value={visibilityScope} onChange={(value) => setVisibilityScope(value as 'PRIVATE' | 'TENANT')} options={[{ value: 'PRIVATE', label: t('私有（仅自己可见）') }, { value: 'TENANT', label: t('租户可见') }]} />
+            </div>
+        </div>
+    </Modal>;
+}
+
+function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element {
+    const { t } = useI18n();
+    const { message } = AntdApp.useApp();
+    const canSaveToKnowledge = permissions.includes('knowledge_base.read');
     const [input, setInput] = useState('');
     const [selectedPrompt, setSelectedPrompt] = useState<string>();
     const [mode, setMode] = useState<'standard' | 'ultra'>('standard');
@@ -288,6 +461,7 @@ function AssistantPage(): JSX.Element {
     const requestVersion = useRef(0);
     const streamFlush = useRef<ReturnType<typeof setTimeout>>();
     const [previewDocument, setPreviewDocument] = useState<{ id: string; title: string; content: string }>();
+    const [saveTarget, setSaveTarget] = useState<SaveTarget>();
     const [renameTarget, setRenameTarget] = useState<Conversation>();
     const [renameValue, setRenameValue] = useState('');
     useEffect(() => { void listConversations().then((result) => { setConversations(result.items); if (result.items[0]) void selectConversation(result.items[0]); }).catch((error) => message.error(error instanceof Error ? error.message : '加载会话失败')); }, []);
@@ -317,6 +491,14 @@ function AssistantPage(): JSX.Element {
         void createConversation().then((conversation) => { setConversations((items) => [conversation, ...items]); setActiveConversationId(conversation.id); setMessages([]); setPreviewDocument(undefined); }).catch((error) => message.error(error instanceof Error ? error.message : '创建会话失败'));
     };
 
+    /** 删除成功后同步会话级引用缓存，重开对话时直接展示已删除态（块 4）。 */
+    const handleCitationDeleted = (citationId: string): void => {
+        if (!activeConversationId) return;
+        const key = `cees.chat.citations.${activeConversationId}`;
+        const cached = JSON.parse(localStorage.getItem(key) ?? '[]') as ChatCitation[];
+        localStorage.setItem(key, JSON.stringify(cached.map((item) => item.id === citationId ? { ...item, deleted: true } : item)));
+    };
+
     const selectConversation = async (conversation: Conversation): Promise<void> => {
         requestVersion.current += 1;
         abortController.current?.abort();
@@ -328,6 +510,7 @@ function AssistantPage(): JSX.Element {
         const detail = await getConversation(conversation.id);
         if (activeConversationId && activeConversationId !== conversation.id) return;
         const cachedSources = JSON.parse(localStorage.getItem(`cees.chat.sources.${conversation.id}`) ?? '[]') as ChatSource[];
+        const cachedCitations = JSON.parse(localStorage.getItem(`cees.chat.citations.${conversation.id}`) ?? '[]') as ChatCitation[];
         const resourcesByTurn = new Map<string, ChatResource[]>();
         for (const item of detail.messages) {
             const resources = item.resources?.map((resource): ChatResource => ({ id: resource.id || resource.resourceId || '', type: resource.type, url: resource.url ?? resource.resourceUrl })) ?? [];
@@ -335,10 +518,14 @@ function AssistantPage(): JSX.Element {
             if (legacyImageUrl && item.turnId && item.toolCallId) resources.push({ id: item.toolCallId, type: 'IMAGE', url: legacyImageUrl });
             if (resources.length && item.turnId) resourcesByTurn.set(item.turnId, [...(resourcesByTurn.get(item.turnId) ?? []), ...resources]);
         }
-        const restored: LocalChatMessage[] = detail.messages.filter((item) => item.role !== 'TOOL').map((item) => ({ id: item.id, role: item.role === 'USER' ? 'user' : 'assistant', content: item.content, resources: item.role === 'ASSISTANT' ? resourcesByTurn.get(item.turnId ?? '') : undefined }));
+        const restored: LocalChatMessage[] = detail.messages.filter((item) => item.role !== 'TOOL').map((item) => ({ id: item.id, role: item.role === 'USER' ? 'user' : 'assistant', content: item.content, persisted: true, resources: item.role === 'ASSISTANT' ? resourcesByTurn.get(item.turnId ?? '') : undefined }));
         if (cachedSources.length) {
             const lastAssistantMessage = [...restored].reverse().find((item) => item.role === 'assistant');
             if (lastAssistantMessage) lastAssistantMessage.sources = cachedSources;
+        }
+        if (cachedCitations.length) {
+            const lastAssistantMessage = [...restored].reverse().find((item) => item.role === 'assistant');
+            if (lastAssistantMessage) lastAssistantMessage.citations = cachedCitations;
         }
         setMessages(restored);
     };
@@ -346,7 +533,7 @@ function AssistantPage(): JSX.Element {
     const sendMessage = async (): Promise<void> => {
         const text = input.trim();
         const imageFileIds = attachment?.isImage ? [attachment.id] : [];
-        const options = [networkSearch && '使用联网搜索', knowledgeBase && '使用知识库', attachment && !attachment.isImage && `参考附件：${attachment.name}（${attachment.id}）`].filter(Boolean);
+        const options = [networkSearch && '使用联网搜索', attachment && !attachment.isImage && `参考附件：${attachment.name}（${attachment.id}）`].filter(Boolean);
         const content = [selectedPrompt, ...options, text].filter(Boolean).join('\n') || (imageFileIds.length ? t('请分析这张图片') : '');
         if ((!content && !imageFileIds.length) || sending) return;
         setInput('');
@@ -362,8 +549,8 @@ function AssistantPage(): JSX.Element {
             const conversationId = activeConversationId ?? (await createConversation()).id;
             setActiveConversationId(conversationId);
             if (!conversations.some((item) => item.id === conversationId)) setConversations((items) => [{ id: conversationId, title: t('新对话'), mode, visibility: 'PRIVATE', version: 1, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }, ...items]);
-            let turnId = ''; let seq = 0; let answer = ''; let terminal = false; const streamingMessageId = `streaming-${Date.now()}`; const resources: ChatResource[] = []; const sources: ChatSource[] = []; const toolTypes = new Map<string, ChatResource['type']>();
-            const updateStreamingMessage = (): void => setMessages((items) => [...items.filter((item) => item.id !== streamingMessageId), { id: streamingMessageId, role: 'assistant', content: answer, resources: [...resources], sources: [...sources] }]);
+            let turnId = ''; let seq = 0; let answer = ''; let terminal = false; const streamingMessageId = `streaming-${Date.now()}`; const resources: ChatResource[] = []; const sources: ChatSource[] = []; const citations: ChatCitation[] = []; const toolTypes = new Map<string, ChatResource['type']>();
+            const updateStreamingMessage = (): void => setMessages((items) => [...items.filter((item) => item.id !== streamingMessageId), { id: streamingMessageId, role: 'assistant', content: answer, resources: [...resources], sources: [...sources], citations: [...citations] }]);
             const handle = (event: TurnStreamEvent): void => {
                 if (event.seq <= seq) return;
                 seq = event.seq;
@@ -372,19 +559,20 @@ function AssistantPage(): JSX.Element {
                 if (event.type === 'tool_call') { if (event.name === 'generate_document') toolTypes.set(event.toolCallId, 'DOCUMENT'); else if (event.name === 'generate_image') { toolTypes.set(event.toolCallId, 'IMAGE'); setImageGenerating(true); } }
                 if (event.type === 'tool_result' && event.status === 'completed') {
                     if (event.sources?.length) { sources.push(...event.sources); updateStreamingMessage(); }
+                    if (event.citations?.length) { citations.push(...event.citations); updateStreamingMessage(); }
                     const resourceId = event.resource?.id ?? event.resourceId;
                     const resourceType = event.resource?.type ?? toolTypes.get(event.toolCallId);
                     if (resourceId && resourceType) { resources.push({ id: resourceId, type: resourceType, url: event.resourceUrl }); if (resourceType === 'IMAGE') setImageGenerating(false); updateStreamingMessage(); }
                 }
                 if (event.type === 'error') { terminal = true; setImageGenerating(false); throw new Error(event.error.message); }
-                if (event.type === 'completed') { terminal = true; setImageGenerating(false); if (sources.length) localStorage.setItem(`cees.chat.sources.${conversationId}`, JSON.stringify(sources)); if (event.finishReason === 'length') message.warning(t('回答达到长度上限，内容可能不完整')); }
+                if (event.type === 'completed') { terminal = true; setImageGenerating(false); if (sources.length) localStorage.setItem(`cees.chat.sources.${conversationId}`, JSON.stringify(sources)); if (citations.length) localStorage.setItem(`cees.chat.citations.${conversationId}`, JSON.stringify(citations)); if (event.finishReason === 'length') message.warning(t('回答达到长度上限，内容可能不完整')); }
             };
             const replay = async (): Promise<void> => {
                 for (let attempt = 0; attempt < 3 && !terminal; attempt += 1) await replayTurnEvents(conversationId, turnId, seq, handle, controller.signal);
                 if (!terminal) throw new Error(t('连接已断开，请稍后重试'));
             };
             try {
-                await createTurn(conversationId, { content, mode, imageFileIds }, crypto.randomUUID(), handle, controller.signal);
+                await createTurn(conversationId, { content, mode, imageFileIds, knowledgeBaseEnabled: knowledgeBase }, crypto.randomUUID(), handle, controller.signal);
             } catch (error) {
                 if (!turnId || controller.signal.aborted || terminal) throw error;
                 await replay();
@@ -410,9 +598,13 @@ function AssistantPage(): JSX.Element {
                     {item.role === 'assistant' && <i className="assistant-avatar"><CeesLogo /></i>}
                     <div className="chat-message-body">
                         <div className="chat-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}>{item.content}</ReactMarkdown></div>
-                        {item.resources?.map((resource) => <ChatResourceCard key={`${resource.type}-${resource.id}`} resource={resource} onPreviewDocument={setPreviewDocument} />)}
+                        {item.resources?.map((resource) => <ChatResourceCard key={`${resource.type}-${resource.id}`} resource={resource} onPreviewDocument={setPreviewDocument} onSaveToKnowledge={canSaveToKnowledge ? setSaveTarget : () => undefined} />)}
                         {item.sources?.length ? <div className="chat-sources">{item.sources.map((source) => <ChatSourceCard key={source.id} source={source} />)}</div> : null}
-                        <button className="chat-copy" type="button" onClick={() => void copyText(item.content)}><CopyOutlined />{t('复制')}</button>
+                        {item.citations?.length ? <div className="chat-sources">{groupCitations(item.citations).map((citation) => <KnowledgeCitationCard key={citation.id} citation={citation} onDeleted={handleCitationDeleted} />)}</div> : null}
+                        <div className="chat-message-actions">
+                            <button className="chat-copy" type="button" onClick={() => void copyText(item.content)}><CopyOutlined />{t('复制')}</button>
+                            {item.persisted && canSaveToKnowledge && <button className="chat-copy chat-save-to-knowledge" type="button" onClick={() => setSaveTarget({ sourceType: 'MESSAGE', sourceId: item.id })}><Save size={13} />{t('存入知识库')}</button>}
+                        </div>
                     </div>
                 </div>)}
                 {sending && <div className="chat-message assistant"><i className="assistant-avatar"><CeesLogo /></i><div className={`chat-generation-status ${imageGenerating ? 'is-image-generation' : ''}`}><span className={imageGenerating ? 'image-generating-orbit' : 'thinking-dots'} />{imageGenerating ? <span>图片生成中</span> : <span>{t('正在思考…')}</span>}</div></div>}
@@ -421,7 +613,7 @@ function AssistantPage(): JSX.Element {
                 <div className="message-composer">
                     <div className="message-editor">
                         {selectedPrompt && <Tag closable onClose={() => setSelectedPrompt(undefined)}>{t(selectedPrompt)}</Tag>}
-                        {attachment && <Tag closable icon={attachment.isImage ? <FileImage size={14} /> : <FileTextIcon size={14} />} onClose={() => setAttachment(undefined)}>{attachment.name}</Tag>}
+                        {attachment && <Tag closable icon={attachment.isImage ? <FileImage size={14} /> : <FileTextIcon size={14} />} onClose={() => setAttachment(undefined)}>{attachment.name}{canSaveToKnowledge && <button className="attachment-save" type="button" title={t('存入知识库')} onClick={() => setSaveTarget({ sourceType: 'FILE_OBJECT', sourceId: attachment.id, defaultName: attachment.name })}><Save size={12} /></button>}</Tag>}
                         <Input.TextArea autoSize={{ minRows: 3, maxRows: 8 }} value={input} onChange={(event) => setInput(event.target.value)} onPressEnter={(event) => { if (!event.shiftKey) { event.preventDefault(); void sendMessage(); } }} placeholder={t('输入消息，Enter 发送')} />
                         <div className="composer-footer">
                             <Dropdown trigger={['click']} menu={{ items: [{ key: 'upload', icon: <Upload size={16} />, label: '上传文件或图片', onClick: () => fileInput.current?.click() }, { key: 'image', icon: <ImagePlus size={16} />, label: '生成图片', onClick: () => setSelectedPrompt('生成图片') }, { key: 'document', icon: <FileTextIcon size={16} />, label: '生成文档', onClick: () => setSelectedPrompt('生成文档') }] }}><Button type="text" className="composer-add" icon={<PlusOutlined />} /></Dropdown>
@@ -436,6 +628,7 @@ function AssistantPage(): JSX.Element {
             </div>
         </section>
         {previewDocument && <aside className="document-preview-panel"><div className="document-preview-heading"><span><FileTextIcon size={18} /><strong>{previewDocument.title}</strong></span><Button type="text" onClick={() => setPreviewDocument(undefined)}>×</Button></div><div className="document-preview-content chat-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}>{previewDocument.content}</ReactMarkdown></div></aside>}
+        {saveTarget && <SaveToKnowledgeModal target={saveTarget} onClose={() => setSaveTarget(undefined)} onSaved={(document) => { message.success(t('已存入知识库：文档《{name}》正在解析索引，处理完成后即可被知识库检索引用。', { name: document.name })); setSaveTarget(undefined); }} />}
         <Modal open={!!renameTarget} title={t('重命名对话')} okText={t('确定')} cancelText={t('取消')} onOk={submitRename} onCancel={() => setRenameTarget(undefined)}>
             <Input value={renameValue} onChange={(event) => setRenameValue(event.target.value)} onPressEnter={submitRename} maxLength={128} autoFocus placeholder={t('请输入新的对话名称')} />
         </Modal>
@@ -518,24 +711,6 @@ function ApplicationsPage(): JSX.Element {
     </div>;
 }
 
-function KnowledgePage({ documents, loading }: { documents: ManagedDocumentSummary[]; loading: boolean }): JSX.Element {
-    const { t } = useI18n();
-    const formatDate = useDateFormatter();
-    const [search, setSearch] = useState('');
-    const filteredDocuments = documents.filter((document) => document.title.toLowerCase().includes(search.toLowerCase()));
-    const [selectedId, setSelectedId] = useState<string>();
-    const selected = documents.find((document) => document.id === selectedId) ?? documents[0];
-
-    return <div className="workspace-page knowledge-page">
-        <PageHeader title={t('知识管理')} description={t('沉淀、组织并安全共享企业知识')} actions={<Button type="primary" icon={<PlusOutlined />}>{t('新建文档')}</Button>} />
-        <div className="knowledge-layout">
-            <aside className="knowledge-folders surface-panel"><h3>{t('受控文档')}</h3><button className="is-active" type="button"><BookOutlined />{t('全部文档')}<span>{documents.length}</span></button><button type="button"><FolderOutlined />{t('租户可见')}<span>{documents.filter((document) => document.visibility === 'TENANT').length}</span></button><button type="button"><FolderOutlined />{t('我的私有')}<span>{documents.filter((document) => document.visibility === 'PRIVATE').length}</span></button></aside>
-            <section className="knowledge-list surface-panel"><div className="knowledge-toolbar"><Input value={search} onChange={(event) => setSearch(event.target.value)} prefix={<SearchOutlined />} placeholder={t('搜索受控文档')} /><Button icon={<StarOutlined />}>{t('收藏')}</Button></div><div className="knowledge-table-head"><span>{t('文档名称')}</span><span>{t('可见性')}</span><span>{t('更新时间')}</span><span>{t('版本')}</span></div>{loading ? <div className="data-loading"><Spin /></div> : filteredDocuments.length ? filteredDocuments.map((document) => <button className={`knowledge-row ${selected?.id === document.id ? 'is-selected' : ''}`} type="button" key={document.id} onClick={() => setSelectedId(document.id)}><span><i><FileTextOutlined /></i><b>{document.title}</b><small>{t('受控文档')}</small></span><span>{document.visibility === 'TENANT' ? t('租户可见') : t('私有')}</span><span>{formatDate(document.updatedAt)}</span><span><Tag>v{document.version}</Tag></span></button>) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('当前权限范围内暂无文档')} />}</section>
-            <aside className="knowledge-detail surface-panel">{selected ? <><i className="knowledge-file-icon"><FileTextOutlined /></i><h2>{selected.title}</h2><Tag>{selected.visibility === 'TENANT' ? t('租户可见') : t('私有')}</Tag><p>{t('该受控文档由 NestJS 统一执行权限、资源范围、版本控制与审计。')}</p><dl><div><dt>{t('最近更新')}</dt><dd>{formatDate(selected.updatedAt)}</dd></div><div><dt>{t('当前版本')}</dt><dd>v{selected.version}</dd></div><div><dt>{t('有效权限')}</dt><dd>{selected.currentPermissions?.join('、') || t('读取')}</dd></div></dl><Button type="primary" block>{t('打开文档')}</Button></> : <Empty description={t('请选择文档')} />}</aside>
-        </div>
-    </div>;
-}
-
 function CurrentPage({ authContext, members, documents, membersLoading, documentsLoading, onSessionExpired, onProfileUpdated }: { authContext: MeResult; members: TenantMember[]; documents: ManagedDocumentSummary[]; membersLoading: boolean; documentsLoading: boolean; onSessionExpired: () => void; onProfileUpdated: (displayName: string) => void }): JSX.Element {
     const navigate = useNavigate();
     const hasPermission = (code: string): boolean => authContext.permissions.includes(code);
@@ -546,14 +721,20 @@ function CurrentPage({ authContext, members, documents, membersLoading, document
 
     const location = useLocation();
     if (location.pathname === '/browser') return <BrowserPage />;
-    if (location.pathname === '/assistant') return <AssistantPage />;
+    // if (location.pathname === '/assistant') return <AssistantPage />;
+    if (location.pathname === '/assistant') return <AssistantPage permissions={authContext.permissions} />;
     if (location.pathname === '/projects') return <ProjectManagement authContext={authContext} onSessionExpired={onSessionExpired} />;
     if (location.pathname === '/meetings') return <MeetingManagement authContext={authContext} onSessionExpired={onSessionExpired} />;
     if (location.pathname === '/reports') return <WorkReportPage authContext={authContext} onSessionExpired={onSessionExpired} />;
     if (location.pathname === '/applications') return <ApplicationsPage />;
     if (location.pathname === '/architecture') return <OrganizationManagement authContext={authContext} fallbackMembers={members} membersLoading={membersLoading} onSessionExpired={onSessionExpired} />;
+    if (location.pathname === '/assignment') return <AssignmentPolicyManagement authContext={authContext} onSessionExpired={onSessionExpired} />;
+    if (location.pathname === '/hr') return <HrManagement authContext={authContext} onSessionExpired={onSessionExpired} />;
+    if (location.pathname === '/finance') return <FinanceManagement authContext={authContext} onSessionExpired={onSessionExpired} />;
+    if (location.pathname === '/legal') return <LegalContractManagement authContext={authContext} onSessionExpired={onSessionExpired} />;
     if (location.pathname === '/roles') return <RoleManagement authContext={authContext} onSessionExpired={onSessionExpired} />;
-    if (location.pathname === '/knowledge') return <KnowledgePage documents={documents} loading={documentsLoading} />;
+    if (location.pathname === '/dingtalk') return <DingTalkOrganizationPage authContext={authContext} onSessionExpired={onSessionExpired} />;
+    if (location.pathname === '/knowledge') return <KnowledgeManagement authContext={authContext} onSessionExpired={onSessionExpired} />;
     if (location.pathname === '/profile') return <ProfileSettings tenantName={authContext.tenant.name} onProfileUpdated={onProfileUpdated} onSessionExpired={onSessionExpired} />;
     if (location.pathname === '/notifications') return <NotificationCenter authContext={authContext} onSessionExpired={onSessionExpired} />;
     return <HomePage

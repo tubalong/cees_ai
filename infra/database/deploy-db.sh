@@ -132,3 +132,7 @@ done
 
 echo "Starting $ENVIRONMENT PostgreSQL and Redis..."
 bash "$BASE_DIR/manage-db.sh" "$ENVIRONMENT" up
+
+# ai-service 的向量库使用独立 database，不进 Prisma，由本脚本幂等创建。
+echo "Ensuring the cees_ai_vectors database exists..."
+bash "$BASE_DIR/manage-db.sh" "$ENVIRONMENT" create-vector-db

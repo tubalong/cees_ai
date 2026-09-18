@@ -20,9 +20,9 @@ export interface ProjectResult {
     departmentId: string | null;
     owner: ProjectMemberResult | null;
     currentMemberRole: ProjectMemberRole | null;
-    startsAt: Date | null;
-    endsAt: Date | null;
+    startedAt: Date | null;
     completedAt: Date | null;
+    closedAt: Date | null;
     completedByMembershipId: string | null;
     completionSummary: string | null;
     memberCount: number;

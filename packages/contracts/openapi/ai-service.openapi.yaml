@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CEES AI Service Internal API
-  version: 0.3.0
+  version: 0.5.0
   description: |
     Internal infrastructure API used only by trusted CEES services.
     Desktop, mobile, and third-party clients must call the NestJS public API instead.
@@ -750,10 +750,13 @@ paths:
       description: |
         Builds TextNodes from a normalized ParsedDocument, chunks them,
         embeds them, and idempotently upserts the vectors into the vector
-        store. Re-submitting the same (document_version_id, chunking_version,
-        embedding_profile, index_version) tuple replaces the previous nodes
-        instead of duplicating them. ai-service never writes the business
-        database and does not create formal resources.
+        store. Replacement is keyed by the (tenant_id, document_version_id,
+        index_version) triple: re-submitting the same triple replaces the
+        previous nodes instead of duplicating them. chunking_version and
+        embedding_profile are recorded as node metadata and define the index
+        identity; changing either requires a new index_version. ai-service
+        never writes the business database and does not create formal
+        resources.
       security:
         - internalToken: []
       requestBody:
@@ -804,6 +807,48 @@ paths:
           $ref: "#/components/responses/InternalError"
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
+  /internal/v1/knowledge/index/delete:
+    post:
+      tags: [knowledge]
+      operationId: deleteKnowledgeIndex
+      summary: Delete derived index of a document version
+      description: |
+        Deletes all derived vectors of the given (document_version_id,
+        index_version) tuple for the tenant. NestJS calls this when a
+        document is deleted or when a new document version supersedes the
+        old one. Never touches business data; deleting the derived index
+        does not delete the business document.
+      security:
+        - internalToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/KnowledgeIndexDeleteRequest"
+            example:
+              request_id: req-knowledge-delete-001
+              tenant_id: tenant-example
+              user_id: user-example
+              document_version_id: version-example
+              index_version: idx-v1
+      responses:
+        "200":
+          description: Derived index deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgeIndexDeleteResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
   /internal/v1/knowledge/retrieve:
     post:
       tags: [knowledge]
@@ -830,7 +875,6 @@ paths:
               scope:
                 knowledge_base_ids: [kb-example]
                 allowed_document_ids: [doc-example]
-                acl_version: acl-2026-09-15-42
               top_k: 8
               index_version: idx-v1
       responses:
@@ -848,6 +892,55 @@ paths:
           $ref: "#/components/responses/ValidationError"
         "500":
           $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /internal/v1/knowledge/answer:
+    post:
+      tags: [knowledge]
+      operationId: answerKnowledge
+      summary: Answer a question grounded in retrieved knowledge chunks
+      description: |
+        Retrieves chunks within the trusted scope, then generates a grounded
+        answer with the rag role. An empty retrieval short-circuits without an
+        LLM call and returns insufficient_evidence=true. The model only outputs
+        citation ids (S1..Sn assigned to the retrieved chunks in order); the
+        service maps them back to real chunk origins, so the model can never
+        fabricate document ids, page numbers or urls.
+      security:
+        - internalToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/KnowledgeAnswerRequest"
+            example:
+              request_id: req-knowledge-answer-001
+              tenant_id: tenant-example
+              user_id: user-example
+              query: What is the escalation procedure for delayed projects?
+              scope:
+                knowledge_base_ids: [kb-example]
+                allowed_document_ids: [doc-example]
+              top_k: 8
+              index_version: idx-v1
+      responses:
+        "200":
+          description: Grounded answer with mapped citations
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgeAnswerResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "502":
+          $ref: "#/components/responses/InvalidProviderOutput"
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
 components:
@@ -2326,10 +2419,54 @@ components:
         latency_ms:
           type: integer
           minimum: 0
+    KnowledgeIndexDeleteRequest:
+      type: object
+      additionalProperties: false
+      required: [request_id, tenant_id, user_id, document_version_id, index_version]
+      properties:
+        request_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        tenant_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        user_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        document_version_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: >-
+            Identity of the document version whose derived index should be
+            removed. Deleting the derived index never deletes the business
+            document.
+        index_version:
+          type: string
+          minLength: 1
+          maxLength: 64
+    KnowledgeIndexDeleteResponse:
+      type: object
+      additionalProperties: false
+      required: [request_id, deleted_chunks, document_version_id, index_version]
+      properties:
+        request_id:
+          type: string
+        deleted_chunks:
+          type: integer
+          minimum: 0
+          description: Number of derived nodes removed from the vector store.
+        document_version_id:
+          type: string
+        index_version:
+          type: string
     KnowledgeRetrieveScope:
       type: object
       additionalProperties: false
-      required: [knowledge_base_ids, acl_version]
+      required: [knowledge_base_ids]
       properties:
         knowledge_base_ids:
           type: array
@@ -2356,6 +2493,10 @@ components:
             type: string
             minLength: 1
             maxLength: 128
+          description: >-
+            Optional department allowlist computed by the caller. Only
+            constrains nodes that carry a department_id; nodes without one
+            pass through.
         project_ids:
           type: array
           maxItems: 256
@@ -2363,10 +2504,19 @@ components:
             type: string
             minLength: 1
             maxLength: 128
+          description: >-
+            Optional project allowlist computed by the caller. Only
+            constrains nodes that carry a project_id; nodes without one
+            pass through.
         acl_version:
           type: string
           minLength: 1
           maxLength: 128
+          description: >-
+            Optional ACL snapshot identifier of the indexed nodes. When
+            omitted, retrieval does not filter on ACL version. Callers that
+            fold permissions in real time on every request may omit it until
+            ACL versioning or retrieval caching is introduced.
     KnowledgeRetrieveRequest:
       type: object
       additionalProperties: false
@@ -2457,6 +2607,136 @@ components:
           maxItems: 32
           items:
             $ref: "#/components/schemas/RetrievedChunk"
+        index_version:
+          type: string
+        embedding_profile:
+          type: string
+    KnowledgeAnswerRequest:
+      type: object
+      additionalProperties: false
+      required: [request_id, tenant_id, user_id, query, scope, index_version]
+      properties:
+        request_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        tenant_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        user_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        query:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        scope:
+          $ref: "#/components/schemas/KnowledgeRetrieveScope"
+        top_k:
+          type: integer
+          minimum: 1
+          maximum: 32
+          default: 8
+        index_version:
+          type: string
+          minLength: 1
+          maxLength: 64
+        embedding_profile:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 64
+          description: >-
+            Embedding profile for the query. Null selects the configured
+            default; the effective profile is returned in the response.
+        max_answer_tokens:
+          type: integer
+          minimum: 64
+          maximum: 4096
+          default: 1024
+          description: Output token budget for the grounded answer.
+    KnowledgeAnswerCitation:
+      type: object
+      additionalProperties: false
+      required: [citation_id, chunk_id, document_id, document_version_id, text]
+      properties:
+        citation_id:
+          type: string
+          minLength: 1
+          maxLength: 16
+          description: Short citation label referenced by the answer, e.g. S1.
+        chunk_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        document_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        document_version_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        text:
+          type: string
+          minLength: 1
+          maxLength: 262144
+        score:
+          type: number
+        page_index:
+          type: [integer, "null"]
+          minimum: 0
+        bbox:
+          type: [array, "null"]
+          minItems: 4
+          maxItems: 4
+          items:
+            type: number
+        heading_path:
+          type: array
+          maxItems: 16
+          items:
+            type: string
+            minLength: 1
+            maxLength: 512
+    KnowledgeAnswerResponse:
+      type: object
+      additionalProperties: false
+      required:
+        [request_id, answer, grounded, insufficient_evidence, citations, index_version, embedding_profile]
+      properties:
+        request_id:
+          type: string
+        answer:
+          type: string
+          maxLength: 65536
+          description: >-
+            Grounded answer text. Empty when insufficient_evidence is true.
+        grounded:
+          type: boolean
+          description: >-
+            True when the answer is backed by mapped citations; always false
+            when insufficient_evidence is true.
+        insufficient_evidence:
+          type: boolean
+          description: >-
+            True when the retrieval produced no chunks or the model determined
+            the evidence cannot answer the question. The service never answers
+            from model imagination in this case.
+        citations:
+          type: array
+          maxItems: 32
+          items:
+            $ref: "#/components/schemas/KnowledgeAnswerCitation"
+        execution:
+          anyOf:
+            - $ref: "#/components/schemas/ExecutionMetadata"
+            - type: "null"
+          default: null
+          description: >-
+            Present only when the rag role actually produced the answer.
+            Null when the empty-retrieval short-circuit skipped the LLM call.
         index_version:
           type: string
         embedding_profile:

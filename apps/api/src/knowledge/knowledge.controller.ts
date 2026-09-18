@@ -27,6 +27,7 @@ import {
     ListKnowledgeBaseMembersQueryDto,
     ListKnowledgeBasesQueryDto,
     ListKnowledgeDocumentsQueryDto,
+    QueryKnowledgeBaseDto,
     UpdateKnowledgeBaseDto,
     UpdateKnowledgeBaseMemberDto,
 } from './dto';
@@ -39,6 +40,7 @@ import {
     KnowledgeBaseResult,
     KnowledgeDocumentListResult,
     KnowledgeDocumentResult,
+    KnowledgeQueryResult,
 } from './knowledge.types';
 
 @ApiTags('knowledge-base')
@@ -73,8 +75,18 @@ export class KnowledgeController {
         return this.knowledgeService.getKnowledgeBase(knowledgeBaseId);
     }
 
+    @Post(':knowledgeBaseId/query')
+    @RequirePermissions('knowledge_base.query')
+    @ApiOkResponse({ description: '基于知识库证据的答案与引用列表' })
+    queryKnowledgeBase(
+        @Param('knowledgeBaseId', new ParseUUIDPipe()) knowledgeBaseId: string,
+        @Body() input: QueryKnowledgeBaseDto,
+    ): Promise<KnowledgeQueryResult> {
+        return this.knowledgeService.queryKnowledgeBase(knowledgeBaseId, input);
+    }
+
     @Patch(':knowledgeBaseId')
-    @RequirePermissions('knowledge_base.update')
+    @RequirePermissions('knowledge_base.read')
     @ApiOkResponse({ description: '知识库已修改' })
     updateKnowledgeBase(
         @Param('knowledgeBaseId', new ParseUUIDPipe()) knowledgeBaseId: string,
@@ -84,7 +96,7 @@ export class KnowledgeController {
     }
 
     @Delete(':knowledgeBaseId')
-    @RequirePermissions('knowledge_base.delete')
+    @RequirePermissions('knowledge_base.read')
     @HttpCode(HttpStatus.NO_CONTENT)
     @ApiNoContentResponse({ description: '知识库已软删除' })
     deleteKnowledgeBase(
@@ -95,7 +107,7 @@ export class KnowledgeController {
     }
 
     @Get(':knowledgeBaseId/members')
-    @RequirePermissions('knowledge_base.member.manage')
+    @RequirePermissions('knowledge_base.read')
     @ApiOkResponse({ description: '知识库成员列表' })
     listMembers(
         @Param('knowledgeBaseId', new ParseUUIDPipe()) knowledgeBaseId: string,
@@ -105,7 +117,7 @@ export class KnowledgeController {
     }
 
     @Post(':knowledgeBaseId/members')
-    @RequirePermissions('knowledge_base.member.manage')
+    @RequirePermissions('knowledge_base.read')
     @ApiCreatedResponse({ description: '知识库成员已添加' })
     addMember(
         @Param('knowledgeBaseId', new ParseUUIDPipe()) knowledgeBaseId: string,
@@ -115,7 +127,7 @@ export class KnowledgeController {
     }
 
     @Patch(':knowledgeBaseId/members/:membershipId')
-    @RequirePermissions('knowledge_base.member.manage')
+    @RequirePermissions('knowledge_base.read')
     @ApiOkResponse({ description: '知识库成员权限已修改' })
     updateMember(
         @Param('knowledgeBaseId', new ParseUUIDPipe()) knowledgeBaseId: string,
@@ -126,7 +138,7 @@ export class KnowledgeController {
     }
 
     @Delete(':knowledgeBaseId/members/:membershipId')
-    @RequirePermissions('knowledge_base.member.manage')
+    @RequirePermissions('knowledge_base.read')
     @HttpCode(HttpStatus.NO_CONTENT)
     @ApiNoContentResponse({ description: '知识库成员已移除' })
     removeMember(
@@ -147,7 +159,7 @@ export class KnowledgeController {
     }
 
     @Post(':knowledgeBaseId/documents')
-    @RequirePermissions('knowledge_base.document.manage')
+    @RequirePermissions('knowledge_base.read')
     @ApiCreatedResponse({ description: '文档已创建，等待后台解析与索引' })
     createDocument(
         @Param('knowledgeBaseId', new ParseUUIDPipe()) knowledgeBaseId: string,
@@ -157,7 +169,7 @@ export class KnowledgeController {
     }
 
     @Post(':knowledgeBaseId/documents/:documentId/versions')
-    @RequirePermissions('knowledge_base.document.manage')
+    @RequirePermissions('knowledge_base.read')
     @ApiCreatedResponse({ description: '新版本已创建，文档重新进入处理队列' })
     createDocumentVersion(
         @Param('knowledgeBaseId', new ParseUUIDPipe()) knowledgeBaseId: string,
@@ -168,12 +180,23 @@ export class KnowledgeController {
     }
 
     @Post(':knowledgeBaseId/documents/:documentId/retry')
-    @RequirePermissions('knowledge_base.document.manage')
+    @RequirePermissions('knowledge_base.read')
     @ApiOkResponse({ description: '文档已重新进入处理队列' })
     retryDocument(
         @Param('knowledgeBaseId', new ParseUUIDPipe()) knowledgeBaseId: string,
         @Param('documentId', new ParseUUIDPipe()) documentId: string,
     ): Promise<KnowledgeDocumentResult> {
         return this.knowledgeDocumentService.retryDocument(knowledgeBaseId, documentId);
+    }
+
+    @Delete(':knowledgeBaseId/documents/:documentId')
+    @RequirePermissions('knowledge_base.read')
+    @HttpCode(HttpStatus.NO_CONTENT)
+    @ApiNoContentResponse({ description: '文档已软删除' })
+    deleteDocument(
+        @Param('knowledgeBaseId', new ParseUUIDPipe()) knowledgeBaseId: string,
+        @Param('documentId', new ParseUUIDPipe()) documentId: string,
+    ): Promise<void> {
+        return this.knowledgeDocumentService.deleteDocument(knowledgeBaseId, documentId);
     }
 }

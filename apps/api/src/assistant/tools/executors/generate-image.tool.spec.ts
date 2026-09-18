@@ -61,6 +61,7 @@ describe('GenerateImageTool', () => {
             executionOwner: 'api:test',
             executionToken: 'execution-token-1',
             permissions: ['ai.image.generate'],
+            knowledgeBaseEnabled: false,
         }, { prompt: '一只猫', size: 'auto' });
 
         expect(imageService.generateImage).toHaveBeenCalledWith(expect.objectContaining({

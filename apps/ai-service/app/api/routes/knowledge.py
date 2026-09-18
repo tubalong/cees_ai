@@ -4,6 +4,10 @@ from fastapi import APIRouter, Depends, Request
 
 from app.api.generated.models import (
     ErrorResponse,
+    KnowledgeAnswerRequest,
+    KnowledgeAnswerResponse,
+    KnowledgeIndexDeleteRequest,
+    KnowledgeIndexDeleteResponse,
     KnowledgeIndexRequest,
     KnowledgeIndexResponse,
     KnowledgeRetrieveRequest,
@@ -12,7 +16,10 @@ from app.api.generated.models import (
 from app.core.errors import AIServiceError
 from app.core.runtime import AppRuntime
 from app.core.security import require_internal_token
+from app.knowledge.answering import answer_question
+from app.knowledge.deletion import delete_document_index
 from app.knowledge.ingestion import index_document
+from app.knowledge.parsed_models import ParsedIdentityError
 from app.knowledge.retrieval import retrieve_chunks
 
 router = APIRouter(
@@ -49,6 +56,16 @@ def _responses() -> dict[int, dict[str, object]]:
     }
 
 
+def _answer_responses() -> dict[int, dict[str, object]]:
+    # answer 额外暴露 502：结构化输出或引用校验失败属于 provider 输出无效。
+    responses = _responses()
+    responses[502] = {
+        "model": ErrorResponse,
+        "description": "Provider output did not match the requested schema",
+    }
+    return responses
+
+
 @router.post(
     "/index",
     response_model=KnowledgeIndexResponse,
@@ -75,7 +92,9 @@ async def index_knowledge(
         return await index_document(
             payload, store=store, embedding_router=embedding_router
         )
-    except (KeyError, ValueError) as exc:
+    except (KeyError, ParsedIdentityError) as exc:
+        # 输入错误映射 400；ValueError（如 embedding 维度不匹配）是
+        # 服务端配置错误，冒泡走统一 500。
         raise AIServiceError(
             "INVALID_KNOWLEDGE_INDEX_REQUEST",
             str(exc),
@@ -119,3 +138,64 @@ async def retrieve_knowledge(
             retryable=False,
             request_id=payload.request_id,
         ) from exc
+
+
+@router.post(
+    "/answer",
+    response_model=KnowledgeAnswerResponse,
+    operation_id="answerKnowledge",
+    summary="Answer a question grounded in retrieved knowledge chunks",
+    response_description="Grounded answer with mapped citations",
+    responses=_answer_responses(),
+)
+async def answer_knowledge(
+    payload: KnowledgeAnswerRequest, request: Request
+) -> KnowledgeAnswerResponse:
+    runtime: AppRuntime = request.app.state.runtime
+    store = runtime.knowledge_store
+    embedding_router = runtime.embedding_router
+    router = runtime.router
+    if store is None or embedding_router is None or router is None:
+        raise AIServiceError(
+            "KNOWLEDGE_NOT_READY",
+            "Knowledge answer generation is not ready",
+            status_code=503,
+            retryable=True,
+            request_id=payload.request_id,
+        )
+    try:
+        return await answer_question(
+            payload, store=store, embedding_router=embedding_router, llm_router=router
+        )
+    except KeyError as exc:
+        raise AIServiceError(
+            "INVALID_KNOWLEDGE_ANSWER_REQUEST",
+            str(exc),
+            status_code=400,
+            retryable=False,
+            request_id=payload.request_id,
+        ) from exc
+
+
+@router.post(
+    "/index/delete",
+    response_model=KnowledgeIndexDeleteResponse,
+    operation_id="deleteKnowledgeIndex",
+    summary="Delete derived index of a document version",
+    response_description="Derived index deleted",
+    responses=_responses(),
+)
+async def delete_knowledge_index(
+    payload: KnowledgeIndexDeleteRequest, request: Request
+) -> KnowledgeIndexDeleteResponse:
+    runtime: AppRuntime = request.app.state.runtime
+    store = runtime.knowledge_store
+    if store is None:
+        raise AIServiceError(
+            "KNOWLEDGE_NOT_READY",
+            "Knowledge index and retrieval are not ready",
+            status_code=503,
+            retryable=True,
+            request_id=payload.request_id,
+        )
+    return await delete_document_index(payload, store=store)

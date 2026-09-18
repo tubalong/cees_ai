@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, ServerSentEventsResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { CompactChatData, CompactChatErrors, CompactChatResponses, ComposeDocumentData, ComposeDocumentErrors, ComposeDocumentResponses, EditImageData, EditImageErrors, EditImageResponses, ExtractFileData, ExtractFileErrors, ExtractFileResponses, GenerateDocumentDocxData, GenerateDocumentDocxErrors, GenerateDocumentDocxResponses, GenerateImageData, GenerateImageErrors, GenerateImageResponses, GetHealthData, GetHealthResponses, GetReadinessData, GetReadinessErrors, GetReadinessResponses, IndexKnowledgeDocumentData, IndexKnowledgeDocumentErrors, IndexKnowledgeDocumentResponses, InvokeChatData, InvokeChatErrors, InvokeChatResponses, InvokeLlmData, InvokeLlmErrors, InvokeLlmResponses, PreviewImageData, PreviewImageErrors, PreviewImageResponses, RenderDocumentDocxData, RenderDocumentDocxErrors, RenderDocumentDocxResponses, RetrieveKnowledgeData, RetrieveKnowledgeErrors, RetrieveKnowledgeResponses, StreamChatData, StreamChatErrors, StreamChatResponse, StreamChatResponses, StreamChatToolTurnData, StreamChatToolTurnErrors, StreamChatToolTurnResponse, StreamChatToolTurnResponses, StreamLlmData, StreamLlmErrors, StreamLlmResponse, StreamLlmResponses } from './types.gen';
+import type { AnswerKnowledgeData, AnswerKnowledgeErrors, AnswerKnowledgeResponses, CompactChatData, CompactChatErrors, CompactChatResponses, ComposeDocumentData, ComposeDocumentErrors, ComposeDocumentResponses, DeleteKnowledgeIndexData, DeleteKnowledgeIndexErrors, DeleteKnowledgeIndexResponses, EditImageData, EditImageErrors, EditImageResponses, ExtractFileData, ExtractFileErrors, ExtractFileResponses, GenerateDocumentDocxData, GenerateDocumentDocxErrors, GenerateDocumentDocxResponses, GenerateImageData, GenerateImageErrors, GenerateImageResponses, GetHealthData, GetHealthResponses, GetReadinessData, GetReadinessErrors, GetReadinessResponses, IndexKnowledgeDocumentData, IndexKnowledgeDocumentErrors, IndexKnowledgeDocumentResponses, InvokeChatData, InvokeChatErrors, InvokeChatResponses, InvokeLlmData, InvokeLlmErrors, InvokeLlmResponses, PreviewImageData, PreviewImageErrors, PreviewImageResponses, RenderDocumentDocxData, RenderDocumentDocxErrors, RenderDocumentDocxResponses, RetrieveKnowledgeData, RetrieveKnowledgeErrors, RetrieveKnowledgeResponses, StreamChatData, StreamChatErrors, StreamChatResponse, StreamChatResponses, StreamChatToolTurnData, StreamChatToolTurnErrors, StreamChatToolTurnResponse, StreamChatToolTurnResponses, StreamLlmData, StreamLlmErrors, StreamLlmResponse, StreamLlmResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -245,15 +245,38 @@ export const extractFile = <ThrowOnError extends boolean = false>(options: Optio
  *
  * Builds TextNodes from a normalized ParsedDocument, chunks them,
  * embeds them, and idempotently upserts the vectors into the vector
- * store. Re-submitting the same (document_version_id, chunking_version,
- * embedding_profile, index_version) tuple replaces the previous nodes
- * instead of duplicating them. ai-service never writes the business
- * database and does not create formal resources.
+ * store. Replacement is keyed by the (tenant_id, document_version_id,
+ * index_version) triple: re-submitting the same triple replaces the
+ * previous nodes instead of duplicating them. chunking_version and
+ * embedding_profile are recorded as node metadata and define the index
+ * identity; changing either requires a new index_version. ai-service
+ * never writes the business database and does not create formal
+ * resources.
  *
  */
 export const indexKnowledgeDocument = <ThrowOnError extends boolean = false>(options: Options<IndexKnowledgeDocumentData, ThrowOnError>): RequestResult<IndexKnowledgeDocumentResponses, IndexKnowledgeDocumentErrors, ThrowOnError> => (options.client ?? client).post<IndexKnowledgeDocumentResponses, IndexKnowledgeDocumentErrors, ThrowOnError>({
     security: [{ name: 'X-AI-Internal-Token', type: 'apiKey' }],
     url: '/internal/v1/knowledge/index',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Delete derived index of a document version
+ *
+ * Deletes all derived vectors of the given (document_version_id,
+ * index_version) tuple for the tenant. NestJS calls this when a
+ * document is deleted or when a new document version supersedes the
+ * old one. Never touches business data; deleting the derived index
+ * does not delete the business document.
+ *
+ */
+export const deleteKnowledgeIndex = <ThrowOnError extends boolean = false>(options: Options<DeleteKnowledgeIndexData, ThrowOnError>): RequestResult<DeleteKnowledgeIndexResponses, DeleteKnowledgeIndexErrors, ThrowOnError> => (options.client ?? client).post<DeleteKnowledgeIndexResponses, DeleteKnowledgeIndexErrors, ThrowOnError>({
+    security: [{ name: 'X-AI-Internal-Token', type: 'apiKey' }],
+    url: '/internal/v1/knowledge/index/delete',
     ...options,
     headers: {
         'Content-Type': 'application/json',
@@ -273,6 +296,27 @@ export const indexKnowledgeDocument = <ThrowOnError extends boolean = false>(opt
 export const retrieveKnowledge = <ThrowOnError extends boolean = false>(options: Options<RetrieveKnowledgeData, ThrowOnError>): RequestResult<RetrieveKnowledgeResponses, RetrieveKnowledgeErrors, ThrowOnError> => (options.client ?? client).post<RetrieveKnowledgeResponses, RetrieveKnowledgeErrors, ThrowOnError>({
     security: [{ name: 'X-AI-Internal-Token', type: 'apiKey' }],
     url: '/internal/v1/knowledge/retrieve',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Answer a question grounded in retrieved knowledge chunks
+ *
+ * Retrieves chunks within the trusted scope, then generates a grounded
+ * answer with the rag role. An empty retrieval short-circuits without an
+ * LLM call and returns insufficient_evidence=true. The model only outputs
+ * citation ids (S1..Sn assigned to the retrieved chunks in order); the
+ * service maps them back to real chunk origins, so the model can never
+ * fabricate document ids, page numbers or urls.
+ *
+ */
+export const answerKnowledge = <ThrowOnError extends boolean = false>(options: Options<AnswerKnowledgeData, ThrowOnError>): RequestResult<AnswerKnowledgeResponses, AnswerKnowledgeErrors, ThrowOnError> => (options.client ?? client).post<AnswerKnowledgeResponses, AnswerKnowledgeErrors, ThrowOnError>({
+    security: [{ name: 'X-AI-Internal-Token', type: 'apiKey' }],
+    url: '/internal/v1/knowledge/answer',
     ...options,
     headers: {
         'Content-Type': 'application/json',

@@ -1,0 +1,160 @@
+.knowledge-management-page {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.kb-layout {
+    display: grid;
+    grid-template-columns: 320px minmax(0, 1fr);
+    gap: 14px;
+    align-items: start;
+}
+
+.kb-list-panel {
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.kb-toolbar {
+    display: flex;
+    gap: 8px;
+}
+
+.kb-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.kb-list-item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--surface);
+    cursor: pointer;
+    text-align: left;
+    transition: border-color .15s ease, box-shadow .15s ease;
+}
+
+.kb-list-item:hover {
+    border-color: #3478ff;
+    box-shadow: 0 2px 8px rgba(52, 120, 255, .08);
+}
+
+.kb-list-item.is-selected {
+    border-color: #3478ff;
+    background: rgba(52, 120, 255, .06);
+}
+
+.kb-list-item-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-width: 0;
+}
+
+.kb-list-item-head strong {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;
+    color: var(--text);
+}
+
+.kb-list-item small {
+    font-size: 12px;
+    color: var(--muted);
+}
+
+.kb-main {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    min-width: 0;
+}
+
+.kb-detail-panel,
+.kb-documents-panel,
+.kb-members-panel {
+    padding: 14px 16px;
+}
+
+.kb-detail-actions {
+    display: inline-flex;
+    gap: 8px;
+}
+
+.kb-description {
+    margin: 0 0 12px;
+    font-size: 13px;
+    color: var(--muted);
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.kb-anchor-text {
+    margin-left: 8px;
+    color: var(--muted);
+}
+
+.kb-member-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.kb-member-cell strong {
+    font-size: 13px;
+    color: var(--text);
+}
+
+.kb-member-cell small {
+    font-size: 12px;
+    color: var(--muted);
+}
+
+.kb-muted {
+    color: var(--muted);
+}
+
+.kb-uploader {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.kb-uploader .ant-upload-wrapper .ant-upload-drag {
+    background: var(--surface);
+}
+
+.kb-uploader .ant-upload-wrapper .ant-upload-drag:hover {
+    border-color: #3478ff;
+}
+
+.kb-uploader .ant-upload-drag-icon {
+    margin-bottom: 8px;
+}
+
+.kb-uploader-form {
+    margin-top: 4px;
+}
+
+.kb-doc-error {
+    color: #e5484d;
+}
+
+@media (max-width: 1100px) {
+    .kb-layout {
+        grid-template-columns: 1fr;
+    }
+}

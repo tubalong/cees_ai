@@ -35,6 +35,7 @@
 - [公开 AI 对话链路与 Token 计量](../architecture/public-chat-api-and-token-metering.md)
 - [用户个人资料管理](../product/user-profile-management.md)
 - [钉钉组织架构与人员同步 API](dingtalk-organization-sync-api.md)
+- [分配策略与人财法 API（AssignmentPolicy、HR 与 Finance 已实现；Legal 契约已冻结待实现）](assignment-and-hr-finance-legal-api.md)
 - [密码修改与凭证安全](../security/password-management.md)
 - [平台使用、接口与数据库字典](../product/platform-usage-guide.md)：按当前 OpenAPI 汇总全部接口、请求参数和验证顺序。
 
@@ -85,6 +86,13 @@ GET    /api/v1/roles/{roleId}
 PATCH  /api/v1/roles/{roleId}
 DELETE /api/v1/roles/{roleId}?version={version}
 PUT    /api/v1/roles/{roleId}/permissions
+
+GET    /api/v1/assignment/policies
+POST   /api/v1/assignment/policies
+GET    /api/v1/assignment/policies/{policyId}
+PATCH  /api/v1/assignment/policies/{policyId}
+DELETE /api/v1/assignment/policies/{policyId}?version={version}
+POST   /api/v1/assignment/policies/resolve
 
 GET    /api/v1/documents
 POST   /api/v1/documents
@@ -202,7 +210,7 @@ DELETE /api/v1/projects/{projectId}/tasks/{taskId}/attachments/{attachmentId}?ve
 GET    /api/v1/projects/{projectId}/tasks/{taskId}/activities
 ```
 
-截至 2026-09-11，身份、本人密码修改、用户个人资料、租户、组织部门、项目、任务、会议、日报周报、通知中心、工作台、RBAC、ACL、审计、平台租户管理、租户账号激活、COS 基础上传和公开 AI 对话接口均已实现。
+截至 2026-09-16，身份、本人密码修改、用户个人资料、租户、组织部门、项目、任务、会议、日报周报、通知中心、工作台、RBAC、ACL、审计、平台租户管理、租户账号激活、COS 基础上传、公开 AI 对话接口和分配策略均已实现。
 
 - `refresh` 每次成功后都会轮换 Refresh Token，旧 Token 立即失效；
 - `logout` 撤销当前 Access Token 对应的 Session；
@@ -383,6 +391,17 @@ GET    /api/v1/projects/{projectId}/tasks/{taskId}/activities
 - 导出复用 `document.read` 权限与既有 Resource(DOCUMENT) 授权模型，不新增独立权限码；手工创建或内容被手工修改的文档没有落库的 `document_spec`，导出返回 400 明确错误；
 - Prisma 新增 `0023_document_docx_export` 迁移：`managed_documents` 增加 `document_spec` JSONB 列，保存 ai-service compose 返回的结构化 DocumentSpec 作为导出事实源；
 - 内部链路：NestJS 网关 `renderDocumentDocx` 调用 `POST /internal/v1/documents/render-docx` 确定性渲染（不调用 LLM）；`generateDocumentDocx`（compose+render）仅透传保留，业务不调用以避免重复 LLM 生成；
+
+## 知识库查询 API 说明（2026-09-16，契约 0.25.0）
+
+- 公开契约版本由 `0.24.0` 提升为 `0.25.0`，兼容新增 `POST /knowledge-bases/{knowledgeBaseId}/query`；
+- 请求 `query`（1 到 4096 字符）必填，`indexVersion` 可选（不传时用服务端默认索引版本，与写入侧一致）；
+- 权限要求 `knowledge_base.query`（权限目录已存在）；响应 `Envelope.data` 为 `KnowledgeQuery`（`answer`/`grounded`/`insufficientEvidence`/`citations`，citation 含文档/版本/块/页码/位置与文本）；
+- 答案只依据知识库证据生成，证据不足明确拒答（`grounded=false`、`insufficientEvidence=true`）；ai-service 暂不可用时返回 `503 KNOWLEDGE_QUERY_SERVICE_UNAVAILABLE`；
+- 每次提问同步写入 `KnowledgeQueryLog`（问题、答案、grounded、耗时与 Token 用量）与审计记录；
+- ai-service 内部契约兼容新增 `POST /internal/v1/knowledge/answer`（retrieve + rag role 答案生成，citation ID 校验，空结果短路）；检索 scope 的 `acl_version` 改为可选，NestJS 检索不传（权限由实时 scope 折叠保证），ACL 版本机制推迟到引入查询缓存时；
+- Prisma 新增 `0028_knowledge_query_api` 迁移：知识库锚点字段、成员权限枚举、`KnowledgeQueryLog` 扩展；TypeScript 客户端已重新生成；
+- 详细业务边界见 [知识库管理 API](knowledge-base-api.md)，架构说明见 [知识库 RAG](../architecture/knowledge-rag.md)。
 
 ## 契约事实源
 

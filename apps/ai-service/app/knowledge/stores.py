@@ -13,8 +13,8 @@ class VectorStoreGateway(Protocol):
     """向量存储访问抽象。
 
     索引与检索只依赖本协议，具体后端（内存、pgvector 等）可替换。
-    后端差异不进契约：删除按 (document_version_id, index_version) 过滤，
-    检索必须支持租户与 scope 的 metadata 过滤。
+    后端差异不进契约：删除按 (tenant_id, document_version_id,
+    index_version) 三元组过滤，检索必须支持租户与 scope 的 metadata 过滤。
     """
 
     async def upsert_nodes(
@@ -149,8 +149,9 @@ def _matches_scope(node: TextNode, scope: KnowledgeRetrieveScope) -> bool:
         project_id = metadata.get("project_id")
         if project_id is not None and project_id not in scope.project_ids:
             return False
-    # ACL 版本不一致说明节点索引时的可见范围已经陈旧，不能返回。
-    if metadata.get("acl_version") != scope.acl_version:
+    # ACL 版本仅在调用方提供时过滤：调用方每次请求实时折叠 scope 时可省略，
+    # ACL 版本机制或检索缓存引入后再启用该过滤。
+    if scope.acl_version is not None and metadata.get("acl_version") != scope.acl_version:
         return False
     return True
 

@@ -164,51 +164,52 @@ jobs:
           pnpm contracts:lint
           pnpm contracts:check
 
-  mobile:
-    name: Flutter (mobile)
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: "3.47.2"
-          channel: stable
-          cache: true
-
-      - name: Install dependencies
-        working-directory: apps/mobile
-        # Keep the committed pubspec.lock; newer transitive native-asset packages may require a newer Dart SDK.
-        run: flutter pub get --enforce-lockfile
-
-      - name: Analyze project
-        working-directory: apps/mobile
-        run: flutter analyze
-
-      - name: Detect Flutter tests
-        id: mobile_tests
-        working-directory: apps/mobile
-        shell: bash
-        run: |
-          test_file=""
-          if [ -d test ]; then
-            test_file="$(find test -type f -name '*_test.dart' -print -quit)"
-          fi
-          if [ -n "$test_file" ]; then
-            echo "has_tests=true" >> "$GITHUB_OUTPUT"
-            echo "Found Flutter test: $test_file"
-          else
-            echo "has_tests=false" >> "$GITHUB_OUTPUT"
-            echo "No Flutter tests found; skipping flutter test."
-          fi
-
-      - name: Run Flutter tests
-        if: steps.mobile_tests.outputs.has_tests == 'true'
-        working-directory: apps/mobile
-        run: flutter test
+  # Temporarily disabled until mobile development resumes.
+  # mobile:
+  #   name: Flutter (mobile)
+  #   runs-on: ubuntu-latest
+  #   timeout-minutes: 20
+  #
+  #   steps:
+  #     - name: Checkout repository
+  #       uses: actions/checkout@v6
+  #       with:
+  #         persist-credentials: false
+  #
+  #     - name: Set up Flutter
+  #       uses: subosito/flutter-action@v2
+  #       with:
+  #         flutter-version: "3.47.2"
+  #         channel: stable
+  #         cache: true
+  #
+  #     - name: Install dependencies
+  #       working-directory: apps/mobile
+  #       # Keep the committed pubspec.lock; newer transitive native-asset packages may require a newer Dart SDK.
+  #       run: flutter pub get --enforce-lockfile
+  #
+  #     - name: Analyze project
+  #       working-directory: apps/mobile
+  #       run: flutter analyze
+  #
+  #     - name: Detect Flutter tests
+  #       id: mobile_tests
+  #       working-directory: apps/mobile
+  #       shell: bash
+  #       run: |
+  #         test_file=""
+  #         if [ -d test ]; then
+  #           test_file="$(find test -type f -name '*_test.dart' -print -quit)"
+  #         fi
+  #         if [ -n "$test_file" ]; then
+  #           echo "has_tests=true" >> "$GITHUB_OUTPUT"
+  #           echo "Found Flutter test: $test_file"
+  #         else
+  #           echo "has_tests=false" >> "$GITHUB_OUTPUT"
+  #           echo "No Flutter tests found; skipping flutter test."
+  #         fi
+  #
+  #     - name: Run Flutter tests
+  #       if: steps.mobile_tests.outputs.has_tests == 'true'
+  #       working-directory: apps/mobile
+  #       run: flutter test

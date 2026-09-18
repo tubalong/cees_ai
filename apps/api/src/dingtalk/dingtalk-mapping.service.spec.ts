@@ -10,6 +10,7 @@ const ROOT_DEPARTMENT_ID = '60000000-0000-0000-0000-000000000001';
 const DINGTALK_DEPARTMENT_ID = '80000000-0000-0000-0000-000000000001';
 const DINGTALK_USER_ID = '90000000-0000-0000-0000-000000000001';
 const EMPLOYEE_ROLE_ID = '70000000-0000-0000-0000-000000000001';
+const MANAGER_ROLE_ID = '70000000-0000-0000-0000-000000000002';
 
 describe('DingTalkMappingService', () => {
     it('previews same-parent department matching and unique member matching', async () => {
@@ -173,6 +174,10 @@ describe('DingTalkMappingService', () => {
         prisma.tenantMembership.findMany.mockResolvedValue([
             { id: 'member-1', departmentId: ROOT_DEPARTMENT_ID, displayName: '另一位张三', account: 'zhangsan', normalizedAccount: 'zhangsan', status: MembershipStatus.ACTIVE, user: { displayName: '另一位张三' } },
         ]);
+        prisma.role.findMany.mockResolvedValue([
+            { id: EMPLOYEE_ROLE_ID, code: 'employee' },
+            { id: MANAGER_ROLE_ID, code: 'manager' },
+        ]);
         prisma.department.findFirst.mockResolvedValue({ id: ROOT_DEPARTMENT_ID });
         prisma.user.create.mockResolvedValue({});
         prisma.tenantMembership.create.mockResolvedValue({});
@@ -188,12 +193,18 @@ describe('DingTalkMappingService', () => {
             createMissingMembers: true,
             departmentResolutions: [],
             userResolutions: [],
+            roleAssignments: [
+                { roleId: EMPLOYEE_ROLE_ID, dingtalkUserIds: [DINGTALK_USER_ID] },
+                { roleId: MANAGER_ROLE_ID, dingtalkUserIds: [DINGTALK_USER_ID] },
+            ],
         });
 
         expect(result.credentials[0]).toEqual(expect.objectContaining({
             account: 'zhangsan2',
             displayName: '张三',
             tenantCode: 'cees',
+            roleIds: [EMPLOYEE_ROLE_ID, MANAGER_ROLE_ID],
+            roleCodes: ['employee', 'manager'],
         }));
         expect(result.credentials[0].activationToken.length).toBeGreaterThanOrEqual(32);
         expect(prisma.tenantMembership.create).toHaveBeenCalledWith(expect.objectContaining({
@@ -203,7 +214,68 @@ describe('DingTalkMappingService', () => {
                 passwordHash: null,
             }),
         }));
+        expect(prisma.membershipRole.createMany).toHaveBeenCalledWith({
+            data: [
+                { tenantId: TENANT_ID, membershipId: expect.any(String), roleId: EMPLOYEE_ROLE_ID },
+                { tenantId: TENANT_ID, membershipId: expect.any(String), roleId: MANAGER_ROLE_ID },
+            ],
+            skipDuplicates: true,
+        });
         expect(JSON.stringify(prisma.auditLog.create.mock.calls[0][0])).not.toContain(result.credentials[0].activationToken);
+    });
+
+    it('requires at least one role for every new member', async () => {
+        const prisma = createPrismaMock();
+        prisma.dingTalkUser.findMany.mockResolvedValue([
+            {
+                id: DINGTALK_USER_ID,
+                externalUserId: 'user-001',
+                name: '张三',
+                departmentExternalIds: [],
+                membershipId: null,
+            },
+        ]);
+
+        await expect(createService(prisma).apply({
+            activationExpiresInDays: 7,
+            createMissingDepartments: true,
+            createMissingMembers: true,
+            departmentResolutions: [],
+            userResolutions: [],
+            roleAssignments: [],
+        })).rejects.toMatchObject({
+            response: expect.objectContaining({
+                code: 'DINGTALK_MAPPING_ROLE_REQUIRED',
+                details: { dingtalkUserIds: [DINGTALK_USER_ID] },
+            }),
+        });
+    });
+
+    it('does not allow tenant_admin in bulk mapping role assignments', async () => {
+        const prisma = createPrismaMock();
+        prisma.dingTalkUser.findMany.mockResolvedValue([
+            {
+                id: DINGTALK_USER_ID,
+                externalUserId: 'user-001',
+                name: '张三',
+                departmentExternalIds: [],
+                membershipId: null,
+            },
+        ]);
+        prisma.role.findMany.mockResolvedValue([
+            { id: EMPLOYEE_ROLE_ID, code: 'tenant_admin' },
+        ]);
+
+        await expect(createService(prisma).apply({
+            activationExpiresInDays: 7,
+            createMissingDepartments: true,
+            createMissingMembers: true,
+            departmentResolutions: [],
+            userResolutions: [],
+            roleAssignments: [{ roleId: EMPLOYEE_ROLE_ID, dingtalkUserIds: [DINGTALK_USER_ID] }],
+        })).rejects.toMatchObject({
+            response: expect.objectContaining({ code: 'DINGTALK_MAPPING_TENANT_ADMIN_FORBIDDEN' }),
+        });
     });
     it('requires a resolution when duplicate members have the same name', async () => {
         const prisma = createPrismaMock();
@@ -257,9 +329,9 @@ function createPrismaMock(): Record<string, any> {
         department: { findMany: jest.fn().mockResolvedValue([]), create: jest.fn(), findFirst: jest.fn() },
         tenantMembership: { findMany: jest.fn().mockResolvedValue([]), findFirst: jest.fn(), create: jest.fn() },
         tenantInvitation: { findMany: jest.fn().mockResolvedValue([]), create: jest.fn() },
-        role: { findFirst: jest.fn().mockResolvedValue({ id: EMPLOYEE_ROLE_ID }) },
+        role: { findFirst: jest.fn().mockResolvedValue({ id: EMPLOYEE_ROLE_ID }), findMany: jest.fn().mockResolvedValue([]) },
         user: { create: jest.fn() },
-        membershipRole: { create: jest.fn() },
+        membershipRole: { create: jest.fn(), createMany: jest.fn() },
         auditLog: { create: jest.fn() },
         $transaction: jest.fn(),
     };

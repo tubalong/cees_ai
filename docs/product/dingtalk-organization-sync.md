@@ -16,6 +16,9 @@
 - 部门按同一父部门下同名唯一规则自动匹配；多候选部门由租户管理员确认，找不到时可创建 CEES 部门。
 - 人员优先使用已有钉钉映射；同名且候选唯一时自动匹配，多候选由租户管理员确认，找不到时可创建待激活成员。
 - 账号在整个租户内唯一，按姓名生成小写拼音，冲突时追加 `2`、`3` 等数字；不得只按部门范围判断冲突。
+- 角色必须由租户管理员提前创建；一个角色可以分配给多人，一个钉钉人员可以拥有多个角色。
+- `tenant_admin` 是受保护的租户管理员角色，不能通过钉钉映射批量分配；选择的角色必须属于当前租户且未删除。
+- 新创建的 CEES 成员必须至少分配一个角色；已匹配成员默认保留原有角色，显式分配时追加角色而不覆盖。
 - 同一钉钉集成同时只能有一个 `RUNNING` 同步任务。
 - 所有接口都在当前租户上下文内执行，并受 JWT、租户守卫和权限守卫保护。
 
@@ -28,7 +31,8 @@
 5. 调用 `POST /api/v1/dingtalk/organization/sync` 执行全量同步。
 6. 使用部门、人员和同步任务查询接口检查结果。
 7. 调用映射预览接口检查自动匹配、待创建项和重名冲突。
-8. 租户管理员补充冲突处理后调用映射应用接口；新建成员的激活凭证只在本次响应返回。
+8. 租户管理员在映射页面为全部或部分人员选择一个或多个角色；新建成员未分配角色时不能应用。
+9. 租户管理员补充冲突处理后调用映射应用接口；新建成员的激活凭证只在本次响应返回。
 
 ## 4. 数据模型
 
@@ -104,6 +108,21 @@ POST /api/v1/dingtalk/organization/mapping/apply
   "createMissingDepartments": true,
   "createMissingMembers": true,
   "activationExpiresInDays": 7,
+  "roleAssignments": [
+    {
+      "roleId": "普通员工角色UUID",
+      "dingtalkUserIds": [
+        "钉钉用户镜像记录UUID-张三",
+        "钉钉用户镜像记录UUID-王五"
+      ]
+    },
+    {
+      "roleId": "技术人员角色UUID",
+      "dingtalkUserIds": [
+        "钉钉用户镜像记录UUID-李四"
+      ]
+    }
+  ],
   "userResolutions": [
     {
       "dingtalkUserId": "钉钉用户镜像记录UUID",
@@ -113,6 +132,8 @@ POST /api/v1/dingtalk/organization/mapping/apply
   ]
 }
 ```
+
+`roleAssignments` 只需要提交管理员实际选择的分组，不需要为每个人单独调用接口。左侧角色列表可以选择一个角色，右侧人员列表可以全选当前筛选结果或勾选部分人员；同一人员可以加入多个角色分组。应用前端应确保所有 `CREATE` 人员至少出现在一个角色分组中。
 
 部门冲突可以使用：
 
@@ -136,7 +157,7 @@ POST /api/v1/dingtalk/organization/mapping/apply
 第三个张三 -> zhangsan3
 ```
 
-账号唯一范围是整个租户，已存在成员、有效邀请和本次批次都会参与冲突检查。激活凭证明文只在应用接口响应中返回一次，前端可以将返回的 `credentials` 生成 Excel。
+账号唯一范围是整个租户，已存在成员、有效邀请和本次批次都会参与冲突检查。激活凭证明文只在应用接口响应中返回一次，前端可以将返回的 `credentials` 生成 Excel；凭证中的 `roleIds`、`roleCodes` 是本次实际写入的新成员角色。
 
 用户使用以下接口设置自己的密码：
 
@@ -149,3 +170,14 @@ POST /api/v1/auth/activate
 ## 8. 暂不包含
 
 当前仍不包含考勤、请假、审批、钉钉文档、聊天消息、日程、待办和 AI 派发；也不会根据钉钉管理员标记自动授予 CEES 管理员角色。
+
+## 9. Desktop 前端入口
+
+桌面端通过左侧导航的“钉钉管理”进入 `/dingtalk`，页面代码独立放在 `apps/desktop/src/features/dingtalk/`，不与 `features/organization/` 共享页面实现。页面包含企业绑定、组织同步、组织镜像和映射导入四个区域。
+
+- 企业绑定：配置或修改 `corpId`、`appKey`、`appSecret`，验证连接并查看集成状态；
+- 组织同步：发起全量同步、查看部门/人员数量和同步历史；
+- 组织镜像：查看钉钉部门、人员及其 CEES 映射状态，可切换显示已删除记录；
+- 映射导入：预览部门和人员动作，处理冲突，按角色批量分配并导出一次性激活凭证 Excel。
+
+导航入口按 `dingtalk.integration.read`、`dingtalk.organization.read` 或 `dingtalk.organization.mapping.preview` 任一权限显示；各页面操作仍由对应的后端权限控制。

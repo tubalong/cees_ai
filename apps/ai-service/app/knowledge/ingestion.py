@@ -8,10 +8,12 @@ from app.api.generated.models import (
     KnowledgeIndexRequest,
     KnowledgeIndexResponse,
 )
+from app.core.errors import AIServiceError
 from app.embeddings.router import EmbeddingRouter
 from app.knowledge.node_builder import IndexContext, build_nodes
 from app.knowledge.parsed_models import assert_identity_matches
 from app.knowledge.stores import VectorStoreGateway
+from app.knowledge.vector_space import assert_compatible_vector_space
 
 
 async def index_document(
@@ -20,10 +22,13 @@ async def index_document(
     store: VectorStoreGateway,
     embedding_router: EmbeddingRouter,
 ) -> KnowledgeIndexResponse:
-    """索引一个解析后的知识文档，幂等四元组为索引身份。
+    """索引一个解析后的知识文档。
 
     步骤：身份校验 -> 节点构建（切分 v1）-> Embedding -> 幂等写入。
-    同一四元组重复提交会替换旧节点，不会产生重复向量。
+    替换判定按 (tenant_id, document_version_id, index_version) 三元组
+    执行：同一三元组重复提交会替换旧节点，不会产生重复向量；
+    chunking_version / embedding_profile 作为索引身份写入节点 metadata，
+    变更 profile 或切分策略必须换新 index_version（见 knowledge-rag.md 3.4）。
     """
     started_at = time.monotonic()
     document = request.parsed_document
@@ -31,6 +36,14 @@ async def index_document(
         document,
         document_id=request.document_id,
         document_version_id=request.document_version_id,
+    )
+    # pgvector 表维度固定，先于构建节点拦截 profile 与向量空间不一致
+    # 的配置错误，避免做完切分/embedding 后才在写入阶段失败。
+    assert_compatible_vector_space(
+        store,
+        embedding_router=embedding_router,
+        profile_name=request.embedding_profile,
+        request_id=request.request_id,
     )
 
     context = IndexContext(
@@ -45,7 +58,14 @@ async def index_document(
     )
     nodes = build_nodes(document, context)
     if not nodes:
-        raise ValueError("document contains no indexable text blocks")
+        # 调用方输入问题：保持 400 语义，不走服务端错误 500 通道。
+        raise AIServiceError(
+            "INVALID_KNOWLEDGE_INDEX_REQUEST",
+            "document contains no indexable text blocks",
+            status_code=400,
+            retryable=False,
+            request_id=request.request_id,
+        )
 
     vectors = await embedding_router.embed_documents(
         request.embedding_profile, [node.text for node in nodes]

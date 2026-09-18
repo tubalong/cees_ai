@@ -1,7 +1,44 @@
-import { Injectable } from '@nestjs/common';
-import type { ParsedDocument } from '@cees/ai-service-client';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import type { FileExtractionResponse, ParsedDocument } from '@cees/ai-service-client';
+import { randomUUID } from 'node:crypto';
+import { AiServiceGateway, AiServiceInvocationError } from '../ai-orchestration/ai-service-gateway.service';
+import { STORAGE_PROVIDER } from '../storage/storage.tokens';
+import { StorageProvider } from '../storage/storage.types';
+import { fromContentListJson, fromMarkdown } from './mineru-artifact-reader';
+import { fromExtractionText } from './text-artifact-reader';
 
 export const KNOWLEDGE_DOCUMENT_PARSER = Symbol('KNOWLEDGE_DOCUMENT_PARSER');
+
+const MINERU_NOT_CONFIGURED = 'MINERU_NOT_CONFIGURED';
+const MINERU_DOWNLOAD_FAILED = 'MINERU_DOWNLOAD_FAILED';
+const MINERU_HTTP_ERROR = 'MINERU_HTTP_ERROR';
+const MINERU_TIMEOUT = 'MINERU_TIMEOUT';
+const MINERU_PARSE_FAILED = 'MINERU_PARSE_FAILED';
+const MINERU_EMPTY_RESULT = 'MINERU_EMPTY_RESULT';
+const MINERU_NOT_CONFIGURED_MESSAGE = 'MinerU 文档解析服务尚未配置或未部署';
+const EXTRACTION_DOWNLOAD_FAILED = 'EXTRACTION_DOWNLOAD_FAILED';
+const EXTRACTION_SERVICE_ERROR = 'EXTRACTION_SERVICE_ERROR';
+const EXTRACTION_FAILED = 'EXTRACTION_FAILED';
+const EXTRACTION_EMPTY_RESULT = 'EXTRACTION_EMPTY_RESULT';
+
+/**
+ * 文本原生格式（3.7 节）：文本本来就在文件里，本地确定性提取无损、毫秒级、
+ * 零模型依赖。与上传链路白名单（ALLOWED_ATTACHMENT_CONTENT_TYPES）对齐。
+ */
+const TEXT_NATIVE_CONTENT_TYPES = new Set([
+    'application/json',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'text/csv',
+    'text/markdown',
+    'text/plain',
+]);
+
+/** 判断 mimeType 是否属于文本原生格式（本地提取路径）。 */
+export function isTextNativeContentType(mimeType: string): boolean {
+    return TEXT_NATIVE_CONTENT_TYPES.has(mimeType.trim().toLowerCase().split(';', 1)[0]);
+}
 
 /** 解析失败且重试也无法恢复（配置缺失、文件损坏等）时抛出，直接置 FAILED。 */
 export class KnowledgeDocumentParserError extends Error {
@@ -16,11 +53,15 @@ export class KnowledgeDocumentParserError extends Error {
 }
 
 export interface KnowledgeDocumentFileInput {
+    documentId: string;
+    documentVersionId: string;
     fileObjectId: string;
     name: string;
     mimeType: string;
     sizeBytes: bigint;
     objectKey: string;
+    tenantId: string;
+    userId: string;
 }
 
 /**
@@ -32,16 +73,288 @@ export interface KnowledgeDocumentParser {
 }
 
 /**
- * MinerU 占位实现：MinerU 服务尚未部署，调用即失败。
- * 错误不可重试，worker 会直接把文档置为 FAILED 并记录原因；块 6 真机联调时替换。
+ * MinerU 真机实现：从 COS 下载原始文件，调用 MinerU FastAPI 服务（同步 /file_parse），
+ * 把返回的 content_list（或 Markdown 回退）转换为 ParsedDocument。
+ * 网络与超时错误可重试；配置缺失、文件问题与 MinerU 报告的解析失败直接置 FAILED。
  */
 @Injectable()
 export class MinerUDocumentParser implements KnowledgeDocumentParser {
-    async parse(_input: KnowledgeDocumentFileInput): Promise<ParsedDocument> {
+    private readonly logger = new Logger(MinerUDocumentParser.name);
+    private readonly apiUrl = process.env.MINERU_API_URL?.replace(/\/+$/, '') ?? '';
+    private readonly timeoutMs = readPositiveInteger(
+        process.env.MINERU_API_TIMEOUT_MS,
+        30 * 60 * 1000,
+    );
+    private readonly langList = process.env.MINERU_API_LANG_LIST?.trim() || 'ch';
+
+    constructor(@Inject(STORAGE_PROVIDER) private readonly storage: StorageProvider) { }
+
+    async parse(input: KnowledgeDocumentFileInput): Promise<ParsedDocument> {
+        if (!this.apiUrl) {
+            throw new KnowledgeDocumentParserError(MINERU_NOT_CONFIGURED, MINERU_NOT_CONFIGURED_MESSAGE, false);
+        }
+        const fileBytes = await downloadFileObject(
+            this.logger, this.storage, input, this.timeoutMs, MINERU_DOWNLOAD_FAILED,
+        );
+        const payload = await this.invokeMinerU(input, fileBytes);
+        return this.buildParsedDocument(input, payload);
+    }
+
+    private async invokeMinerU(input: KnowledgeDocumentFileInput, fileBytes: Buffer): Promise<unknown> {
+        const form = new FormData();
+        form.append('files', new Blob([new Uint8Array(fileBytes)], { type: input.mimeType }), input.name);
+        form.append('return_md', 'true');
+        form.append('return_content_list', 'true');
+        form.append('backend', 'pipeline');
+        form.append('lang_list', this.langList);
+        let response: Response;
+        try {
+            response = await fetch(`${this.apiUrl}/file_parse`, {
+                method: 'POST',
+                body: form,
+                signal: AbortSignal.timeout(this.timeoutMs),
+            });
+        } catch (error) {
+            const timedOut = isTimeoutError(error);
+            this.logger.warn(`MinerU 调用失败 documentId=${input.documentId} ${timedOut ? '(timeout)' : ''}`, error);
+            throw new KnowledgeDocumentParserError(
+                MINERU_TIMEOUT,
+                timedOut ? 'MinerU 解析超时' : 'MinerU 服务不可用',
+                true,
+            );
+        }
+        if (!response.ok) {
+            // 4xx 通常是文件本身问题（不支持/损坏/过大），重试无意义；5xx 视为服务端瞬时故障。
+            const retryable = response.status >= 500;
+            this.logger.warn(`MinerU HTTP ${response.status} documentId=${input.documentId}`);
+            throw new KnowledgeDocumentParserError(
+                MINERU_HTTP_ERROR,
+                `MinerU 解析请求失败（HTTP ${response.status}）`,
+                retryable,
+            );
+        }
+        return await response.json();
+    }
+
+    private buildParsedDocument(input: KnowledgeDocumentFileInput, payload: unknown): ParsedDocument {
+        // MinerU 3.4.5 服务模式：顶层 status 标记任务状态（completed/failed），
+        // 失败时 error 携带原因；部分部署仍返回 PARSE_RC 兼容字段，一并容忍。
+        const parseRc = findNumericField(payload, 'parse_rc') ?? findNumericField(payload, 'PARSE_RC');
+        const status = findStringField(payload, ['status']);
+        if ((parseRc !== null && parseRc !== undefined && parseRc !== 0)
+            || (parseRc === null && status && status !== 'completed' && status !== 'success')) {
+            const detail = findStringField(payload, ['error']) ?? '';
+            throw new KnowledgeDocumentParserError(
+                MINERU_PARSE_FAILED,
+                `MinerU 解析失败（${detail || `status=${status}`}）`,
+                false,
+            );
+        }
+        const parserVersion = findStringField(payload, ['version', 'parser_version']) ?? 'mineru-api';
+        const context = {
+            documentId: input.documentId,
+            documentVersionId: input.documentVersionId,
+            parserVersion,
+        };
+        const contentList = findContentList(payload);
+        if (contentList !== null) {
+            return fromContentListJson(contentList, context);
+        }
+        const markdown = findStringField(payload, ['md_content', 'markdown', 'content']);
+        if (markdown) {
+            return fromMarkdown(markdown, context);
+        }
         throw new KnowledgeDocumentParserError(
-            'MINERU_NOT_CONFIGURED',
-            'MinerU 文档解析服务尚未配置或未部署',
+            MINERU_EMPTY_RESULT,
+            'MinerU 未返回可用的解析产物',
             false,
         );
     }
+}
+
+/**
+ * 组合解析器：按 mimeType 分流（3.7 节）。
+ * 文本原生格式（md/txt/csv/json/docx/pptx/xlsx）走 ai-service 本地确定性提取；
+ * 视觉/版式格式（pdf/图片）走 MinerU pipeline。未命中的类型回退 MinerU，
+ * 与块 6 行为一致。错误语义：本地提取失败不可重试，服务不可用可重试。
+ */
+@Injectable()
+export class RoutedKnowledgeDocumentParser implements KnowledgeDocumentParser {
+    private readonly logger = new Logger(RoutedKnowledgeDocumentParser.name);
+    private readonly timeoutMs = readPositiveInteger(
+        process.env.MINERU_API_TIMEOUT_MS,
+        30 * 60 * 1000,
+    );
+
+    constructor(
+        private readonly mineru: MinerUDocumentParser,
+        private readonly gateway: AiServiceGateway,
+        @Inject(STORAGE_PROVIDER) private readonly storage: StorageProvider,
+    ) { }
+
+    async parse(input: KnowledgeDocumentFileInput): Promise<ParsedDocument> {
+        if (isTextNativeContentType(input.mimeType)) {
+            return this.extractTextNative(input);
+        }
+        return this.mineru.parse(input);
+    }
+
+    private async extractTextNative(input: KnowledgeDocumentFileInput): Promise<ParsedDocument> {
+        const fileBytes = await downloadFileObject(
+            this.logger, this.storage, input, this.timeoutMs, EXTRACTION_DOWNLOAD_FAILED,
+        );
+        let response: FileExtractionResponse;
+        try {
+            response = await this.gateway.extractFile({
+                request_id: randomUUID(),
+                tenant_id: input.tenantId,
+                user_id: input.userId,
+                filename: input.name,
+                content_type: input.mimeType,
+                data_base64: fileBytes.toString('base64'),
+            });
+        } catch (error) {
+            if (!(error instanceof AiServiceInvocationError)) throw error;
+            if (error.retryable) {
+                this.logger.warn(
+                    `本地提取服务不可用 documentId=${input.documentId}`, error,
+                );
+                throw new KnowledgeDocumentParserError(
+                    EXTRACTION_SERVICE_ERROR,
+                    `本地文本提取服务不可用（${error.message}）`,
+                    true,
+                );
+            }
+            throw new KnowledgeDocumentParserError(
+                EXTRACTION_FAILED,
+                `本地文本提取失败（${error.message}）`,
+                false,
+            );
+        }
+        const text = (response.parts ?? [])
+            .filter((part): part is Extract<typeof part, { type: 'text' }> => part.type === 'text')
+            .map((part) => part.text)
+            .join('');
+        if (!text.trim()) {
+            throw new KnowledgeDocumentParserError(
+                EXTRACTION_EMPTY_RESULT,
+                '本地文本提取未返回可用内容',
+                false,
+            );
+        }
+        return fromExtractionText(text, {
+            documentId: input.documentId,
+            documentVersionId: input.documentVersionId,
+            engine: response.metadata?.engine ?? 'extraction',
+        });
+    }
+}
+
+/**
+ * 从 COS 下载原始文件字节。URL 生成失败与下载失败都视为可重试基础设施错误；
+ * MinerU 与本地提取两条路径共用同一套下载语义。
+ */
+async function downloadFileObject(
+    logger: Logger,
+    storage: StorageProvider,
+    input: KnowledgeDocumentFileInput,
+    timeoutMs: number,
+    failureCode: string,
+): Promise<Buffer> {
+    let url: string;
+    try {
+        url = await storage.createDownloadUrl(input.objectKey);
+    } catch (error) {
+        logger.warn(`COS 下载 URL 生成失败 objectKey=${input.objectKey}`, error);
+        throw new KnowledgeDocumentParserError(failureCode, '生成对象下载地址失败', true);
+    }
+    try {
+        const response = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+        if (!response.ok) {
+            throw new Error(`object download HTTP ${response.status}`);
+        }
+        return Buffer.from(await response.arrayBuffer());
+    } catch (error) {
+        logger.warn(`COS 对象下载失败 objectKey=${input.objectKey}`, error);
+        throw new KnowledgeDocumentParserError(failureCode, '下载原始文件失败', true);
+    }
+}
+
+function readPositiveInteger(raw: string | undefined, fallback: number): number {
+    const value = Number(raw);
+    return Number.isInteger(value) && value > 0 ? value : fallback;
+}
+
+function isTimeoutError(error: unknown): boolean {
+    return error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError');
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** 宽松读取响应中的数值字段（如 PARSE_RC），容忍 results 包装。 */
+function findNumericField(payload: unknown, key: string): number | null {
+    for (const candidate of responseCandidates(payload)) {
+        if (isRecord(candidate) && typeof candidate[key] === 'number') {
+            return candidate[key] as number;
+        }
+    }
+    return null;
+}
+
+/** 宽松读取响应中的字符串字段，按候选键顺序。 */
+function findStringField(payload: unknown, keys: string[]): string | null {
+    for (const candidate of responseCandidates(payload)) {
+        if (!isRecord(candidate)) continue;
+        for (const key of keys) {
+            const value = candidate[key];
+            if (typeof value === 'string' && value.trim()) return value;
+        }
+    }
+    return null;
+}
+
+/**
+ * 展开 MinerU 响应的候选容器：顶层、顶层数组、results（数组或按文件名索引的
+ * 对象）、result 对象。3.4.5 服务模式下 results 为 {文件名: {...}} 形态。
+ */
+function responseCandidates(payload: unknown): unknown[] {
+    const candidates: unknown[] = [payload];
+    if (Array.isArray(payload)) candidates.push(...payload);
+    if (isRecord(payload)) {
+        const results = payload['results'];
+        if (Array.isArray(results)) {
+            candidates.push(...results);
+        } else if (isRecord(results)) {
+            candidates.push(...Object.values(results));
+        }
+        if (isRecord(payload['result'])) candidates.push(payload['result']);
+    }
+    return candidates;
+}
+
+/**
+ * 宽松定位 content_list：优先从 results 各候选的 content_list 提取，容忍
+ * results 数组、按文件名索引的对象与 pdf_info.content_list 包装；
+ * content_list 可能是数组，也可能是 JSON 字符串（3.4.5 服务模式）。
+ */
+function findContentList(payload: unknown): unknown | null {
+    for (const candidate of responseCandidates(payload)) {
+        if (!isRecord(candidate)) continue;
+        for (const key of ['content_list', 'pdf_info']) {
+            let value = candidate[key];
+            if (isRecord(value) && Array.isArray(value['content_list'])) value = value['content_list'];
+            if (typeof value === 'string') {
+                try {
+                    const parsed = JSON.parse(value);
+                    if (Array.isArray(parsed)) return parsed;
+                } catch {
+                    // 非 JSON 字符串，继续尝试下一候选
+                }
+            }
+            if (Array.isArray(value)) return value;
+        }
+    }
+    return null;
 }

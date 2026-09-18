@@ -4,6 +4,7 @@ import {
   ArrayMinSize,
   ArrayMaxSize,
   IsArray,
+  IsBoolean,
   IsIn,
   IsInt,
   IsOptional,
@@ -110,6 +111,14 @@ export class CreateTurnRequestDto {
   @ValidateIf((_object, value) => value !== undefined)
   @IsIn(['standard', 'ultra'])
   mode?: PublicTurnMode;
+
+  @ApiPropertyOptional({
+    description: '本轮是否允许检索知识库；省略时默认关闭，检索范围按用户权限折叠',
+    default: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  knowledgeBaseEnabled?: boolean;
 }
 
 export class ReplayTurnEventsQueryDto {

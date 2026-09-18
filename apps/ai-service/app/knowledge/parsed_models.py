@@ -45,6 +45,14 @@ def heading_of(block: ParsedBlock) -> str | None:
     return normalize_block_text(block.text)
 
 
+class ParsedIdentityError(ValueError):
+    """ParsedDocument 身份与索引请求不一致，属于调用方输入错误。
+
+    路由层据此映射 400；其他 ValueError（如 embedding 维度不匹配）
+    是服务端配置错误，统一走 500。
+    """
+
+
 def assert_identity_matches(
     document: ParsedDocument,
     *,
@@ -53,12 +61,12 @@ def assert_identity_matches(
 ) -> None:
     """校验 ParsedDocument 身份与索引请求一致，防止串文档。"""
     if document.document_id != document_id:
-        raise ValueError(
+        raise ParsedIdentityError(
             f"parsed document id mismatch: expected {document_id}, "
             f"got {document.document_id}"
         )
     if document.document_version_id != document_version_id:
-        raise ValueError(
+        raise ParsedIdentityError(
             f"parsed document version mismatch: expected {document_version_id}, "
             f"got {document.document_version_id}"
         )

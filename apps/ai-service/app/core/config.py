@@ -86,6 +86,29 @@ class ImageProfile(BaseModel):
         return self
 
 
+class EmbeddingProfile(BaseModel):
+    """Embedding 配置。只服务知识库索引与检索，不参与答案生成。
+
+    确定性 provider 由代码内置（开发/测试用），这里只声明外部 provider；
+    dimension 是契约级属性，配置必须与所声明模型的真实维度一致。
+    """
+
+    provider: Literal["openai_compatible"]
+    model: str = Field(min_length=1)
+    base_url: str | None = None
+    api_key_env: str | None = None
+    enabled: bool = True
+    dimension: int = Field(gt=0)
+    timeout_seconds: float = Field(default=60.0, gt=0.0, le=600.0)
+    max_retries: int = Field(default=2, ge=0, le=10)
+
+    @model_validator(mode="after")
+    def validate_provider_settings(self) -> EmbeddingProfile:
+        if not self.base_url or not self.api_key_env:
+            raise ValueError("embedding profiles require base_url and api_key_env")
+        return self
+
+
 class ChatModePolicy(BaseModel):
     role: ModelRole
     reasoning_effort: Literal["low", "high", "max"] | None = None
@@ -118,6 +141,7 @@ class ModelCatalog(BaseModel):
     roles: dict[ModelRole, list[str]] = Field(default_factory=dict)
     chat: ChatConfig | None = None
     image_profiles: dict[str, ImageProfile] = Field(default_factory=dict)
+    embedding_profiles: dict[str, EmbeddingProfile] = Field(default_factory=dict)
     extraction: ExtractionConfig | None = None
 
     @field_validator("profiles")
@@ -139,6 +163,10 @@ class Settings(BaseSettings):
     ai_docs_enabled: bool | None = None
     ai_model_config_path: Path = SERVICE_ROOT / "config/models.toml"
     log_level: str = "INFO"
+    # 知识库向量库：memory 为进程内实现（开发/测试），pgvector 为独立数据库。
+    knowledge_vector_store: Literal["memory", "pgvector"] = "memory"
+    knowledge_vector_database_url: str | None = None
+    knowledge_vector_dimension: int | None = None
 
     @field_validator("ai_model_config_path", mode="after")
     @classmethod
@@ -190,6 +218,7 @@ def validate_readiness(settings: Settings, catalog: ModelCatalog) -> list[str]:
     _validate_chat_readiness(catalog, errors)
     _validate_tool_calling_readiness(catalog, errors)
     _validate_image_readiness(settings, catalog, errors)
+    _validate_knowledge_readiness(settings, catalog, errors)
 
     for name, profile in catalog.profiles.items():
         if not profile.enabled or profile.provider == "mock":
@@ -212,6 +241,54 @@ def validate_readiness(settings: Settings, catalog: ModelCatalog) -> list[str]:
             errors.append(f"enabled profile {name} uses an example base URL in production")
 
     return errors
+
+
+def _validate_knowledge_readiness(
+    settings: Settings, catalog: ModelCatalog, errors: list[str]
+) -> None:
+    if settings.knowledge_vector_store != "pgvector":
+        return
+    if not settings.knowledge_vector_database_url:
+        errors.append(
+            "KNOWLEDGE_VECTOR_DATABASE_URL is required when "
+            "knowledge_vector_store is pgvector"
+        )
+    if not settings.knowledge_vector_dimension:
+        errors.append(
+            "KNOWLEDGE_VECTOR_DIMENSION is required when "
+            "knowledge_vector_store is pgvector"
+        )
+    enabled_profiles = [
+        (name, profile)
+        for name, profile in catalog.embedding_profiles.items()
+        if profile.enabled
+    ]
+    if settings.node_env == "production" and not enabled_profiles:
+        errors.append(
+            "knowledge vector store requires at least one enabled embedding "
+            "profile in production"
+        )
+    for name, profile in enabled_profiles:
+        # 交叉校验：向量表维度必须与启用的 embedding profile 声明维度
+        # 一致，否则索引写入或检索时才会暴露维度不匹配（统一走 500）。
+        if (
+            settings.knowledge_vector_dimension
+            and profile.dimension != settings.knowledge_vector_dimension
+        ):
+            errors.append(
+                f"enabled embedding profile {name} declares dimension "
+                f"{profile.dimension} but KNOWLEDGE_VECTOR_DIMENSION is "
+                f"{settings.knowledge_vector_dimension}"
+            )
+        assert profile.api_key_env is not None
+        key = os.getenv(profile.api_key_env)
+        if not key:
+            errors.append(
+                f"enabled embedding profile {name} is missing environment "
+                f"variable {profile.api_key_env}"
+            )
+        elif settings.node_env == "production" and key == "change_me":
+            errors.append(f"enabled embedding profile {name} uses an example API key in production")
 
 
 def _validate_image_readiness(

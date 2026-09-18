@@ -11,6 +11,7 @@ from app.api.generated.models import (
     ParsedDocument,
     VisibilityScope,
 )
+from app.core.errors import AIServiceError
 from app.embeddings.router import build_default_embedding_router
 from app.knowledge.ingestion import index_document
 from app.knowledge.retrieval import retrieve_chunks
@@ -81,7 +82,7 @@ def make_retrieve_request(
     allowed_document_ids: list[str] | None = None,
     department_ids: list[str] | None = None,
     project_ids: list[str] | None = None,
-    acl_version: str = "acl-1",
+    acl_version: str | None = None,
     index_version: str = "idx-v1",
     top_k: int = 8,
 ) -> KnowledgeRetrieveRequest:
@@ -245,6 +246,47 @@ async def test_stale_acl_version_never_served() -> None:
     assert response.chunks == []
 
 
+async def test_retrieve_without_acl_version_serves_nodes() -> None:
+    # 调用方每次请求实时折叠 scope 时可省略 acl_version，检索不按 ACL 版本过滤。
+    store = InMemoryVectorStore()
+    router = build_default_embedding_router()
+    await index_document(make_index_request(), store=store, embedding_router=router)
+    response = await retrieve_chunks(
+        make_retrieve_request(query="项目延期"),
+        store=store,
+        embedding_router=router,
+    )
+    assert len(response.chunks) == 1
+
+
+async def test_empty_department_allowlist_blocks_department_nodes() -> None:
+    # 空白名单表示调用方没有任何可授权的部门：只放行不携带 department_id 的节点。
+    store = InMemoryVectorStore()
+    router = build_default_embedding_router()
+    scoped = KnowledgeVisibilityScope(
+        visibility_scope=VisibilityScope.DEPARTMENT,
+        department_id="dept-2",
+        acl_version="acl-1",
+    )
+    await index_document(
+        make_index_request(visibility_scope=scoped),
+        store=store,
+        embedding_router=router,
+    )
+    await index_document(
+        make_index_request(document_id="doc-tenant", document_version_id="docv-tenant"),
+        store=store,
+        embedding_router=router,
+    )
+    response = await retrieve_chunks(
+        make_retrieve_request(query="项目延期", department_ids=[]),
+        store=store,
+        embedding_router=router,
+    )
+    assert len(response.chunks) == 1
+    assert response.chunks[0].document_id == "doc-tenant"
+
+
 async def test_retrieve_only_sees_declared_index_version() -> None:
     store = InMemoryVectorStore()
     router = build_default_embedding_router()
@@ -329,7 +371,7 @@ async def test_index_rejects_document_without_indexable_text() -> None:
     request.parsed_document.blocks = [
         ParsedBlock(block_id="block-img", type="image", text=None, source_order=0)
     ]
-    with pytest.raises(ValueError, match="no indexable text"):
+    with pytest.raises(AIServiceError, match="no indexable text"):
         await index_document(request, store=store, embedding_router=router)
 
 

@@ -129,6 +129,35 @@ describe('DashboardService', () => {
         });
         expect(prisma.meeting.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 10, orderBy: [{ startsAt: 'asc' }, { id: 'asc' }] }));
     });
+
+    it('resolves daily report and meeting day boundaries in the tenant time zone', async () => {
+        // 2026-09-11T23:30Z 在东八区已经是 9 月 12 日 07:30。
+        jest.useFakeTimers();
+        jest.setSystemTime(new Date('2026-09-11T23:30:00.000Z'));
+        const prisma = createPrismaMock();
+        prisma.project.findMany.mockResolvedValue([]);
+        prisma.task.findMany.mockResolvedValue([]);
+        prisma.notificationRecipient.count.mockResolvedValue(0);
+        prisma.workReport.findMany.mockResolvedValue([
+            { status: WorkReportStatus.SUBMITTED, type: WorkReportType.DAILY, periodStart: new Date('2026-09-11T00:00:00.000Z'), authorMembershipId: MEMBERSHIP_ID, reviewerMembershipId: MEMBERSHIP_ID },
+        ]);
+        prisma.meeting.findMany.mockResolvedValue([
+            { status: MeetingStatus.SCHEDULED, startsAt: new Date('2026-09-12T02:00:00.000Z'), participants: [] },
+        ]);
+        const service = createService(prisma);
+
+        // 东八区：昨天是 09-11，且 09-12T02:00Z 属于本地 09-12，算“今日”。
+        prisma.tenant.findFirst.mockResolvedValue({ timezone: 'Asia/Shanghai' });
+        const shanghai = await service.overview();
+        expect(shanghai.report.dailyReportPending).toBe(false);
+        expect(shanghai.meeting.today).toBe(1);
+
+        // UTC：昨天是 09-10，09-12T02:00Z 已经跨出 UTC 当日窗口。
+        prisma.tenant.findFirst.mockResolvedValue({ timezone: 'UTC' });
+        const utc = await service.overview();
+        expect(utc.report.dailyReportPending).toBe(true);
+        expect(utc.meeting.today).toBe(0);
+    });
 });
 
 function useFixedNow(): void {
@@ -157,5 +186,6 @@ function createPrismaMock(): Record<string, any> {
         workReport: { findMany: jest.fn() },
         meeting: { findMany: jest.fn() },
         notificationRecipient: { count: jest.fn() },
+        tenant: { findFirst: jest.fn().mockResolvedValue({ timezone: 'Asia/Shanghai' }) },
     };
 }

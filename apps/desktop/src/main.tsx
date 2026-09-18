@@ -20,6 +20,7 @@ import './features/profile/profile.css';
 import './features/roles/role.css';
 import './app/preferences.css';
 import './features/platform/platform-tenant.css';
+import './features/dingtalk/dingtalk.css';
 
 const queryClient = new QueryClient();
 

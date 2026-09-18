@@ -213,6 +213,18 @@ cees/{local|staging|production}/tenants/{tenantId}/files/{yyyy}/{mm}/{fileId}/so
 - Expose-Headers 建议包含 `ETag` 和 `x-cos-request-id`；
 - 缓存时间应短于签名或权限策略变更窗口。
 
+桶未配置 CORS 时，浏览器预检被拒会直接阻止直传（表现为 OPTIONS 预检 403 且无 `Access-Control-*` 响应头）。开发环境示例规则（控制台 → 安全管理 → 跨域访问 CORS 设置）：
+
+| 配置项 | 本地开发 |
+| --- | --- |
+| 来源 Origin | `http://localhost:5173`, `http://127.0.0.1:5173` |
+| 操作 Methods | `PUT`, `GET`, `HEAD` |
+| Allow-Headers | `Content-Type` |
+| Expose-Headers | `ETag`, `x-cos-request-id` |
+| 超时 Max-Age | `300`（小于签名 600 秒窗口） |
+
+Electron 生产包通过 `loadFile(file://)` 加载页面时浏览器 Origin 为 `null`，若 COS 规则不支持 `null` 字面值则按部署环境实际客户端 Origin 处理；业务 API 的 CAM 策略禁止修改 CORS，需使用主账号或有权限的管理员账号配置。
+
 Flutter 原生请求不依赖浏览器 CORS，但仍使用相同的预签名 URL、对象键和完成校验流程。
 
 ## 9. 安全要求

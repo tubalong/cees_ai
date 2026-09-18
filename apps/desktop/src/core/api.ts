@@ -250,6 +250,20 @@ interface CursorPage<T> {
     nextCursor: string | null;
 }
 
+async function collectCursorPages<T>(pathForCursor: (cursor?: string) => string): Promise<CursorPage<T>> {
+    const items: T[] = [];
+    const visited = new Set<string>();
+    let cursor: string | undefined;
+    do {
+        const page = await authorizedRequest<CursorPage<T>>(pathForCursor(cursor));
+        items.push(...page.items);
+        cursor = page.nextCursor ?? undefined;
+        if (cursor && visited.has(cursor)) throw new Error('分页游标重复，无法继续加载数据');
+        if (cursor) visited.add(cursor);
+    } while (cursor);
+    return { items, nextCursor: null };
+}
+
 interface ApiSuccess<T> {
     success: true;
     data: T;
@@ -338,6 +352,225 @@ export async function listDocuments(keyword?: string): Promise<CursorPage<Manage
 
 export async function getDocument(documentId: string): Promise<ManagedDocumentDetail> {
     return authorizedRequest<ManagedDocumentDetail>(`v1/documents/${encodeURIComponent(documentId)}`);
+}
+
+export type KnowledgeSourceType = 'FILE_OBJECT' | 'DOCUMENT' | 'MESSAGE';
+
+export type KnowledgeDocumentVisibilityScope = 'PRIVATE' | 'DEPARTMENT' | 'PROJECT' | 'TENANT';
+
+export type KnowledgeBaseVisibilityScope = 'PRIVATE' | 'DEPARTMENT' | 'PROJECT' | 'TENANT';
+
+export type KnowledgeBaseMemberPermission = 'READER' | 'EDITOR' | 'MANAGER';
+
+export interface KnowledgeBaseSummary {
+    id: string;
+    tenantId: string;
+    name: string;
+    description: string | null;
+    visibilityScope: KnowledgeBaseVisibilityScope;
+    departmentId: string | null;
+    projectId: string | null;
+    memberCount: number;
+    /** 当前用户对该库的成员等级；锚点人群与 read_all 恒 READER，manage_all 恒 MANAGER。 */
+    myPermission: KnowledgeBaseMemberPermission;
+    createdBy: string | null;
+    updatedBy: string | null;
+    version: number;
+    createdAt: string;
+    updatedAt: string;
+}
+
+export interface KnowledgeDocumentResult {
+    id: string;
+    tenantId: string;
+    knowledgeBaseId: string;
+    name: string;
+    status: 'PENDING' | 'PARSING' | 'PARSED' | 'INDEXING' | 'READY' | 'FAILED';
+    fileObjectId: string;
+    versionNumber: number;
+    currentVersionId: string;
+    retryCount: number;
+    lastError: string | null;
+    visibilityScope: KnowledgeDocumentVisibilityScope;
+    departmentId: string | null;
+    projectId: string | null;
+    createdBy: string | null;
+    updatedBy: string | null;
+    version: number;
+    createdAt: string;
+    updatedAt: string;
+}
+
+/** 转存目标库候选：当前用户达到 EDITOR 成员权限的知识库（块 7c）。 */
+export async function listWritableKnowledgeBases(): Promise<{ items: KnowledgeBaseSummary[]; nextCursor: string | null }> {
+    return authorizedRequest<{ items: KnowledgeBaseSummary[]; nextCursor: string | null }>('v1/knowledge-bases?permission=EDITOR&limit=100');
+}
+
+// ---------------------------------------------------------------------------
+// 知识库管理（块 9）：库 CRUD、归属锚点与成员管理
+// ---------------------------------------------------------------------------
+
+export interface ListKnowledgeBasesParams {
+    keyword?: string;
+    limit?: number;
+    cursor?: string;
+    permission?: KnowledgeBaseMemberPermission;
+}
+
+export async function listKnowledgeBases(params: ListKnowledgeBasesParams = {}): Promise<CursorPage<KnowledgeBaseSummary>> {
+    const query = new URLSearchParams({ limit: String(params.limit ?? 100) });
+    if (params.keyword?.trim()) query.set('keyword', params.keyword.trim());
+    if (params.cursor) query.set('cursor', params.cursor);
+    if (params.permission) query.set('permission', params.permission);
+    return authorizedRequest<CursorPage<KnowledgeBaseSummary>>(`v1/knowledge-bases?${query}`);
+}
+
+export interface CreateKnowledgeBaseInput {
+    name: string;
+    description?: string | null;
+    visibilityScope?: KnowledgeBaseVisibilityScope;
+    departmentId?: string;
+    projectId?: string;
+}
+
+export async function createKnowledgeBase(input: CreateKnowledgeBaseInput): Promise<KnowledgeBaseSummary> {
+    return authorizedRequest<KnowledgeBaseSummary>('v1/knowledge-bases', {
+        method: 'POST',
+        body: JSON.stringify({
+            name: input.name.trim(),
+            ...(input.description?.trim() ? { description: input.description.trim() } : {}),
+            ...(input.visibilityScope ? { visibilityScope: input.visibilityScope } : {}),
+            ...(input.departmentId ? { departmentId: input.departmentId } : {}),
+            ...(input.projectId ? { projectId: input.projectId } : {}),
+        }),
+    });
+}
+
+export interface UpdateKnowledgeBaseInput {
+    name?: string;
+    description?: string | null;
+    visibilityScope?: KnowledgeBaseVisibilityScope;
+    /** 仅 DEPARTMENT 时使用；传 null 清除锚点。 */
+    departmentId?: string | null;
+    /** 仅 PROJECT 时使用；传 null 清除锚点。 */
+    projectId?: string | null;
+    version: number;
+}
+
+export async function updateKnowledgeBase(knowledgeBaseId: string, input: UpdateKnowledgeBaseInput): Promise<KnowledgeBaseSummary> {
+    return authorizedRequest<KnowledgeBaseSummary>(`v1/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+            ...(input.name?.trim() ? { name: input.name.trim() } : {}),
+            ...(input.description !== undefined ? { description: input.description?.trim() || null } : {}),
+            ...(input.visibilityScope !== undefined ? { visibilityScope: input.visibilityScope } : {}),
+            ...(input.departmentId !== undefined ? { departmentId: input.departmentId } : {}),
+            ...(input.projectId !== undefined ? { projectId: input.projectId } : {}),
+            version: input.version,
+        }),
+    });
+}
+
+export async function deleteKnowledgeBase(knowledgeBaseId: string, version: number): Promise<void> {
+    return authorizedRequest<void>(`v1/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}?version=${version}`, { method: 'DELETE' });
+}
+
+export interface KnowledgeBaseMemberSummary {
+    id: string;
+    tenantId: string;
+    knowledgeBaseId: string;
+    membershipId: string;
+    userId: string;
+    account: string;
+    displayName: string;
+    permission: KnowledgeBaseMemberPermission;
+    createdAt: string;
+}
+
+export async function listKnowledgeBaseMembers(knowledgeBaseId: string): Promise<CursorPage<KnowledgeBaseMemberSummary>> {
+    // 契约未定义 limit 参数（后端固定每页最多 100 条），传递未知参数会被 DTO 白名单拒绝。
+    return authorizedRequest<CursorPage<KnowledgeBaseMemberSummary>>(`v1/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/members`);
+}
+
+export async function addKnowledgeBaseMember(knowledgeBaseId: string, membershipId: string, permission: KnowledgeBaseMemberPermission): Promise<KnowledgeBaseMemberSummary> {
+    return authorizedRequest<KnowledgeBaseMemberSummary>(`v1/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/members`, {
+        method: 'POST',
+        body: JSON.stringify({ membershipId, permission }),
+    });
+}
+
+export async function updateKnowledgeBaseMember(knowledgeBaseId: string, membershipId: string, permission: KnowledgeBaseMemberPermission): Promise<KnowledgeBaseMemberSummary> {
+    return authorizedRequest<KnowledgeBaseMemberSummary>(`v1/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/members/${encodeURIComponent(membershipId)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ permission }),
+    });
+}
+
+export async function removeKnowledgeBaseMember(knowledgeBaseId: string, membershipId: string): Promise<void> {
+    return authorizedRequest<void>(`v1/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/members/${encodeURIComponent(membershipId)}`, { method: 'DELETE' });
+}
+
+// ---------------------------------------------------------------------------
+// 知识库文档管理：上传文件对象进解析索引队列、列表与失败重试
+// ---------------------------------------------------------------------------
+
+export interface ListKnowledgeDocumentsParams {
+    keyword?: string;
+    limit?: number;
+    cursor?: string;
+}
+
+export async function listKnowledgeDocuments(knowledgeBaseId: string, params: ListKnowledgeDocumentsParams = {}): Promise<CursorPage<KnowledgeDocumentResult>> {
+    const query = new URLSearchParams({ limit: String(params.limit ?? 100) });
+    if (params.keyword?.trim()) query.set('keyword', params.keyword.trim());
+    if (params.cursor) query.set('cursor', params.cursor);
+    return authorizedRequest<CursorPage<KnowledgeDocumentResult>>(`v1/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/documents?${query}`);
+}
+
+/** 人工上传路径：关联已上传完成的文件对象创建文档，进入 PENDING 后由后台任务解析索引。 */
+export async function uploadKnowledgeDocument(knowledgeBaseId: string, input: {
+    fileObjectId: string;
+    name?: string;
+    visibilityScope: KnowledgeDocumentVisibilityScope;
+}): Promise<KnowledgeDocumentResult> {
+    return authorizedRequest<KnowledgeDocumentResult>(`v1/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/documents`, {
+        method: 'POST',
+        body: JSON.stringify({
+            fileObjectId: input.fileObjectId,
+            name: input.name?.trim() || undefined,
+            visibilityScope: input.visibilityScope,
+        }),
+    });
+}
+
+/** 重新把处理失败的文档送入解析索引队列（仅 FAILED 状态可重试）。 */
+export async function retryKnowledgeDocument(knowledgeBaseId: string, documentId: string): Promise<KnowledgeDocumentResult> {
+    return authorizedRequest<KnowledgeDocumentResult>(`v1/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/documents/${encodeURIComponent(documentId)}/retry`, {
+        method: 'POST',
+    });
+}
+
+/** 删除文档：软删业务记录并异步清理全部版本的向量索引（需库内 EDITOR 及以上权限）。 */
+export async function deleteKnowledgeDocument(knowledgeBaseId: string, documentId: string): Promise<void> {
+    return authorizedRequest<void>(`v1/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/documents/${encodeURIComponent(documentId)}`, { method: 'DELETE' });
+}
+
+/** 对话数据转知识库：附件 / AI 生成文档 / 对话消息走统一转存端点（块 7c）。 */
+export async function createKnowledgeDocument(knowledgeBaseId: string, input: {
+    sourceType: KnowledgeSourceType;
+    sourceId: string;
+    name?: string;
+    visibilityScope: KnowledgeDocumentVisibilityScope;
+}): Promise<KnowledgeDocumentResult> {
+    return authorizedRequest<KnowledgeDocumentResult>(`v1/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/documents`, {
+        method: 'POST',
+        body: JSON.stringify({
+            sourceType: input.sourceType,
+            sourceId: input.sourceId,
+            name: input.name?.trim() || undefined,
+            visibilityScope: input.visibilityScope,
+        }),
+    });
 }
 
 async function authorizedRequest<T>(path: string, init: RequestInit = {}, retry = true): Promise<T> {
@@ -638,6 +871,146 @@ export async function deleteTenantRole(roleId: string, version: number): Promise
     return authorizedRequest<void>(`v1/roles/${encodeURIComponent(roleId)}?${query}`, { method: 'DELETE' });
 }
 
+export type DingTalkIntegrationStatus = 'ACTIVE' | 'DISABLED' | 'ERROR';
+export type DingTalkSyncJobStatus = 'RUNNING' | 'SUCCEEDED' | 'FAILED';
+
+export interface DingTalkIntegration {
+    id: string;
+    tenantId: string;
+    corpId: string;
+    appKey: string;
+    status: DingTalkIntegrationStatus;
+    lastVerifiedAt: string | null;
+    lastSyncedAt: string | null;
+    lastErrorCode: string | null;
+    lastErrorMessage: string | null;
+    version: number;
+    createdAt: string;
+    updatedAt: string;
+}
+
+export interface CreateDingTalkIntegrationInput {
+    corpId: string;
+    appKey: string;
+    appSecret: string;
+}
+
+export interface UpdateDingTalkIntegrationInput {
+    appKey?: string;
+    appSecret?: string;
+    status?: Exclude<DingTalkIntegrationStatus, 'ERROR'>;
+    version: number;
+}
+
+export interface DingTalkDepartment {
+    id: string;
+    externalDepartmentId: string;
+    parentExternalDepartmentId: string | null;
+    departmentId: string | null;
+    name: string;
+    displayOrder: number;
+    isDeleted: boolean;
+    lastSeenAt: string;
+    createdAt: string;
+    updatedAt: string;
+}
+
+export interface DingTalkUser {
+    id: string;
+    externalUserId: string;
+    unionId: string | null;
+    membershipId: string | null;
+    name: string;
+    title: string | null;
+    jobNumber: string | null;
+    departmentExternalIds: string[];
+    active: boolean;
+    admin: boolean;
+    boss: boolean;
+    isDeleted: boolean;
+    lastSeenAt: string;
+    createdAt: string;
+    updatedAt: string;
+}
+
+export interface DingTalkSyncJob {
+    id: string;
+    integrationId: string;
+    type: string;
+    status: DingTalkSyncJobStatus;
+    departmentCount: number;
+    userCount: number;
+    errorCode: string | null;
+    errorMessage: string | null;
+    startedAt: string;
+    completedAt: string | null;
+    createdAt: string;
+}
+
+export interface DingTalkCursorParams {
+    limit?: number;
+    cursor?: string;
+    includeDeleted?: boolean;
+}
+
+export async function getDingTalkIntegration(): Promise<DingTalkIntegration | null> {
+    try {
+        return await authorizedRequest<DingTalkIntegration>('v1/dingtalk/integration');
+    } catch (error) {
+        if (error instanceof Error && error.message.includes('尚未绑定钉钉企业')) return null;
+        throw error;
+    }
+}
+
+export async function createDingTalkIntegration(input: CreateDingTalkIntegrationInput): Promise<DingTalkIntegration> {
+    return authorizedRequest<DingTalkIntegration>('v1/dingtalk/integration', {
+        method: 'POST',
+        body: JSON.stringify({
+            corpId: input.corpId.trim(),
+            appKey: input.appKey.trim(),
+            appSecret: input.appSecret,
+        }),
+    });
+}
+
+export async function updateDingTalkIntegration(input: UpdateDingTalkIntegrationInput): Promise<DingTalkIntegration> {
+    return authorizedRequest<DingTalkIntegration>('v1/dingtalk/integration', {
+        method: 'PATCH',
+        body: JSON.stringify({
+            ...(input.appKey?.trim() ? { appKey: input.appKey.trim() } : {}),
+            ...(input.appSecret ? { appSecret: input.appSecret } : {}),
+            ...(input.status ? { status: input.status } : {}),
+            version: input.version,
+        }),
+    });
+}
+
+export async function verifyDingTalkIntegration(): Promise<DingTalkIntegration> {
+    return authorizedRequest<DingTalkIntegration>('v1/dingtalk/integration/verify', { method: 'POST' });
+}
+
+export async function syncDingTalkOrganization(): Promise<DingTalkSyncJob> {
+    return authorizedRequest<DingTalkSyncJob>('v1/dingtalk/organization/sync', { method: 'POST' });
+}
+
+export async function listDingTalkDepartments(input: DingTalkCursorParams = {}): Promise<{ items: DingTalkDepartment[]; nextCursor: string | null }> {
+    const query = new URLSearchParams({ limit: String(input.limit ?? 100), includeDeleted: String(input.includeDeleted ?? false) });
+    if (input.cursor) query.set('cursor', input.cursor);
+    return authorizedRequest<{ items: DingTalkDepartment[]; nextCursor: string | null }>(`v1/dingtalk/organization/departments?${query}`);
+}
+
+export async function listDingTalkUsers(input: DingTalkCursorParams = {}): Promise<{ items: DingTalkUser[]; nextCursor: string | null }> {
+    const query = new URLSearchParams({ limit: String(input.limit ?? 100), includeDeleted: String(input.includeDeleted ?? false) });
+    if (input.cursor) query.set('cursor', input.cursor);
+    return authorizedRequest<{ items: DingTalkUser[]; nextCursor: string | null }>(`v1/dingtalk/organization/users?${query}`);
+}
+
+export async function listDingTalkSyncJobs(input: { limit?: number; cursor?: string } = {}): Promise<{ items: DingTalkSyncJob[]; nextCursor: string | null }> {
+    const query = new URLSearchParams({ limit: String(input.limit ?? 20) });
+    if (input.cursor) query.set('cursor', input.cursor);
+    return authorizedRequest<{ items: DingTalkSyncJob[]; nextCursor: string | null }>(`v1/dingtalk/sync-jobs?${query}`);
+}
+
 export async function listTenantInvitations(): Promise<CursorPage<TenantInvitation>> {
     return authorizedRequest<CursorPage<TenantInvitation>>('v1/tenants/current/invitations?limit=100');
 }
@@ -843,16 +1216,18 @@ export interface UploadSessionCompleted {
 }
 
 function readUploadSession(data: Record<string, unknown>): UploadSessionCreated {
-    const uploadUrl = (data.uploadUrl ?? data.putUrl ?? data.url) as string | undefined;
+    // 后端返回嵌套结构：upload: { method, url, headers }，fileId 为文件对象 ID；顶层字段为兼容回退。
+    const nested = (data.upload ?? {}) as Record<string, unknown>;
+    const uploadUrl = (nested.url ?? data.uploadUrl ?? data.putUrl ?? data.url) as string | undefined;
     if (!uploadUrl) throw new Error('上传会话响应缺少直传地址');
-    const rawHeaders = (data.uploadHeaders ?? data.headers ?? data.requiredHeaders ?? {}) as Record<string, unknown>;
+    const rawHeaders = (nested.headers ?? data.uploadHeaders ?? data.headers ?? data.requiredHeaders ?? {}) as Record<string, unknown>;
     const uploadHeaders: Record<string, string> = {};
     Object.entries(rawHeaders).forEach(([key, value]) => {
         if (typeof value === 'string') uploadHeaders[key] = value;
     });
     return {
-        uploadSessionId: String(data.id ?? data.uploadSessionId ?? ''),
-        fileObjectId: String(data.fileObjectId ?? data.fileId ?? ''),
+        uploadSessionId: String(data.uploadSessionId ?? data.id ?? ''),
+        fileObjectId: String(data.fileId ?? data.fileObjectId ?? ''),
         uploadUrl,
         uploadHeaders,
         expiresAt: typeof data.expiresAt === 'string' ? data.expiresAt : undefined,
@@ -914,7 +1289,7 @@ export type TurnStreamEvent =
     | { type: 'status'; seq: number; phase: 'reasoning' | 'answering' | 'tool_executing' }
     | { type: 'content_delta'; seq: number; text: string }
     | { type: 'tool_call'; seq: number; toolCallId: string; name: string; arguments: Record<string, unknown> }
-    | { type: 'tool_result'; seq: number; toolCallId: string; status: 'completed' | 'failed' | 'rejected'; resourceId?: string | null; resourceUrl?: string | null; resource?: { id: string; type: 'IMAGE' | 'DOCUMENT' } | null; sources?: Array<{ id: string; title: string; url: string; domain: string; snippet: string; publishedAt?: string | null }>; error?: Record<string, unknown> | null }
+    | { type: 'tool_result'; seq: number; toolCallId: string; status: 'completed' | 'failed' | 'rejected'; resourceId?: string | null; resourceUrl?: string | null; resource?: { id: string; type: 'IMAGE' | 'DOCUMENT' } | null; sources?: Array<{ id: string; title: string; url: string; domain: string; snippet: string; publishedAt?: string | null }>; citations?: Array<{ id: string; title: string; snippet: string; pageIndex?: number | null }>; error?: Record<string, unknown> | null }
     | { type: 'usage'; seq: number; tokenUsage: Record<string, number | null> }
     | { type: 'completed'; seq: number; latencyMs: number; finishReason: string | null }
     | { type: 'error'; seq: number; error: { code: string; message: string; retryable: boolean } };
@@ -953,7 +1328,7 @@ async function streamSse(path: string, init: RequestInit, onEvent: (event: TurnS
     try { while (true) { const { value, done } = await reader.read(); if (done) { consume(decoder.decode()); if (buffer.trim()) throw new Error('事件流意外中断'); break; } consume(decoder.decode(value, { stream: true })); } } finally { reader.releaseLock(); }
 }
 
-export function createTurn(conversationId: string, input: { content: string; mode: ChatMode; imageFileIds?: string[] }, idempotencyKey: string, onEvent: (event: TurnStreamEvent) => void, signal?: AbortSignal): Promise<void> { return streamSse(`v1/conversations/${encodeURIComponent(conversationId)}/turns`, { method: 'POST', body: JSON.stringify({ content: input.content, mode: input.mode, ...(input.imageFileIds?.length ? { imageFileIds: input.imageFileIds } : {}) }), signal, headers: { 'Idempotency-Key': idempotencyKey } }, onEvent); }
+export function createTurn(conversationId: string, input: { content: string; mode: ChatMode; imageFileIds?: string[]; knowledgeBaseEnabled?: boolean }, idempotencyKey: string, onEvent: (event: TurnStreamEvent) => void, signal?: AbortSignal): Promise<void> { return streamSse(`v1/conversations/${encodeURIComponent(conversationId)}/turns`, { method: 'POST', body: JSON.stringify({ content: input.content, mode: input.mode, ...(input.imageFileIds?.length ? { imageFileIds: input.imageFileIds } : {}), ...(input.knowledgeBaseEnabled ? { knowledgeBaseEnabled: true } : {}) }), signal, headers: { 'Idempotency-Key': idempotencyKey } }, onEvent); }
 export function replayTurnEvents(conversationId: string, turnId: string, afterSeq: number, onEvent: (event: TurnStreamEvent) => void, signal?: AbortSignal): Promise<void> { return streamSse(`v1/conversations/${encodeURIComponent(conversationId)}/turns/${encodeURIComponent(turnId)}/events?afterSeq=${afterSeq}`, { method: 'GET', signal }, onEvent); }
 export async function cancelTurn(conversationId: string, turnId: string): Promise<Turn> { return authorizedRequest<Turn>(`v1/conversations/${encodeURIComponent(conversationId)}/turns/${encodeURIComponent(turnId)}/cancel`, { method: 'POST' }); }
 
@@ -1148,19 +1523,22 @@ export type ProjectMemberRole = 'OWNER' | 'MANAGER' | 'MEMBER';
 
 export interface ProjectSummary {
     id: string;
+    /** 服务端按企业时区年份自动分配，格式 PRJ-<年>-<序号>；创建后不可修改。 */
     code: string;
     name: string;
     description?: string | null;
     departmentId?: string | null;
     status: ProjectStatus;
-    ownerMembershipId?: string | null;
     owner?: { membershipId?: string; account?: string; displayName?: string } | null;
-    myRole?: ProjectMemberRole | null;
+    /** project.manage_all 跨项目访问时可能为 null。 */
+    currentMemberRole?: ProjectMemberRole | null;
     memberCount?: number;
     taskCount?: number;
-    startsAt?: string | null;
-    endsAt?: string | null;
+    /** 首次启动时间：系统在项目从 PLANNING 转为 ACTIVE 时写入。 */
+    startedAt?: string | null;
     completedAt?: string | null;
+    /** 关闭时间：项目被取消或归档时系统写入。 */
+    closedAt?: string | null;
     completionSummary?: string | null;
     createdAt?: string;
     updatedAt?: string;
@@ -1168,16 +1546,18 @@ export interface ProjectSummary {
 }
 
 export interface CreateProjectInput {
-    code: string;
     name: string;
     description?: string;
     departmentId?: string | null;
     ownerMembershipId?: string;
-    startsAt?: string | null;
-    endsAt?: string | null;
+    /** 初始项目成员；负责人由服务端自动加入，需要 project.member.manage 权限。 */
+    memberMembershipIds?: string[];
 }
 
-export interface UpdateProjectInput extends Partial<CreateProjectInput> {
+export interface UpdateProjectInput {
+    name?: string;
+    description?: string | null;
+    departmentId?: string | null;
     version: number;
 }
 
@@ -1213,13 +1593,11 @@ export async function createProject(input: CreateProjectInput): Promise<ProjectS
     return authorizedRequest<ProjectSummary>('v1/projects', {
         method: 'POST',
         body: JSON.stringify({
-            code: input.code.trim(),
             name: input.name.trim(),
             ...(input.description?.trim() ? { description: input.description.trim() } : {}),
             ...(input.departmentId ? { departmentId: input.departmentId } : {}),
             ...(input.ownerMembershipId ? { ownerMembershipId: input.ownerMembershipId } : {}),
-            ...(input.startsAt ? { startsAt: input.startsAt } : {}),
-            ...(input.endsAt ? { endsAt: input.endsAt } : {}),
+            ...(input.memberMembershipIds?.length ? { memberMembershipIds: input.memberMembershipIds } : {}),
         }),
     });
 }
@@ -1232,12 +1610,9 @@ export async function updateProject(projectId: string, input: UpdateProjectInput
     return authorizedRequest<ProjectSummary>(`v1/projects/${encodeURIComponent(projectId)}`, {
         method: 'PATCH',
         body: JSON.stringify({
-            ...(input.code?.trim() ? { code: input.code.trim() } : {}),
             ...(input.name?.trim() ? { name: input.name.trim() } : {}),
             ...(input.description !== undefined ? { description: input.description?.trim() || null } : {}),
             ...(input.departmentId !== undefined ? { departmentId: input.departmentId } : {}),
-            ...(input.startsAt !== undefined ? { startsAt: input.startsAt } : {}),
-            ...(input.endsAt !== undefined ? { endsAt: input.endsAt } : {}),
             version: input.version,
         }),
     });
@@ -1792,4 +2167,503 @@ export async function reviewWorkReport(reportId: string, approved: boolean, comm
             version,
         }),
     });
+}
+
+export interface DingTalkMappingRequest {
+    activationExpiresInDays?: number;
+    createMissingDepartments?: boolean;
+    createMissingMembers?: boolean;
+}
+
+export interface DingTalkMappingDepartmentPreview {
+    dingtalkDepartmentId: string;
+    externalDepartmentId: string;
+    name: string;
+    path: string;
+    action: 'MATCH_EXISTING' | 'CREATE' | 'CONFLICT' | 'SKIP';
+    departmentId: string | null;
+    candidateDepartmentIds: string[];
+    reason: string;
+}
+
+export interface DingTalkMappingUserPreview {
+    dingtalkUserId: string;
+    externalUserId: string;
+    name: string;
+    departmentPaths: string[];
+    action: 'MATCH_EXISTING' | 'CREATE' | 'CONFLICT' | 'SKIP';
+    membershipId: string | null;
+    candidateMembershipIds: string[];
+    suggestedAccount: string;
+    reason: string;
+}
+
+export interface DingTalkMappingPreview {
+    activationExpiresInDays: number;
+    departments: DingTalkMappingDepartmentPreview[];
+    users: DingTalkMappingUserPreview[];
+    summary: {
+        departmentMatchedCount: number;
+        departmentCreateCount: number;
+        departmentConflictCount: number;
+        userMatchedCount: number;
+        userCreateCount: number;
+        userConflictCount: number;
+    };
+}
+
+export interface DingTalkRoleAssignment {
+    roleId: string;
+    dingtalkUserIds: string[];
+}
+
+export interface DingTalkMappingDepartmentResolution {
+    dingtalkDepartmentId: string;
+    action: 'BIND_EXISTING' | 'CREATE' | 'SKIP';
+    departmentId?: string | null;
+}
+
+export interface DingTalkMappingUserResolution {
+    dingtalkUserId: string;
+    action: 'BIND_EXISTING' | 'CREATE' | 'SKIP';
+    membershipId?: string | null;
+    account?: string | null;
+}
+
+export interface DingTalkMappingCredential {
+    dingtalkUserId: string;
+    membershipId: string;
+    displayName: string;
+    account: string;
+    departmentId: string | null;
+    tenantCode: string;
+    roleIds: string[];
+    roleCodes: string[];
+    activationToken: string;
+    activationExpiresAt: string;
+}
+
+export interface DingTalkMappingResult {
+    preview: DingTalkMappingPreview;
+    credentials: DingTalkMappingCredential[];
+    summary: DingTalkMappingPreview['summary'] & { departmentSkippedCount: number; userSkippedCount: number };
+}
+
+export async function previewDingTalkMapping(input: DingTalkMappingRequest = {}): Promise<DingTalkMappingPreview> {
+    return authorizedRequest<DingTalkMappingPreview>('v1/dingtalk/organization/mapping/preview', {
+        method: 'POST',
+        body: JSON.stringify(input),
+    });
+}
+
+export async function applyDingTalkMapping(input: DingTalkMappingRequest & {
+    departmentResolutions?: DingTalkMappingDepartmentResolution[];
+    userResolutions?: DingTalkMappingUserResolution[];
+    roleAssignments: DingTalkRoleAssignment[];
+}): Promise<DingTalkMappingResult> {
+    return authorizedRequest<DingTalkMappingResult>('v1/dingtalk/organization/mapping/apply', {
+        method: 'POST',
+        body: JSON.stringify(input),
+    });
+}
+
+export type AssignmentPolicyDomain = 'TASK' | 'MEETING' | 'WORK_REPORT' | 'PROJECT' | 'DOCUMENT';
+export type AssignmentPolicyLevel = 'TENANT' | 'PROJECT';
+export type AssignmentPolicyFallbackMode = 'NONE' | 'PROJECT_MEMBERS' | 'TENANT_MEMBERS';
+
+export interface AssignmentCandidatePool {
+    membershipIds: string[];
+    departmentIds: string[];
+    projectIds: string[];
+}
+
+export interface AssignmentPolicy {
+    id: string;
+    tenantId: string;
+    projectId: string | null;
+    domain: AssignmentPolicyDomain;
+    level: AssignmentPolicyLevel;
+    name: string;
+    description: string | null;
+    candidatePool: AssignmentCandidatePool;
+    skipOnLeave: boolean;
+    fallbackMode: AssignmentPolicyFallbackMode;
+    enabled: boolean;
+    version: number;
+    createdAt: string;
+    updatedAt: string;
+}
+
+export interface AssignmentPolicyResolveInput {
+    domain: AssignmentPolicyDomain;
+    projectId?: string;
+    context?: { sourceType: string; sourceId: string };
+    availabilityWindow?: { startAt: string; endAt: string };
+}
+
+export interface AssignmentPolicyResolveResult {
+    matchedPolicyId: string | null;
+    domain: AssignmentPolicyDomain;
+    level: AssignmentPolicyLevel;
+    candidates: string[];
+    skippedOnLeave: string[];
+    leaveFilterApplied: boolean;
+    fallbackMode: AssignmentPolicyFallbackMode;
+    sourceTrace: {
+        policyId: string | null;
+        projectId: string | null;
+        domain: AssignmentPolicyDomain;
+        level: AssignmentPolicyLevel;
+    };
+    resolvedAt: string;
+}
+
+export interface CreateAssignmentPolicyInput {
+    domain: AssignmentPolicyDomain;
+    level: AssignmentPolicyLevel;
+    projectId?: string;
+    name: string;
+    description?: string | null;
+    candidatePool: AssignmentCandidatePool;
+    skipOnLeave: boolean;
+    fallbackMode: AssignmentPolicyFallbackMode;
+    enabled?: boolean;
+}
+
+export interface UpdateAssignmentPolicyInput {
+    name?: string;
+    description?: string | null;
+    candidatePool?: AssignmentCandidatePool;
+    skipOnLeave?: boolean;
+    fallbackMode?: AssignmentPolicyFallbackMode;
+    enabled?: boolean;
+    version: number;
+}
+
+export async function listAssignmentPolicies(domain?: AssignmentPolicyDomain, projectId?: string): Promise<CursorPage<AssignmentPolicy>> {
+    const query = new URLSearchParams({ limit: '100' });
+    if (domain) query.set('domain', domain);
+    if (projectId) query.set('projectId', projectId);
+    return authorizedRequest<CursorPage<AssignmentPolicy>>(`v1/assignment/policies?${query}`);
+}
+
+export async function getAssignmentPolicy(policyId: string): Promise<AssignmentPolicy> {
+    return authorizedRequest<AssignmentPolicy>(`v1/assignment/policies/${encodeURIComponent(policyId)}`);
+}
+
+export async function createAssignmentPolicy(input: CreateAssignmentPolicyInput): Promise<AssignmentPolicy> {
+    return authorizedRequest<AssignmentPolicy>('v1/assignment/policies', {
+        method: 'POST',
+        body: JSON.stringify({
+            ...input,
+            name: input.name.trim(),
+            description: input.description?.trim() || null,
+            candidatePool: {
+                membershipIds: [...new Set(input.candidatePool.membershipIds)],
+                departmentIds: [...new Set(input.candidatePool.departmentIds)],
+                projectIds: [...new Set(input.candidatePool.projectIds)],
+            },
+            enabled: input.enabled ?? true,
+        }),
+    });
+}
+
+export async function updateAssignmentPolicy(policyId: string, input: UpdateAssignmentPolicyInput): Promise<AssignmentPolicy> {
+    return authorizedRequest<AssignmentPolicy>(`v1/assignment/policies/${encodeURIComponent(policyId)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+            ...(input.name?.trim() ? { name: input.name.trim() } : {}),
+            ...(input.description !== undefined ? { description: input.description?.trim() || null } : {}),
+            ...(input.candidatePool ? {
+                candidatePool: {
+                    membershipIds: [...new Set(input.candidatePool.membershipIds)],
+                    departmentIds: [...new Set(input.candidatePool.departmentIds)],
+                    projectIds: [...new Set(input.candidatePool.projectIds)],
+                },
+            } : {}),
+            ...(input.skipOnLeave !== undefined ? { skipOnLeave: input.skipOnLeave } : {}),
+            ...(input.fallbackMode !== undefined ? { fallbackMode: input.fallbackMode } : {}),
+            ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),
+            version: input.version,
+        }),
+    });
+}
+
+export async function deleteAssignmentPolicy(policyId: string, version: number): Promise<void> {
+    return authorizedRequest<void>(`v1/assignment/policies/${encodeURIComponent(policyId)}?version=${version}`, { method: 'DELETE' });
+}
+
+export async function resolveAssignmentPolicy(input: AssignmentPolicyResolveInput): Promise<AssignmentPolicyResolveResult> {
+    return authorizedRequest<AssignmentPolicyResolveResult>('v1/assignment/policies/resolve', {
+        method: 'POST',
+        body: JSON.stringify(input),
+    });
+}
+
+export type HrProfileStatus = 'ACTIVE' | 'SUSPENDED' | 'TERMINATED' | 'ON_LEAVE';
+export type HrLeaveUnit = 'DAY' | 'HALF_DAY' | 'HOUR';
+export type HrRequestStatus = 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
+export type HrAttendanceStatus = 'NORMAL' | 'LATE' | 'EARLY_LEAVE' | 'ABSENT' | 'LEAVE' | 'OVERTIME' | 'EXCEPTION' | 'CORRECTED';
+export type HrEmployeeChangeType = 'ONBOARD' | 'PROBATION' | 'TRANSFER' | 'PROMOTION' | 'DEMOTION' | 'RESIGNATION' | 'TERMINATION';
+export type HrEmployeeChangeStatus = HrRequestStatus | 'EFFECTIVE';
+
+export interface HrProfile {
+    id: string; membershipId: string; employeeNo?: string | null; displayName: string; departmentId?: string | null;
+    position?: string | null; employmentType?: string | null; managerMembershipId?: string | null;
+    entryDate?: string | null; leaveDate?: string | null; phone?: string | null; email?: string | null;
+    idType?: string | null; idNumber?: string | null; emergencyContactName?: string | null;
+    emergencyContactPhone?: string | null; educationLevel?: string | null; costCenter?: string | null;
+    jobLevel?: string | null; probationEndDate?: string | null; regularDate?: string | null;
+    workLocation?: string | null; status: HrProfileStatus; version: number; createdAt: string; updatedAt: string;
+}
+
+export interface HrLeaveType { id: string; code: string; name: string; unit: HrLeaveUnit; paid: boolean; defaultDays?: number | null; enabled: boolean; version: number; }
+export interface HrLeaveBalance { id: string; membershipId: string; leaveTypeId: string; year: number; totalDays: number; usedDays: number; pendingDays: number; remainingDays: number; unit: HrLeaveUnit; version: number; }
+export interface HrLeaveYearAllocation { year: number; days: number }
+export interface HrLeaveRequest { id: string; membershipId: string; leaveTypeId: string; startAt: string; endAt: string; durationDays: number; yearAllocations: HrLeaveYearAllocation[]; reason?: string | null; status: HrRequestStatus; reviewedBy?: string | null; reviewedAt?: string | null; reviewComment?: string | null; version: number; createdAt: string; updatedAt: string; }
+export interface HrAttendanceRecord { id: string; membershipId: string; workDate: string; checkInAt?: string | null; checkOutAt?: string | null; status: HrAttendanceStatus; source: 'MANUAL' | 'IMPORT' | 'DINGTALK'; note?: string | null; reviewedBy?: string | null; reviewedAt?: string | null; version: number; }
+export interface HrOvertimeRequest { id: string; membershipId: string; startAt: string; endAt: string; durationHours: number; reason: string; status: HrRequestStatus; reviewedBy?: string | null; reviewedAt?: string | null; reviewComment?: string | null; version: number; createdAt: string; }
+export interface HrEmployeeChange { id: string; membershipId: string; type: HrEmployeeChangeType; effectiveDate: string; fromDepartmentId?: string | null; toDepartmentId?: string | null; fromPosition?: string | null; toPosition?: string | null; fromManagerMembershipId?: string | null; toManagerMembershipId?: string | null; reason?: string | null; status: HrEmployeeChangeStatus; reviewedBy?: string | null; reviewedAt?: string | null; reviewComment?: string | null; version: number; createdAt: string; }
+
+export interface HrProfileInput {
+    membershipId?: string; employeeNo?: string | null; departmentId?: string | null; position?: string | null;
+    employmentType?: string | null; managerMembershipId?: string | null; entryDate?: string | null;
+    phone?: string | null; email?: string | null; idType?: string | null; idNumber?: string | null;
+    emergencyContactName?: string | null; emergencyContactPhone?: string | null; educationLevel?: string | null;
+    costCenter?: string | null; jobLevel?: string | null; probationEndDate?: string | null; regularDate?: string | null;
+    workLocation?: string | null; status?: HrProfileStatus; version?: number;
+}
+
+export async function listHrProfiles(keyword?: string): Promise<CursorPage<HrProfile>> {
+    return collectCursorPages((cursor) => {
+        const query = new URLSearchParams({ limit: '100' });
+        if (keyword) query.set('keyword', keyword);
+        if (cursor) query.set('cursor', cursor);
+        return `v1/hr/profiles?${query}`;
+    });
+}
+export async function createHrProfile(input: HrProfileInput & { membershipId: string }): Promise<HrProfile> { return authorizedRequest<HrProfile>('v1/hr/profiles', { method: 'POST', body: JSON.stringify(input) }); }
+export async function updateHrProfile(membershipId: string, input: HrProfileInput & { version: number }): Promise<HrProfile> { return authorizedRequest<HrProfile>(`v1/hr/profiles/${encodeURIComponent(membershipId)}`, { method: 'PATCH', body: JSON.stringify(input) }); }
+export async function listHrLeaveTypes(): Promise<{ items: HrLeaveType[] }> { return authorizedRequest<{ items: HrLeaveType[] }>('v1/hr/leave-types'); }
+export async function createHrLeaveType(input: Omit<HrLeaveType, 'id' | 'version'>): Promise<HrLeaveType> { return authorizedRequest<HrLeaveType>('v1/hr/leave-types', { method: 'POST', body: JSON.stringify(input) }); }
+export async function updateHrLeaveType(id: string, input: Partial<Omit<HrLeaveType, 'id'>> & { version: number }): Promise<HrLeaveType> { return authorizedRequest<HrLeaveType>(`v1/hr/leave-types/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(input) }); }
+export async function deleteHrLeaveType(id: string, version: number): Promise<void> { return authorizedRequest<void>(`v1/hr/leave-types/${encodeURIComponent(id)}?version=${version}`, { method: 'DELETE' }); }
+export async function listHrLeaveBalances(year?: number): Promise<CursorPage<HrLeaveBalance>> { return collectCursorPages((cursor) => { const query = new URLSearchParams({ limit: '100' }); if (year) query.set('year', String(year)); if (cursor) query.set('cursor', cursor); return `v1/hr/leave-balances?${query}`; }); }
+export async function adjustHrLeaveBalance(input: { membershipId: string; leaveTypeId: string; year: number; deltaDays: number; reason: string }): Promise<HrLeaveBalance> { return authorizedRequest<HrLeaveBalance>('v1/hr/leave-balances/adjust', { method: 'POST', body: JSON.stringify(input) }); }
+export async function listHrLeaveRequests(status?: HrRequestStatus): Promise<CursorPage<HrLeaveRequest>> { return collectCursorPages((cursor) => `v1/hr/leave-requests?limit=100${status ? `&status=${status}` : ''}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`); }
+export async function createHrLeaveRequest(input: { leaveTypeId: string; startAt: string; endAt: string; durationDays?: number; reason?: string | null }): Promise<HrLeaveRequest> { return authorizedRequest<HrLeaveRequest>('v1/hr/leave-requests', { method: 'POST', body: JSON.stringify(input) }); }
+export async function reviewHrLeaveRequest(id: string, decision: 'APPROVE' | 'REJECT', version: number, comment?: string): Promise<HrLeaveRequest> { return authorizedRequest<HrLeaveRequest>(`v1/hr/leave-requests/${encodeURIComponent(id)}/review`, { method: 'POST', body: JSON.stringify({ decision, version, comment }) }); }
+export async function withdrawHrLeaveRequest(id: string, version: number): Promise<HrLeaveRequest> { return authorizedRequest<HrLeaveRequest>(`v1/hr/leave-requests/${encodeURIComponent(id)}/withdraw`, { method: 'POST', body: JSON.stringify({ version }) }); }
+export async function cancelHrLeaveRequest(id: string, version: number, reason?: string): Promise<HrLeaveRequest> { return authorizedRequest<HrLeaveRequest>(`v1/hr/leave-requests/${encodeURIComponent(id)}/cancel`, { method: 'POST', body: JSON.stringify({ version, reason }) }); }
+export async function listHrAttendanceRecords(): Promise<CursorPage<HrAttendanceRecord>> { return collectCursorPages((cursor) => `v1/hr/attendance-records?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`); }
+export async function createHrAttendanceRecord(input: { membershipId: string; workDate: string; checkInAt?: string | null; checkOutAt?: string | null; status: HrAttendanceStatus; note?: string | null }): Promise<HrAttendanceRecord> { return authorizedRequest<HrAttendanceRecord>('v1/hr/attendance-records', { method: 'POST', body: JSON.stringify(input) }); }
+export async function importHrAttendanceRecords(records: Array<{ membershipId: string; workDate: string; checkInAt?: string | null; checkOutAt?: string | null; status: HrAttendanceStatus; note?: string | null }>): Promise<{ total: number; imported: number; failed: number; failures: Array<{ index: number; code: string; message: string }> }> { return authorizedRequest('v1/hr/attendance-records/import', { method: 'POST', body: JSON.stringify({ records }) }); }
+export async function updateHrAttendanceRecord(id: string, input: { checkInAt?: string | null; checkOutAt?: string | null; status?: HrAttendanceStatus; note?: string | null; version: number }): Promise<HrAttendanceRecord> { return authorizedRequest<HrAttendanceRecord>(`v1/hr/attendance-records/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(input) }); }
+export async function reviewHrAttendanceRecord(id: string, decision: 'APPROVE' | 'REJECT', version: number, comment?: string): Promise<HrAttendanceRecord> { return authorizedRequest<HrAttendanceRecord>(`v1/hr/attendance-records/${encodeURIComponent(id)}/review`, { method: 'POST', body: JSON.stringify({ decision, version, comment }) }); }
+export async function listHrOvertimeRequests(): Promise<CursorPage<HrOvertimeRequest>> { return collectCursorPages((cursor) => `v1/hr/overtime-requests?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`); }
+export async function createHrOvertimeRequest(input: { startAt: string; endAt: string; durationHours: number; reason: string }): Promise<HrOvertimeRequest> { return authorizedRequest<HrOvertimeRequest>('v1/hr/overtime-requests', { method: 'POST', body: JSON.stringify(input) }); }
+export async function reviewHrOvertimeRequest(id: string, decision: 'APPROVE' | 'REJECT', version: number, comment?: string): Promise<HrOvertimeRequest> { return authorizedRequest<HrOvertimeRequest>(`v1/hr/overtime-requests/${encodeURIComponent(id)}/review`, { method: 'POST', body: JSON.stringify({ decision, version, comment }) }); }
+export async function cancelHrOvertimeRequest(id: string, version: number): Promise<HrOvertimeRequest> { return authorizedRequest<HrOvertimeRequest>(`v1/hr/overtime-requests/${encodeURIComponent(id)}/cancel`, { method: 'POST', body: JSON.stringify({ version }) }); }
+export async function listHrEmployeeChanges(): Promise<CursorPage<HrEmployeeChange>> { return collectCursorPages((cursor) => `v1/hr/employee-changes?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`); }
+export async function createHrEmployeeChange(input: { membershipId: string; type: HrEmployeeChangeType; effectiveDate: string; fromDepartmentId?: string | null; toDepartmentId?: string | null; fromPosition?: string | null; toPosition?: string | null; fromManagerMembershipId?: string | null; toManagerMembershipId?: string | null; reason?: string | null }): Promise<HrEmployeeChange> { return authorizedRequest<HrEmployeeChange>('v1/hr/employee-changes', { method: 'POST', body: JSON.stringify(input) }); }
+export async function reviewHrEmployeeChange(id: string, decision: 'APPROVE' | 'REJECT', version: number, comment?: string): Promise<HrEmployeeChange> { return authorizedRequest<HrEmployeeChange>(`v1/hr/employee-changes/${encodeURIComponent(id)}/review`, { method: 'POST', body: JSON.stringify({ decision, version, comment }) }); }
+export async function cancelHrEmployeeChange(id: string, version: number): Promise<HrEmployeeChange> { return authorizedRequest<HrEmployeeChange>(`v1/hr/employee-changes/${encodeURIComponent(id)}/cancel`, { method: 'POST', body: JSON.stringify({ version }) }); }
+export async function getHrHeadcountReport(): Promise<{ asOf: string; total: number; byDepartment: Array<{ departmentId: string; departmentName: string; headcount: number }> }> { return authorizedRequest('v1/hr/reports/headcount'); }
+export async function getHrLeaveSummaryReport(year: number): Promise<{ year: number; totalRequestedDays: number; totalApprovedDays: number; byLeaveType: Array<{ leaveTypeId: string; leaveTypeName: string; requestedDays: number; approvedDays: number }> }> { return authorizedRequest(`v1/hr/reports/leave-summary?year=${year}`); }
+export async function getHrAttendanceSummaryReport(dateFrom: string, dateTo: string): Promise<{ dateFrom: string; dateTo: string; normalDays: number; lateCount: number; earlyLeaveCount: number; absentDays: number; leaveDays: number }> { return authorizedRequest(`v1/hr/reports/attendance-summary?dateFrom=${dateFrom}&dateTo=${dateTo}`); }
+export async function getHrOvertimeSummaryReport(dateFrom: string, dateTo: string): Promise<{ dateFrom: string; dateTo: string; totalHours: number; byMember: Array<{ membershipId: string; displayName: string; overtimeHours: number }> }> { return authorizedRequest(`v1/hr/reports/overtime-summary?dateFrom=${dateFrom}&dateTo=${dateTo}`); }
+
+export type FinanceExpenseStatus = 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN' | 'CANCELLED' | 'PAID';
+export type FinancePaymentMethod = 'BANK_TRANSFER' | 'CASH' | 'CORPORATE_CARD' | 'OTHER';
+
+export interface FinanceExpenseCategory {
+    id: string; tenantId: string; code: string; name: string; description?: string | null;
+    enabled: boolean; version: number; createdAt: string; updatedAt: string;
+}
+
+export interface FinanceExpenseItemInput {
+    categoryId: string; description: string; amount: number; taxAmount?: number; occurredAt: string;
+    merchantName?: string | null; invoiceNumber?: string | null; invoiceType?: string | null;
+    projectId?: string | null; departmentId?: string | null; remark?: string | null;
+}
+
+export interface FinanceExpenseItem extends FinanceExpenseItemInput {
+    id: string; reportId: string; taxAmount: number; sortOrder: number; version: number; createdAt: string;
+}
+
+export interface FinanceExpenseAttachment {
+    id: string; reportId: string; itemId?: string | null; fileObjectId: string;
+    originalName: string; mimeType: string; sizeBytes: number; createdAt: string;
+}
+
+export interface FinanceExpenseStatusHistory {
+    id: string; reportId: string; fromStatus?: FinanceExpenseStatus | null; toStatus: FinanceExpenseStatus;
+    actorMembershipId: string; comment?: string | null; createdAt: string;
+}
+
+export interface FinanceExpenseReport {
+    id: string; tenantId: string; reportNo: string; requesterMembershipId: string; requesterDepartmentId?: string | null;
+    title: string; description?: string | null; currency: string; totalAmount: number; status: FinanceExpenseStatus;
+    submittedAt?: string | null; reviewedBy?: string | null; reviewedAt?: string | null; reviewComment?: string | null;
+    paidBy?: string | null; paidAt?: string | null; paymentMethod?: FinancePaymentMethod | null;
+    paymentReference?: string | null; paymentComment?: string | null; cancelledAt?: string | null;
+    cancellationReason?: string | null; items: FinanceExpenseItem[]; attachments: FinanceExpenseAttachment[];
+    statusHistory: FinanceExpenseStatusHistory[]; version: number; createdAt: string; updatedAt: string;
+}
+
+export interface FinanceExpenseReportInput {
+    title: string; description?: string | null; currency?: string; items: FinanceExpenseItemInput[]; attachmentIds?: string[];
+}
+
+export interface FinanceExpenseSummary {
+    currency: string; reportCount: number; submittedAmount: number; approvedAmount: number; paidAmount: number;
+    pendingApprovalCount: number; pendingApprovalAmount: number; pendingPaymentCount: number; pendingPaymentAmount: number;
+    byCategory: Array<{ categoryId: string; categoryName: string; amount: number }>;
+}
+
+export interface FinanceExpenseReportFilters {
+    keyword?: string; status?: FinanceExpenseStatus; requesterMembershipId?: string; departmentId?: string;
+    projectId?: string; categoryId?: string; dateFrom?: string; dateTo?: string;
+}
+
+export interface FinanceProjectSpend {
+    projectId: string; currency: string; submittedAmount: number; approvedAmount: number; paidAmount: number;
+}
+
+export async function listFinanceExpenseCategories(): Promise<{ items: FinanceExpenseCategory[] }> {
+    return authorizedRequest('v1/finance/expense-categories');
+}
+export async function createFinanceExpenseCategory(input: { code: string; name: string; description?: string | null; enabled?: boolean }): Promise<FinanceExpenseCategory> {
+    return authorizedRequest('v1/finance/expense-categories', { method: 'POST', body: JSON.stringify(input) });
+}
+export async function updateFinanceExpenseCategory(id: string, input: { code?: string; name?: string; description?: string | null; enabled?: boolean; version: number }): Promise<FinanceExpenseCategory> {
+    return authorizedRequest(`v1/finance/expense-categories/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(input) });
+}
+export async function deleteFinanceExpenseCategory(id: string, version: number): Promise<void> {
+    return authorizedRequest(`v1/finance/expense-categories/${encodeURIComponent(id)}?version=${version}`, { method: 'DELETE' });
+}
+export async function listFinanceExpenseReports(filters: FinanceExpenseReportFilters = {}): Promise<CursorPage<FinanceExpenseReport>> {
+    return collectCursorPages((cursor) => {
+        const query = new URLSearchParams({ limit: '100' });
+        if (filters.keyword?.trim()) query.set('keyword', filters.keyword.trim());
+        if (filters.status) query.set('status', filters.status);
+        if (filters.requesterMembershipId) query.set('requesterMembershipId', filters.requesterMembershipId);
+        if (filters.departmentId) query.set('departmentId', filters.departmentId);
+        if (filters.projectId) query.set('projectId', filters.projectId);
+        if (filters.categoryId) query.set('categoryId', filters.categoryId);
+        if (filters.dateFrom) query.set('dateFrom', filters.dateFrom);
+        if (filters.dateTo) query.set('dateTo', filters.dateTo);
+        if (cursor) query.set('cursor', cursor);
+        return `v1/finance/expense-reports?${query}`;
+    });
+}
+export async function getFinanceExpenseReport(id: string): Promise<FinanceExpenseReport> {
+    return authorizedRequest(`v1/finance/expense-reports/${encodeURIComponent(id)}`);
+}
+export async function createFinanceExpenseReport(input: FinanceExpenseReportInput): Promise<FinanceExpenseReport> {
+    return authorizedRequest('v1/finance/expense-reports', { method: 'POST', body: JSON.stringify(input) });
+}
+export async function updateFinanceExpenseReport(id: string, input: FinanceExpenseReportInput & { version: number }): Promise<FinanceExpenseReport> {
+    return authorizedRequest(`v1/finance/expense-reports/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(input) });
+}
+export async function deleteFinanceExpenseReport(id: string, version: number): Promise<void> {
+    return authorizedRequest(`v1/finance/expense-reports/${encodeURIComponent(id)}?version=${version}`, { method: 'DELETE' });
+}
+export async function submitFinanceExpenseReport(id: string, version: number): Promise<FinanceExpenseReport> {
+    return authorizedRequest(`v1/finance/expense-reports/${encodeURIComponent(id)}/submit`, { method: 'POST', body: JSON.stringify({ version }) });
+}
+export async function withdrawFinanceExpenseReport(id: string, version: number, reason?: string): Promise<FinanceExpenseReport> {
+    return authorizedRequest(`v1/finance/expense-reports/${encodeURIComponent(id)}/withdraw`, { method: 'POST', body: JSON.stringify({ version, reason }) });
+}
+export async function cancelFinanceExpenseReport(id: string, version: number, reason?: string): Promise<FinanceExpenseReport> {
+    return authorizedRequest(`v1/finance/expense-reports/${encodeURIComponent(id)}/cancel`, { method: 'POST', body: JSON.stringify({ version, reason }) });
+}
+export async function reviewFinanceExpenseReport(id: string, input: { decision: 'APPROVE' | 'REJECT'; comment?: string | null; version: number }): Promise<FinanceExpenseReport> {
+    return authorizedRequest(`v1/finance/expense-reports/${encodeURIComponent(id)}/review`, { method: 'POST', body: JSON.stringify(input) });
+}
+export async function markFinanceExpenseReportPaid(id: string, input: { paidAt: string; paymentMethod: FinancePaymentMethod; paymentReference: string; comment?: string | null; version: number }): Promise<FinanceExpenseReport> {
+    return authorizedRequest(`v1/finance/expense-reports/${encodeURIComponent(id)}/mark-paid`, { method: 'POST', body: JSON.stringify(input) });
+}
+export async function getFinanceExpenseSummary(dateFrom: string, dateTo: string): Promise<FinanceExpenseSummary> {
+    return authorizedRequest(`v1/finance/reports/expense-summary?dateFrom=${dateFrom}&dateTo=${dateTo}`);
+}
+export async function getFinanceProjectSpend(projectId: string, dateFrom?: string, dateTo?: string, currency = 'CNY'): Promise<FinanceProjectSpend> {
+    const query = new URLSearchParams({ projectId, currency });
+    if (dateFrom) query.set('dateFrom', dateFrom);
+    if (dateTo) query.set('dateTo', dateTo);
+    return authorizedRequest(`v1/finance/reports/project-spend?${query}`);
+}
+
+export type LegalContractStatus = 'DRAFT' | 'ACTIVE' | 'PENDING_RENEWAL' | 'EXPIRED' | 'TERMINATED' | 'ARCHIVED';
+export type LegalContractType = 'PURCHASE' | 'SALES' | 'SERVICE' | 'EMPLOYMENT' | 'NDA' | 'LEASE' | 'OTHER';
+
+export interface LegalContractAttachment {
+    id: string; fileObjectId: string; originalName: string; mimeType: string; sizeBytes: number; createdAt: string;
+}
+export interface LegalContractStatusHistory {
+    id: string; fromStatus?: LegalContractStatus | null; toStatus: LegalContractStatus;
+    actorMembershipId?: string | null; comment?: string | null; createdAt: string;
+}
+export interface LegalContract {
+    id: string; tenantId: string; contractNo: string; name: string; counterparty: string; type: LegalContractType;
+    amount?: number | null; currency: string; startDate: string; endDate?: string | null; signedAt?: string | null;
+    status: LegalContractStatus; description?: string | null; ownerMembershipId: string;
+    departmentId?: string | null; projectId?: string | null; renewalReminderDays: number;
+    activatedAt?: string | null; terminatedAt?: string | null; terminationReason?: string | null; archivedAt?: string | null;
+    attachments: LegalContractAttachment[]; statusHistory: LegalContractStatusHistory[];
+    version: number; createdAt: string; updatedAt: string;
+}
+export interface LegalContractInput {
+    contractNo?: string; name: string; counterparty: string; type: LegalContractType; amount?: number | null;
+    currency?: string; startDate: string; endDate?: string | null; signedAt?: string | null; description?: string | null;
+    ownerMembershipId: string; departmentId?: string | null; projectId?: string | null;
+    renewalReminderDays?: number; attachmentIds?: string[];
+}
+export interface LegalContractFilters {
+    keyword?: string; status?: LegalContractStatus; type?: LegalContractType; ownerMembershipId?: string; cursor?: string;
+    departmentId?: string; projectId?: string; currency?: string; endDateFrom?: string; endDateTo?: string;
+    expiringWithinDays?: number;
+}
+export interface LegalContractSummary {
+    asOf: string; expiringWithinDays: number; totalCount: number; draftCount: number; activeCount: number;
+    pendingRenewalCount: number; expiringCount: number; expiredCount: number; terminatedCount: number; archivedCount: number;
+    amountsByCurrency: Array<{ currency: string; activeAmount: number; expiringAmount: number }>;
+}
+
+export async function listLegalContracts(filters: LegalContractFilters = {}): Promise<CursorPage<LegalContract>> {
+    const query = new URLSearchParams({ limit: '100' });
+    Object.entries(filters).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && String(value).trim()) query.set(key, String(value));
+    });
+    return authorizedRequest(`v1/legal/contracts?${query}`);
+}
+export async function createLegalContract(input: LegalContractInput): Promise<LegalContract> {
+    return authorizedRequest('v1/legal/contracts', { method: 'POST', body: JSON.stringify(input) });
+}
+export async function updateLegalContract(id: string, input: Partial<LegalContractInput> & { version: number }): Promise<LegalContract> {
+    return authorizedRequest(`v1/legal/contracts/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(input) });
+}
+export async function deleteLegalContract(id: string, version: number): Promise<void> {
+    return authorizedRequest(`v1/legal/contracts/${encodeURIComponent(id)}?version=${version}`, { method: 'DELETE' });
+}
+export async function activateLegalContract(id: string, version: number, comment?: string): Promise<LegalContract> {
+    return legalContractAction(id, 'activate', { version, comment });
+}
+export async function markLegalContractPendingRenewal(id: string, version: number, comment?: string): Promise<LegalContract> {
+    return legalContractAction(id, 'mark-pending-renewal', { version, comment });
+}
+export async function renewLegalContract(id: string, input: { newEndDate: string; renewalReminderDays?: number; comment?: string; version: number }): Promise<LegalContract> {
+    return legalContractAction(id, 'renew', input);
+}
+export async function terminateLegalContract(id: string, input: { effectiveDate: string; reason: string; version: number }): Promise<LegalContract> {
+    return legalContractAction(id, 'terminate', input);
+}
+export async function archiveLegalContract(id: string, version: number, comment?: string): Promise<LegalContract> {
+    return legalContractAction(id, 'archive', { version, comment });
+}
+export async function getLegalContractSummary(expiringWithinDays = 30): Promise<LegalContractSummary> {
+    return authorizedRequest(`v1/legal/reports/contract-summary?expiringWithinDays=${expiringWithinDays}`);
+}
+function legalContractAction(id: string, action: string, body: unknown): Promise<LegalContract> {
+    return authorizedRequest(`v1/legal/contracts/${encodeURIComponent(id)}/${action}`, { method: 'POST', body: JSON.stringify(body) });
 }

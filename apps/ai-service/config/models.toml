@@ -108,6 +108,20 @@ api_key_env = "IMAGE_GEN_BACKUP_API_KEY"
 timeout_seconds = 60.0
 max_retries = 1
 
+# Embedding profiles serve knowledge indexing and retrieval only; the
+# deterministic provider is built in and needs no declaration. The first
+# enabled profile becomes the default when requests omit embedding_profile.
+# Keep it disabled until EMBEDDING_API_KEY is configured.
+[embedding_profiles.primary]
+enabled = false
+provider = "openai_compatible"
+model = "text-embedding-3-small"
+base_url = "https://www.aikeyhub.top/v1"
+api_key_env = "EMBEDDING_API_KEY"
+dimension = 1536
+timeout_seconds = 60.0
+max_retries = 2
+
 [roles]
 default = ["primary", "backup", "vision-primary"]
 structured = ["primary", "backup"]

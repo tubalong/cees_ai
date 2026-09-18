@@ -8,7 +8,7 @@
 通知中心与后台任务见 [通知中心与后台任务](../product/notification-center.md)。
 工作台与数据看板见 [工作台与数据看板](../product/dashboard-workbench.md)。
 
-> 新环境使用 `prisma migrate deploy` 按 `0001_init` 到 `0016_dingtalk_organization_sync` 的目录顺序执行迁移；全部迁移完成后与当前 `schema.prisma` 保持一致。
+> 新环境使用 `prisma migrate deploy` 执行全部已提交迁移（包含 `0036_c_hr_leave_integrity`）；全部迁移完成后与当前 `schema.prisma` 保持一致。
 
 - `apps/api/prisma/schema.prisma` 是数据模型唯一事实源，迁移提交 `prisma/migrations`。
 - 新建表和字段必须在同一迁移中使用 `COMMENT ON TABLE`、`COMMENT ON COLUMN` 添加 PostgreSQL 注释；`0003_organization_departments_and_database_comments` 已补齐此前全部业务表和字段注释。
@@ -16,6 +16,24 @@
 - 向量检索使用 pgvector；扩展由 `0001_init` 在创建向量字段前启用，不使用环境专属初始化 SQL。
 - AI 服务对业务库只读；正式写入统一经 NestJS。
 - 业务模型落地前，先在此文档维护实体与关系草图。
+
+## HR 模型
+
+```text
+TenantMembership ── HrProfile
+TenantMembership ── HrLeaveBalance ── HrLeaveType
+TenantMembership ── HrLeaveRequest ── HrLeaveType
+TenantMembership ── HrAttendanceRecord
+TenantMembership ── HrOvertimeRequest
+TenantMembership ── HrEmployeeChange
+```
+
+- `0032_c_hr_fullstack` 创建员工档案、假期类型、假期余额、请假申请、考勤记录、加班申请和人事异动表；
+- `0035_c_hr_offboarding_sensitive_fields` 不新增业务字段，注册员工档案敏感字段读写权限；离职审批复用 `tenant_memberships.status` 与 `auth_sessions.revoked_at` 完成主体停用和会话撤销；
+- `0036_c_hr_leave_integrity` 为 `hr_leave_requests` 增加 `year_allocations` JSONB 列，保存按租户本地年度拆分的额度占用；请假时长改由服务端折算，`duration_days` 语义不变但不再采信客户端传值；
+- 员工档案与成员一对一；活跃工号、假期类型编码、年度余额和每日考勤使用唯一索引约束；
+- 各表保留 `tenant_id`、审计创建/更新人、软删除和 `version` 乐观锁字段；
+- HR 聚合报表不创建快照表，直接读取正式业务事实并应用当前角色数据范围。
 
 ## 通知中心模型
 
@@ -55,6 +73,7 @@ User
 - User 是内部人员资料，使用 UUID 作为技术主键，邮箱字段暂时保留为可空兼容字段；
 - TenantMembership 表示用户在特定租户中的账号、凭证、成员身份和状态；
 - 租户账号业务唯一约束为 `tenantId + normalizedAccount`，登录时使用 `tenantCode + account`；
+- `tenants.timezone` 保存租户时区（IANA 标识，默认 `Asia/Shanghai`），用于业务日界线与项目编码年份；`0030_tenant_timezone` 新增该字段并回填存量租户；
 - AuthSession 必须同时绑定 User、Tenant 和 TenantMembership；
 - MembershipRole 负责成员与租户角色的关联。
 
@@ -122,11 +141,13 @@ UploadSession --COS HEAD 校验通过--> FileObject
 Project
   ├── ownerMembership -> TenantMembership
   ├── members -> ProjectMember[] -> TenantMembership
+  ├── codeSequence -> ProjectCodeSequence（tenantId + year）
   └── statusHistory -> ProjectStatusHistory[]
 ```
 
 - 项目成员外键指向 `TenantMembership`，不直接使用全局 User；
 - 项目编码使用 `tenantId + normalizedCode` 唯一约束；
+- `project_code_sequences` 按 `tenantId + year` 保存自动编码序号，`0031_project_code_sequence_and_timestamps` 同时把 `starts_at` 重命名为 `started_at`、删除 `ends_at` 并新增 `closed_at`；
 - `ownerMembershipId` 保存唯一当前负责人，项目成员角色同步为 `OWNER`；
 - `project_status_history` 保存每次状态变化及操作者 Membership；
 - `0005_project_management` 迁移旧成员关系、项目状态和编码，并为新增结构添加 PostgreSQL 中文注释。
@@ -215,6 +236,41 @@ Tenant
 - `0016_dingtalk_organization_sync` 创建上述枚举、表、索引、外键、钉钉权限和全部 PostgreSQL 中文表/字段注释；
 - 当前同步只处理组织架构和人员，不处理考勤、请假、文档、消息、日程和 AI 派发。
 
+## 13. 分配策略模型
+
+```text
+Tenant
+  └── AssignmentPolicy
+        └── Project?（项目覆盖策略时必填）
+```
+
+- `assignment_policies` 保存租户级或项目级分配策略，领域、层级、候选池、请假跳过、兜底模式和启停状态；
+- `domain` 枚举为 `TASK`、`MEETING`、`WORK_REPORT`、`PROJECT`、`DOCUMENT`；
+- `level` 枚举为 `TENANT`（租户默认）或 `PROJECT`（项目覆盖）；
+- `candidate_pool` 使用 JSONB 保存 `membershipIds`、`departmentIds`、`projectIds` 三类候选来源；
+- `fallback_mode` 枚举为 `NONE`、`PROJECT_MEMBERS`、`TENANT_MEMBERS`；
+- 同租户、同领域、同层级、同项目的活跃策略唯一；唯一索引使用 `WHERE deleted_at IS NULL`，软删除后允许重建；
+- `0030_c_assignment_policy` 创建上述枚举、表、索引、外键和 PostgreSQL 中文注释；
+- 分配解析不落表，结果只用于预览或由任务模块消费，正式分配结果仍写任务模块；
+- 详细业务规则见 `docs/product/assignment-and-hr-finance-legal.md` 和 `docs/api/assignment-and-hr-finance-legal-api.md`。
+
+## 14. Legal 合同台账模型
+
+```text
+Tenant
+  ├── LegalContractSequence
+  └── LegalContract
+        ├── LegalContractAttachment -> FileObject
+        └── LegalContractStatusHistory
+```
+
+- `legal_contracts` 保存租户内唯一合同编号、交易对方、类型、金额、有效期、负责人、部门、项目和生命周期状态；
+- `legal_contract_sequences` 按“租户 + 年份”维护自动编号序列；
+- `legal_contract_attachments` 复用正式 `FileObject`，不复制对象存储数据；
+- `legal_contract_status_history` 保存人工和系统状态流转，系统动作的 `actor_membership_id` 为空；
+- `0034_c_legal_contract_fullstack` 创建 Legal 枚举、四张表、索引、外键与 PostgreSQL 中文注释；
+- 合同使用软删除和 `version` 乐观锁，只有草稿允许删除；到期判断按租户时区自然日执行；
+- 详细规则见 `docs/architecture/legal-contract-ledger.md`。
 ## AI 调用计量模型
 
 ```text

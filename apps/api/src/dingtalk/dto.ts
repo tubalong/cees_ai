@@ -1,5 +1,8 @@
 import { Transform, Type } from 'class-transformer';
 import {
+    ArrayMaxSize,
+    ArrayUnique,
+    IsArray,
     IsEnum,
     IsInt,
     IsIn,
@@ -125,6 +128,17 @@ export class DingTalkUserMappingResolutionDto {
     account?: string;
 }
 
+export class DingTalkRoleAssignmentDto {
+    @IsUUID()
+    roleId!: string;
+
+    @IsArray()
+    @ArrayUnique()
+    @ArrayMaxSize(1000)
+    @IsUUID(undefined, { each: true })
+    dingtalkUserIds!: string[];
+}
+
 export class PreviewDingTalkMappingDto {
     @IsOptional()
     @IsInt()
@@ -149,4 +163,9 @@ export class ApplyDingTalkMappingDto extends PreviewDingTalkMappingDto {
     @Type(() => DingTalkUserMappingResolutionDto)
     @ValidateNested({ each: true })
     userResolutions: DingTalkUserMappingResolutionDto[] = [];
+
+    @IsOptional()
+    @Type(() => DingTalkRoleAssignmentDto)
+    @ValidateNested({ each: true })
+    roleAssignments?: DingTalkRoleAssignmentDto[] = [];
 }

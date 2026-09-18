@@ -8,7 +8,7 @@ import { KnowledgeIndexingService } from './knowledge-indexing.service';
 describe('KnowledgeIndexingService', () => {
     it('walks a document from PENDING to READY and submits the index request', async () => {
         const mocks = createMocks();
-        mocks.prisma.knowledgeDocument.findMany.mockResolvedValue([pendingDocument()]);
+        mocks.prisma.knowledgeDocument.findMany.mockResolvedValueOnce([]).mockResolvedValue([pendingDocument()]);
         mocks.prisma.knowledgeDocument.updateMany.mockResolvedValue({ count: 1 });
         mocks.prisma.documentVersion.findFirst.mockResolvedValue(documentVersion());
         mocks.prisma.fileObject.findFirst.mockResolvedValue(fileObject());
@@ -62,7 +62,7 @@ describe('KnowledgeIndexingService', () => {
 
     it('returns to PENDING after a retryable parse failure and retries', async () => {
         const mocks = createMocks();
-        mocks.prisma.knowledgeDocument.findMany.mockResolvedValue([pendingDocument()]);
+        mocks.prisma.knowledgeDocument.findMany.mockResolvedValueOnce([]).mockResolvedValue([pendingDocument()]);
         mocks.prisma.knowledgeDocument.updateMany.mockResolvedValue({ count: 1 });
         mocks.prisma.documentVersion.findFirst.mockResolvedValue(documentVersion());
         mocks.prisma.fileObject.findFirst.mockResolvedValue(fileObject());
@@ -87,7 +87,7 @@ describe('KnowledgeIndexingService', () => {
 
     it('marks FAILED after retryable failures reach the limit', async () => {
         const mocks = createMocks();
-        mocks.prisma.knowledgeDocument.findMany.mockResolvedValue([pendingDocument()]);
+        mocks.prisma.knowledgeDocument.findMany.mockResolvedValueOnce([]).mockResolvedValue([pendingDocument()]);
         mocks.prisma.knowledgeDocument.updateMany.mockResolvedValue({ count: 1 });
         mocks.prisma.documentVersion.findFirst.mockResolvedValue(documentVersion());
         mocks.prisma.fileObject.findFirst.mockResolvedValue(fileObject());
@@ -119,7 +119,7 @@ describe('KnowledgeIndexingService', () => {
 
     it('fails immediately for non-retryable parse errors', async () => {
         const mocks = createMocks();
-        mocks.prisma.knowledgeDocument.findMany.mockResolvedValue([pendingDocument()]);
+        mocks.prisma.knowledgeDocument.findMany.mockResolvedValueOnce([]).mockResolvedValue([pendingDocument()]);
         mocks.prisma.knowledgeDocument.updateMany.mockResolvedValue({ count: 1 });
         mocks.prisma.documentVersion.findFirst.mockResolvedValue(documentVersion());
         mocks.prisma.fileObject.findFirst.mockResolvedValue(fileObject());
@@ -141,7 +141,7 @@ describe('KnowledgeIndexingService', () => {
 
     it('retries a retryable index failure from the gateway', async () => {
         const mocks = createMocks();
-        mocks.prisma.knowledgeDocument.findMany.mockResolvedValue([pendingDocument()]);
+        mocks.prisma.knowledgeDocument.findMany.mockResolvedValueOnce([]).mockResolvedValue([pendingDocument()]);
         mocks.prisma.knowledgeDocument.updateMany.mockResolvedValue({ count: 1 });
         mocks.prisma.documentVersion.findFirst.mockResolvedValue(documentVersion());
         mocks.prisma.fileObject.findFirst.mockResolvedValue(fileObject());
@@ -165,9 +165,37 @@ describe('KnowledgeIndexingService', () => {
         });
     });
 
+    it('recovers stalled PARSING/INDEXING documents back to PENDING', async () => {
+        const mocks = createMocks();
+        const stalled = pendingDocument({ status: KnowledgeDocumentStatus.PARSING });
+        mocks.prisma.knowledgeDocument.findMany
+            .mockResolvedValueOnce([stalled])
+            .mockResolvedValueOnce([]);
+        mocks.prisma.knowledgeDocument.updateMany.mockResolvedValue({ count: 1 });
+        const service = createService(mocks);
+
+        const result = await service.runOnce();
+
+        expect(result).toEqual({ skipped: false, processed: 0 });
+        expect(mocks.prisma.knowledgeDocument.updateMany).toHaveBeenCalledWith({
+            where: { id: DOCUMENT_ID, status: KnowledgeDocumentStatus.PARSING, deletedAt: null },
+            data: {
+                status: KnowledgeDocumentStatus.PENDING,
+                lastError: '处理超时，已自动回收重新排队',
+            },
+        });
+        expect(mocks.prisma.auditLog.create).toHaveBeenCalledWith({
+            data: expect.objectContaining({
+                action: 'KNOWLEDGE_DOCUMENT_PROCESS_RECOVERED',
+                outcome: 'SUCCESS',
+                metadata: expect.objectContaining({ priorStatus: 'PARSING' }),
+            }),
+        });
+    });
+
     it('skips a document already claimed by another instance', async () => {
         const mocks = createMocks();
-        mocks.prisma.knowledgeDocument.findMany.mockResolvedValue([pendingDocument()]);
+        mocks.prisma.knowledgeDocument.findMany.mockResolvedValueOnce([]).mockResolvedValue([pendingDocument()]);
         mocks.prisma.knowledgeDocument.updateMany.mockResolvedValue({ count: 0 });
         const service = createService(mocks);
 
@@ -179,7 +207,9 @@ describe('KnowledgeIndexingService', () => {
 
     it('fails immediately when the document has no current version', async () => {
         const mocks = createMocks();
-        mocks.prisma.knowledgeDocument.findMany.mockResolvedValue([
+        mocks.prisma.knowledgeDocument.findMany
+            .mockResolvedValueOnce([])
+            .mockResolvedValue([
             pendingDocument({ currentVersionId: null }),
         ]);
         mocks.prisma.knowledgeDocument.updateMany.mockResolvedValue({ count: 1 });
@@ -202,7 +232,7 @@ describe('KnowledgeIndexingService', () => {
 
     it('fails immediately when the file object is missing', async () => {
         const mocks = createMocks();
-        mocks.prisma.knowledgeDocument.findMany.mockResolvedValue([pendingDocument()]);
+        mocks.prisma.knowledgeDocument.findMany.mockResolvedValueOnce([]).mockResolvedValue([pendingDocument()]);
         mocks.prisma.knowledgeDocument.updateMany.mockResolvedValue({ count: 1 });
         mocks.prisma.documentVersion.findFirst.mockResolvedValue(documentVersion());
         mocks.prisma.fileObject.findFirst.mockResolvedValue(null);
@@ -234,7 +264,7 @@ describe('KnowledgeIndexingService', () => {
     it('derives stable index identity from configuration', async () => {
         process.env.KNOWLEDGE_INDEX_VERSION = 'custom-index-v2';
         const mocks = createMocks();
-        mocks.prisma.knowledgeDocument.findMany.mockResolvedValue([pendingDocument()]);
+        mocks.prisma.knowledgeDocument.findMany.mockResolvedValueOnce([]).mockResolvedValue([pendingDocument()]);
         mocks.prisma.knowledgeDocument.updateMany.mockResolvedValue({ count: 1 });
         mocks.prisma.documentVersion.findFirst.mockResolvedValue(documentVersion());
         mocks.prisma.fileObject.findFirst.mockResolvedValue(fileObject());
@@ -256,6 +286,90 @@ describe('KnowledgeIndexingService', () => {
         }));
         delete process.env.KNOWLEDGE_INDEX_VERSION;
     });
+
+    it('deletes a document version index with the configured index version', async () => {
+        const mocks = createMocks();
+        mocks.gateway.deleteKnowledgeIndex.mockResolvedValue({
+            request_id: 'request-id',
+            deleted_chunks: 3,
+            document_version_id: VERSION_ID,
+            index_version: 'knowledge-index-v1',
+        });
+        const service = createService(mocks);
+
+        await service.deleteDocumentVersionIndex(TENANT_ID, 'user-1', VERSION_ID);
+
+        expect(mocks.gateway.deleteKnowledgeIndex).toHaveBeenCalledWith({
+            request_id: expect.any(String),
+            tenant_id: TENANT_ID,
+            user_id: 'user-1',
+            document_version_id: VERSION_ID,
+            index_version: 'knowledge-index-v1',
+        });
+    });
+
+    it('cleans the fresh index when the document was soft-deleted during indexing', async () => {
+        const mocks = createMocks();
+        mocks.prisma.knowledgeDocument.findMany.mockResolvedValueOnce([]).mockResolvedValue([pendingDocument()]);
+        mocks.prisma.knowledgeDocument.updateMany.mockResolvedValue({ count: 1 });
+        mocks.prisma.documentVersion.findFirst.mockResolvedValue(documentVersion());
+        mocks.prisma.fileObject.findFirst.mockResolvedValue(fileObject());
+        mocks.parser.parse.mockResolvedValue(parsedDocument());
+        mocks.gateway.indexKnowledge.mockResolvedValue({
+            request_id: 'request-id',
+            indexed_chunks: 1,
+            chunking_version: 'knowledge-chunking-v1',
+            embedding_profile: 'deterministic',
+            index_version: 'knowledge-index-v1',
+            latency_ms: 12,
+        });
+        // 索引完成后文档已被软删：findFirst 返回 null，不再标回 READY。
+        mocks.prisma.knowledgeDocument.findFirst.mockResolvedValue(null);
+        mocks.gateway.deleteKnowledgeIndex.mockResolvedValue({
+            request_id: 'request-id',
+            deleted_chunks: 1,
+            document_version_id: VERSION_ID,
+            index_version: 'knowledge-index-v1',
+        });
+        const service = createService(mocks);
+
+        await service.runOnce();
+
+        // 已删文档不再标回 READY（PARSED/INDEXING 状态更新仍正常发生）。
+        expect(mocks.prisma.knowledgeDocument.update).not.toHaveBeenCalledWith(expect.objectContaining({
+            data: expect.objectContaining({ status: KnowledgeDocumentStatus.READY }),
+        }));
+        expect(mocks.gateway.deleteKnowledgeIndex).toHaveBeenCalledWith(expect.objectContaining({
+            tenant_id: TENANT_ID,
+            document_version_id: VERSION_ID,
+        }));
+    });
+
+    it('cleans all version indexes of a knowledge base and tolerates single failures', async () => {
+        const mocks = createMocks();
+        mocks.prisma.knowledgeDocument.findMany.mockResolvedValue([
+            { id: DOCUMENT_ID },
+            { id: '40000000-0000-0000-0000-000000000002' },
+        ]);
+        mocks.prisma.documentVersion.findMany.mockResolvedValue([
+            { id: VERSION_ID },
+            { id: '50000000-0000-0000-0000-000000000002' },
+            { id: '50000000-0000-0000-0000-000000000003' },
+        ]);
+        mocks.gateway.deleteKnowledgeIndex
+            .mockResolvedValueOnce({ request_id: 'r', deleted_chunks: 1, document_version_id: VERSION_ID, index_version: 'knowledge-index-v1' })
+            .mockRejectedValueOnce(new AiServiceInvocationError('AI_SERVICE_UNAVAILABLE', 'down', true, 503))
+            .mockResolvedValueOnce({ request_id: 'r', deleted_chunks: 2, document_version_id: 'v3', index_version: 'knowledge-index-v1' });
+        const service = createService(mocks);
+
+        await service.deleteKnowledgeBaseIndexes(TENANT_ID, 'user-1', KNOWLEDGE_BASE_ID);
+
+        expect(mocks.prisma.documentVersion.findMany).toHaveBeenCalledWith({
+            where: { tenantId: TENANT_ID, documentId: { in: [DOCUMENT_ID, '40000000-0000-0000-0000-000000000002'] } },
+            select: { id: true },
+        });
+        expect(mocks.gateway.deleteKnowledgeIndex).toHaveBeenCalledTimes(3);
+    });
 });
 
 const TENANT_ID = '10000000-0000-0000-0000-000000000001';
@@ -268,7 +382,7 @@ const DEPARTMENT_ID = '70000000-0000-0000-0000-000000000001';
 interface Mocks {
     prisma: Record<string, any>;
     redis: { setIfAbsent: jest.Mock; deleteIfValue: jest.Mock };
-    gateway: { indexKnowledge: jest.Mock };
+    gateway: { indexKnowledge: jest.Mock; deleteKnowledgeIndex: jest.Mock };
     parser: { parse: jest.Mock };
 }
 
@@ -287,15 +401,16 @@ function createMocks(): Mocks {
             findMany: jest.fn().mockResolvedValue([]),
             updateMany: jest.fn(),
             update: jest.fn(),
+            findFirst: jest.fn().mockResolvedValue({ id: DOCUMENT_ID }),
         },
-        documentVersion: { findFirst: jest.fn() },
+        documentVersion: { findFirst: jest.fn(), findMany: jest.fn() },
         fileObject: { findFirst: jest.fn() },
         auditLog: { create: jest.fn() },
     };
     return {
         prisma,
         redis: { setIfAbsent: jest.fn().mockResolvedValue(true), deleteIfValue: jest.fn().mockResolvedValue(undefined) },
-        gateway: { indexKnowledge: jest.fn() },
+        gateway: { indexKnowledge: jest.fn(), deleteKnowledgeIndex: jest.fn() },
         parser: { parse: jest.fn() },
     };
 }

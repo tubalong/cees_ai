@@ -3,10 +3,12 @@
 /* tslint:disable */
 /* eslint-disable */
 import type { DingTalkDepartmentMappingResolution } from './DingTalkDepartmentMappingResolution';
+import type { DingTalkRoleAssignment } from './DingTalkRoleAssignment';
 import type { DingTalkUserMappingResolution } from './DingTalkUserMappingResolution';
 import type { PreviewDingTalkMappingRequest } from './PreviewDingTalkMappingRequest';
 export type ApplyDingTalkMappingRequest = (PreviewDingTalkMappingRequest & {
     departmentResolutions?: Array<DingTalkDepartmentMappingResolution>;
     userResolutions?: Array<DingTalkUserMappingResolution>;
+    roleAssignments?: Array<DingTalkRoleAssignment>;
 });
 

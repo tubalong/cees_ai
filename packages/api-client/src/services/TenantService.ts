@@ -13,9 +13,11 @@ import type { TenantInvitationStatus } from '../models/TenantInvitationStatus';
 import type { TenantMemberListResponseEnvelope } from '../models/TenantMemberListResponseEnvelope';
 import type { TenantMemberResponseEnvelope } from '../models/TenantMemberResponseEnvelope';
 import type { TenantResponseEnvelope } from '../models/TenantResponseEnvelope';
+import type { TenantSearchPolicyResponseEnvelope } from '../models/TenantSearchPolicyResponseEnvelope';
 import type { UpdateTenantMemberAccountRequest } from '../models/UpdateTenantMemberAccountRequest';
 import type { UpdateTenantMemberRequest } from '../models/UpdateTenantMemberRequest';
 import type { UpdateTenantRequest } from '../models/UpdateTenantRequest';
+import type { UpdateTenantSearchPolicyRequest } from '../models/UpdateTenantSearchPolicyRequest';
 import type { CancelablePromise } from '../core/CancelablePromise';
 import { OpenAPI } from '../core/OpenAPI';
 import { request as __request } from '../core/request';
@@ -320,6 +322,43 @@ export class TenantService {
             url: '/tenants/current/invitations/{invitationId}',
             path: {
                 'invitationId': invitationId,
+            },
+        });
+    }
+    /**
+     * 查询租户联网检索策略
+     * @returns TenantSearchPolicyResponseEnvelope 租户联网检索策略
+     * @throws ApiError
+     */
+    public static getTenantSearchPolicy(): CancelablePromise<TenantSearchPolicyResponseEnvelope> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/tenants/current/search-policy',
+            errors: {
+                401: `登录状态无效或已过期`,
+                403: `缺少 tenant.read 权限`,
+            },
+        });
+    }
+    /**
+     * 修改租户联网检索策略
+     * @returns TenantSearchPolicyResponseEnvelope 修改后的租户联网检索策略
+     * @throws ApiError
+     */
+    public static updateTenantSearchPolicy({
+        requestBody,
+    }: {
+        requestBody: UpdateTenantSearchPolicyRequest,
+    }): CancelablePromise<TenantSearchPolicyResponseEnvelope> {
+        return __request(OpenAPI, {
+            method: 'PATCH',
+            url: '/tenants/current/search-policy',
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                400: `请求字段校验失败`,
+                401: `登录状态无效或已过期`,
+                403: `缺少 tenant.update 权限`,
             },
         });
     }

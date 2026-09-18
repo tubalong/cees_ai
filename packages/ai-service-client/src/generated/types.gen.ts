@@ -644,15 +644,45 @@ export type KnowledgeIndexResponse = {
     latency_ms?: number;
 };
 
+export type KnowledgeIndexDeleteRequest = {
+    request_id: string;
+    tenant_id: string;
+    user_id: string;
+    /**
+     * Identity of the document version whose derived index should be removed. Deleting the derived index never deletes the business document.
+     */
+    document_version_id: string;
+    index_version: string;
+};
+
+export type KnowledgeIndexDeleteResponse = {
+    request_id: string;
+    /**
+     * Number of derived nodes removed from the vector store.
+     */
+    deleted_chunks: number;
+    document_version_id: string;
+    index_version: string;
+};
+
 export type KnowledgeRetrieveScope = {
     knowledge_base_ids: Array<string>;
     /**
      * Optional document-level allowlist computed by the caller. When omitted, all documents inside the given knowledge bases match.
      */
     allowed_document_ids?: Array<string>;
+    /**
+     * Optional department allowlist computed by the caller. Only constrains nodes that carry a department_id; nodes without one pass through.
+     */
     department_ids?: Array<string>;
+    /**
+     * Optional project allowlist computed by the caller. Only constrains nodes that carry a project_id; nodes without one pass through.
+     */
     project_ids?: Array<string>;
-    acl_version: string;
+    /**
+     * Optional ACL snapshot identifier of the indexed nodes. When omitted, retrieval does not filter on ACL version. Callers that fold permissions in real time on every request may omit it until ACL versioning or retrieval caching is introduced.
+     */
+    acl_version?: string;
 };
 
 export type KnowledgeRetrieveRequest = {
@@ -688,6 +718,67 @@ export type RetrievedChunk = {
 export type KnowledgeRetrieveResponse = {
     request_id: string;
     chunks: Array<RetrievedChunk>;
+    index_version: string;
+    embedding_profile: string;
+};
+
+export type KnowledgeAnswerRequest = {
+    request_id: string;
+    tenant_id: string;
+    user_id: string;
+    query: string;
+    scope: KnowledgeRetrieveScope;
+    top_k?: number;
+    index_version: string;
+    /**
+     * Embedding profile for the query. Null selects the configured default; the effective profile is returned in the response.
+     */
+    embedding_profile?: string | null;
+    /**
+     * Output token budget for the grounded answer.
+     */
+    max_answer_tokens?: number;
+};
+
+export type KnowledgeAnswerCitation = {
+    /**
+     * Short citation label referenced by the answer, e.g. S1.
+     */
+    citation_id: string;
+    chunk_id: string;
+    document_id: string;
+    document_version_id: string;
+    text: string;
+    score?: number;
+    page_index?: number | null;
+    bbox?: [
+        number,
+        number,
+        number,
+        number
+    ] | null;
+    heading_path?: Array<string>;
+};
+
+export type KnowledgeAnswerResponse = {
+    request_id: string;
+    /**
+     * Grounded answer text. Empty when insufficient_evidence is true.
+     */
+    answer: string;
+    /**
+     * True when the answer is backed by mapped citations; always false when insufficient_evidence is true.
+     */
+    grounded: boolean;
+    /**
+     * True when the retrieval produced no chunks or the model determined the evidence cannot answer the question. The service never answers from model imagination in this case.
+     */
+    insufficient_evidence: boolean;
+    citations: Array<KnowledgeAnswerCitation>;
+    /**
+     * Present only when the rag role actually produced the answer. Null when the empty-retrieval short-circuit skipped the LLM call.
+     */
+    execution?: ExecutionMetadata | null;
     index_version: string;
     embedding_profile: string;
 };
@@ -1359,6 +1450,47 @@ export type IndexKnowledgeDocumentResponses = {
 
 export type IndexKnowledgeDocumentResponse = IndexKnowledgeDocumentResponses[keyof IndexKnowledgeDocumentResponses];
 
+export type DeleteKnowledgeIndexData = {
+    body: KnowledgeIndexDeleteRequest;
+    path?: never;
+    query?: never;
+    url: '/internal/v1/knowledge/index/delete';
+};
+
+export type DeleteKnowledgeIndexErrors = {
+    /**
+     * Invalid profile or unsupported output mode
+     */
+    400: ErrorResponse;
+    /**
+     * Internal authentication failed
+     */
+    401: ErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ErrorResponse;
+    /**
+     * Unexpected internal service error
+     */
+    500: ErrorResponse;
+    /**
+     * Service or configured providers unavailable
+     */
+    503: ErrorResponse;
+};
+
+export type DeleteKnowledgeIndexError = DeleteKnowledgeIndexErrors[keyof DeleteKnowledgeIndexErrors];
+
+export type DeleteKnowledgeIndexResponses = {
+    /**
+     * Derived index deleted
+     */
+    200: KnowledgeIndexDeleteResponse;
+};
+
+export type DeleteKnowledgeIndexResponse = DeleteKnowledgeIndexResponses[keyof DeleteKnowledgeIndexResponses];
+
 export type RetrieveKnowledgeData = {
     body: KnowledgeRetrieveRequest;
     path?: never;
@@ -1399,3 +1531,48 @@ export type RetrieveKnowledgeResponses = {
 };
 
 export type RetrieveKnowledgeResponse = RetrieveKnowledgeResponses[keyof RetrieveKnowledgeResponses];
+
+export type AnswerKnowledgeData = {
+    body: KnowledgeAnswerRequest;
+    path?: never;
+    query?: never;
+    url: '/internal/v1/knowledge/answer';
+};
+
+export type AnswerKnowledgeErrors = {
+    /**
+     * Invalid profile or unsupported output mode
+     */
+    400: ErrorResponse;
+    /**
+     * Internal authentication failed
+     */
+    401: ErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ErrorResponse;
+    /**
+     * Unexpected internal service error
+     */
+    500: ErrorResponse;
+    /**
+     * Provider output did not match the requested schema
+     */
+    502: ErrorResponse;
+    /**
+     * Service or configured providers unavailable
+     */
+    503: ErrorResponse;
+};
+
+export type AnswerKnowledgeError = AnswerKnowledgeErrors[keyof AnswerKnowledgeErrors];
+
+export type AnswerKnowledgeResponses = {
+    /**
+     * Grounded answer with mapped citations
+     */
+    200: KnowledgeAnswerResponse;
+};
+
+export type AnswerKnowledgeResponse = AnswerKnowledgeResponses[keyof AnswerKnowledgeResponses];

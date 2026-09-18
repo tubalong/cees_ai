@@ -7,6 +7,12 @@
 - 企业管理员可以创建、编辑和删除自定义角色，并整体替换角色权限。
 - `tenant_admin` 是平台维护的系统角色，客户端禁止编辑、替换权限和删除。
 
+## P0 复检结论
+
+- 新模块权限已进入权限目录，	enant_admin 已获得，自定义角色默认不授予。
+- 自定义角色可显式授予分配策略、跨职能任务、HR、Finance、Legal 权限，并写入审计。
+- 详细边界见 [C 后端主体 P0 复检](../architecture/backend-subject-p0-review.md)。
+
 ## 接口
 
 | 接口 | 用途 | 权限 |
@@ -43,8 +49,10 @@
 - `DEPARTMENT`：本部门。
 - `DEPARTMENT_TREE`：本部门及下级。
 - `PROJECT`：参与项目。
-- `CUSTOM`：自定义范围。
+- `CUSTOM`：自定义范围，当前解析器尚未支持具体约束配置。
 - `TENANT`：当前企业全部数据。
+
+后端 `DataScopeResolverService` 将角色的 `dataScope` 解析为租户级、成员级、部门级或项目级过滤条件。未配置角色的成员默认按 `SELF` 处理；遇到 `CUSTOM` 时返回 `DATA_SCOPE_CUSTOM_UNSUPPORTED`，避免出现“已配置但不生效”的静默越权。
 
 ## 邀请联动
 

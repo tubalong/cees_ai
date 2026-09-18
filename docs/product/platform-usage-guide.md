@@ -44,7 +44,7 @@
 | 通知中心 | 已实现 | 通知列表、未读统计、已读操作、租户隔离和后台提醒 |
 | 工作台与数据看板 | 已实现 | 概览、任务统计、待办聚合和近期会议 |
 | 知识库 | 第一阶段已实现 | 知识库 CRUD、成员权限、租户隔离、乐观锁和审计；文档处理与 RAG 暂未实现 |
-| 钉钉组织架构和人员同步 | 第一阶段已实现 | 一租户一钉钉企业、凭证验证、部门/人员镜像、自动映射、冲突确认、待激活账号和同步任务；考勤、文档、消息与 AI 暂未实现 |
+| 钉钉组织架构和人员同步 | 第一阶段已实现 | 一租户一钉钉企业、凭证验证、部门/人员镜像、自动映射、冲突确认、角色批量分配、待激活账号和同步任务；考勤、文档、消息与 AI 暂未实现 |
 | AI 草稿和额度体系 | 部分基础 | AI 草稿仍为数据结构基础；当前只有实际 Token 指标，没有企业/坑位/成员额度账户或扣减 |
 
 ## 3. 管理员账号到底存在哪里
@@ -202,7 +202,7 @@ pnpm --filter @cees/api dev
 | 方法与路径 | 用途 | 参数/请求体 | 返回 | 权限 |
 | --- | --- | --- | --- | --- |
 | `GET /tenants/current` | 获取当前 Token 对应租户 | 无 | `TenantDetail` | `tenant.read` |
-| `PATCH /tenants/current` | 修改当前租户名称 | `UpdateTenantRequest` | 修改后的租户 | `tenant.update` |
+| `PATCH /tenants/current` | 修改当前租户名称或时区 | `UpdateTenantRequest` | 修改后的租户 | `tenant.update` |
 | `GET /tenants/current/members` | 分页查询成员 | `keyword/status/roleId/limit/cursor` | 成员列表 | `member.read` |
 | `GET /tenants/current/members/{membershipId}` | 查询单个成员 | `membershipId` | 成员详情 | `member.read` |
 | `PATCH /tenants/current/members/{membershipId}` | 修改展示名、部门或成员状态 | 路径 ID + `UpdateTenantMemberRequest` | 修改后的成员 | `member.update`；修改部门还需 `department.member.assign` |
@@ -442,7 +442,7 @@ API 从 JWT 注入租户、User 和 Membership，客户端不能提交这些内�
 | `GET /dingtalk/organization/users` | 查询人员外部镜像 | `limit/cursor/includeDeleted` | 人员列表 | `dingtalk.organization.read` |
 | `GET /dingtalk/sync-jobs` | 查询同步历史和失败原因 | `limit/cursor` | 同步任务列表 | `dingtalk.integration.read` |
 | `POST /dingtalk/organization/mapping/preview` | 预览部门和人员映射 | `activationExpiresInDays/createMissingDepartments/createMissingMembers` | 映射预览 | `dingtalk.organization.mapping.preview` |
-| `POST /dingtalk/organization/mapping/apply` | 应用映射并创建待激活成员 | `departmentResolutions/userResolutions` 等 | 映射结果和一次性激活凭证 | `dingtalk.organization.mapping.manage` |
+| `POST /dingtalk/organization/mapping/apply` | 应用映射并创建待激活成员 | `departmentResolutions/userResolutions/roleAssignments` 等 | 映射结果、实际角色和一次性激活凭证 | `dingtalk.organization.mapping.manage` |
 
 创建绑定示例：
 
@@ -454,7 +454,7 @@ API 从 JWT 注入租户、User 和 Membership，客户端不能提交这些内�
 }
 ```
 
-业务规则：一个租户只能绑定一个钉钉企业，一个 `corpId` 不能被其他租户重复绑定；`appSecret` 使用 `DINGTALK_CREDENTIAL_ENCRYPTION_KEY` 以 AES-256-GCM 加密保存，接口不返回密钥。同步阶段只保存外部镜像；映射应用阶段按预览和管理员确认结果绑定已有 CEES 部门/成员，或创建 CEES 部门和待激活成员。账号按姓名生成小写拼音，在整个租户内冲突时追加 `2`、`3` 等数字；不生成默认密码，激活凭证只返回一次。考勤、请假、文档、消息和 AI 派发属于后续阶段。详细说明见 [钉钉组织架构与人员同步](dingtalk-organization-sync.md) 和 [钉钉组织架构与人员同步 API](../api/dingtalk-organization-sync-api.md)。
+业务规则：一个租户只能绑定一个钉钉企业，一个 `corpId` 不能被其他租户重复绑定；`appSecret` 使用 `DINGTALK_CREDENTIAL_ENCRYPTION_KEY` 以 AES-256-GCM 加密保存，接口不返回密钥。同步阶段只保存外部镜像；映射应用阶段按预览和管理员确认结果绑定已有 CEES 部门/成员，或创建 CEES 部门和待激活成员。角色不会自动创建，由租户管理员在角色管理中先创建；应用映射时通过 `roleAssignments` 将角色批量分配给全部或部分钉钉人员，允许一人多个角色，但禁止分配 `tenant_admin`。新建成员必须至少有一个角色，已有成员默认保留原角色，显式指定时追加角色。账号按姓名生成小写拼音，在整个租户内冲突时追加 `2`、`3` 等数字；不生成默认密码，激活凭证只返回一次。考勤、请假、文档、消息和 AI 派发属于后续阶段。详细说明见 [钉钉组织架构与人员同步](dingtalk-organization-sync.md) 和 [钉钉组织架构与人员同步 API](../api/dingtalk-organization-sync-api.md)。
 
 | 字段 | 含义 |
 | --- | --- |
@@ -468,6 +468,8 @@ API 从 JWT 注入租户、User 和 Membership，客户端不能提交这些内�
 | `departmentId` | 组织映射应用后关联的 CEES 正式部门 UUID；首次同步前通常为空 |
 | `departmentResolutions` | 部门冲突处理列表，动作可为 `BIND_EXISTING`、`CREATE` 或 `SKIP` |
 | `userResolutions` | 人员冲突处理列表，管理员可绑定已有成员、创建新成员或跳过 |
+| `roleAssignments` | 角色批量分配列表；一个角色可对应多人，一个人可出现在多个角色分组中 |
+| `roleIds` / `roleCodes` | 激活凭证中实际写入新成员的角色 UUID 和角色编码 |
 | `activationToken` | 新成员一次性激活凭证，只在映射应用响应中返回一次 |
 
 ## 7. 请求参数字典
@@ -569,8 +571,11 @@ POST /platform/auth/change-password
 
 | 字段 | 必填 | 含义 |
 | --- | --- | --- |
-| `name` | 是 | 新租户名称，1～120 位 |
+| `name` | 否 | 新租户名称，1～120 位 |
+| `timezone` | 否 | IANA 时区标识，1～64 位；非法标识返回 `400 TENANT_TIMEZONE_INVALID` |
 | `version` | 是 | 当前租户版本 |
+
+`name` 与 `timezone` 至少提供一个，都不提供时返回 `400 TENANT_UPDATE_EMPTY`。时区影响工作台“今日/明日”、后台日报提醒所属日期和项目编码年份；本期不提供配置界面，只能直接调用该接口修改。
 
 #### `UpdateTenantMemberRequest`
 
@@ -642,8 +647,8 @@ POST /platform/auth/change-password
 
 | 请求 | 关键字段 | 说明 |
 | --- | --- | --- |
-| `CreateProjectRequest` | `code/name`，可选 `description/departmentId/ownerMembershipId/startsAt/endsAt` | 编码 2～32 位，只允许英文、数字、`_`、`-` |
-| `UpdateProjectRequest` | 可修改创建字段中的项目资料，必填 `version` | 不允许直接修改状态和负责人 |
+| `CreateProjectRequest` | 必填 `name`，可选 `description/departmentId/ownerMembershipId/memberMembershipIds` | 项目编码由服务端按租户时区年份自动分配，请求不接受 `code` 和时间字段 |
+| `UpdateProjectRequest` | 可修改 `name/description/departmentId`，必填 `version` | 不能修改编码、时间字段、状态和负责人 |
 | `AddProjectMemberRequest` | `membershipId`，可选 `role` | role 仅 `MANAGER/MEMBER`，默认 `MEMBER` |
 | `UpdateProjectMemberRequest` | `role/version` | 负责人不能通过该接口修改 |
 | `TransferProjectOwnerRequest` | `membershipId/version` | 目标必须是当前项目的有效成员 |
@@ -894,7 +899,7 @@ POST /platform/auth/change-password
 | `AuthMembership` | 当前成员的 `id/account/status/roles` |
 | `LoginResponse` | Access/Refresh Token、各自有效秒数以及用户、租户、成员上下文 |
 | `MeResponse` | 当前用户、租户、成员及实时权限编码数组 |
-| `TenantDetail` | 租户 UUID、编码、名称、状态、版本和时间 |
+| `TenantDetail` | 租户 UUID、编码、名称、时区、状态、版本和时间 |
 | `TenantMember` | Membership UUID、账号、User、部门、状态、角色、加入时间和版本 |
 | `DepartmentSummary` | 部门 UUID、父部门、名称、说明、排序、状态、成员数、子部门数和版本 |
 | `DepartmentTreeNode` | `DepartmentSummary` 的全部字段以及递归 `children` 子部门数组 |
@@ -2705,16 +2710,14 @@ TenantInvitationRole
 
 ```json
 {
-  "code": "PRJ-2026-001",
   "name": "AI 工作台",
   "description": "企业内部 AI 协作平台",
   "departmentId": null,
-  "startsAt": "2026-09-08T00:00:00.000Z",
-  "endsAt": "2026-12-31T00:00:00.000Z"
+  "memberMembershipIds": []
 }
 ```
 
-不传 `ownerMembershipId` 时当前成员自动成为 `OWNER`。建议按以下顺序验证：
+创建成功后响应里的 `code` 才是真实编号（例如 `PRJ-2026-1`），编号按租户时区年份递增且创建后不可修改；不传 `ownerMembershipId` 时当前成员自动成为 `OWNER`，`memberMembershipIds` 需要 `project.member.manage` 权限。项目时间字段（`startedAt`/`completedAt`/`closedAt`）全部由状态命令写入，创建与修改请求都不接受。建议按以下顺序验证：
 
 ```text
 POST /api/v1/projects
@@ -2953,7 +2956,7 @@ Idempotency-Key: verify-turn-001
 
 
 
-## 34. `0.24.0` 钉钉组织映射与首次成员导入说明
+## 34. `0.25.0` 钉钉组织映射角色分配说明
 
 - 新增 `POST /dingtalk/organization/mapping/preview`，只读取当前租户已同步的钉钉镜像，返回部门和人员的自动匹配、待创建和冲突结果，不修改正式业务数据；
 - 新增 `POST /dingtalk/organization/mapping/apply`，按管理员确认结果在事务中应用部门映射、成员映射和缺失数据创建；
@@ -2963,6 +2966,9 @@ Idempotency-Key: verify-turn-001
 - 账号按姓名生成小写拼音，账号唯一范围是整个租户；冲突时依次使用 `zhangsan2`、`zhangsan3` 等数字后缀；
 - 激活令牌只在映射应用响应中返回一次，前端可以使用 `credentials` 生成 Excel；令牌明文不写入数据库、日志或审计元数据；
 - 重复应用已经建立映射的钉钉人员不会重复创建 CEES 账号或重新签发激活凭证；
+- 角色不会由系统自动创建；应用映射前由租户管理员在角色管理中创建角色，并通过 `roleAssignments` 批量分配；一个角色可分配给多人，一个人可拥有多个角色；
+- `tenant_admin` 不允许通过钉钉组织映射分配；新建成员没有至少一个角色时返回 `DINGTALK_MAPPING_ROLE_REQUIRED`，已匹配成员默认保留已有角色，显式分配时追加而不覆盖；
+- `credentials` 返回新建成员实际获得的 `roleIds` 和 `roleCodes`，前端生成激活凭证 Excel 时应一并展示角色信息；
 - 新增权限 `dingtalk.organization.mapping.preview` 和 `dingtalk.organization.mapping.manage`，由迁移 `0027_dingtalk_organization_mapping` 自动授予现有 `tenant_admin` 角色；
-- 公开契约版本由 `0.23.0` 提升为 `0.24.0`，并已重新生成 `packages/api-client`；
+- 公开契约版本由 `0.24.0` 提升为 `0.25.0`，并已重新生成 `packages/api-client`；
 - 当前仍不包含考勤、请假、审批、钉钉文档、聊天消息、日程和 AI 派发。

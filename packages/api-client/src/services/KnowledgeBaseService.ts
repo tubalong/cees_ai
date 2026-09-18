@@ -8,10 +8,13 @@ import type { CreateKnowledgeDocumentRequest } from '../models/CreateKnowledgeDo
 import type { CreateKnowledgeDocumentVersionRequest } from '../models/CreateKnowledgeDocumentVersionRequest';
 import type { KnowledgeBaseListResponseEnvelope } from '../models/KnowledgeBaseListResponseEnvelope';
 import type { KnowledgeBaseMemberListResponseEnvelope } from '../models/KnowledgeBaseMemberListResponseEnvelope';
+import type { KnowledgeBaseMemberPermission } from '../models/KnowledgeBaseMemberPermission';
 import type { KnowledgeBaseMemberResponseEnvelope } from '../models/KnowledgeBaseMemberResponseEnvelope';
 import type { KnowledgeBaseResponseEnvelope } from '../models/KnowledgeBaseResponseEnvelope';
 import type { KnowledgeDocumentListResponseEnvelope } from '../models/KnowledgeDocumentListResponseEnvelope';
 import type { KnowledgeDocumentResponseEnvelope } from '../models/KnowledgeDocumentResponseEnvelope';
+import type { KnowledgeQueryRequest } from '../models/KnowledgeQueryRequest';
+import type { KnowledgeQueryResponseEnvelope } from '../models/KnowledgeQueryResponseEnvelope';
 import type { UpdateKnowledgeBaseMemberRequest } from '../models/UpdateKnowledgeBaseMemberRequest';
 import type { UpdateKnowledgeBaseRequest } from '../models/UpdateKnowledgeBaseRequest';
 import type { CancelablePromise } from '../core/CancelablePromise';
@@ -20,7 +23,7 @@ import { request as __request } from '../core/request';
 export class KnowledgeBaseService {
     /**
      * 查询当前成员可访问的知识库
-     * 普通成员只能看到自己加入的知识库，拥有 knowledge_base.manage_all 权限的成员可看到当前租户全部知识库。
+     * 普通成员看到自己加入的知识库与归属范围覆盖自己的知识库（TENANT 全员、DEPARTMENT 部门树、PROJECT 项目），拥有 knowledge_base.read_all 或 knowledge_base.manage_all 权限的成员可看到当前租户全部知识库。
      * @returns KnowledgeBaseListResponseEnvelope 知识库列表
      * @throws ApiError
      */
@@ -28,6 +31,7 @@ export class KnowledgeBaseService {
         keyword,
         limit = 20,
         cursor,
+        permission,
     }: {
         /**
          * 按知识库名称或说明模糊搜索
@@ -41,6 +45,10 @@ export class KnowledgeBaseService {
          * 上一页返回的知识库 ID
          */
         cursor?: string,
+        /**
+         * 只返回当前用户达到该成员权限的知识库（转存目标库选择）；省略时按可见范围返回
+         */
+        permission?: KnowledgeBaseMemberPermission,
     }): CancelablePromise<KnowledgeBaseListResponseEnvelope> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -49,6 +57,7 @@ export class KnowledgeBaseService {
                 'keyword': keyword,
                 'limit': limit,
                 'cursor': cursor,
+                'permission': permission,
             },
             errors: {
                 400: `分页游标无效或请求参数校验失败`,
@@ -72,7 +81,7 @@ export class KnowledgeBaseService {
             body: requestBody,
             mediaType: 'application/json',
             errors: {
-                400: `请求字段校验失败`,
+                400: `请求字段校验失败或归属锚点无效（KNOWLEDGE_BASE_SCOPE_INVALID）`,
                 401: `登录状态无效或缺少有效租户成员身份`,
                 403: `缺少 knowledge_base.create 权限`,
             },
@@ -129,7 +138,7 @@ export class KnowledgeBaseService {
             body: requestBody,
             mediaType: 'application/json',
             errors: {
-                400: `请求字段校验失败或没有可修改字段`,
+                400: `请求字段校验失败、没有可修改字段或归属锚点无效（KNOWLEDGE_BASE_SCOPE_INVALID）`,
                 401: `登录状态无效或缺少有效租户成员身份`,
                 403: `缺少知识库 MANAGER 权限`,
                 404: `知识库不存在或当前成员无权访问`,
@@ -175,6 +184,42 @@ export class KnowledgeBaseService {
         });
     }
     /**
+     * 基于知识库内容回答提问
+     * 检索知识库内当前成员可见的文档内容，由 ai-service 基于证据生成带引用的答案。
+     * 检索无结果时直接返回 insufficientEvidence=true 不调用模型；
+     * 答案只引用真实检索到的 chunk，不允许模型编造文档、页码或链接。
+     *
+     * @returns KnowledgeQueryResponseEnvelope 基于知识库证据的答案与引用列表
+     * @throws ApiError
+     */
+    public static queryKnowledgeBase({
+        knowledgeBaseId,
+        requestBody,
+    }: {
+        /**
+         * 知识库 ID
+         */
+        knowledgeBaseId: string,
+        requestBody: KnowledgeQueryRequest,
+    }): CancelablePromise<KnowledgeQueryResponseEnvelope> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/knowledge-bases/{knowledgeBaseId}/query',
+            path: {
+                'knowledgeBaseId': knowledgeBaseId,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                400: `请求字段校验失败`,
+                401: `登录状态无效或缺少有效租户成员身份`,
+                403: `缺少 knowledge_base.query 权限或不是该知识库成员`,
+                404: `知识库不存在或当前成员无权访问`,
+                503: `AI 服务暂不可用，可稍后重试`,
+            },
+        });
+    }
+    /**
      * 查询知识库成员
      * @returns KnowledgeBaseMemberListResponseEnvelope 知识库成员列表
      * @throws ApiError
@@ -204,7 +249,7 @@ export class KnowledgeBaseService {
             errors: {
                 400: `分页游标无效`,
                 401: `登录状态无效或缺少有效租户成员身份`,
-                403: `缺少 knowledge_base.member.manage 权限或知识库 MANAGER 权限`,
+                403: `缺少 knowledge_base.read 权限或知识库 MANAGER 权限`,
                 404: `知识库不存在或当前成员无权访问`,
             },
         });
@@ -236,7 +281,7 @@ export class KnowledgeBaseService {
             errors: {
                 400: `请求字段校验失败`,
                 401: `登录状态无效或缺少有效租户成员身份`,
-                403: `缺少 knowledge_base.member.manage 权限或知识库 MANAGER 权限`,
+                403: `缺少 knowledge_base.read 权限或知识库 MANAGER 权限`,
                 404: `知识库或目标成员不存在`,
                 409: `目标成员已经加入知识库`,
             },
@@ -244,7 +289,7 @@ export class KnowledgeBaseService {
     }
     /**
      * 查询知识库文档
-     * 返回知识库内未删除文档的分页列表，包含处理状态；普通成员只能查看自己加入的知识库。
+     * 返回知识库内未删除文档的分页列表，包含处理状态；普通成员只能查看自己加入的知识库，归属人群（TENANT/部门树/项目）可按只读浏览。
      * @returns KnowledgeDocumentListResponseEnvelope 知识库文档列表
      * @throws ApiError
      */
@@ -317,7 +362,7 @@ export class KnowledgeBaseService {
             errors: {
                 400: `请求字段校验失败或可见范围与部门、项目字段不一致`,
                 401: `登录状态无效或缺少有效租户成员身份`,
-                403: `缺少 knowledge_base.document.manage 权限或知识库 EDITOR 权限`,
+                403: `缺少 knowledge_base.read 权限或知识库 EDITOR 权限`,
                 404: `知识库不存在或文件对象不属于当前租户`,
                 409: `文件对象已被其他文档使用或已删除`,
             },
@@ -356,7 +401,7 @@ export class KnowledgeBaseService {
             errors: {
                 400: `请求字段校验失败或可见范围与部门、项目字段不一致`,
                 401: `登录状态无效或缺少有效租户成员身份`,
-                403: `缺少 knowledge_base.document.manage 权限或知识库 EDITOR 权限`,
+                403: `缺少 knowledge_base.read 权限或知识库 EDITOR 权限`,
                 404: `知识库、文档不存在或文件对象不属于当前租户`,
                 409: `文件对象已被其他文档使用或已删除`,
             },
@@ -390,9 +435,42 @@ export class KnowledgeBaseService {
             },
             errors: {
                 401: `登录状态无效或缺少有效租户成员身份`,
-                403: `缺少 knowledge_base.document.manage 权限或知识库 EDITOR 权限`,
+                403: `缺少 knowledge_base.read 权限或知识库 EDITOR 权限`,
                 404: `知识库或文档不存在`,
                 409: `文档当前状态不允许重试`,
+            },
+        });
+    }
+    /**
+     * 删除知识库文档
+     * 软删除文档并异步清理全部版本的向量索引；库内 EDITOR 及以上（或 knowledge_base.manage_all）可执行。
+     * @returns void
+     * @throws ApiError
+     */
+    public static deleteKnowledgeDocument({
+        knowledgeBaseId,
+        documentId,
+    }: {
+        /**
+         * 知识库 ID
+         */
+        knowledgeBaseId: string,
+        /**
+         * 文档 ID
+         */
+        documentId: string,
+    }): CancelablePromise<void> {
+        return __request(OpenAPI, {
+            method: 'DELETE',
+            url: '/knowledge-bases/{knowledgeBaseId}/documents/{documentId}',
+            path: {
+                'knowledgeBaseId': knowledgeBaseId,
+                'documentId': documentId,
+            },
+            errors: {
+                401: `登录状态无效或缺少有效租户成员身份`,
+                403: `缺少 knowledge_base.read 权限或知识库 EDITOR 权限`,
+                404: `知识库或文档不存在`,
             },
         });
     }
@@ -429,7 +507,7 @@ export class KnowledgeBaseService {
             errors: {
                 400: `请求字段校验失败`,
                 401: `登录状态无效或缺少有效租户成员身份`,
-                403: `缺少 knowledge_base.member.manage 权限或知识库 MANAGER 权限`,
+                403: `缺少 knowledge_base.read 权限或知识库 MANAGER 权限`,
                 404: `知识库或成员不存在`,
                 409: `不允许降低知识库创建者权限`,
             },
@@ -463,7 +541,7 @@ export class KnowledgeBaseService {
             },
             errors: {
                 401: `登录状态无效或缺少有效租户成员身份`,
-                403: `缺少 knowledge_base.member.manage 权限或知识库 MANAGER 权限`,
+                403: `缺少 knowledge_base.read 权限或知识库 MANAGER 权限`,
                 404: `知识库或成员不存在`,
                 409: `不允许移除创建者或最后一名 MANAGER`,
             },
