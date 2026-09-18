@@ -104,7 +104,10 @@ def test_chat_invoke_returns_context_and_execution_metadata() -> None:
     assert body["context_usage"]["strategy"] == "summary_plus_recent"
     assert body["execution"]["profile"] == "primary"
     assert provider.calls[0][1].reasoning_effort is None
-    assert "The project name is CEES AI." in provider.calls[0][0][2].content
+    assert any(
+        "The project name is CEES AI." in message.content
+        for message in provider.calls[0][0]
+    )
 
 
 def test_ultra_chat_stream_emits_reasoning_and_answering_status() -> None:
@@ -149,6 +152,64 @@ def test_ultra_chat_stream_emits_reasoning_and_answering_status() -> None:
     assert events[2][1]["execution"]["profile"] == "primary"
     assert events[5][1]["token_usage"]["total_tokens"] == 12
     assert provider.stream_calls[0][1].reasoning_effort == "high"
+
+
+def test_chat_stream_extracts_follow_up_questions_from_final_reply() -> None:
+    client, _ = build_chat_client(
+        stream_outcomes=[
+            [
+                ProviderStreamChunk(text="项目名是 CEES AI。"),
+                ProviderStreamChunk(
+                    text='<follow_up_questions>["怎么申请试用？"]</follow_up_questions>',
+                ),
+                ProviderStreamChunk(
+                    token_usage=TokenUsageData(
+                        input_tokens=10,
+                        output_tokens=5,
+                        total_tokens=15,
+                    ),
+                    finish_reason="stop",
+                ),
+            ]
+        ]
+    )
+
+    with client:
+        response = client.post(
+            "/internal/v1/chat/stream",
+            headers={"X-AI-Internal-Token": "secret"},
+            json=chat_payload(),
+        )
+
+    assert response.status_code == 200
+    events = parse_sse_events(response.text)
+    deltas = [data["text"] for name, data in events if name == "content_delta"]
+    assert "".join(deltas) == "项目名是 CEES AI。"
+    completed = events[-1][1]
+    assert completed["related_questions"] == ["怎么申请试用？"]
+
+
+def test_chat_stream_omits_related_questions_without_block() -> None:
+    client, _ = build_chat_client(
+        stream_outcomes=[
+            [
+                ProviderStreamChunk(text="普通回答。"),
+                ProviderStreamChunk(finish_reason="stop"),
+            ]
+        ]
+    )
+
+    with client:
+        response = client.post(
+            "/internal/v1/chat/stream",
+            headers={"X-AI-Internal-Token": "secret"},
+            json=chat_payload(),
+        )
+
+    assert response.status_code == 200
+    events = parse_sse_events(response.text)
+    completed = events[-1][1]
+    assert "related_questions" not in completed
 
 
 def test_chat_compact_returns_reusable_summary() -> None:
