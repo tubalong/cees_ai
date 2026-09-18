@@ -46,6 +46,7 @@ import {
   UpdateConversationRequestDto,
 } from '../dto';
 import { TurnRunnerService } from '../runtime/turn-runner.service';
+import { RELATED_QUESTIONS_LINGER_MS } from '../runtime/turn-execution.config';
 
 const IDEMPOTENCY_KEY_MAX_LENGTH = 128;
 
@@ -135,7 +136,12 @@ export class AssistantController {
         webSearchEnabled: input.webSearchEnabled,
       });
       const events = await this.turnRunner.subscribeTurn(
-        { conversationId, turnId: started.turnId, afterSeq: 0 },
+        {
+          conversationId,
+          turnId: started.turnId,
+          afterSeq: 0,
+          lingerMs: RELATED_QUESTIONS_LINGER_MS,
+        },
         abortController.signal,
       );
       await this.writeSse(response, events, abortController, onClose);
@@ -165,6 +171,7 @@ export class AssistantController {
           conversationId,
           turnId,
           afterSeq: query.afterSeq,
+          lingerMs: RELATED_QUESTIONS_LINGER_MS,
         },
         abortController.signal,
       );
@@ -211,7 +218,9 @@ export class AssistantController {
         const step = await generator.next();
         if (step.done || response.destroyed) break;
         await writeSseEvent(response, step.value);
-        if (step.value.type === 'completed' || step.value.type === 'error') break;
+        // error 是终止事件；completed 之后可能还有 related_questions，
+        // 由订阅侧的宽限期（lingerMs）决定何时自然结束。
+        if (step.value.type === 'error') break;
       }
       if (!response.writableEnded && !response.destroyed) response.end();
     } catch (error) {

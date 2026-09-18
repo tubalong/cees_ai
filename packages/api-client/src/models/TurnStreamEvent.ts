@@ -5,10 +5,11 @@
 import type { TurnStreamCompletedEvent } from './TurnStreamCompletedEvent';
 import type { TurnStreamContentDeltaEvent } from './TurnStreamContentDeltaEvent';
 import type { TurnStreamErrorEvent } from './TurnStreamErrorEvent';
+import type { TurnStreamRelatedQuestionsEvent } from './TurnStreamRelatedQuestionsEvent';
 import type { TurnStreamStartedEvent } from './TurnStreamStartedEvent';
 import type { TurnStreamStatusEvent } from './TurnStreamStatusEvent';
 import type { TurnStreamToolCallEvent } from './TurnStreamToolCallEvent';
 import type { TurnStreamToolResultEvent } from './TurnStreamToolResultEvent';
 import type { TurnStreamUsageEvent } from './TurnStreamUsageEvent';
-export type TurnStreamEvent = (TurnStreamStartedEvent | TurnStreamStatusEvent | TurnStreamContentDeltaEvent | TurnStreamToolCallEvent | TurnStreamToolResultEvent | TurnStreamUsageEvent | TurnStreamCompletedEvent | TurnStreamErrorEvent);
+export type TurnStreamEvent = (TurnStreamStartedEvent | TurnStreamStatusEvent | TurnStreamContentDeltaEvent | TurnStreamToolCallEvent | TurnStreamToolResultEvent | TurnStreamUsageEvent | TurnStreamCompletedEvent | TurnStreamRelatedQuestionsEvent | TurnStreamErrorEvent);
 

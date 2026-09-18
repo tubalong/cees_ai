@@ -129,6 +129,8 @@ class ChatConfig(BaseModel):
     compaction_role: ModelRole = ModelRole.default
     compaction_max_output_tokens: int = Field(default=2048, ge=256, le=8192)
     compaction_context_budget_tokens: int = Field(default=65536, ge=1024, le=2_000_000)
+    related_questions_role: ModelRole = ModelRole.default
+    related_questions_max_output_tokens: int = Field(default=512, ge=64, le=4096)
 
 
 class ExtractionConfig(BaseModel):
@@ -242,8 +244,7 @@ def validate_readiness(settings: Settings, catalog: ModelCatalog) -> list[str]:
             )
         elif not is_configured_secret(key):
             errors.append(
-                f"enabled profile {name} still uses the example value for "
-                f"{profile.api_key_env}"
+                f"enabled profile {name} still uses the example value for {profile.api_key_env}"
             )
         if settings.node_env == "production" and profile.model == "change_me":
             errors.append(f"enabled profile {name} uses an example model in production")
@@ -264,23 +265,18 @@ def _validate_knowledge_readiness(
         return
     if not settings.knowledge_vector_database_url:
         errors.append(
-            "KNOWLEDGE_VECTOR_DATABASE_URL is required when "
-            "knowledge_vector_store is pgvector"
+            "KNOWLEDGE_VECTOR_DATABASE_URL is required when knowledge_vector_store is pgvector"
         )
     if not settings.knowledge_vector_dimension:
         errors.append(
-            "KNOWLEDGE_VECTOR_DIMENSION is required when "
-            "knowledge_vector_store is pgvector"
+            "KNOWLEDGE_VECTOR_DIMENSION is required when knowledge_vector_store is pgvector"
         )
     enabled_profiles = [
-        (name, profile)
-        for name, profile in catalog.embedding_profiles.items()
-        if profile.enabled
+        (name, profile) for name, profile in catalog.embedding_profiles.items() if profile.enabled
     ]
     if settings.node_env == "production" and not enabled_profiles:
         errors.append(
-            "knowledge vector store requires at least one enabled embedding "
-            "profile in production"
+            "knowledge vector store requires at least one enabled embedding profile in production"
         )
     for name, profile in enabled_profiles:
         # 交叉校验：向量表维度必须与启用的 embedding profile 声明维度
@@ -305,13 +301,9 @@ def _validate_knowledge_readiness(
             errors.append(f"enabled embedding profile {name} uses an example API key in production")
 
 
-def _validate_image_readiness(
-    settings: Settings, catalog: ModelCatalog, errors: list[str]
-) -> None:
+def _validate_image_readiness(settings: Settings, catalog: ModelCatalog, errors: list[str]) -> None:
     enabled_profiles = [
-        (name, profile)
-        for name, profile in catalog.image_profiles.items()
-        if profile.enabled
+        (name, profile) for name, profile in catalog.image_profiles.items() if profile.enabled
     ]
     if not enabled_profiles:
         errors.append("image generation requires at least one enabled image profile")
@@ -359,9 +351,7 @@ def _validate_tool_calling_readiness(catalog: ModelCatalog, errors: list[str]) -
             errors.append(f"role orchestrator references disabled profile {profile_name}")
             continue
         if ModelCapability.tool_calling not in profile.capabilities:
-            errors.append(
-                f"role orchestrator profile {profile_name} does not support tool_calling"
-            )
+            errors.append(f"role orchestrator profile {profile_name} does not support tool_calling")
 
 
 def _validate_chat_readiness(catalog: ModelCatalog, errors: list[str]) -> None:
@@ -374,7 +364,8 @@ def _validate_chat_readiness(catalog: ModelCatalog, errors: list[str]) -> None:
             errors.append(f"chat mode {required_mode.value} must be configured")
 
     checked_roles = {policy.role for policy in catalog.chat.modes.values()} | {
-        catalog.chat.compaction_role
+        catalog.chat.compaction_role,
+        catalog.chat.related_questions_role,
     }
     for role in checked_roles:
         candidates = catalog.roles.get(role, [])
@@ -412,6 +403,15 @@ def _validate_chat_readiness(catalog: ModelCatalog, errors: list[str]) -> None:
             continue
         if catalog.chat.compaction_max_output_tokens > profile.max_output_tokens_limit:
             errors.append(f"chat compaction_max_output_tokens exceeds profile {profile_name} limit")
+
+    for profile_name in catalog.roles.get(catalog.chat.related_questions_role, []):
+        profile = catalog.profiles.get(profile_name)
+        if profile is None or not profile.enabled:
+            continue
+        if catalog.chat.related_questions_max_output_tokens > profile.max_output_tokens_limit:
+            errors.append(
+                f"chat related_questions_max_output_tokens exceeds profile {profile_name} limit"
+            )
 
 
 def load_catalog_safely(settings: Settings) -> tuple[ModelCatalog | None, list[str]]:

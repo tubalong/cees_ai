@@ -5,6 +5,12 @@ import { isTerminalTurnStatus, PublicTurnStreamEvent } from '../assistant.types'
 
 const POLL_INTERVAL_MS = 250;
 
+/** 轮次终态后的宽限等待窗口；期间仍可能追加后续事件（如 related_questions）。 */
+export interface TurnPollOptions {
+  /** 终态且事件消费完后继续等待新事件的最长毫秒数；不传或传 0 时保持旧行为。 */
+  lingerMs?: number;
+}
+
 /**
  * 轮次事件的持久化与重放。事件带轮次内递增 seq（@@unique([turnId, seq])），
  * 断线重连按 afterSeq 重放；订阅端通过短轮询读取新事件直到轮次终态，
@@ -57,14 +63,19 @@ export class EventService {
 
   /**
    * 从 afterSeq 之后开始按序产出事件，并在轮次进入终态且事件全部消费后结束。
+   * 指定 lingerMs 时，终态后进入最长 lingerMs 毫秒的宽限期：期间追加的新事件
+   * 继续产出，宽限期到则结束。用于 completed 之后异步到达的 related_questions。
    * 调用方中断生成器（客户端断开）只停止推送，不影响执行侧持续写入。
    */
   async *poll(
     turnId: string,
     afterSeq: number,
     signal?: AbortSignal,
+    options?: TurnPollOptions,
   ): AsyncGenerator<PublicTurnStreamEvent> {
+    const lingerMs = options?.lingerMs ?? 0;
     let lastSeq = afterSeq;
+    let lingerUntil: number | null = null;
     while (true) {
       if (signal?.aborted) return;
 
@@ -84,7 +95,11 @@ export class EventService {
         where: { id: turnId },
         select: { status: true },
       });
-      if (!turn || isTerminalTurnStatus(turn.status)) return;
+      if (!turn || isTerminalTurnStatus(turn.status)) {
+        if (lingerMs <= 0) return;
+        if (lingerUntil === null) lingerUntil = Date.now() + lingerMs;
+        if (Date.now() >= lingerUntil) return;
+      }
 
       await sleep(POLL_INTERVAL_MS, signal);
     }

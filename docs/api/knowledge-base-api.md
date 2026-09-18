@@ -1,6 +1,6 @@
 # 知识库管理 API
 
-公开契约版本：`0.30.0`。所有接口使用租户 Access Token，路径基于 `/api/v1`。
+公开契约版本：`0.31.0`。所有接口使用租户 Access Token，路径基于 `/api/v1`。
 
 ## 知识库
 
@@ -124,7 +124,7 @@ POST /knowledge-bases/{knowledgeBaseId}/query
 | --- | --- | --- |
 | `name` | 知识库创建、修改；文档创建 | 1 到 200 个字符；服务端会去除首尾空白；文档转存路径下省略时沿用来源资源名称 |
 | `description` | 创建、修改 | 知识库说明，最多 2000 个字符；空字符串会规范化为 `null` |
-| `visibilityScope` | 知识库创建、修改；文档创建、新版本 | 知识库归属/文档可见范围：`PRIVATE`、`DEPARTMENT`、`PROJECT` 或 `TENANT`；知识库归属改为 `PRIVATE`/`TENANT` 时锚点自动置空 |
+| `visibilityScope` | 知识库创建、修改；文档创建、新版本 | 知识库归属/文档可见范围：`PRIVATE`、`DEPARTMENT`、`PROJECT` 或 `TENANT`；知识库归属改为 `PRIVATE`/`TENANT` 时锚点自动置空；数据库层预留 `CUSTOM` 枚举，公开接口统一收敛为 `PRIVATE` |
 | `departmentId` | 知识库创建、修改；文档创建、新版本 | `DEPARTMENT` 时必填，服务端校验属于当前租户；知识库修改传 `null` 清除锚点（须与归属范围配套） |
 | `projectId` | 知识库创建、修改；文档创建、新版本 | `PROJECT` 时必填，服务端校验属于当前租户；知识库修改传 `null` 清除锚点（须与归属范围配套） |
 | `version` | 修改、删除 | 当前知识库版本，修改成功后递增 |
@@ -168,7 +168,7 @@ POST /knowledge-bases/{knowledgeBaseId}/query
 | `KNOWLEDGE_SOURCE_DOCUMENT_NOT_FOUND` | 转存的 AI 文档不存在或无权访问 |
 | `KNOWLEDGE_SOURCE_MESSAGE_NOT_FOUND` | 转存的对话消息不存在或无权访问 |
 | `KNOWLEDGE_SOURCE_MESSAGE_INVALID` | 该消息类型不支持转存（仅用户或助手消息） |
-| `KNOWLEDGE_BASE_MEMBER_PERMISSION_DENIED` | 成员权限不满足操作要求（转存与文档删除要求 `EDITOR`） |
+| `KNOWLEDGE_BASE_MEMBER_PERMISSION_DENIED` | 成员权限不满足操作要求（转存与文档删除要求 `EDITOR`，库资料与成员管理要求 `MANAGER`） |
 | `KNOWLEDGE_DOCUMENT_RETRY_INVALID` | 只有 `FAILED` 状态的文档可以重试 |
 | `KNOWLEDGE_DOCUMENT_SCOPE_INVALID` | 可见范围缺少部门/项目，或部门/项目不属于当前租户 |
 | `KNOWLEDGE_FILE_OBJECT_NOT_FOUND` | 文件不存在、非当前租户或已删除 |

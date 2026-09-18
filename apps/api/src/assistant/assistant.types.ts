@@ -122,6 +122,7 @@ export interface PublicKnowledgeToolCitation {
  * 公开轮次事件联合。纯文本轮次只产出 started/status/content_delta/usage/completed/error；
  * 工具轮次额外产出 tool_call / tool_result，结构与公开契约 0.22.0 的
  * TurnStreamToolCallEvent / TurnStreamToolResultEvent 一致。
+ * completed 之后可能异步到达 related_questions（生成失败则不发）。
  */
 export type PublicTurnStreamEvent =
   | {
@@ -158,6 +159,12 @@ export type PublicTurnStreamEvent =
     error: { code: string; message: string } | null;
   }
   | { type: 'completed'; seq: number; latencyMs: number; finishReason: string | null }
+  | {
+    type: 'related_questions';
+    seq: number;
+    /** 基于本轮答复生成的简短追问建议，每个不超过 30 字。 */
+    questions: string[];
+  }
   | { type: 'error'; seq: number; error: PublicTurnErrorDetail };
 
 export function isTerminalTurnStatus(status: PublicTurnStatus): boolean {
