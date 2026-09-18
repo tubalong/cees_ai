@@ -63,19 +63,29 @@ function DocumentEditorModal({ documentId, onClose }: { documentId?: string; onC
     </Modal>;
 }
 
+type VisibilityScope = 'ALL' | 'TENANT' | 'PRIVATE';
+
 export default function ManagedDocumentsPage({ documents, loading }: { documents: ManagedDocumentSummary[]; loading: boolean }): JSX.Element {
     const { t } = useI18n();
     const formatDate = useDateFormatter();
     const [search, setSearch] = useState('');
+    const [scope, setScope] = useState<VisibilityScope>('ALL');
     const [selectedId, setSelectedId] = useState<string>();
     const [editingId, setEditingId] = useState<string>();
-    const filteredDocuments = documents.filter((document) => document.title.toLowerCase().includes(search.toLowerCase()));
-    const selected = documents.find((document) => document.id === selectedId) ?? documents[0];
+    const scopes: { value: VisibilityScope; label: string; icon: JSX.Element; count: number }[] = [
+        { value: 'ALL', label: t('全部文档'), icon: <BookOutlined />, count: documents.length },
+        { value: 'TENANT', label: t('租户可见'), icon: <FolderOutlined />, count: documents.filter((document) => document.visibility === 'TENANT').length },
+        { value: 'PRIVATE', label: t('我的私有'), icon: <FolderOutlined />, count: documents.filter((document) => document.visibility === 'PRIVATE').length },
+    ];
+    const scopedDocuments = scope === 'ALL' ? documents : documents.filter((document) => document.visibility === scope);
+    const filteredDocuments = scopedDocuments.filter((document) => document.title.toLowerCase().includes(search.toLowerCase()));
+    // 选中项只在当前筛选结果内查找，切换分类或搜索后自动回落到列表首项。
+    const selected = filteredDocuments.find((document) => document.id === selectedId) ?? filteredDocuments[0];
 
     return <div className="workspace-page knowledge-page">
         <header className="workspace-page-header"><div><h1>{t('生成文档')}</h1><p>{t('编辑并导出 AI 生成的受控文档')}</p></div><Button type="primary" icon={<Plus size={15} />}>{t('新建文档')}</Button></header>
         <div className="knowledge-layout">
-            <aside className="knowledge-folders surface-panel"><h3>{t('受控文档')}</h3><button className="is-active" type="button"><BookOutlined />{t('全部文档')}<span>{documents.length}</span></button><button type="button"><FolderOutlined />{t('租户可见')}<span>{documents.filter((document) => document.visibility === 'TENANT').length}</span></button><button type="button"><FolderOutlined />{t('我的私有')}<span>{documents.filter((document) => document.visibility === 'PRIVATE').length}</span></button></aside>
+            <aside className="knowledge-folders surface-panel"><h3>{t('受控文档')}</h3>{scopes.map((item) => <button className={scope === item.value ? 'is-active' : ''} type="button" key={item.value} aria-pressed={scope === item.value} onClick={() => setScope(item.value)}>{item.icon}{item.label}<span>{item.count}</span></button>)}</aside>
             <section className="knowledge-list surface-panel"><div className="knowledge-toolbar"><Input value={search} onChange={(event) => setSearch(event.target.value)} prefix={<FileTextOutlined />} placeholder={t('搜索受控文档')} /><Button icon={<StarOutlined />}>{t('收藏')}</Button></div><div className="knowledge-table-head"><span>{t('文档名称')}</span><span>{t('可见性')}</span><span>{t('更新时间')}</span><span>{t('版本')}</span></div>{loading ? <div className="data-loading"><Spin /></div> : filteredDocuments.length ? filteredDocuments.map((document) => <button className={`knowledge-row ${selected?.id === document.id ? 'is-selected' : ''}`} type="button" key={document.id} onClick={() => setSelectedId(document.id)}><span><i><FileTextOutlined /></i><b>{document.title}</b><small>{t('受控文档')}</small></span><span>{document.visibility === 'TENANT' ? t('租户可见') : t('私有')}</span><span>{formatDate(document.updatedAt)}</span><span><Tag>v{document.version}</Tag></span></button>) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('当前权限范围内暂无文档')} />}</section>
             <aside className="knowledge-detail surface-panel">{selected ? <><i className="knowledge-file-icon"><FileTextOutlined /></i><h2>{selected.title}</h2><Tag>{selected.visibility === 'TENANT' ? t('租户可见') : t('私有')}</Tag><p>{t('该文档由服务端统一执行权限、版本控制与审计。')}</p><dl><div><dt>{t('最近更新')}</dt><dd>{formatDate(selected.updatedAt)}</dd></div><div><dt>{t('当前版本')}</dt><dd>v{selected.version}</dd></div><div><dt>{t('有效权限')}</dt><dd>{selected.currentPermissions?.join('、') || t('读取')}</dd></div></dl><Button type="primary" block onClick={() => setEditingId(selected.id)}>{t('打开文档')}</Button></> : <Empty description={t('请选择文档')} />}</aside>
         </div>
