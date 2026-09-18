@@ -10,9 +10,9 @@ from app.api.generated.models import DocumentOptions, PptxSpec
 from app.core.errors import AIServiceError
 from app.documents.pptx_renderer import (
     _BLOCK_GAP,
+    PptxRenderer,
     _measure_block,
     _paginate,
-    PptxRenderer,
 )
 
 _BRAND = RGBColor(0x56, 0x5C, 0xF6)
