@@ -165,6 +165,9 @@ export default function DingTalkOrganizationPage({ authContext, onSessionExpired
     }, [departmentsQuery.error, integrationQuery.error, jobsQuery.error, onSessionExpired, rolesQuery.error, usersQuery.error]);
 
     useEffect(() => {
+        // 加载态下 IntegrationPanel 只渲染 Spin、不会挂载 <Form>，此时调用表单实例会触发
+        // antd 的 "Instance created by `useForm` is not connected to any Form element" 警告。
+        if (integrationQuery.isLoading) return;
         if (!integrationQuery.data) {
             integrationForm.resetFields();
             integrationForm.setFieldValue('status', true);
@@ -176,7 +179,7 @@ export default function DingTalkOrganizationPage({ authContext, onSessionExpired
             appSecret: '',
             status: integrationQuery.data.status === 'ACTIVE',
         });
-    }, [integrationForm, integrationQuery.data]);
+    }, [integrationForm, integrationQuery.data, integrationQuery.isLoading]);
 
     const refreshDingTalkData = (): void => {
         void queryClient.invalidateQueries({ queryKey: ['dingtalk-integration'] });
@@ -299,6 +302,9 @@ export default function DingTalkOrganizationPage({ authContext, onSessionExpired
         {
             key: 'integration',
             label: <span><SettingOutlined /> {t('企业绑定')}</span>,
+            // 表单在非激活标签页下默认不挂载，会导致 integrationForm 未连接 Form 元素
+            // （antd 警告 "Instance created by useForm is not connected to any Form element"）。
+            forceRender: true,
             children: <IntegrationPanel
                 integration={integrationQuery.data ?? null}
                 loading={integrationQuery.isLoading}
@@ -542,7 +548,7 @@ function MappingPanel({ preview, roles, rolesLoading, previewLoading, applyLoadi
                         { title: t('动作'), dataIndex: 'action', render: (action: string) => <Tag color={action === 'CREATE' ? 'blue' : action === 'CONFLICT' ? 'orange' : 'green'}>{dingTalkMappingActionLabel(action)}</Tag> },
                         { title: t('原因'), dataIndex: 'reason' },
                         { title: t('处理'), render: (_, department) => department.action !== 'CONFLICT' ? <Tag>{t('自动处理')}</Tag> : <Space><Select style={{ minWidth: 150 }} placeholder={t('选择处理方式')} value={departmentResolutions[department.dingtalkDepartmentId]?.action} onChange={(action: ResolutionAction) => onDepartmentAction(department.dingtalkDepartmentId, action)} options={[{ value: 'CREATE', label: t('创建新部门') }, { value: 'SKIP', label: t('跳过') }, ...(department.candidateDepartmentIds.length ? [{ value: 'BIND_EXISTING', label: t('绑定候选部门') }] : [])]} />{departmentResolutions[department.dingtalkDepartmentId]?.action === 'BIND_EXISTING' && <Select style={{ minWidth: 180 }} placeholder={t('选择候选部门')} value={departmentResolutions[department.dingtalkDepartmentId]?.departmentId} onChange={(departmentId: string) => onDepartmentAction(department.dingtalkDepartmentId, 'BIND_EXISTING', departmentId)} options={department.candidateDepartmentIds.map((departmentId) => ({ value: departmentId, label: departmentId }))} />}</Space> },
-                    ]} title={() => <Select value={departmentFilter} onChange={setDepartmentFilter} options={[{ value: 'ALL', label: t('全部') }, { value: 'CONFLICT', label: t('仅冲突') }, { value: 'CREATE', label: t('待创建') }, { value: 'MATCH_EXISTING', label: t('已匹配') }]} /> } />,
+                    ]} title={() => <Select value={departmentFilter} onChange={setDepartmentFilter} options={[{ value: 'ALL', label: t('全部') }, { value: 'CONFLICT', label: t('仅冲突') }, { value: 'CREATE', label: t('待创建') }, { value: 'MATCH_EXISTING', label: t('已匹配') }]} />} />,
                 }, {
                     key: 'users',
                     label: t('人员处理'),
@@ -552,7 +558,7 @@ function MappingPanel({ preview, roles, rolesLoading, previewLoading, applyLoadi
                         { title: t('建议账号'), dataIndex: 'suggestedAccount' },
                         { title: t('动作'), dataIndex: 'action', render: (action: string) => <Tag color={action === 'CREATE' ? 'blue' : action === 'CONFLICT' ? 'orange' : 'green'}>{dingTalkMappingActionLabel(action)}</Tag> },
                         { title: t('处理'), width: 420, render: (_, user) => user.action !== 'CONFLICT' ? <Tag>{t('自动处理')}</Tag> : <Space direction="vertical" size={4}><Space><Select style={{ minWidth: 150 }} placeholder={t('选择处理方式')} value={userResolutions[user.dingtalkUserId]?.action} onChange={(action: ResolutionAction) => onUserAction(user.dingtalkUserId, action)} options={[{ value: 'CREATE', label: t('创建新成员') }, { value: 'SKIP', label: t('跳过') }, ...(user.candidateMembershipIds.length ? [{ value: 'BIND_EXISTING', label: t('绑定候选成员') }] : [])]} />{userResolutions[user.dingtalkUserId]?.action === 'BIND_EXISTING' && <Select style={{ minWidth: 210 }} placeholder={t('选择候选成员')} value={userResolutions[user.dingtalkUserId]?.membershipId} onChange={(membershipId: string) => onUserAction(user.dingtalkUserId, 'BIND_EXISTING', membershipId)} options={user.candidateMembershipIds.map((membershipId) => ({ value: membershipId, label: membershipId }))} />}</Space>{userResolutions[user.dingtalkUserId]?.action === 'CREATE' && <Input size="small" placeholder={t('可选：自定义登录账号')} onChange={(event) => onUserAction(user.dingtalkUserId, 'CREATE', undefined, event.target.value)} />}</Space> },
-                    ]} title={() => <Select value={userFilter} onChange={setUserFilter} options={[{ value: 'ALL', label: t('全部') }, { value: 'CONFLICT', label: t('仅冲突') }, { value: 'CREATE', label: t('待创建') }, { value: 'MATCH_EXISTING', label: t('已匹配') }]} /> } />,
+                    ]} title={() => <Select value={userFilter} onChange={setUserFilter} options={[{ value: 'ALL', label: t('全部') }, { value: 'CONFLICT', label: t('仅冲突') }, { value: 'CREATE', label: t('待创建') }, { value: 'MATCH_EXISTING', label: t('已匹配') }]} />} />,
                 }, {
                     key: 'roles',
                     label: t('角色分配'),
