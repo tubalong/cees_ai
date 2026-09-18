@@ -91,11 +91,13 @@ GET    /api/v1/hr/reports/overtime-summary
 - 请假提交冻结余额，审批、撤回和取消在同一事务中更新余额和申请状态。
 - 创建请假申请时 `durationDays` 为可选的一致性校验值，服务端按申请时间与假期单位折算后以服务端结果为准；不一致返回 `400 HR_LEAVE_DURATION_MISMATCH`，折算结果低于 0.01 天返回 `400 HR_LEAVE_DURATION_TOO_SHORT`。
 - 请假响应新增 `yearAllocations`，按租户本地年度给出额度占用明细；跨年度申请会同时占用多个年度余额。
+- `GET /hr/leave-balances` 支持 `limit`、`cursor`，返回 `items` + `nextCursor`；`hr.leave.manage_all` 仅放宽当前租户内的请假数据范围。
 - 同一成员待审批或已批准的时间段不可重叠，重叠返回 `409 HR_LEAVE_REQUEST_OVERLAP`；缺少对应年度余额记录返回 `409 HR_LEAVE_BALANCE_NOT_FOUND`。
+- 创建加班申请时，`durationHours` 为客户端一致性校验值，正式时长由服务端按起止时间折算；不一致返回 `400 HR_OVERTIME_DURATION_MISMATCH`，时间重叠返回 `409 HR_OVERTIME_REQUEST_OVERLAP`。
 - 请假、加班、考勤修正和人事异动的审批人不能是申请本人，命中返回 `403 HR_SELF_REVIEW_FORBIDDEN`。
 - 员工档案 `PATCH` 不接受 `status = TERMINATED` 与 `leaveDate`，分别返回 `400 HR_PROFILE_TERMINATION_REQUIRES_CHANGE`、`400 HR_PROFILE_LEAVE_DATE_REQUIRES_CHANGE`；档案部门变更会同步租户成员部门并要求 `department.member.assign`。
 - 考勤导入单批最多 500 条，返回逐条失败位置与原因，不因单条失败回滚整批。
-- 人事异动审批通过后同步员工档案；目标部门变化同步 `TenantMembership.departmentId`。
+- 人事异动审批通过后，生效日为当前租户日期或更早时立即进入 `EFFECTIVE`；未来生效时进入 `APPROVED`，由后台任务在租户本地生效日应用。目标部门变化同步 `TenantMembership.departmentId`。
 - `RESIGNATION` 或 `TERMINATION` 审批通过时，同一事务停用对应租户成员、撤销全部未撤销会话并记录 `HR_OFFBOARDING_SUBJECT_DISABLED` 审计；主体记录不软删除。
 - 若目标成员是最后一名有效租户管理员，接口返回 `409 TENANT_LAST_ADMIN`，管理员交接完成后方可批准离职。
 - 全部 HR 资源按租户隔离并接入 `DataScopeResolverService`、乐观锁和审计。
@@ -127,6 +129,8 @@ GET    /api/v1/finance/reports/project-spend
 - 付款确认只允许 `APPROVED` 状态，记录付款方式、时间和流水号。
 - 费用汇总和项目支出接口为 B、D 提供只读聚合。
 - 报销列表支持关键字、状态、报销人、部门、项目、类别和费用发生日期筛选。
+- 普通报销人只能引用自己参与的有效项目；`finance.expense.manage_all` 或 `project.manage_all` 可引用当前租户其他有效项目，无效归属返回 `400 FINANCE_EXPENSE_PROJECT_INVALID`。
+- 自动报销单号按租户时区年份生成；`attachmentIds` 可省略并按空集合处理。
 - 详细边界见 [财务报销与支出数据设计](../architecture/finance-expense-management.md)。
 
 - 报销单包含明细数组，`totalAmount` 由服务端与明细求和校验。
@@ -161,7 +165,7 @@ GET    /api/v1/legal/reports/contract-summary
 
 - `activate`：`DRAFT -> ACTIVE`，要求合同已填写 `signedAt`。
 - `mark-pending-renewal`：`ACTIVE -> PENDING_RENEWAL`，要求存在 `endDate`。
-- `renew`：`PENDING_RENEWAL/EXPIRED -> ACTIVE`，要求 `newEndDate` 晚于原到期日期。
+- `renew`：`PENDING_RENEWAL/EXPIRED -> ACTIVE`，要求 `newEndDate` 晚于原到期日期且不得早于当前租户日期。
 - `terminate`：`ACTIVE/PENDING_RENEWAL -> TERMINATED`，必须填写终止日期和原因。
 - `archive`：`EXPIRED/TERMINATED -> ARCHIVED`。
 - 后台任务按租户时区处理进入续签窗口和合同到期，并写状态历史与系统审计。
@@ -169,6 +173,7 @@ GET    /api/v1/legal/reports/contract-summary
 ### 4.3 查询、数据范围与汇总
 
 - 列表支持关键字、状态、类型、负责人、部门、项目、币种、到期日期和到期窗口筛选。
+- 到期窗口与显式到期日期区间按交集组合；`expiringWithinDays` 与非 `ACTIVE/PENDING_RENEWAL` 状态组合时直接返回空页。
 - `SELF` 按负责人过滤，部门范围按合同归属部门过滤，项目范围按合同关联项目过滤。
 - `legal.contract.manage_all` 必须与接口要求的操作权限组合使用，只放宽当前租户内数据范围，不绕过状态机和乐观锁。
 - 汇总返回各状态数量、即将到期数量及按币种分组的生效和到期金额。

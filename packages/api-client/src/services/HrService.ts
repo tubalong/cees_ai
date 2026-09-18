@@ -207,9 +207,13 @@ export class HrService {
     public static listHrLeaveBalances({
         membershipId,
         year,
+        limit = 20,
+        cursor,
     }: {
         membershipId?: string,
         year?: number,
+        limit?: number,
+        cursor?: string,
     }): CancelablePromise<HrLeaveBalanceListResponseEnvelope> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -217,6 +221,8 @@ export class HrService {
             query: {
                 'membershipId': membershipId,
                 'year': year,
+                'limit': limit,
+                'cursor': cursor,
             },
             errors: {
                 401: `登录状态无效或已过期`,
@@ -706,9 +712,10 @@ export class HrService {
             body: requestBody,
             mediaType: 'application/json',
             errors: {
-                400: `请求字段校验失败`,
+                400: `请求字段校验失败；客户端加班时长与服务端按起止时间折算结果不一致时返回 HR_OVERTIME_DURATION_MISMATCH`,
                 401: `登录状态无效或已过期`,
                 403: `缺少 hr.overtime.request 权限`,
+                409: `与本人待审批或已批准的加班时间重叠（HR_OVERTIME_REQUEST_OVERLAP）`,
             },
         });
     }
@@ -918,7 +925,7 @@ export class HrService {
     }
     /**
      * 审批人事异动
-     * @returns HrEmployeeChangeResponseEnvelope 审批后的人事异动；批准离职或解除时同步停用租户成员并撤销其全部有效会话，历史主体记录保留
+     * @returns HrEmployeeChangeResponseEnvelope 审批后的人事异动；生效日为未来日期时进入 APPROVED，后台任务于租户本地生效日转为 EFFECTIVE；立即生效的离职或解除会同步停用租户成员并撤销其全部有效会话
      * @throws ApiError
      */
     public static reviewHrEmployeeChange({

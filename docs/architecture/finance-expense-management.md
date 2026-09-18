@@ -41,12 +41,14 @@ DRAFT/REJECTED/WITHDRAWN -> CANCELLED
 - `finance.expense.approve`：在数据范围内审批，不得自审。
 - `finance.expense.manage_all`：管理类别、租户级查看、取消和付款确认。
 - 非 `manage_all` 查询通过 `DataScopeResolverService` 折叠为成员、部门树或项目范围。
+- 普通成员创建或修改报销明细时，只能引用自己参与的有效项目；`finance.expense.manage_all` 或 `project.manage_all` 可引用当前租户其他有效项目。
 
 ## 5. 跨模块边界
 
 - B 的老板经营概况只读消费待审批报销数量和金额。
 - D 的项目预算只读消费项目维度 `submittedAmount`、`approvedAmount`、`paidAmount`。
 - 项目和部门只作为费用归属引用；财务模块不修改项目预算或组织主数据。
+- 报销单自动编号中的年份按租户时区计算，不直接使用服务器或数据库 UTC 年份。
 
 ## 6. 失败语义
 
@@ -66,3 +68,4 @@ DRAFT/REJECTED/WITHDRAWN -> CANCELLED
 - 付款管理同时展示待付款和已付款历史，详情展示付款时间、方式和流水号。
 - 财务报表展示本月费用分类，并按项目输出已提交、已批准和已付款支出。
 - 报销草稿支持上传和移除票据附件，正式保存时整体替换附件关联。
+- Desktop 客户端持续跟随 `nextCursor` 获取报销列表，不再只展示服务端首批 100 条记录。

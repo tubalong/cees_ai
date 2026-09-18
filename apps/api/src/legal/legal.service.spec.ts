@@ -55,6 +55,60 @@ describe('LegalService', () => {
         }));
     });
 
+    it('intersects expiring and explicit end-date filters', async () => {
+        const prisma = createPrismaMock();
+        prisma.legalContract.findMany.mockResolvedValue([]);
+        const service = createService(prisma);
+
+        await service.listContracts({
+            limit: 20,
+            expiringWithinDays: 30,
+            endDateFrom: '2026-09-20',
+            endDateTo: '2026-10-01',
+        });
+
+        expect(prisma.legalContract.findMany).toHaveBeenCalledWith(expect.objectContaining({
+            where: expect.objectContaining({
+                AND: expect.arrayContaining([
+                    expect.objectContaining({ endDate: expect.objectContaining({ gte: expect.any(Date), lte: expect.any(Date) }) }),
+                    { endDate: { gte: new Date('2026-09-20T00:00:00.000Z'), lte: new Date('2026-10-01T00:00:00.000Z') } },
+                ]),
+            }),
+        }));
+    });
+
+    it('returns an empty page when expiring is combined with an inactive status', async () => {
+        const prisma = createPrismaMock();
+        const service = createService(prisma);
+
+        await expect(service.listContracts({
+            limit: 20,
+            status: LegalContractStatus.DRAFT,
+            expiringWithinDays: 30,
+        })).resolves.toEqual({ items: [], nextCursor: null });
+        expect(prisma.legalContract.findMany).not.toHaveBeenCalled();
+    });
+
+    it('rejects renewal dates before the current tenant date', async () => {
+        jest.useFakeTimers().setSystemTime(new Date('2026-09-18T08:00:00.000Z'));
+        try {
+            const prisma = createPrismaMock();
+            prisma.legalContract.findFirst.mockResolvedValue(contractRecord({
+                status: LegalContractStatus.EXPIRED,
+                endDate: new Date('2026-09-16T00:00:00.000Z'),
+            }));
+            const service = createService(prisma);
+
+            await expect(service.renewContract(CONTRACT_ID, {
+                version: 1,
+                newEndDate: '2026-09-17',
+            })).rejects.toMatchObject({ response: expect.objectContaining({ code: 'LEGAL_CONTRACT_RENEWAL_DATE_INVALID' }) });
+            expect(prisma.legalContract.updateMany).not.toHaveBeenCalled();
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
     it('rejects activation when signed date is missing', async () => {
         const prisma = createPrismaMock();
         prisma.legalContract.findFirst.mockResolvedValue(contractRecord({ signedAt: null }));

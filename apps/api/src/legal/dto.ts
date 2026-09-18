@@ -29,7 +29,7 @@ export class CreateLegalContractDto {
     @IsOptional() @IsUUID() projectId?: string | null;
     @IsOptional() @Type(() => Number) @IsInt() @Min(0) @Max(365) renewalReminderDays = 30;
     @IsOptional() @IsArray() @ArrayMaxSize(20) @ArrayUnique() @IsUUID('4', { each: true })
-    attachmentIds: string[] = [];
+    attachmentIds?: string[];
 }
 
 export class UpdateLegalContractDto {

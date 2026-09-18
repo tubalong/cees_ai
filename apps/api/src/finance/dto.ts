@@ -70,7 +70,7 @@ export class CreateFinanceExpenseReportDto {
     @IsArray() @ArrayMinSize(1) @ArrayMaxSize(100) @ValidateNested({ each: true }) @Type(() => FinanceExpenseItemDto)
     items!: FinanceExpenseItemDto[];
     @IsOptional() @IsArray() @ArrayMaxSize(20) @ArrayUnique() @IsUUID('4', { each: true })
-    attachmentIds: string[] = [];
+    attachmentIds?: string[];
 }
 
 export class UpdateFinanceExpenseReportDto extends CreateFinanceExpenseReportDto {

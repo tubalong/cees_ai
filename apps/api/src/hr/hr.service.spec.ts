@@ -1,6 +1,7 @@
-import { ConflictException, ForbiddenException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
 import {
-    HrEmployeeChangeStatus, HrEmployeeChangeType, HrLeaveRequestStatus, HrLeaveUnit, HrProfileStatus, MembershipStatus,
+    HrEmployeeChangeStatus, HrEmployeeChangeType, HrLeaveRequestStatus, HrLeaveUnit, HrOvertimeRequestStatus,
+    HrProfileStatus, MembershipStatus,
 } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
 import { DataScopeResolverService } from '../rbac/data-scope-resolver.service';
@@ -60,6 +61,55 @@ describe('HrService', () => {
         expect(prisma.hrLeaveBalance.update).toHaveBeenCalledWith(expect.objectContaining({
             data: expect.objectContaining({ pendingDays: { decrement: 2 }, usedDays: { increment: 2 } }),
         }));
+    });
+
+    it('paginates leave balances and lets manage_all bypass role data scope', async () => {
+        const prisma = createPrismaMock();
+        prisma.hrLeaveBalance.findMany.mockResolvedValue([
+            balanceRecord({ id: BALANCE_ID }),
+            balanceRecord({ id: SECOND_BALANCE_ID }),
+        ]);
+        const scope = { resolve: jest.fn().mockResolvedValue({
+            tenantWide: false, membershipIds: [], departmentIds: [], projectIds: [], scopes: ['SELF'],
+        }) };
+        const service = createService(prisma, ['hr.leave.manage_all'], scope);
+
+        const result = await service.listLeaveBalances({ limit: 1 });
+
+        expect(result).toEqual(expect.objectContaining({
+            items: [expect.objectContaining({ id: BALANCE_ID })],
+            nextCursor: BALANCE_ID,
+        }));
+        expect(scope.resolve).not.toHaveBeenCalled();
+        expect(prisma.hrLeaveBalance.findMany).toHaveBeenCalledWith(expect.objectContaining({
+            where: expect.objectContaining({ membershipId: undefined }),
+            take: 2,
+        }));
+    });
+
+    it('derives overtime duration on the server and rejects a mismatching client value', async () => {
+        const service = createService(createPrismaMock(), ['hr.overtime.request']);
+
+        await expect(service.createOvertimeRequest({
+            startAt: '2026-09-18T10:00:00.000Z',
+            endAt: '2026-09-18T12:00:00.000Z',
+            durationHours: 1.5,
+            reason: '版本发布',
+        })).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('rejects overtime requests overlapping submitted or approved requests', async () => {
+        const prisma = createPrismaMock();
+        prisma.hrOvertimeRequest.findFirst.mockResolvedValue({ id: OVERTIME_REQUEST_ID });
+        const service = createService(prisma, ['hr.overtime.request']);
+
+        await expect(service.createOvertimeRequest({
+            startAt: '2026-09-18T10:00:00.000Z',
+            endAt: '2026-09-18T12:00:00.000Z',
+            durationHours: 2,
+            reason: '版本发布',
+        })).rejects.toMatchObject({ response: expect.objectContaining({ code: 'HR_OVERTIME_REQUEST_OVERLAP' }) });
+        expect(prisma.hrOvertimeRequest.create).not.toHaveBeenCalled();
     });
 
     it('masks sensitive profile fields without sensitive read permission', async () => {
@@ -122,7 +172,9 @@ describe('HrService', () => {
         'disables the tenant subject and revokes sessions for approved %s',
         async (type) => {
             const prisma = createPrismaMock();
-            prisma.hrEmployeeChange.findFirst.mockResolvedValue(employeeChangeRecord({ type }));
+            prisma.hrEmployeeChange.findFirst.mockResolvedValue(employeeChangeRecord({
+                type, effectiveDate: new Date('2026-09-17T00:00:00.000Z'),
+            }));
             prisma.hrEmployeeChange.updateMany.mockResolvedValue({ count: 1 });
             prisma.hrEmployeeChange.findUniqueOrThrow.mockResolvedValue(employeeChangeRecord({
                 type,
@@ -164,7 +216,9 @@ describe('HrService', () => {
 
     it('prevents offboarding the last active tenant administrator', async () => {
         const prisma = createPrismaMock();
-        prisma.hrEmployeeChange.findFirst.mockResolvedValue(employeeChangeRecord());
+        prisma.hrEmployeeChange.findFirst.mockResolvedValue(employeeChangeRecord({
+            effectiveDate: new Date('2026-09-17T00:00:00.000Z'),
+        }));
         prisma.hrEmployeeChange.updateMany.mockResolvedValue({ count: 1 });
         prisma.hrProfile.updateMany.mockResolvedValue({ count: 1 });
         prisma.tenantMembership.findFirst.mockResolvedValue(membershipRecord({
@@ -177,6 +231,78 @@ describe('HrService', () => {
             .rejects.toMatchObject({ response: expect.objectContaining({ code: 'TENANT_LAST_ADMIN' }) });
         expect(prisma.tenantMembership.updateMany).not.toHaveBeenCalled();
         expect(prisma.authSession.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('keeps a future employee change approved until its effective date', async () => {
+        const prisma = createPrismaMock();
+        prisma.hrEmployeeChange.findFirst.mockResolvedValue(employeeChangeRecord({
+            effectiveDate: new Date('2026-09-30T00:00:00.000Z'),
+        }));
+        prisma.hrEmployeeChange.updateMany.mockResolvedValue({ count: 1 });
+        prisma.hrEmployeeChange.findUniqueOrThrow.mockResolvedValue(employeeChangeRecord({
+            effectiveDate: new Date('2026-09-30T00:00:00.000Z'),
+            status: HrEmployeeChangeStatus.APPROVED,
+            version: 2,
+        }));
+        prisma.tenant.findFirst.mockResolvedValue({ timezone: 'Asia/Shanghai' });
+        const service = createService(prisma, ['hr.employee_change.approve']);
+
+        const result = await service.reviewEmployeeChange(EMPLOYEE_CHANGE_ID, { decision: 'APPROVE', version: 1 });
+
+        expect(result.status).toBe(HrEmployeeChangeStatus.APPROVED);
+        expect(prisma.hrProfile.updateMany).not.toHaveBeenCalled();
+        expect(prisma.tenantMembership.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('applies approved employee changes when the tenant-local effective date arrives', async () => {
+        const prisma = createPrismaMock();
+        prisma.hrEmployeeChange.findMany.mockResolvedValue([employeeChangeRecord({
+            status: HrEmployeeChangeStatus.APPROVED,
+            effectiveDate: new Date('2026-09-18T00:00:00.000Z'),
+            tenant: { timezone: 'Asia/Shanghai' },
+        })]);
+        prisma.hrEmployeeChange.updateMany.mockResolvedValue({ count: 1 });
+        prisma.hrProfile.updateMany.mockResolvedValue({ count: 1 });
+        prisma.tenantMembership.findFirst.mockResolvedValue(membershipRecord());
+        prisma.tenantMembership.updateMany.mockResolvedValue({ count: 1 });
+        prisma.authSession.updateMany.mockResolvedValue({ count: 1 });
+        const service = createService(prisma, ['hr.employee_change.approve']);
+
+        await expect(service.processApprovedEmployeeChanges(new Date('2026-09-18T08:00:00.000Z'))).resolves.toBe(1);
+
+        expect(prisma.hrEmployeeChange.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+            where: expect.objectContaining({ status: HrEmployeeChangeStatus.APPROVED }),
+            data: expect.objectContaining({ status: HrEmployeeChangeStatus.EFFECTIVE, updatedBy: null }),
+        }));
+        expect(prisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+            data: expect.objectContaining({
+                action: 'HR_EMPLOYEE_CHANGE_EFFECTIVE',
+                actorUserId: null,
+                actorMembershipId: null,
+            }),
+        }));
+    });
+
+    it('uses the queried year allocation in cross-year leave summaries', async () => {
+        const prisma = createPrismaMock();
+        prisma.tenant.findFirst.mockResolvedValue({ timezone: 'Asia/Shanghai' });
+        prisma.hrLeaveRequest.findMany.mockResolvedValue([leaveRequestRecord({
+            status: HrLeaveRequestStatus.APPROVED,
+            startAt: new Date('2026-12-28T00:00:00.000Z'),
+            endAt: new Date('2027-01-05T00:00:00.000Z'),
+            durationDays: 9,
+            yearAllocations: [{ year: 2026, days: 4 }, { year: 2027, days: 5 }],
+            leaveType: { name: '年假' },
+        })]);
+        const service = createService(prisma, ['hr.report.read']);
+
+        const result = await service.getLeaveSummaryReport({ year: 2027 });
+
+        expect(result).toEqual(expect.objectContaining({
+            totalRequestedDays: 5,
+            totalApprovedDays: 5,
+            byLeaveType: [expect.objectContaining({ requestedDays: 5, approvedDays: 5 })],
+        }));
     });
 
     it('derives the leave duration on the server and rejects a mismatching client value', async () => {
@@ -291,28 +417,36 @@ const USER_ID = '10000000-0000-0000-0000-000000000002';
 const MEMBERSHIP_ID = '50000000-0000-0000-0000-000000000001';
 const LEAVE_TYPE_ID = '60000000-0000-0000-0000-000000000001';
 const BALANCE_ID = '70000000-0000-0000-0000-000000000001';
+const SECOND_BALANCE_ID = '70000000-0000-0000-0000-000000000002';
 const REQUEST_ID = '80000000-0000-0000-0000-000000000001';
+const OVERTIME_REQUEST_ID = '81000000-0000-0000-0000-000000000001';
 const OFFBOARDED_MEMBERSHIP_ID = '50000000-0000-0000-0000-000000000002';
 const EMPLOYEE_CHANGE_ID = '90000000-0000-0000-0000-000000000001';
 const REQUESTER_MEMBERSHIP_ID = '50000000-0000-0000-0000-000000000003';
 const DEPARTMENT_ID = '40000000-0000-0000-0000-000000000001';
 
-function createService(prisma: Record<string, any>, permissions: string[] = []): HrService {
+function createService(
+    prisma: Record<string, any>,
+    permissions: string[] = [],
+    dataScope: Record<string, any> = { resolve: jest.fn().mockResolvedValue({
+        tenantWide: true, membershipIds: [], departmentIds: [], projectIds: [], scopes: [],
+    }) },
+): HrService {
     const tenantContext = { require: jest.fn().mockReturnValue({
         tenantId: TENANT_ID, userId: USER_ID, membershipId: MEMBERSHIP_ID, requestId: 'request-id',
         roles: ['tenant_admin'], permissions,
     }) } as unknown as TenantContext;
-    const scope = { resolve: jest.fn().mockResolvedValue({ tenantWide: true, membershipIds: [], departmentIds: [], projectIds: [], scopes: [] }) } as unknown as DataScopeResolverService;
-    return new HrService(prisma as unknown as PrismaService, tenantContext, scope);
+    return new HrService(prisma as unknown as PrismaService, tenantContext, dataScope as unknown as DataScopeResolverService);
 }
 
 function createPrismaMock(): Record<string, any> {
     const prisma: Record<string, any> = {
         hrLeaveType: { findFirst: jest.fn() },
-        hrLeaveBalance: { findFirst: jest.fn(), update: jest.fn() },
-        hrLeaveRequest: { findFirst: jest.fn(), create: jest.fn(), updateMany: jest.fn(), findUniqueOrThrow: jest.fn() },
+        hrLeaveBalance: { findMany: jest.fn(), findFirst: jest.fn(), findUniqueOrThrow: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
+        hrLeaveRequest: { findMany: jest.fn(), findFirst: jest.fn(), create: jest.fn(), updateMany: jest.fn(), findUniqueOrThrow: jest.fn() },
+        hrOvertimeRequest: { findFirst: jest.fn(), create: jest.fn(), findMany: jest.fn() },
         hrProfile: { findFirst: jest.fn(), updateMany: jest.fn(), findFirstOrThrow: jest.fn() },
-        hrEmployeeChange: { findFirst: jest.fn(), updateMany: jest.fn(), findUniqueOrThrow: jest.fn() },
+        hrEmployeeChange: { findMany: jest.fn(), findFirst: jest.fn(), create: jest.fn(), updateMany: jest.fn(), findUniqueOrThrow: jest.fn() },
         tenantMembership: { findFirst: jest.fn(), findMany: jest.fn(), updateMany: jest.fn(), count: jest.fn() },
         tenant: { findFirst: jest.fn() },
         department: { findFirst: jest.fn() },

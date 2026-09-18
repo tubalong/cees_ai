@@ -1,9 +1,9 @@
 # Legal 合同台账设计
 
-> 状态：已实现（OpenAPI 0.28.0 + Prisma migration 0034 + NestJS API + Desktop）
+> 状态：已实现（OpenAPI 0.30.0 + Prisma migration 0034 + NestJS API + Desktop）
 > Owner：C
-> 契约版本：`0.28.0`
-> 更新日期：2026-09-17
+> 契约版本：`0.30.0`
+> 更新日期：2026-09-18
 > 关联：`packages/contracts/openapi/openapi.yaml`、[人财法数据契约](hr-finance-legal-data-contract.md)、[分配策略与人财法 API](../api/assignment-and-hr-finance-legal-api.md)
 
 ## 1. 目标
@@ -73,7 +73,7 @@ AI 后续只能生成合同草稿或风险建议；正式合同台账仍由 Nest
 日期约束：
 
 - `endDate` 不为空时必须大于或等于 `startDate`。
-- 续签后的 `newEndDate` 必须晚于原 `endDate`；原 `endDate` 为空时不得执行续签动作。
+- 续签后的 `newEndDate` 必须晚于原 `endDate`，且不得早于当前租户日期；原 `endDate` 为空时不得执行续签动作。
 - 终止日期不得早于 `startDate`，也不得晚于服务端受理日期。
 - 所有“今天”按租户时区换算，禁止直接使用数据库 UTC 日期判断业务到期。
 
@@ -116,10 +116,10 @@ HT-{YYYY}-{6位流水号}
 | `ACTIVE` | 标记待续签 | `PENDING_RENEWAL` | 必须存在 `endDate` |
 | `ACTIVE` | 自动到期 | `EXPIRED` | 租户日期已经超过 `endDate` |
 | `ACTIVE` | 终止 | `TERMINATED` | 必须填写终止日期和原因 |
-| `PENDING_RENEWAL` | 续签 | `ACTIVE` | 新到期日期晚于原到期日期 |
+| `PENDING_RENEWAL` | 续签 | `ACTIVE` | 新到期日期晚于原到期日期且不早于当前租户日期 |
 | `PENDING_RENEWAL` | 自动到期 | `EXPIRED` | 租户日期已经超过 `endDate` |
 | `PENDING_RENEWAL` | 终止 | `TERMINATED` | 必须填写终止日期和原因 |
-| `EXPIRED` | 续签 | `ACTIVE` | 新到期日期晚于原到期日期 |
+| `EXPIRED` | 续签 | `ACTIVE` | 新到期日期晚于原到期日期且不早于当前租户日期 |
 | `EXPIRED` | 归档 | `ARCHIVED` | 记录归档操作者和备注 |
 | `TERMINATED` | 归档 | `ARCHIVED` | 记录归档操作者和备注 |
 | `ARCHIVED` | 无 | — | 终态，只读 |
@@ -168,6 +168,8 @@ HT-{YYYY}-{6位流水号}
 - `TENANT` 或 `legal.contract.manage_all`：当前租户全部合同。
 
 合同没有 `departmentId` 或 `projectId` 时，不因负责人当前部门或项目变化自动获得对应范围；仍可通过 `SELF`、`TENANT` 或 `manage_all` 访问。
+
+列表中的不同业务筛选条件取交集：到期窗口与显式 `endDateFrom/endDateTo` 会同时生效；`expiringWithinDays` 只适用于 `ACTIVE`、`PENDING_RENEWAL`，与其他状态组合时返回空页。
 
 创建或修改归属字段时，调用者只能选择其数据范围内的负责人、部门和项目；`manage_all` 可选择当前租户任意有效资源。
 

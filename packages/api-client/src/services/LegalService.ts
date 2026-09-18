@@ -265,7 +265,7 @@ export class LegalService {
             body: requestBody,
             mediaType: 'application/json',
             errors: {
-                400: `新到期日期或请求字段校验失败`,
+                400: `新到期日期必须晚于原到期日期且不得早于当前租户日期`,
                 401: `登录状态无效或已过期`,
                 403: `缺少 legal.contract.update 权限或数据范围不足`,
                 404: `合同不存在或不属于当前租户`,

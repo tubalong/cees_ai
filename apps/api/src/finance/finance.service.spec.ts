@@ -26,6 +26,7 @@ describe('FinanceService', () => {
         const prisma = createPrismaMock();
         prisma.tenantMembership.findFirst.mockResolvedValue({ id: MEMBERSHIP_ID, departmentId: DEPARTMENT_ID });
         prisma.financeExpenseCategory.findMany.mockResolvedValue([{ id: CATEGORY_ID }]);
+        prisma.tenant.findFirst.mockResolvedValue({ timezone: 'Asia/Shanghai' });
         prisma.financeExpenseReportSequence.upsert.mockResolvedValue({ lastNumber: 12 });
         prisma.financeExpenseReport.create.mockImplementation(async ({ data }: { data: Record<string, any> }) => reportRecord({
             reportNo: data.reportNo,
@@ -103,12 +104,65 @@ describe('FinanceService', () => {
             }),
         }));
     });
+
+    it('rejects project attribution when the requester is not a project member', async () => {
+        const prisma = createPrismaMock();
+        prisma.tenantMembership.findFirst.mockResolvedValue({ id: MEMBERSHIP_ID, departmentId: DEPARTMENT_ID });
+        prisma.financeExpenseCategory.findMany.mockResolvedValue([{ id: CATEGORY_ID }]);
+        prisma.project.count.mockResolvedValue(0);
+        const service = createService(prisma, ['finance.expense.request']);
+
+        await expect(service.createReport({
+            title: '项目采购',
+            currency: 'CNY',
+            items: [{
+                categoryId: CATEGORY_ID,
+                description: '测试设备',
+                amount: 100,
+                taxAmount: 0,
+                occurredAt: '2026-09-18',
+                projectId: PROJECT_ID,
+            }],
+        })).rejects.toMatchObject({ response: expect.objectContaining({ code: 'FINANCE_EXPENSE_PROJECT_INVALID' }) });
+
+        expect(prisma.project.count).toHaveBeenCalledWith({ where: expect.objectContaining({
+            members: { some: { membershipId: MEMBERSHIP_ID, deletedAt: null } },
+        }) });
+        expect(prisma.financeExpenseReport.create).not.toHaveBeenCalled();
+    });
+
+    it('uses the tenant-local calendar year in generated report numbers', async () => {
+        jest.useFakeTimers().setSystemTime(new Date('2026-12-31T16:30:00.000Z'));
+        try {
+            const prisma = createPrismaMock();
+            prisma.tenantMembership.findFirst.mockResolvedValue({ id: MEMBERSHIP_ID, departmentId: DEPARTMENT_ID });
+            prisma.financeExpenseCategory.findMany.mockResolvedValue([{ id: CATEGORY_ID }]);
+            prisma.tenant.findFirst.mockResolvedValue({ timezone: 'Asia/Shanghai' });
+            prisma.financeExpenseReportSequence.upsert.mockResolvedValue({ lastNumber: 1 });
+            prisma.financeExpenseReport.create.mockImplementation(async ({ data }: { data: Record<string, any> }) => reportRecord({ reportNo: data.reportNo }));
+            const service = createService(prisma);
+
+            const result = await service.createReport({
+                title: '跨年费用',
+                currency: 'CNY',
+                items: [{ categoryId: CATEGORY_ID, description: '云服务', amount: 10, taxAmount: 0, occurredAt: '2027-01-01' }],
+            });
+
+            expect(result.reportNo).toBe('EXP-2027-000001');
+            expect(prisma.financeExpenseReportSequence.upsert).toHaveBeenCalledWith(expect.objectContaining({
+                where: { tenantId_year: { tenantId: TENANT_ID, year: 2027 } },
+            }));
+        } finally {
+            jest.useRealTimers();
+        }
+    });
 });
 
 const TENANT_ID = '10000000-0000-0000-0000-000000000001';
 const USER_ID = '10000000-0000-0000-0000-000000000002';
 const MEMBERSHIP_ID = '50000000-0000-0000-0000-000000000001';
 const DEPARTMENT_ID = '60000000-0000-0000-0000-000000000001';
+const PROJECT_ID = '60000000-0000-0000-0000-000000000002';
 const CATEGORY_ID = '30000000-0000-0000-0000-000000000001';
 const REPORT_ID = '40000000-0000-0000-0000-000000000001';
 const ITEM_ID = '70000000-0000-0000-0000-000000000001';
@@ -134,6 +188,7 @@ function createPrismaMock(): Record<string, any> {
         financeExpenseStatusHistory: { create: jest.fn() },
         financeExpenseReportSequence: { upsert: jest.fn() },
         tenantMembership: { findFirst: jest.fn() },
+        tenant: { findFirst: jest.fn() },
         project: { count: jest.fn(), findFirst: jest.fn() },
         department: { count: jest.fn() },
         fileObject: { count: jest.fn() },

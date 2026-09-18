@@ -26,6 +26,7 @@ describe('BackgroundJobsService', () => {
             expiredAiActionDrafts: 0,
             workReportReminderNotifications: 0,
             legalContractTransitions: 0,
+            hrEmployeeChangesApplied: 0,
         });
         expect(prisma.uploadSession.updateMany).not.toHaveBeenCalled();
     });
@@ -167,10 +168,12 @@ function createService(
     notifications = createNotificationMock(),
 ): BackgroundJobsService {
     const legalService = { processLifecycle: jest.fn().mockResolvedValue(0) };
+    const hrService = { processApprovedEmployeeChanges: jest.fn().mockResolvedValue(0) };
     return new BackgroundJobsService(
         prisma as unknown as PrismaService,
         redis as unknown as RedisService,
         notifications as unknown as NotificationService,
         legalService as any,
+        hrService as any,
     );
 }
