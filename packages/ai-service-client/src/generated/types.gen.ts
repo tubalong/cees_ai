@@ -435,6 +435,23 @@ export type PageBreakBlock = {
     type: 'page_break';
 };
 
+export type ImageBlock = {
+    type: 'image';
+    /**
+     * Image location the renderer downloads (COS signed URL or data URL). Callers must only pass locations the reader is allowed to see.
+     */
+    url: string;
+    /**
+     * Alternative text; used as the placeholder label when the image cannot be fetched.
+     */
+    alt?: string | null;
+    caption?: string | null;
+    /**
+     * Share of the content width the image occupies; height follows the source aspect ratio.
+     */
+    width_ratio?: number;
+};
+
 export type DocumentBlock = ({
     type: 'paragraph';
 } & ParagraphBlock) | ({
@@ -447,7 +464,9 @@ export type DocumentBlock = ({
     type: 'quote';
 } & QuoteBlock) | ({
     type: 'page_break';
-} & PageBreakBlock);
+} & PageBreakBlock) | ({
+    type: 'image';
+} & ImageBlock);
 
 export type DocumentSection = {
     heading: string;
@@ -505,6 +524,87 @@ export type RenderDocxRequest = {
     user_id: string;
     document: DocumentSpec;
     document_options: DocumentOptions;
+};
+
+export type RenderPdfRequest = {
+    request_id: string;
+    tenant_id: string;
+    user_id: string;
+    document: DocumentSpec;
+    document_options: DocumentOptions;
+};
+
+export type PptxParagraphBlock = {
+    type: 'paragraph';
+    text: string;
+};
+
+export type PptxBulletListBlock = {
+    type: 'bullet_list';
+    items: Array<string>;
+};
+
+export type PptxNumberedListBlock = {
+    type: 'numbered_list';
+    items: Array<string>;
+};
+
+export type PptxTableBlock = {
+    type: 'table';
+    columns: Array<string>;
+    rows: Array<Array<string>>;
+};
+
+export type PptxQuoteBlock = {
+    type: 'quote';
+    text: string;
+    attribution?: string | null;
+};
+
+export type PptxImageBlock = {
+    type: 'image';
+    /**
+     * COS URL of the image to embed.
+     */
+    url: string;
+    alt?: string | null;
+    caption?: string | null;
+};
+
+export type PptxBlock = ({
+    type: 'paragraph';
+} & PptxParagraphBlock) | ({
+    type: 'bullet_list';
+} & PptxBulletListBlock) | ({
+    type: 'numbered_list';
+} & PptxNumberedListBlock) | ({
+    type: 'table';
+} & PptxTableBlock) | ({
+    type: 'quote';
+} & PptxQuoteBlock) | ({
+    type: 'image';
+} & PptxImageBlock);
+
+export type PptxSlide = {
+    title: string;
+    layout: 'title' | 'title_and_content' | 'section_header' | 'two_column' | 'blank';
+    blocks: Array<PptxBlock>;
+};
+
+export type PptxSpec = {
+    schema_version: '1.0';
+    title: string;
+    subtitle?: string | null;
+    theme?: 'brand' | 'neutral';
+    slides: Array<PptxSlide>;
+};
+
+export type RenderPptxRequest = {
+    request_id: string;
+    tenant_id: string;
+    user_id: string;
+    pptx: PptxSpec;
+    options: DocumentOptions;
 };
 
 export type TextOutput = {
@@ -1375,6 +1475,72 @@ export type GenerateDocumentDocxResponses = {
 };
 
 export type GenerateDocumentDocxResponse = GenerateDocumentDocxResponses[keyof GenerateDocumentDocxResponses];
+
+export type RenderDocumentPdfData = {
+    body: RenderPdfRequest;
+    path?: never;
+    query?: never;
+    url: '/internal/v1/documents/render-pdf';
+};
+
+export type RenderDocumentPdfErrors = {
+    /**
+     * Internal authentication failed
+     */
+    401: ErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ErrorResponse;
+    /**
+     * Unexpected internal service error
+     */
+    500: ErrorResponse;
+};
+
+export type RenderDocumentPdfError = RenderDocumentPdfErrors[keyof RenderDocumentPdfErrors];
+
+export type RenderDocumentPdfResponses = {
+    /**
+     * PDF document rendered
+     */
+    200: Blob | File;
+};
+
+export type RenderDocumentPdfResponse = RenderDocumentPdfResponses[keyof RenderDocumentPdfResponses];
+
+export type RenderDocumentPptxData = {
+    body: RenderPptxRequest;
+    path?: never;
+    query?: never;
+    url: '/internal/v1/documents/render-pptx';
+};
+
+export type RenderDocumentPptxErrors = {
+    /**
+     * Internal authentication failed
+     */
+    401: ErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ErrorResponse;
+    /**
+     * Unexpected internal service error
+     */
+    500: ErrorResponse;
+};
+
+export type RenderDocumentPptxError = RenderDocumentPptxErrors[keyof RenderDocumentPptxErrors];
+
+export type RenderDocumentPptxResponses = {
+    /**
+     * PPTX presentation rendered
+     */
+    200: Blob | File;
+};
+
+export type RenderDocumentPptxResponse = RenderDocumentPptxResponses[keyof RenderDocumentPptxResponses];
 
 export type ExtractFileData = {
     body: FileExtractionRequest;

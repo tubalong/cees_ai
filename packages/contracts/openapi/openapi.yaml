@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CEES AI API
-  version: 0.31.0
+  version: 0.32.0
   description: 以本文件为唯一事实源的公开 API 契约。资源与操作按 docs/api 约定补充。
 
 servers:
@@ -2073,6 +2073,136 @@ paths:
                 type: string
           content:
             application/vnd.openxmlformats-officedocument.wordprocessingml.document:
+              schema:
+                type: string
+                format: binary
+        "400":
+          description: 文档没有可导出的生成规格
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "401":
+          description: 登录状态无效或已过期
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "403":
+          description: 缺少 document.read 权限
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "404":
+          description: 文档不存在或不在授权范围内
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "503":
+          description: AI 服务不可用
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /documents/{documentId}/export/pdf:
+    parameters:
+      - name: documentId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      summary: 导出授权范围内文档为 PDF
+      description: >-
+        由生成时落库的结构化 DocumentSpec 经 ai-service 确定性渲染为 PDF 文件
+        （内嵌 CJK 字体），不调用 LLM；复用 document.read 权限。
+      operationId: documentExportPdf
+      tags: [Document]
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: PDF 文档文件
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Content-Disposition:
+              description: 附件文件名，含 ASCII 回退与 RFC 5987 UTF-8 文件名
+              schema:
+                type: string
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "400":
+          description: 文档没有可导出的生成规格
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "401":
+          description: 登录状态无效或已过期
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "403":
+          description: 缺少 document.read 权限
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "404":
+          description: 文档不存在或不在授权范围内
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "503":
+          description: AI 服务不可用
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /documents/{documentId}/export/pptx:
+    parameters:
+      - name: documentId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      summary: 导出授权范围内文档为 PPTX
+      description: >-
+        由生成时落库的结构化 DocumentSpec 按「一节一页」映射后经 ai-service
+        确定性渲染为 PPTX 文件，不调用 LLM；复用 document.read 权限。
+      operationId: documentExportPptx
+      tags: [Document]
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: PPTX 演示文稿文件
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Content-Disposition:
+              description: 附件文件名，含 ASCII 回退与 RFC 5987 UTF-8 文件名
+              schema:
+                type: string
+          content:
+            application/vnd.openxmlformats-officedocument.presentationml.presentation:
               schema:
                 type: string
                 format: binary
@@ -9243,6 +9373,20 @@ components:
           description: 工具产生的稳定正式资源引用（IMAGE 为 AI 生成图片、DOCUMENT 为 AI 生成文档）；非 TOOL 消息为空数组；资源访问 URL 必须通过对应资源接口按需获取（图片为 GET /api/v1/images/{imageId}），消息正文不携带签名 URL
           items:
             $ref: '#/components/schemas/ToolResultResourceReference'
+        sources:
+          type: array
+          maxItems: 20
+          default: []
+          description: TOOL 消息对应工具调用返回的结构化来源（联网搜索等非资源型工具）；其他角色固定为空数组；来源按轮次归属，老客户端可忽略该字段
+          items:
+            $ref: '#/components/schemas/ToolSource'
+        citations:
+          type: array
+          maxItems: 20
+          default: []
+          description: TOOL 消息对应工具调用返回的知识库文档引用；其他角色固定为空数组；引用按轮次归属，老客户端可忽略该字段
+          items:
+            $ref: '#/components/schemas/KnowledgeToolCitation'
         createdAt:
           type: string
           format: date-time
@@ -9298,6 +9442,11 @@ components:
             imageFileIds:
               type: array
               minItems: 1
+        - required: [fileIds]
+          properties:
+            fileIds:
+              type: array
+              minItems: 1
       properties:
         content:
           type: [string, 'null']
@@ -9313,6 +9462,15 @@ components:
           items:
             type: string
             format: uuid
+        fileIds:
+          type: array
+          maxItems: 8
+          minItems: 1
+          uniqueItems: true
+          description: Stable document FileObject IDs referenced by this user message; the API extracts text and injects it into the trusted conversation context
+          items:
+            type: string
+            format: uuid
         mode:
           allOf:
             - $ref: '#/components/schemas/ChatMode'
@@ -9321,6 +9479,10 @@ components:
           type: boolean
           default: false
           description: 本轮是否允许检索知识库；省略时默认关闭。开启后 AI 可获得知识库检索工具，检索范围按用户权限折叠
+        webSearchEnabled:
+          type: boolean
+          default: false
+          description: 本轮是否允许联网搜索；省略时默认关闭。关闭时 AI 不获得联网检索工具；若用户消息明确提到需要联网，服务端可为本轮自动临时启用并在 started 事件回传（见 TurnCapabilities.autoEnabled）
 
     TurnStatus:
       type: string
@@ -9443,6 +9605,27 @@ components:
           $ref: '#/components/schemas/ChatMode'
         contextUsage:
           $ref: '#/components/schemas/ChatContextUsage'
+        capabilities:
+          $ref: '#/components/schemas/TurnCapabilities'
+
+    TurnCapabilities:
+      type: object
+      additionalProperties: false
+      required: [webSearch, knowledgeBase, autoEnabled]
+      description: 本轮实际生效的对话能力；由显式开关与服务端意图自动启用合并后得出
+      properties:
+        webSearch:
+          type: boolean
+          description: 本轮实际是否启用联网搜索
+        knowledgeBase:
+          type: boolean
+          description: 本轮实际是否启用知识库检索
+        autoEnabled:
+          type: array
+          description: 由服务端意图识别自动启用的能力标识；用户显式开启的不计入，供前端展示透明提示
+          items:
+            type: string
+            enum: [web_search, knowledge_search]
 
     TurnPhase:
       type: string
@@ -12464,7 +12647,7 @@ components:
 
     DocumentDetail:
       type: object
-      required: [id, resourceId, title, content, visibility, ownerMembershipId, effectivePermissions, version, createdAt, updatedAt]
+      required: [id, resourceId, title, content, documentSpec, fileObjectId, fileMimeType, visibility, ownerMembershipId, effectivePermissions, version, createdAt, updatedAt]
       properties:
         id:
           type: string
@@ -12476,6 +12659,17 @@ components:
           type: string
         content:
           type: string
+        documentSpec:
+          type: [object, "null"]
+          additionalProperties: true
+          description: 结构化生成规格（DocumentSpec），用于导出 DOCX/PDF/PPTX；手工创建的文档为 null。
+        fileObjectId:
+          type: [string, "null"]
+          format: uuid
+          description: 生成时落盘的正式文件标识；手工文档或落盘失败时为 null。
+        fileMimeType:
+          type: [string, "null"]
+          description: 生成时请求的正式文件 MIME 类型，用于客户端恢复 DOCX/PDF/PPTX 下载格式。
         visibility:
           $ref: "#/components/schemas/DocumentVisibility"
         ownerMembershipId:

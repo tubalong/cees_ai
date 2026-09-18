@@ -4,6 +4,7 @@
 /* eslint-disable */
 import type { ChatContextUsage } from './ChatContextUsage';
 import type { ChatMode } from './ChatMode';
+import type { TurnCapabilities } from './TurnCapabilities';
 export type TurnStreamStartedEvent = {
     type: 'started';
     /**
@@ -24,5 +25,6 @@ export type TurnStreamStartedEvent = {
     turnId: string;
     mode: ChatMode;
     contextUsage: ChatContextUsage;
+    capabilities?: TurnCapabilities;
 };
 

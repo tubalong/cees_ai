@@ -173,4 +173,56 @@ export class DocumentService {
             },
         });
     }
+    /**
+     * 导出授权范围内文档为 PDF
+     * 由生成时落库的结构化 DocumentSpec 经 ai-service 确定性渲染为 PDF 文件 （内嵌 CJK 字体），不调用 LLM；复用 document.read 权限。
+     * @returns binary PDF 文档文件
+     * @throws ApiError
+     */
+    public static documentExportPdf({
+        documentId,
+    }: {
+        documentId: string,
+    }): CancelablePromise<Blob> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/documents/{documentId}/export/pdf',
+            path: {
+                'documentId': documentId,
+            },
+            errors: {
+                400: `文档没有可导出的生成规格`,
+                401: `登录状态无效或已过期`,
+                403: `缺少 document.read 权限`,
+                404: `文档不存在或不在授权范围内`,
+                503: `AI 服务不可用`,
+            },
+        });
+    }
+    /**
+     * 导出授权范围内文档为 PPTX
+     * 由生成时落库的结构化 DocumentSpec 按「一节一页」映射后经 ai-service 确定性渲染为 PPTX 文件，不调用 LLM；复用 document.read 权限。
+     * @returns binary PPTX 演示文稿文件
+     * @throws ApiError
+     */
+    public static documentExportPptx({
+        documentId,
+    }: {
+        documentId: string,
+    }): CancelablePromise<Blob> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/documents/{documentId}/export/pptx',
+            path: {
+                'documentId': documentId,
+            },
+            errors: {
+                400: `文档没有可导出的生成规格`,
+                401: `登录状态无效或已过期`,
+                403: `缺少 document.read 权限`,
+                404: `文档不存在或不在授权范围内`,
+                503: `AI 服务不可用`,
+            },
+        });
+    }
 }
