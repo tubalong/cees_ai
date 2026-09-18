@@ -111,6 +111,8 @@ describe('ConversationService', () => {
       content: '你好',
       imageFileIds: [],
       resources: [],
+      sources: [],
+      citations: [],
     });
     expect(prisma.conversationMessage.findMany).toHaveBeenCalledWith({
       where: { tenantId: TENANT_ID, conversationId: CONVERSATION_ID },
@@ -120,7 +122,7 @@ describe('ConversationService', () => {
         content: true,
         imageFileIds: true,
         turn: { select: { seq: true } },
-        toolCall: { select: { executedResourceType: true, executedResourceId: true } },
+        toolCall: { select: { executedResourceType: true, executedResourceId: true, result: true } },
       }),
     });
   });
@@ -136,7 +138,17 @@ describe('ConversationService', () => {
       toolCallId: '80000000-0000-4000-8000-000000000001',
       turnId: '90000000-0000-4000-8000-000000000002',
       turn: { seq: 2 },
-      toolCall: { executedResourceType: 'IMAGE', executedResourceId: 'a0000000-0000-4000-8000-000000000001' },
+      toolCall: {
+        executedResourceType: 'IMAGE',
+        executedResourceId: 'a0000000-0000-4000-8000-000000000001',
+        result: {
+          summary: '图片已生成',
+          resourceType: 'IMAGE',
+          resourceId: 'a0000000-0000-4000-8000-000000000001',
+          sources: [],
+          citations: [],
+        },
+      },
       createdAt: new Date('2026-09-01T00:00:04.000Z'),
     });
     const secondTurnUser = messageRecord({
@@ -180,6 +192,87 @@ describe('ConversationService', () => {
       [],
       [{ type: 'IMAGE', id: 'a0000000-0000-4000-8000-000000000001' }],
     ]);
+    expect(result.messages.map((message) => message.sources)).toEqual([[], [], [], []]);
+    expect(result.messages.map((message) => message.citations)).toEqual([[], [], [], []]);
+  });
+
+  it('returns per-turn tool sources and citations from the persisted tool result', async () => {
+    const prisma = createPrismaMock();
+    prisma.conversation.findFirst.mockResolvedValue(conversationRecord());
+    const webSearchToolMessage = messageRecord({
+      id: '70000000-0000-4000-8000-000000000011',
+      role: ConversationMessageRole.TOOL,
+      content: '{"type":"web_search_result"}',
+      toolCallId: '80000000-0000-4000-8000-000000000011',
+      turnId: '90000000-0000-4000-8000-000000000011',
+      turn: { seq: 1 },
+      toolCall: {
+        executedResourceType: null,
+        executedResourceId: null,
+        result: {
+          summary: '搜索结果',
+          resourceType: null,
+          resourceId: null,
+          sources: [
+            {
+              id: 'call-1:1',
+              title: 'Docker 部署指南',
+              url: 'https://example.com/docker',
+              domain: 'example.com',
+              snippet: '部署步骤',
+              publishedAt: null,
+            },
+            { id: 'broken-missing-url', title: '缺少 URL' },
+          ],
+          citations: [
+            {
+              id: 'b0000000-0000-4000-8000-000000000001',
+              title: '运维手册',
+              snippet: '第 3 章',
+              pageIndex: 2,
+              knowledgeBaseId: 'c0000000-0000-4000-8000-000000000001',
+              deletable: true,
+            },
+            { id: '', title: '非法条目' },
+          ],
+        },
+      },
+      createdAt: new Date('2026-09-01T00:00:02.000Z'),
+    });
+    const knowledgeToolMessage = messageRecord({
+      id: '70000000-0000-4000-8000-000000000012',
+      role: ConversationMessageRole.TOOL,
+      content: '无来源',
+      toolCallId: '80000000-0000-4000-8000-000000000012',
+      turnId: '90000000-0000-4000-8000-000000000012',
+      turn: { seq: 2 },
+      toolCall: { executedResourceType: null, executedResourceId: null, result: null },
+      createdAt: new Date('2026-09-01T00:00:03.000Z'),
+    });
+    prisma.conversationMessage.findMany.mockResolvedValue([webSearchToolMessage, knowledgeToolMessage]);
+    const service = createService(prisma);
+
+    const result = await service.getDetail(CONVERSATION_ID);
+
+    // 来源与引用只跟随产生它们的那一轮 TOOL 消息，不会挂到其它轮次。
+    expect(result.messages[0].sources).toEqual([{
+      id: 'call-1:1',
+      title: 'Docker 部署指南',
+      url: 'https://example.com/docker',
+      domain: 'example.com',
+      snippet: '部署步骤',
+      publishedAt: null,
+    }]);
+    expect(result.messages[0].citations).toEqual([{
+      id: 'b0000000-0000-4000-8000-000000000001',
+      title: '运维手册',
+      snippet: '第 3 章',
+      pageIndex: 2,
+      knowledgeBaseId: 'c0000000-0000-4000-8000-000000000001',
+      deletable: true,
+    }]);
+    expect(result.messages[1].sources).toEqual([]);
+    expect(result.messages[1].citations).toEqual([]);
   });
 
   it('updates a title with optimistic locking and an audit record', async () => {

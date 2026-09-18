@@ -7,7 +7,7 @@ import pytest
 from app.api.generated.models import ComposeDocumentRequest
 from app.core.config import ModelRole, OutputMode
 from app.core.errors import AIServiceError
-from app.documents.composer import DocumentComposer
+from app.documents.composer import MAX_COMPOSE_ATTEMPTS, DocumentComposer
 from app.llm.router import LLMRouter
 from tests.helpers import StubProvider, catalog, profile, result
 
@@ -66,11 +66,14 @@ def plan_data() -> dict[str, object]:
     }
 
 
-def build_composer(output: dict[str, object], *, finish_reason: str = "stop") -> tuple[
-    DocumentComposer, StubProvider
-]:
+def build_composer(
+    output: dict[str, object], *, finish_reason: str = "stop", repeat: int = 1
+) -> tuple[DocumentComposer, StubProvider]:
     model_profile = profile(modes={OutputMode.json_schema})
-    provider = StubProvider(model_profile, [result(output, finish_reason=finish_reason)])
+    provider = StubProvider(
+        model_profile,
+        [result(output, finish_reason=finish_reason)] * repeat,
+    )
     router = LLMRouter(
         catalog({"structured": model_profile}, {ModelRole.structured: ["structured"]}),
         lambda _name, _profile: provider,
@@ -146,13 +149,40 @@ async def test_rejects_truncated_document() -> None:
 
 @pytest.mark.asyncio
 async def test_maps_invalid_provider_structure_to_document_error() -> None:
-    composer, _ = build_composer({"schema_version": "1.0"})
+    # 结构化输出不合规会重试 MAX_COMPOSE_ATTEMPTS 次；每次都不合规才最终失败。
+    composer, provider = build_composer(
+        {"schema_version": "1.0"}, repeat=MAX_COMPOSE_ATTEMPTS
+    )
 
     with pytest.raises(AIServiceError) as raised:
         await composer.compose(ComposeDocumentRequest.model_validate(request_data()))
 
     assert raised.value.code == "DOCUMENT_SPEC_INVALID"
     assert raised.value.status_code == 502
+    assert len(provider.calls) == MAX_COMPOSE_ATTEMPTS
+
+
+@pytest.mark.asyncio
+async def test_recovers_when_a_retry_returns_valid_structure() -> None:
+    model_profile = profile(modes={OutputMode.json_schema})
+    provider = StubProvider(
+        model_profile,
+        [
+            result({"schema_version": "1.0"}),
+            result(document_data()),
+        ],
+    )
+    router = LLMRouter(
+        catalog({"structured": model_profile}, {ModelRole.structured: ["structured"]}),
+        lambda _name, _profile: provider,
+    )
+
+    composition = await DocumentComposer(router).compose(
+        ComposeDocumentRequest.model_validate(request_data())
+    )
+
+    assert composition.document.title == "Implementation plan"
+    assert len(provider.calls) == 2
 
 
 @pytest.mark.asyncio

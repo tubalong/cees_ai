@@ -3,6 +3,9 @@ import type { ChatToolDefinition } from '@cees/ai-service-client';
 /** 对话级知识库开关控制的可检索工具名；开关关闭时该工具不进入模型工具列表。 */
 export const KNOWLEDGE_SEARCH_TOOL_NAME = 'knowledge_search';
 
+/** 对话级联网开关控制的可检索工具名；开关关闭时该工具不进入模型工具列表。 */
+export const WEB_SEARCH_TOOL_NAME = 'web_search';
+
 /**
  * 工具执行上下文：由 TurnRunner 从请求上下文组装后传入，
  * 工具不得自行读取 AsyncLocalStorage 或重复解析身份与权限。
@@ -24,6 +27,11 @@ export interface ToolExecutionContext {
   permissions: string[];
   /** 本轮是否允许检索知识库（对话级开关）；开关关闭时模型拿不到知识库工具。 */
   knowledgeBaseEnabled: boolean;
+  /**
+   * 本轮是否允许联网搜索：由显式开关与意图自动启用合并后的“有效值”。
+   * 关闭时模型拿不到联网工具，执行器再做一次兜底校验。
+   */
+  webSearchEnabled: boolean;
 }
 
 export interface ToolSource {

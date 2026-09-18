@@ -704,6 +704,90 @@ paths:
           $ref: "#/components/responses/InvalidProviderOutput"
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
+  /internal/v1/documents/render-pdf:
+    post:
+      tags: [documents]
+      operationId: renderDocumentPdf
+      summary: Render a DocumentSpec as PDF
+      description: >-
+        Deterministically renders a validated DocumentSpec as a PDF with embedded
+        CJK fonts, without invoking an LLM.
+      security:
+        - internalToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RenderPdfRequest"
+      responses:
+        "200":
+          description: PDF document rendered
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Content-Disposition:
+              description: Attachment filename with ASCII fallback and RFC 5987 UTF-8 filename.
+              schema:
+                type: string
+            X-Request-Id:
+              schema:
+                type: string
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /internal/v1/documents/render-pptx:
+    post:
+      tags: [documents]
+      operationId: renderDocumentPptx
+      summary: Render a PptxSpec as PPTX
+      description: >-
+        Deterministically renders a validated PptxSpec as a PPTX presentation,
+        without invoking an LLM.
+      security:
+        - internalToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RenderPptxRequest"
+      responses:
+        "200":
+          description: PPTX presentation rendered
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Content-Disposition:
+              description: Attachment filename with ASCII fallback and RFC 5987 UTF-8 filename.
+              schema:
+                type: string
+            X-Request-Id:
+              schema:
+                type: string
+          content:
+            application/vnd.openxmlformats-officedocument.presentationml.presentation:
+              schema:
+                type: string
+                format: binary
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /internal/v1/files/extract:
     post:
       tags: [files]
@@ -1917,6 +2001,38 @@ components:
         type:
           type: string
           const: page_break
+    ImageBlock:
+      type: object
+      additionalProperties: false
+      required: [type, url]
+      properties:
+        type:
+          type: string
+          const: image
+        url:
+          type: string
+          minLength: 1
+          maxLength: 2048
+          description: >-
+            Image location the renderer downloads (COS signed URL or data URL).
+            Callers must only pass locations the reader is allowed to see.
+        alt:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 256
+          default: null
+          description: Alternative text; used as the placeholder label when the image cannot be fetched.
+        caption:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 256
+          default: null
+        width_ratio:
+          type: number
+          minimum: 0.2
+          maximum: 1
+          default: 1
+          description: Share of the content width the image occupies; height follows the source aspect ratio.
     DocumentBlock:
       oneOf:
         - $ref: "#/components/schemas/ParagraphBlock"
@@ -1925,6 +2041,7 @@ components:
         - $ref: "#/components/schemas/TableBlock"
         - $ref: "#/components/schemas/QuoteBlock"
         - $ref: "#/components/schemas/PageBreakBlock"
+        - $ref: "#/components/schemas/ImageBlock"
       discriminator:
         propertyName: type
         mapping:
@@ -1934,6 +2051,7 @@ components:
           table: "#/components/schemas/TableBlock"
           quote: "#/components/schemas/QuoteBlock"
           page_break: "#/components/schemas/PageBreakBlock"
+          image: "#/components/schemas/ImageBlock"
     DocumentSection:
       type: object
       additionalProperties: false
@@ -2117,6 +2235,218 @@ components:
         document:
           $ref: "#/components/schemas/DocumentSpec"
         document_options:
+          $ref: "#/components/schemas/DocumentOptions"
+    RenderPdfRequest:
+      type: object
+      additionalProperties: false
+      required: [request_id, tenant_id, user_id, document, document_options]
+      properties:
+        request_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        tenant_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        user_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        document:
+          $ref: "#/components/schemas/DocumentSpec"
+        document_options:
+          $ref: "#/components/schemas/DocumentOptions"
+    PptxParagraphBlock:
+      type: object
+      additionalProperties: false
+      required: [type, text]
+      properties:
+        type:
+          type: string
+          const: paragraph
+        text:
+          type: string
+          minLength: 1
+          maxLength: 5000
+    PptxBulletListBlock:
+      type: object
+      additionalProperties: false
+      required: [type, items]
+      properties:
+        type:
+          type: string
+          const: bullet_list
+        items:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items:
+            type: string
+            minLength: 1
+            maxLength: 2000
+    PptxNumberedListBlock:
+      type: object
+      additionalProperties: false
+      required: [type, items]
+      properties:
+        type:
+          type: string
+          const: numbered_list
+        items:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items:
+            type: string
+            minLength: 1
+            maxLength: 2000
+    PptxTableBlock:
+      type: object
+      additionalProperties: false
+      required: [type, columns, rows]
+      properties:
+        type:
+          type: string
+          const: table
+        columns:
+          type: array
+          minItems: 1
+          maxItems: 8
+          items:
+            type: string
+            minLength: 1
+            maxLength: 256
+        rows:
+          type: array
+          minItems: 1
+          maxItems: 40
+          items:
+            type: array
+            minItems: 1
+            maxItems: 8
+            items:
+              type: string
+              maxLength: 2000
+    PptxQuoteBlock:
+      type: object
+      additionalProperties: false
+      required: [type, text]
+      properties:
+        type:
+          type: string
+          const: quote
+        text:
+          type: string
+          minLength: 1
+          maxLength: 2000
+        attribution:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 256
+    PptxImageBlock:
+      type: object
+      additionalProperties: false
+      required: [type, url]
+      properties:
+        type:
+          type: string
+          const: image
+        url:
+          type: string
+          minLength: 1
+          maxLength: 2048
+          description: COS URL of the image to embed.
+        alt:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 256
+        caption:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 256
+    PptxBlock:
+      oneOf:
+        - $ref: "#/components/schemas/PptxParagraphBlock"
+        - $ref: "#/components/schemas/PptxBulletListBlock"
+        - $ref: "#/components/schemas/PptxNumberedListBlock"
+        - $ref: "#/components/schemas/PptxTableBlock"
+        - $ref: "#/components/schemas/PptxQuoteBlock"
+        - $ref: "#/components/schemas/PptxImageBlock"
+      discriminator:
+        propertyName: type
+        mapping:
+          paragraph: "#/components/schemas/PptxParagraphBlock"
+          bullet_list: "#/components/schemas/PptxBulletListBlock"
+          numbered_list: "#/components/schemas/PptxNumberedListBlock"
+          table: "#/components/schemas/PptxTableBlock"
+          quote: "#/components/schemas/PptxQuoteBlock"
+          image: "#/components/schemas/PptxImageBlock"
+    PptxSlide:
+      type: object
+      additionalProperties: false
+      required: [title, layout, blocks]
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 256
+        layout:
+          type: string
+          enum: [title, title_and_content, section_header, two_column, blank]
+          default: title_and_content
+        blocks:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            $ref: "#/components/schemas/PptxBlock"
+    PptxSpec:
+      type: object
+      additionalProperties: false
+      required: [schema_version, title, slides]
+      properties:
+        schema_version:
+          type: string
+          const: "1.0"
+        title:
+          type: string
+          minLength: 1
+          maxLength: 256
+        subtitle:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 512
+        theme:
+          type: string
+          enum: [brand, neutral]
+          default: brand
+        slides:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/PptxSlide"
+    RenderPptxRequest:
+      type: object
+      additionalProperties: false
+      required: [request_id, tenant_id, user_id, pptx, options]
+      properties:
+        request_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        tenant_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        user_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        pptx:
+          $ref: "#/components/schemas/PptxSpec"
+        options:
           $ref: "#/components/schemas/DocumentOptions"
     TextOutput:
       type: object

@@ -17,6 +17,7 @@ from app.api.generated.models import (
     BulletListBlock,
     DocumentOptions,
     DocumentSpec,
+    ImageBlock,
     NumberedListBlock,
     PageBreakBlock,
     ParagraphBlock,
@@ -24,10 +25,16 @@ from app.api.generated.models import (
     TableBlock,
     TemplateId,
 )
+from app.documents.images import load_image
+from app.documents.normalize import normalize_document_spec
 from app.documents.validation import validate_document_spec
 
 DOCX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 _INVALID_FILENAME = re.compile(r'[\x00-\x1f<>:"/\\|?*]+')
+
+# 与 `_configure_document` 的页面设置保持一致：A4 宽 21cm，左右页边距各 3.18cm。
+_CONTENT_WIDTH_CM = 21.0 - 3.18 * 2
+_MAX_IMAGE_HEIGHT_CM = 19.5
 
 
 @dataclass(frozen=True)
@@ -44,6 +51,9 @@ class DocxRenderer:
         *,
         request_id: str,
     ) -> RenderedDocx:
+        # 渲染前统一清洗：合并「封面」小节、剥离「标题：」等标签前缀、剔除占位行，
+        # 保证 DOCX 与 PPTX/PDF 的成稿一致，不出现重复封面与占位符。
+        document = normalize_document_spec(document)
         validate_document_spec(document, request_id=request_id, status_code=422)
         template_id = options.template_id or TemplateId.business_standard
         if template_id != TemplateId.business_standard:
@@ -84,6 +94,8 @@ class DocxRenderer:
                     quote_paragraph.paragraph_format.keep_together = True
                 elif isinstance(block, PageBreakBlock):
                     word_document.add_page_break()
+                elif isinstance(block, ImageBlock):
+                    _add_image(word_document, block)
 
         _add_page_numbers(word_document, locale)
         output = BytesIO()
@@ -132,6 +144,33 @@ def _set_style_font(style: Any, font_name: str, size: float) -> None:
     style.font.name = font_name
     style.font.size = Pt(size)
     style._element.get_or_add_rPr().rFonts.set(qn("w:eastAsia"), font_name)
+
+
+def _add_image(document: DocxDocument, block: ImageBlock) -> None:
+    """居中插入图片与图注；图片取不到时降级为一行说明，不中断整份文档。"""
+    image = load_image(block.url)
+    if image is None:
+        label = block.alt or block.caption or "图片"
+        placeholder = document.add_paragraph()
+        placeholder.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        placeholder.add_run(f"[图片未能加载：{label}]").italic = True
+        return
+
+    width_cm = _CONTENT_WIDTH_CM * float(block.width_ratio or 1.0)
+    height_cm = width_cm / image.aspect_ratio
+    if height_cm > _MAX_IMAGE_HEIGHT_CM:
+        height_cm = _MAX_IMAGE_HEIGHT_CM
+        width_cm = height_cm * image.aspect_ratio
+
+    picture_paragraph = document.add_paragraph()
+    picture_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    picture_paragraph.add_run().add_picture(
+        BytesIO(image.content), width=Cm(width_cm), height=Cm(height_cm)
+    )
+    if block.caption:
+        caption = document.add_paragraph()
+        caption.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        caption.add_run(block.caption).italic = True
 
 
 def _add_table(document: DocxDocument, block: TableBlock) -> None:

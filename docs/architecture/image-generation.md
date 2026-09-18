@@ -123,4 +123,5 @@ IMAGE_GEN_BACKUP_API_KEY=change_me
 - 变更记录：
   - 2026-09-14：公开 `tool_result` 事件曾携带生成时签发的短期可下载 URL（可选字段 `resourceUrl`），客户端可直接下载/展示图片；
   - 2026-09-15（契约 0.24.0）：彻底移除 `resourceUrl`——事件与快照只保存 `resource {type,id}` 稳定引用；会话消息新增 `resources` 数组（IMAGE/DOCUMENT），前端一律经资源接口现签 URL，解决 URL 过期裂图与图片串扰问题；
+  - 2026-09-17：桌面端移除「TOOL 消息正文里首个 `http(s)://` 链接即视为图片资源」的启发式兜底——该兜底会把 `web_search` 等 TOOL 摘要中的网页 URL 误渲染成图片卡片，产生打不开或空白的假图片。历史消息的图片一律只来自服务端回传的稳定 `resources`（`{ type, id }`），再经 `GET /images/{imageId}` 现签 URL，前端不再从正文文本猜测图片地址；
 - 回喂模型的工具结果摘要只放用户关心的信息（格式、大小），不携带签名 URL、图片 ID、模型名等内部信息，避免模型转述泄露（2026-09-15）。

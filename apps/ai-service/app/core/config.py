@@ -184,6 +184,17 @@ def load_model_catalog(path: Path) -> ModelCatalog:
         return ModelCatalog.model_validate(tomllib.load(file))
 
 
+# `.env.example` 中所有密钥的占位值。任何已启用的 profile 只要仍使用该值，
+# 就等同于未配置：否则请求会在调用上游时以 401 失败，并被误报成
+# "The selected provider rejected the tool streaming invocation"。
+EXAMPLE_SECRET_PLACEHOLDER = "change_me"
+
+
+def is_configured_secret(value: str | None) -> bool:
+    """密钥是否已真实配置（非空且不是示例占位值）。"""
+    return bool(value) and value.strip() != EXAMPLE_SECRET_PLACEHOLDER
+
+
 def validate_readiness(settings: Settings, catalog: ModelCatalog) -> list[str]:
     errors: list[str] = []
     token = settings.ai_internal_token
@@ -229,8 +240,11 @@ def validate_readiness(settings: Settings, catalog: ModelCatalog) -> list[str]:
             errors.append(
                 f"enabled profile {name} is missing environment variable {profile.api_key_env}"
             )
-        elif settings.node_env == "production" and key == "change_me":
-            errors.append(f"enabled profile {name} uses an example API key in production")
+        elif not is_configured_secret(key):
+            errors.append(
+                f"enabled profile {name} still uses the example value for "
+                f"{profile.api_key_env}"
+            )
         if settings.node_env == "production" and profile.model == "change_me":
             errors.append(f"enabled profile {name} uses an example model in production")
         if (
@@ -316,8 +330,11 @@ def _validate_image_readiness(
                 f"enabled image profile {name} is missing environment variable "
                 f"{profile.api_key_env}"
             )
-        elif settings.node_env == "production" and key == "change_me":
-            errors.append(f"enabled image profile {name} uses an example API key in production")
+        elif not is_configured_secret(key):
+            errors.append(
+                f"enabled image profile {name} still uses the example value for "
+                f"{profile.api_key_env}"
+            )
         if settings.node_env == "production" and profile.model == "change_me":
             errors.append(f"enabled image profile {name} uses an example model in production")
         if (

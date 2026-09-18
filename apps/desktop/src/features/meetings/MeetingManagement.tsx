@@ -153,7 +153,7 @@ export default function MeetingManagement({ authContext, onSessionExpired }: Mee
     </div>;
 }
 
-    function MeetingDetailModal({ meeting, myMembershipId, permissions, activeMembers, onClose, onRefresh }: { meeting: Meeting; myMembershipId: string; permissions: Set<string>; activeMembers: TenantMember[]; onClose: () => void; onRefresh: () => void }): JSX.Element {
+function MeetingDetailModal({ meeting, myMembershipId, permissions, activeMembers, onClose, onRefresh }: { meeting: Meeting; myMembershipId: string; permissions: Set<string>; activeMembers: TenantMember[]; onClose: () => void; onRefresh: () => void }): JSX.Element {
     const { message } = AntdApp.useApp();
     const { t } = useI18n();
     const formatDate = useDateFormatter();
@@ -327,7 +327,7 @@ export default function MeetingManagement({ authContext, onSessionExpired }: Mee
                         })()}>{t('添加')}</Button>
                     </>}
                     <span style={{ flex: 1 }} />
-                    <small style={{ color: 'var(--cees-muted)' }}><TeamOutlined /> {participants.length}</small>
+                    <small style={{ color: 'var(--muted)' }}><TeamOutlined /> {participants.length}</small>
                 </div>
                 <div className="task-list">
                     {participants.map((participant) => <div className="task-row-item" key={participant.id} style={{ cursor: 'default' }}>

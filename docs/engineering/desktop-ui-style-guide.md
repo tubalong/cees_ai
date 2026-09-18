@@ -67,21 +67,27 @@ src/
 
    组件颜色、圆角、字号应优先由 Ant Design 令牌驱动，不要写死。
 
-2. **CSS 变量**（`workspace.css` 的 `:root`）：
+2. **CSS 变量**（`styles.css` 的 `:root`，唯一来源）：
 
    ```css
    :root {
        --workspace-bg: #f4f6f9;   /* 页面/工作区背景 */
        --surface: #ffffff;         /* 卡片/面板表面 */
+       --surface-soft: #f8f9fb;    /* 浅底表面 */
        --line: #e8ebf1;            /* 分隔线/描边 */
        --text: #202432;            /* 主文字 */
        --muted: #858c9b;           /* 次要文字 */
        --primary: #565cf6;         /* 品牌主色 */
+       --primary-rgb: 86, 92, 246; /* 主色 RGB（透明阴影用 rgba(var(--primary-rgb), …)） */
        --primary-soft: #eef0ff;    /* 主色浅底 */
    }
+
+   :root[data-theme='dark'] { /* 暗色覆盖，仅覆盖语义令牌，--primary 保持不变 */ }
    ```
 
-   自定义 CSS 中**必须使用变量**（`var(--primary)`），不要直接写 `#565cf6` 等十六进制，便于后续统一换肤。
+   - 所有颜色令牌**只在 `styles.css` 定义**，`workspace.css` / `preferences.css` 不得重复定义。
+   - 历史遗留的 `--app-*`（`--app-text` / `--app-surface` / `--app-border` / `--app-muted` / `--app-background` / `--app-surface-soft`）已改为语义令牌的**别名**；新代码统一使用语义令牌（`--text` / `--surface` / `--line` / `--muted` 等）。
+   - 自定义 CSS 中**必须使用变量**（`var(--primary)`），不要直接写 `#565cf6` 等十六进制，便于后续统一换肤。
 
 ## 3. 颜色规范
 
@@ -152,7 +158,8 @@ src/
 - 侧边导航、功能入口、表格状态 → 用 `@ant-design/icons`（`*Outlined`）。
 - 聊天工具栏、资源操作（下载/查看/删除）、轻量动作 → 用 `lucide-react`。
 - lucide 图标统一 `size={15}` 或 `size={16}`，用 `stroke-width: 1.8` 保持粗细一致。
-- 新增图标优先在现有两库中选，不新增第三个图标库。
+- 新增图标优先在现有两库中选，不新增第三个图标库。唯一例外是「展开/收起」这类纯装饰性指示箭头：允许内联 `<svg>` 手绘细线 chevron（13px、`stroke-width: 1.8`、`stroke-linecap: round`），因为 antd 的实心三角在小字号下发粗显笨重。
+- 折叠指示箭头的方向约定：**未展开指向右（`>`），展开后指向下（`v`）**。实现上只用一份「指向右」的图形，展开时 `transform: rotate(90deg)` 顺时针旋转，不要为两种状态各写一个图标（避免切换时产生跳变）。
 
 ## 9. 命名规范
 
@@ -176,3 +183,11 @@ src/
 - [ ] 空态 / 加载态用了 `Empty` / `Spin`。
 - [ ] 删除等危险操作有二次确认。
 - [ ] 类名 kebab-case 且带功能前缀。
+
+## 12. 路由约定
+
+- 使用 `react-router-dom` 的**声明式** `<Routes>/<Route>`，不要用 `if (pathname === '...')` 过程式分派。
+- 工作台路由统一在 `app/Workspace.tsx` 的 `CurrentPage` 里注册；登录页 / 平台工作台在 `app/App.tsx` 顶层按认证状态分支。
+- 现有路由：`/`（首页）、`/assistant`、`/projects`、`/meetings`、`/reports`、`/applications`、`/architecture`、`/roles`、`/knowledge`、`/notifications`、`/profile`、`/browser`。
+- 新增页面：在 `features/<feature>/` 建组件，并在 `CurrentPage` 加一条 `<Route path="/xxx" element={<Xxx ... />} />`。
+- 页面级数据查询内聚到对应页面组件内（如 `HomePage` 内部查 dashboard），不要在路由层统一触发无关查询。

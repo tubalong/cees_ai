@@ -48,6 +48,30 @@ def test_enabled_openai_profile_requires_key(monkeypatch) -> None:
     assert any("PRIMARY_LLM_API_KEY" in error for error in errors)
 
 
+def test_example_api_key_is_not_ready_outside_production(monkeypatch) -> None:
+    catalog = load_model_catalog(MODEL_FIXTURE)
+    catalog.profiles["primary"].enabled = True
+    catalog.roles[ModelRole.default] = ["primary"]
+    monkeypatch.setenv("PRIMARY_LLM_API_KEY", "change_me")
+
+    errors = validate_readiness(Settings(node_env="test", ai_internal_token="secret"), catalog)
+
+    assert any(
+        "still uses the example value for PRIMARY_LLM_API_KEY" in error for error in errors
+    )
+
+
+def test_configured_api_key_passes_readiness(monkeypatch) -> None:
+    catalog = load_model_catalog(MODEL_FIXTURE)
+    catalog.profiles["primary"].enabled = True
+    catalog.roles[ModelRole.default] = ["primary"]
+    monkeypatch.setenv("PRIMARY_LLM_API_KEY", "sk-real-key")
+
+    errors = validate_readiness(Settings(node_env="test", ai_internal_token="secret"), catalog)
+
+    assert not any("PRIMARY_LLM_API_KEY" in error for error in errors)
+
+
 def test_role_rejects_profile_without_required_output_mode() -> None:
     catalog = load_model_catalog(MODEL_FIXTURE)
     catalog.roles[ModelRole.structured] = ["mock"]

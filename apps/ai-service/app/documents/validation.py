@@ -1,6 +1,12 @@
 from __future__ import annotations
 
-from app.api.generated.models import DocumentPlan, DocumentSpec, TableBlock
+from app.api.generated.models import (
+    DocumentPlan,
+    DocumentSpec,
+    PptxSpec,
+    PptxTableBlock,
+    TableBlock,
+)
 from app.core.errors import AIServiceError
 
 
@@ -72,3 +78,21 @@ def _raise_invalid(message: str, request_id: str, status_code: int) -> None:
         status_code=status_code,
         request_id=request_id,
     )
+
+
+def validate_pptx_spec(
+    spec: PptxSpec,
+    *,
+    request_id: str,
+    status_code: int,
+) -> None:
+    for slide in spec.slides:
+        for block in slide.blocks:
+            if isinstance(block, PptxTableBlock) and any(
+                len(row) != len(block.columns) for row in block.rows
+            ):
+                _raise_invalid(
+                    "Pptx table rows must match the column count",
+                    request_id,
+                    status_code,
+                )

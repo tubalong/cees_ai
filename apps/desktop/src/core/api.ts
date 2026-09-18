@@ -1,5 +1,5 @@
-// export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://132.232.159.186:3000/api/';
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://192.168.5.29:3000/api/';
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000/api/';
+// export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://192.168.5.29:3000/api/';
 // http://192.168.5.29:3000/api/
 // http://132.232.159.186:3000/api/
 const ACCESS_TOKEN_KEY = 'cees.accessToken';
@@ -242,6 +242,9 @@ export interface ManagedDocumentSummary {
 export interface ManagedDocumentDetail extends ManagedDocumentSummary {
     resourceId: string;
     content: string;
+    documentSpec: Record<string, unknown> | null;
+    fileObjectId: string | null;
+    fileMimeType: string | null;
     effectivePermissions: string[];
 }
 
@@ -571,6 +574,84 @@ export async function createKnowledgeDocument(knowledgeBaseId: string, input: {
             visibilityScope: input.visibilityScope,
         }),
     });
+}
+
+export async function updateDocument(documentId: string, input: { content: string; version: number }): Promise<ManagedDocumentDetail> {
+    return authorizedRequest<ManagedDocumentDetail>(`v1/documents/${encodeURIComponent(documentId)}`, {
+        method: 'PATCH',
+        body: JSON.stringify(input),
+    });
+}
+
+export async function exportDocument(
+    documentId: string,
+    format: 'docx' | 'pdf' | 'pptx',
+    preferredName?: string,
+): Promise<void> {
+    const accessToken = getStoredValue(ACCESS_TOKEN_KEY);
+    if (!accessToken) throw new Error('登录状态已失效，请重新登录');
+    const suffix = format === 'docx' ? 'export' : `export/${format}`;
+    const response = await fetch(new URL(`v1/documents/${encodeURIComponent(documentId)}/${suffix}`, API_BASE_URL), {
+        headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!response.ok) {
+        const body = await response.json().catch(() => null) as ApiErrorBody | null;
+        throw new Error(body?.message?.toString() || body?.error?.message || '导出失败');
+    }
+    const blob = await response.blob();
+    const filename = resolveDownloadFilename(response.headers.get('Content-Disposition'), format, preferredName);
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.click();
+    URL.revokeObjectURL(url);
+}
+
+/**
+ * 计算下载文件名：优先使用服务端 Content-Disposition 携带的文档标题；当响应头不可读
+ * （如未被 CORS 暴露）或只是通用兜底名（document.* / presentation.*）时，退回调用方
+ * 已知的文档标题，确保用户始终下载到「按主题命名」的文件，而不是 document.pdf。
+ */
+export function resolveDownloadFilename(disposition: string | null, format: string, preferredName?: string): string {
+    const fromHeader = filenameFromDisposition(disposition, format);
+    const preferred = preferredName ? sanitizeDownloadName(preferredName) : '';
+    if (preferred && isGenericDownloadName(fromHeader, format)) return `${preferred}.${format}`;
+    return fromHeader;
+}
+
+/** 判定服务端返回的名字是否只是通用兜底名（document.* / presentation.*）。 */
+export function isGenericDownloadName(name: string, format: string): boolean {
+    const lower = name.trim().toLowerCase();
+    return lower === `document.${format}` || lower === `presentation.${format}`;
+}
+
+/** 清理用户可见的下载文件名主名：与 api 侧一致地去除文件系统非法字符与控制符。 */
+export function sanitizeDownloadName(title: string): string {
+    return title
+        .replace(/[\\/:*?"<>|\u0000-\u001f]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .replace(/\.+$/g, '')
+        .slice(0, 120);
+}
+
+/**
+ * 从 Content-Disposition 解析下载文件名，优先取 RFC 5987 的 `filename*=UTF-8''`
+ * （可携带中文等非 ASCII 标题），退回 `filename="..."`，都缺失时用 `document.<format>`。
+ * 需要服务端在 CORS 暴露 Content-Disposition，否则浏览器读不到此头。
+ */
+export function filenameFromDisposition(disposition: string | null, format: string): string {
+    if (disposition) {
+        const extended = /filename\*\s*=\s*utf-8''([^;]+)/i.exec(disposition);
+        if (extended) {
+            try { return decodeURIComponent(extended[1].trim()); } catch { /* 编码非法时退回 ASCII 分支 */ }
+        }
+        const basic = /filename\s*=\s*"([^"]*)"|filename\s*=\s*([^;]+)/i.exec(disposition);
+        const candidate = (basic?.[1] ?? basic?.[2])?.trim();
+        if (candidate) return candidate;
+    }
+    return `document.${format}`;
 }
 
 async function authorizedRequest<T>(path: string, init: RequestInit = {}, retry = true): Promise<T> {
@@ -1210,7 +1291,8 @@ export interface UploadSessionCreated {
 }
 
 export interface UploadSessionCompleted {
-    fileObjectId: string;
+    // 契约（openapi FileMetadata）：完成直传返回正式文件元数据，文件标识字段为 id。
+    id: string;
     fileName?: string;
     sizeBytes?: number;
 }
@@ -1270,7 +1352,7 @@ export async function uploadAttachmentFile(file: File): Promise<string> {
     }, idempotencyKey);
     await uploadToPresignedUrl(session.uploadUrl, session.uploadHeaders, file);
     const completed = await completeUploadSession(session.uploadSessionId);
-    return completed.fileObjectId || session.fileObjectId;
+    return completed.id || session.fileObjectId;
 }
 
 // ---------------------------------------------------------------------------
@@ -1280,12 +1362,14 @@ export async function uploadAttachmentFile(file: File): Promise<string> {
 export type ChatMode = 'standard' | 'ultra';
 
 export interface Conversation { id: string; title: string; mode: ChatMode; visibility: 'PRIVATE'; version: number; createdAt: string; updatedAt: string; lastTurnAt?: string | null; }
-export interface ConversationMessage { id: string; role: 'USER' | 'ASSISTANT' | 'TOOL'; content: string; createdAt: string; turnId?: string | null; toolCallId?: string | null; resources?: Array<{ id: string; resourceId?: string; type: 'IMAGE' | 'DOCUMENT'; url?: string | null; resourceUrl?: string | null }> | null; }
+export interface ConversationMessage { id: string; role: 'USER' | 'ASSISTANT' | 'TOOL'; content: string; createdAt: string; turnId?: string | null; toolCallId?: string | null; resources?: Array<{ id: string; resourceId?: string; type: 'IMAGE' | 'DOCUMENT'; url?: string | null; resourceUrl?: string | null }> | null; sources?: Array<{ id: string; title: string; url: string; domain: string; snippet: string; publishedAt?: string | null }> | null; citations?: Array<{ id: string; title: string; snippet: string; pageIndex?: number | null; knowledgeBaseId?: string | null; deletable?: boolean }> | null; }
 export interface ConversationDetail { conversation: Conversation; messages: ConversationMessage[]; }
 export interface Turn { id: string; conversationId: string; status: 'RECEIVED' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED'; mode: ChatMode; error?: Record<string, unknown> | null; createdAt: string; completedAt?: string | null; }
 export interface ImageAccess { id: string; resourceId: string; mimeType: 'image/png' | 'image/jpeg' | 'image/webp'; sizeBytes: number; url: string; prompt?: string | null; model?: string | null; createdAt: string; }
+/** 本轮实际生效的对话能力；autoEnabled 只包含服务端因意图识别自动启用的能力。 */
+export interface TurnCapabilities { webSearch: boolean; knowledgeBase: boolean; autoEnabled: Array<'web_search' | 'knowledge_search'>; }
 export type TurnStreamEvent =
-    | { type: 'started'; seq: number; requestId: string; conversationId: string; turnId: string; mode: ChatMode; contextUsage: Record<string, unknown> }
+    | { type: 'started'; seq: number; requestId: string; conversationId: string; turnId: string; mode: ChatMode; contextUsage: Record<string, unknown>; capabilities?: TurnCapabilities }
     | { type: 'status'; seq: number; phase: 'reasoning' | 'answering' | 'tool_executing' }
     | { type: 'content_delta'; seq: number; text: string }
     | { type: 'tool_call'; seq: number; toolCallId: string; name: string; arguments: Record<string, unknown> }
@@ -1328,7 +1412,7 @@ async function streamSse(path: string, init: RequestInit, onEvent: (event: TurnS
     try { while (true) { const { value, done } = await reader.read(); if (done) { consume(decoder.decode()); if (buffer.trim()) throw new Error('事件流意外中断'); break; } consume(decoder.decode(value, { stream: true })); } } finally { reader.releaseLock(); }
 }
 
-export function createTurn(conversationId: string, input: { content: string; mode: ChatMode; imageFileIds?: string[]; knowledgeBaseEnabled?: boolean }, idempotencyKey: string, onEvent: (event: TurnStreamEvent) => void, signal?: AbortSignal): Promise<void> { return streamSse(`v1/conversations/${encodeURIComponent(conversationId)}/turns`, { method: 'POST', body: JSON.stringify({ content: input.content, mode: input.mode, ...(input.imageFileIds?.length ? { imageFileIds: input.imageFileIds } : {}), ...(input.knowledgeBaseEnabled ? { knowledgeBaseEnabled: true } : {}) }), signal, headers: { 'Idempotency-Key': idempotencyKey } }, onEvent); }
+export function createTurn(conversationId: string, input: { content: string; mode: ChatMode; imageFileIds?: string[]; fileIds?: string[]; knowledgeBaseEnabled?: boolean; webSearchEnabled?: boolean }, idempotencyKey: string, onEvent: (event: TurnStreamEvent) => void, signal?: AbortSignal): Promise<void> { return streamSse(`v1/conversations/${encodeURIComponent(conversationId)}/turns`, { method: 'POST', body: JSON.stringify({ content: input.content, mode: input.mode, ...(input.imageFileIds?.length ? { imageFileIds: input.imageFileIds } : {}), ...(input.fileIds?.length ? { fileIds: input.fileIds } : {}), ...(input.knowledgeBaseEnabled ? { knowledgeBaseEnabled: true } : {}), ...(input.webSearchEnabled ? { webSearchEnabled: true } : {}) }), signal, headers: { 'Idempotency-Key': idempotencyKey } }, onEvent); }
 export function replayTurnEvents(conversationId: string, turnId: string, afterSeq: number, onEvent: (event: TurnStreamEvent) => void, signal?: AbortSignal): Promise<void> { return streamSse(`v1/conversations/${encodeURIComponent(conversationId)}/turns/${encodeURIComponent(turnId)}/events?afterSeq=${afterSeq}`, { method: 'GET', signal }, onEvent); }
 export async function cancelTurn(conversationId: string, turnId: string): Promise<Turn> { return authorizedRequest<Turn>(`v1/conversations/${encodeURIComponent(conversationId)}/turns/${encodeURIComponent(turnId)}/cancel`, { method: 'POST' }); }
 

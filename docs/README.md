@@ -25,6 +25,9 @@
 | [knowledge-rag](architecture/knowledge-rag.md) | 知识库 RAG：MinerU 解析、LlamaIndex 索引检索、权限过滤与分块计划 |
 | [image-generation](architecture/image-generation.md) | 图片生成 profile、ImageRouter、内部生成接口与边界 |
 | [document-generation](architecture/document-generation.md) | 领域无关的文档组合、DocumentSpec 与 DOCX 渲染 |
+| [pdf-pptx-generation](architecture/pdf-pptx-generation.md) | PDF/PPTX 确定性渲染、PptxSpec 与三个生成工具接线 |
+| [生成文档格式交付](architecture/generated-document-format-delivery.md) | 生成格式落库、文档详情契约与桌面端资源卡片下载 |
+| [生成文档落 COS 与附件注入](architecture/generated-document-storage-and-attachment-injection.md) | 生成文件直传 COS、FileObject 关联与对话文档附件文本注入 |
 | [file-upload](architecture/file-upload.md) | 已落地的 COS 基础直传接口与后续权限、额度、扫描设计 |
 | [redis-foundation](architecture/redis-foundation.md) | NestJS Redis 基础 CRUD、命名空间和使用边界 |
 | [api](api/README.md) | 公开与内部契约及生成客户端约定 |
@@ -41,3 +44,4 @@
 - [Git 协作规范](engineering/git-conventions.md)：分支与 Conventional Commit 命名规范。
 - [持续集成（CI）](engineering/ci.md)：GitHub Actions 触发条件、必需检查与本地验证命令。
 - [AI 合并冲突修复助手](engineering/ai-conflict-resolver.md)：维护者触发的半自动冲突修复、候选 PR、限制与安全边界。
+- [桌面端状态管理约定](engineering/desktop-state-management.md)：服务端数据、全局 UI 偏好与局部 UI 状态的分层归属约定。

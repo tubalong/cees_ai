@@ -117,6 +117,7 @@ describe('DocumentService', () => {
             executionToken: 'execution-token-1',
             instruction: '写一份项目周报',
             visibility: DocumentVisibility.PRIVATE,
+            format: 'docx',
         });
 
         expect(gateway.composeDocument).toHaveBeenCalledWith(expect.objectContaining({
@@ -181,6 +182,7 @@ describe('DocumentService', () => {
             executionToken: 'execution-token-1',
             instruction: '写一份项目周报',
             visibility: DocumentVisibility.PRIVATE,
+            format: 'docx',
         });
 
         expect(gateway.composeDocument).not.toHaveBeenCalled();
@@ -192,7 +194,7 @@ describe('DocumentService', () => {
         }));
     });
 
-    it('clears the stored document spec when content is manually edited', async () => {
+    it('rebuilds the stored document spec when content is manually edited', async () => {
         const prisma = createPrismaMock();
         prisma.managedDocument.findFirst
             .mockResolvedValueOnce(documentRecord())
@@ -204,7 +206,7 @@ describe('DocumentService', () => {
 
         expect(prisma.managedDocument.updateMany).toHaveBeenCalledWith({
             where: { id: DOCUMENT_ID, tenantId: TENANT_ID, version: 1, deletedAt: null },
-            data: expect.objectContaining({ content: 'manually edited', documentSpec: Prisma.DbNull }),
+            data: expect.objectContaining({ content: 'manually edited', documentSpec: expect.objectContaining({ schema_version: '1.0' }) }),
         });
     });
 
@@ -249,12 +251,233 @@ describe('DocumentService', () => {
         expect(result).toEqual({ filename: 'Project plan', bytes: Buffer.from('docx-bytes') });
     });
 
+    it('falls back to the DocumentSpec title when the stored title sanitizes to empty', async () => {
+        const prisma = createPrismaMock();
+        prisma.managedDocument.findFirst.mockResolvedValue(documentRecord({
+            // 历史上被误转码成占位符的落库标题，清洗后为空字符串
+            title: '??????',
+            documentSpec: {
+                schema_version: '1.0',
+                title: '导出格式自检',
+                subtitle: null,
+                sections: [{ heading: 'Overview', level: 1, blocks: [{ type: 'paragraph', text: 'content' }] }],
+                source_refs: [],
+            },
+        }));
+        const gateway = {
+            composeDocument: jest.fn(),
+            renderDocumentDocx: jest.fn().mockResolvedValue(Buffer.from('docx-bytes')),
+        };
+        const service = createService(prisma, createAccessMock(), gateway);
+
+        const result = await service.exportDocumentDocx(DOCUMENT_ID);
+
+        expect(result.filename).toBe('导出格式自检');
+        expect(gateway.renderDocumentDocx).toHaveBeenCalledWith(expect.objectContaining({
+            document_options: expect.objectContaining({ title: '导出格式自检' }),
+        }));
+    });
+
+    it('falls back to the neutral filename when neither the title nor the spec title is usable', async () => {
+        const prisma = createPrismaMock();
+        prisma.managedDocument.findFirst.mockResolvedValue(documentRecord({
+            title: '???',
+            documentSpec: {
+                schema_version: '1.0',
+                title: '???',
+                subtitle: null,
+                sections: [],
+                source_refs: [],
+            },
+        }));
+        const gateway = {
+            composeDocument: jest.fn(),
+            renderDocumentDocx: jest.fn().mockResolvedValue(Buffer.from('docx-bytes')),
+        };
+        const service = createService(prisma, createAccessMock(), gateway);
+
+        const result = await service.exportDocumentDocx(DOCUMENT_ID);
+
+        expect(result.filename).toBe('document');
+    });
+
+    it('sanitizes filesystem-illegal characters out of the export filename', async () => {
+        const prisma = createPrismaMock();
+        prisma.managedDocument.findFirst.mockResolvedValue(documentRecord({
+            title: '周报/计划:2026?',
+            documentSpec: {
+                schema_version: '1.0',
+                title: '周报',
+                subtitle: null,
+                sections: [],
+                source_refs: [],
+            },
+        }));
+        const gateway = {
+            composeDocument: jest.fn(),
+            renderDocumentDocx: jest.fn().mockResolvedValue(Buffer.from('docx-bytes')),
+        };
+        const service = createService(prisma, createAccessMock(), gateway);
+
+        const result = await service.exportDocumentDocx(DOCUMENT_ID);
+
+        expect(result.filename).toBe('周报 计划 2026');
+    });
+
+    it('names the stored-file download after the resolved document title', async () => {
+        const prisma = createPrismaMock();
+        prisma.managedDocument.findFirst.mockResolvedValue(documentRecord({
+            title: '??????',
+            documentSpec: {
+                schema_version: '1.0',
+                title: '导出格式自检',
+                subtitle: null,
+                sections: [],
+                source_refs: [],
+            },
+            fileObject: { id: 'f1', mimeType: 'application/pdf', objectKey: 'cees/local/x.pdf' },
+        }));
+        const service = createService(prisma, createAccessMock());
+
+        const result = await service.getDocumentFileDownload(DOCUMENT_ID);
+
+        expect(result.filename).toBe('导出格式自检.pdf');
+        expect(result.url).toBe('https://cos.example.com/signed');
+    });
+
     it('rejects export when the document has no stored spec', async () => {
         const prisma = createPrismaMock();
         prisma.managedDocument.findFirst.mockResolvedValue(documentRecord({ documentSpec: null }));
         const service = createService(prisma, createAccessMock());
 
         await expect(service.exportDocumentDocx(DOCUMENT_ID)).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('inserts an image block into the named section and re-renders the same document in place', async () => {
+        const prisma = createPrismaMock();
+        prisma.managedDocument.findFirst.mockResolvedValue({
+            id: DOCUMENT_ID,
+            title: '项目周报',
+            documentSpec: {
+                schema_version: '1.0',
+                title: '项目周报',
+                subtitle: null,
+                sections: [
+                    { heading: '本周进展', level: 1, blocks: [{ type: 'paragraph', text: '完成工具循环接入。' }] },
+                    { heading: '下周计划', level: 1, blocks: [{ type: 'paragraph', text: '补充集成测试。' }] },
+                ],
+                source_refs: [],
+            },
+            fileObject: null,
+            generatedByToolCall: { name: 'generate_pdf' },
+        });
+        prisma.managedDocument.updateMany.mockResolvedValue({ count: 1 });
+        const gateway = {
+            composeDocument: jest.fn(),
+            renderDocumentPdf: jest.fn().mockResolvedValue(Buffer.from('pdf-bytes')),
+        };
+        const service = createService(prisma, createAccessMock(), gateway);
+
+        const result = await service.insertDocumentImage({
+            tenantId: TENANT_ID,
+            userId: USER_ID,
+            membershipId: MEMBERSHIP_ID,
+            requestId: 'request-id',
+            conversationId: '60000000-0000-0000-0000-000000000001',
+            turnId: 'turn-id',
+            toolCallId: 'tool-call-id',
+            executionOwner: 'api:test',
+            executionToken: 'execution-token-1',
+            imageObjectKey: 'cees/local/tenants/x/uploads/pic.png',
+            sectionTitle: '下周计划',
+            caption: '架构图',
+        });
+
+        expect(gateway.renderDocumentPdf).toHaveBeenCalledWith(expect.objectContaining({
+            request_id: 'request-id',
+            tenant_id: TENANT_ID,
+            user_id: USER_ID,
+        }));
+        const updateCall = prisma.managedDocument.updateMany.mock.calls[0][0];
+        const insertedSpec = updateCall.data.documentSpec;
+        expect(insertedSpec.sections[1].blocks).toContainEqual(expect.objectContaining({ type: 'image', caption: '架构图' }));
+        // 正文与既有块完全不变：原段落必须保留。
+        expect(insertedSpec.sections[1].blocks[0]).toEqual({ type: 'paragraph', text: '补充集成测试。' });
+        expect(updateCall.data.version).toEqual({ increment: 1 });
+        expect(prisma.auditLog.create).toHaveBeenCalledWith({
+            data: expect.objectContaining({ action: 'DOCUMENT_IMAGE_INSERTED', resourceId: DOCUMENT_ID }),
+        });
+        expect(result).toEqual({ documentId: DOCUMENT_ID, title: '项目周报', sectionHeading: '下周计划', sectionIndex: 1, format: 'pdf' });
+    });
+
+    it('rejects insertion when the target section does not exist', async () => {
+        const prisma = createPrismaMock();
+        prisma.managedDocument.findFirst.mockResolvedValue({
+            id: DOCUMENT_ID,
+            title: '项目周报',
+            documentSpec: {
+                schema_version: '1.0',
+                title: '项目周报',
+                subtitle: null,
+                sections: [{ heading: '本周进展', level: 1, blocks: [{ type: 'paragraph', text: 'content' }] }],
+                source_refs: [],
+            },
+            fileObject: null,
+            generatedByToolCall: { name: 'generate_pdf' },
+        });
+        const gateway = { composeDocument: jest.fn(), renderDocumentPdf: jest.fn() };
+        const service = createService(prisma, createAccessMock(), gateway);
+
+        await expect(service.insertDocumentImage({
+            tenantId: TENANT_ID,
+            userId: USER_ID,
+            membershipId: MEMBERSHIP_ID,
+            requestId: 'request-id',
+            conversationId: '60000000-0000-0000-0000-000000000001',
+            turnId: 'turn-id',
+            toolCallId: 'tool-call-id',
+            executionOwner: 'api:test',
+            executionToken: 'execution-token-1',
+            imageObjectKey: 'cees/local/tenants/x/uploads/pic.png',
+            sectionTitle: '不存在的章节',
+        })).rejects.toBeInstanceOf(BadRequestException);
+        expect(gateway.renderDocumentPdf).not.toHaveBeenCalled();
+        expect(prisma.managedDocument.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('replays the persisted insertion for the same tool_call_id without re-rendering', async () => {
+        const prisma = createPrismaMock();
+        prisma.aIActionDraft.findUnique.mockResolvedValue({
+            tenantId: TENANT_ID,
+            status: DraftStatus.EXECUTED,
+            payload: {
+                operation: 'insert_document_image',
+                documentId: DOCUMENT_ID,
+                sectionHeading: '下周计划',
+                sectionIndex: 1,
+                format: 'pdf',
+            },
+        });
+        prisma.managedDocument.findFirst.mockResolvedValue({ id: DOCUMENT_ID, title: '项目周报' });
+        const gateway = { composeDocument: jest.fn(), renderDocumentPdf: jest.fn() };
+        const service = createService(prisma, createAccessMock(), gateway);
+
+        const result = await service.insertDocumentImage({
+            tenantId: TENANT_ID,
+            userId: USER_ID,
+            membershipId: MEMBERSHIP_ID,
+            requestId: 'request-id',
+            conversationId: '60000000-0000-0000-0000-000000000001',
+            turnId: 'turn-id',
+            toolCallId: 'tool-call-id',
+            executionOwner: 'api:test',
+            executionToken: 'execution-token-1',
+            imageObjectKey: 'cees/local/tenants/x/uploads/pic.png',
+        });
+
+        expect(gateway.renderDocumentPdf).not.toHaveBeenCalled();
+        expect(prisma.managedDocument.updateMany).not.toHaveBeenCalled();
+        expect(result).toEqual({ documentId: DOCUMENT_ID, title: '项目周报', sectionHeading: '下周计划', sectionIndex: 1, format: 'pdf' });
     });
 
     it('does not write a failure audit after a concurrent successful finalization', async () => {
@@ -273,6 +496,7 @@ describe('DocumentService', () => {
             executionToken: 'execution-token-1',
             instruction: '写一份项目周报',
             visibility: DocumentVisibility.PRIVATE,
+            format: 'docx',
         };
 
         await expect((service as any).recordGenerationFailure(
@@ -310,11 +534,29 @@ function createService(prisma: Record<string, any>, access: Record<string, any>,
             ],
         }),
     } as unknown as TenantContext;
+    const storage = {
+        putObject: jest.fn().mockResolvedValue({ sizeBytes: 10, contentType: 'application/pdf', etag: 'etag' }),
+        createDownloadUrl: jest.fn().mockResolvedValue('https://cos.example.com/signed'),
+        deleteObject: jest.fn().mockResolvedValue(undefined),
+    };
+    const storageSettings = {
+        bucket: 'bucket',
+        region: 'region',
+        objectPrefix: 'cees/local',
+        signedUrlTtlSeconds: 600,
+        maxUploadBytes: 104857600,
+    };
+    const objectKeys = {
+        buildGeneratedDocumentKey: jest.fn().mockReturnValue('cees/local/tenants/x/generated-documents/y/docx'),
+    };
     return new DocumentService(
         prisma as unknown as PrismaService,
         tenantContext,
         access as unknown as ResourceAccessService,
         gateway as unknown as AiServiceGateway,
+        storage as any,
+        storageSettings as any,
+        objectKeys as any,
     );
 }
 
@@ -344,6 +586,7 @@ function createPrismaMock(): Record<string, any> {
             findUnique: jest.fn().mockResolvedValue(null),
         },
         toolCall: { findFirst: jest.fn().mockResolvedValue({ id: 'tool-call-id' }) },
+        fileObject: { create: jest.fn(), deleteMany: jest.fn() },
         resourceAcl: { updateMany: jest.fn() },
         auditLog: { create: jest.fn() },
         $transaction: jest.fn(),
@@ -367,6 +610,8 @@ function documentRecord(overrides: Record<string, unknown> = {}): ManagedDocumen
         deletedAt: null,
         version: 1,
         generatedByToolCallId: null,
+        fileObjectId: null,
+        fileObject: null,
         resource: {
             id: DOCUMENT_ID,
             tenantId: TENANT_ID,

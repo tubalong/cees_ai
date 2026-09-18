@@ -27,6 +27,7 @@ import { describeAssistantError } from '../assistant.errors';
 import {
   isTerminalTurnStatus,
   PublicTurn,
+  PublicTurnCapabilities,
   PublicTurnMode,
   PublicTurnStreamEvent,
 } from '../assistant.types';
@@ -34,8 +35,9 @@ import { ConversationService } from '../conversation/conversation.service';
 import { EventService } from '../conversation/event.service';
 import { ToolPolicyError, ToolPolicyService } from '../tools/tool-policy.service';
 import { ToolRegistryService } from '../tools/tool-registry';
-import { KNOWLEDGE_SEARCH_TOOL_NAME } from '../tools/tool.types';
+import { KNOWLEDGE_SEARCH_TOOL_NAME, WEB_SEARCH_TOOL_NAME } from '../tools/tool.types';
 import { ContextBuilderService } from './context-builder.service';
+import { IntentCapabilityService, type AutoEnabledCapability } from './intent-capability.service';
 import { AssistantMessageContentService } from './message-content.service';
 import {
   ASSISTANT_HEARTBEAT_INTERVAL_MS,
@@ -78,7 +80,8 @@ export class TurnRunnerService implements OnModuleDestroy {
     private readonly toolPolicy: ToolPolicyService,
     private readonly state: TurnStateService,
     private readonly messageContent: AssistantMessageContentService,
-  ) {}
+    private readonly intentCapability: IntentCapabilityService,
+  ) { }
 
   onModuleDestroy(): void {
     for (const controller of this.activeExecutions.values()) controller.abort();
@@ -94,10 +97,13 @@ export class TurnRunnerService implements OnModuleDestroy {
     idempotencyKey: string;
     content?: string | null;
     imageFileIds?: string[];
+    documentFileIds?: string[];
     /** 未显式指定时使用会话的默认模式。 */
     mode?: PublicTurnMode;
     /** 本轮是否允许检索知识库；省略时默认关闭。 */
     knowledgeBaseEnabled?: boolean;
+    /** 本轮是否允许联网搜索；省略时默认关闭。 */
+    webSearchEnabled?: boolean;
   }): Promise<StartTurnResult> {
     const conversation = await this.conversationService.requireMemberConversation(input.conversationId);
     const context = this.tenantContext.require();
@@ -112,11 +118,13 @@ export class TurnRunnerService implements OnModuleDestroy {
       tenantId: conversation.tenantId,
       userId: context.userId,
       membershipId: context.membershipId,
+      requestId: context.requestId,
     });
-    if (!input.content?.trim() && imageFileIds.length === 0) {
+    const documentFileIds = input.documentFileIds ?? [];
+    if (!input.content?.trim() && imageFileIds.length === 0 && documentFileIds.length === 0) {
       throw new BadRequestException({
         code: 'MESSAGE_CONTENT_EMPTY',
-        message: '消息至少需要包含文本或一张图片',
+        message: '消息至少需要包含文本、一张图片或一个文档',
       });
     }
     const requestHash = hashTurnRequest(
@@ -124,8 +132,18 @@ export class TurnRunnerService implements OnModuleDestroy {
       mode,
       input.content ?? '',
       imageFileIds,
+      documentFileIds,
       input.knowledgeBaseEnabled ?? false,
+      input.webSearchEnabled ?? false,
     );
+
+    // 本轮有效能力 = 用户显式开关 ∪ 服务端意图识别结果。意图识别只把用户
+    // “明确提到”的需求翻译成能力，并把自动启用的部分回传前端做透明提示。
+    const capabilities = resolveTurnCapabilities({
+      knowledgeBaseEnabled: input.knowledgeBaseEnabled ?? false,
+      webSearchEnabled: input.webSearchEnabled ?? false,
+      detected: this.intentCapability.detect(input.content),
+    });
 
     const existing = await this.prisma.assistantTurn.findUnique({
       where: {
@@ -147,6 +165,7 @@ export class TurnRunnerService implements OnModuleDestroy {
       requestHash,
       content: input.content,
       imageFileIds,
+      documentFileIds,
       mode,
       knowledgeBaseEnabled: input.knowledgeBaseEnabled ?? false,
       executionOwner: this.executionOwner,
@@ -176,7 +195,7 @@ export class TurnRunnerService implements OnModuleDestroy {
       requestId: context.requestId,
       mode,
       permissions: context.permissions,
-      knowledgeBaseEnabled: input.knowledgeBaseEnabled ?? false,
+      capabilities,
       signal: abortController.signal,
     });
 
@@ -230,7 +249,8 @@ export class TurnRunnerService implements OnModuleDestroy {
     requestId: string;
     mode: PublicTurnMode;
     permissions: string[];
-    knowledgeBaseEnabled: boolean;
+    /** 本轮有效能力（显式开关 ∪ 意图识别），决定哪些检索工具可进入模型工具列表。 */
+    capabilities: PublicTurnCapabilities;
     signal: AbortSignal;
   }): Promise<void> {
     try {
@@ -256,11 +276,14 @@ export class TurnRunnerService implements OnModuleDestroy {
         input.membershipId,
       );
       const allowedTools = this.toolRegistry.listAllowed(currentAuthorization.permissions);
-      // 对话级知识库开关只管“读”：开关关闭时模型拿不到知识库检索工具；
-      // 即使模型仍发起调用，执行器还有一次开关兜底校验。
-      const gatedTools = input.knowledgeBaseEnabled
-        ? allowedTools
-        : allowedTools.filter((tool) => tool.name !== KNOWLEDGE_SEARCH_TOOL_NAME);
+      // 对话级能力开关只管“读”：知识库/联网开关关闭时模型拿不到对应检索工具；
+      // 即使模型仍发起调用，执行器还有一次开关兜底校验。这里用的是本轮
+      // “有效能力”（显式开关 ∪ 意图自动启用），而不是原始请求值。
+      const gatedTools = allowedTools.filter((tool) => {
+        if (tool.name === KNOWLEDGE_SEARCH_TOOL_NAME && !input.capabilities.knowledgeBase) return false;
+        if (tool.name === WEB_SEARCH_TOOL_NAME && !input.capabilities.webSearch) return false;
+        return true;
+      });
       if (gatedTools.length === 0) {
         await this.runPlainTurn(input);
         return;
@@ -290,6 +313,7 @@ export class TurnRunnerService implements OnModuleDestroy {
     membershipId: string;
     requestId: string;
     mode: PublicTurnMode;
+    capabilities: PublicTurnCapabilities;
     signal: AbortSignal;
   }): Promise<void> {
     const { turnId, conversation } = input;
@@ -301,6 +325,10 @@ export class TurnRunnerService implements OnModuleDestroy {
       requestId: input.requestId,
       mode: input.mode,
     });
+    // 未启用的能力通过可信 instructions 告知模型，避免它凭记忆编造外部/内部信息，
+    // 并引导它在用户确有需求时提示开启开关或改写为明确请求。
+    const guidance = buildCapabilityGuidance(input.capabilities);
+    if (guidance) chatRequest.instructions = guidance;
     if (input.signal.aborted) return;
 
     const upstream = await this.gateway.streamChat(
@@ -326,7 +354,13 @@ export class TurnRunnerService implements OnModuleDestroy {
         }, this.executionOwner);
         return;
       }
-      const publicEvent = this.mapUpstreamEvent(event, conversation.id, turnId, input.requestId);
+      const publicEvent = this.mapUpstreamEvent(
+        event,
+        conversation.id,
+        turnId,
+        input.requestId,
+        input.capabilities,
+      );
       await this.appendPublicEvent(turnId, conversation.tenantId, publicEvent);
       if (publicEvent.type === 'content_delta') content += publicEvent.text;
     }
@@ -346,7 +380,7 @@ export class TurnRunnerService implements OnModuleDestroy {
     mode: PublicTurnMode;
     permissions: string[];
     allowedTools: ReturnType<ToolRegistryService['listAllowed']>;
-    knowledgeBaseEnabled: boolean;
+    capabilities: PublicTurnCapabilities;
     signal: AbortSignal;
   }): Promise<void> {
     const { turnId, conversation } = input;
@@ -375,6 +409,7 @@ export class TurnRunnerService implements OnModuleDestroy {
         user_id: input.userId,
         conversation_id: conversation.id,
         mode: input.mode === 'ultra' ? 'ultra' : 'standard',
+        instructions: buildCapabilityGuidance(input.capabilities) ?? null,
         conversation_summary: messages.summary ?? null,
         messages: messages.items,
         tools: input.allowedTools,
@@ -432,6 +467,7 @@ export class TurnRunnerService implements OnModuleDestroy {
               conversation.id,
               turnId,
               input.requestId,
+              input.capabilities,
             );
             if (publicEvent.type === 'content_delta') {
               pendingContentDeltas.push(publicEvent);
@@ -474,7 +510,7 @@ export class TurnRunnerService implements OnModuleDestroy {
         membershipId: input.membershipId,
         requestId: input.requestId,
         permissions: input.permissions,
-        knowledgeBaseEnabled: input.knowledgeBaseEnabled,
+        capabilities: input.capabilities,
         executionOwner: this.executionOwner,
         calls: suggestedCalls,
         modelStep: modelCall + 1,
@@ -509,7 +545,7 @@ export class TurnRunnerService implements OnModuleDestroy {
     membershipId: string;
     requestId: string;
     permissions: string[];
-    knowledgeBaseEnabled: boolean;
+    capabilities: PublicTurnCapabilities;
     executionOwner: string;
     calls: UpstreamToolCall[];
     modelStep: number;
@@ -640,7 +676,8 @@ export class TurnRunnerService implements OnModuleDestroy {
             executionToken,
             signal: input.signal,
             permissions: executionPermissions,
-            knowledgeBaseEnabled: input.knowledgeBaseEnabled,
+            knowledgeBaseEnabled: input.capabilities.knowledgeBase,
+            webSearchEnabled: input.capabilities.webSearch,
           },
           approval.parsedArguments,
         );
@@ -770,6 +807,7 @@ export class TurnRunnerService implements OnModuleDestroy {
     conversationId: string,
     turnId: string,
     requestId: string,
+    capabilities: PublicTurnCapabilities,
   ): DistributiveOmit<PublicTurnStreamEvent, 'seq'> {
     switch (event.type) {
       case 'started':
@@ -786,6 +824,7 @@ export class TurnRunnerService implements OnModuleDestroy {
             historyTruncated: event.context_usage.history_truncated,
             estimatedInputTokens: event.context_usage.estimated_input_tokens,
           },
+          capabilities,
         };
       case 'status':
         return { type: 'status', phase: event.phase };
@@ -891,11 +930,60 @@ function hashTurnRequest(
   mode: string,
   content: string,
   imageFileIds: readonly string[] = [],
+  documentFileIds: readonly string[] = [],
   knowledgeBaseEnabled = false,
+  webSearchEnabled = false,
 ): string {
   return createHash('sha256')
-    .update(JSON.stringify({ conversationId, mode, content, imageFileIds, knowledgeBaseEnabled }))
+    .update(JSON.stringify({
+      conversationId,
+      mode,
+      content,
+      imageFileIds,
+      documentFileIds,
+      knowledgeBaseEnabled,
+      webSearchEnabled,
+    }))
     .digest('hex');
+}
+
+/**
+ * 合并显式开关与意图识别结果得到“本轮有效能力”。autoEnabled 只记录
+ * “用户没开、但服务端因意图识别自动打开”的能力，供前端做透明提示。
+ */
+function resolveTurnCapabilities(input: {
+  knowledgeBaseEnabled: boolean;
+  webSearchEnabled: boolean;
+  detected: { webSearch: boolean; knowledgeBase: boolean };
+}): PublicTurnCapabilities {
+  const autoEnabled: AutoEnabledCapability[] = [];
+  if (!input.webSearchEnabled && input.detected.webSearch) autoEnabled.push('web_search');
+  if (!input.knowledgeBaseEnabled && input.detected.knowledgeBase) autoEnabled.push('knowledge_search');
+  return {
+    webSearch: input.webSearchEnabled || input.detected.webSearch,
+    knowledgeBase: input.knowledgeBaseEnabled || input.detected.knowledgeBase,
+    autoEnabled,
+  };
+}
+
+/**
+ * 生成可信 instructions 片段，向模型说明本轮未启用的检索能力：避免它凭记忆
+ * 编造外部/内部信息，并引导它在用户确有需求时提示开启开关或改写为明确请求。
+ * 两项能力都已启用时返回 null（无需额外提示）。本片段只约束能力边界，
+ * 不改变回答风格。
+ */
+function buildCapabilityGuidance(capabilities: PublicTurnCapabilities): string | null {
+  const notes: string[] = [];
+  if (!capabilities.webSearch) {
+    notes.push('本轮未启用联网搜索：不要凭记忆编造实时或外部信息（新闻、股价、天气、最新版本等）。'
+      + '若用户确实需要联网，请提示可在输入框开启「联网搜索」或直接说“联网查一下”。');
+  }
+  if (!capabilities.knowledgeBase) {
+    notes.push('本轮未启用知识库检索：不要凭记忆编造公司内部资料（制度、人员、项目、流程等）。'
+      + '若用户确实需要内部资料，请提示可在输入框开启「知识库」或直接说“查一下知识库”。');
+  }
+  if (notes.length === 0) return null;
+  return notes.join('\n');
 }
 
 /**

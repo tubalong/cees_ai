@@ -54,7 +54,7 @@ input {
     display: grid;
     place-items: center;
     color: #fff;
-    background: #565cf6;
+    background: var(--primary);
     font-weight: 700;
 }
 

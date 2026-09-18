@@ -7,6 +7,9 @@ export const managedDocumentAccessInclude = {
     resource: {
         include: { acls: true },
     },
+    fileObject: {
+        select: { id: true, mimeType: true, objectKey: true },
+    },
 } satisfies Prisma.ManagedDocumentInclude;
 
 export type ManagedDocumentWithAccess = Prisma.ManagedDocumentGetPayload<{

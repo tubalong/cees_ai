@@ -1,6 +1,7 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { WebSearchService } from '../../../web-search/web-search.service';
 import type { WebSearchRecency } from '../../../web-search/web-search.types';
+import { ToolPolicyError } from '../tool-policy.service';
 import { ToolRegistryService } from '../tool-registry';
 import type { ToolDefinition, ToolExecutionContext, ToolExecutionResult } from '../tool.types';
 
@@ -15,7 +16,7 @@ export class WebSearchTool implements OnModuleInit {
   constructor(
     private readonly registry: ToolRegistryService,
     private readonly searchService: WebSearchService,
-  ) {}
+  ) { }
 
   onModuleInit(): void {
     this.registry.register(this.definition);
@@ -66,6 +67,15 @@ export class WebSearchTool implements OnModuleInit {
     context: ToolExecutionContext,
     input: Record<string, unknown>,
   ): Promise<ToolExecutionResult> {
+    // 开关兜底校验：正常情况下开关关闭时模型拿不到本工具，这里防止任何绕过路径。
+    if (!context.webSearchEnabled) {
+      throw new ToolPolicyError(
+        'PERMISSION_DENIED',
+        'webSearchEnabled=false 时拒绝执行 web_search',
+        '本轮未启用联网搜索；请告知用户如需联网检索可在输入框开启相应选项，或直接说明需要联网',
+        ['ai.web.search'],
+      );
+    }
     const response = await this.searchService.search({
       query: input.query as string,
       recency: input.recency as WebSearchRecency,

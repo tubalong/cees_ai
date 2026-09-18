@@ -95,9 +95,9 @@
     height: 40px;
     display: grid;
     place-items: center;
-    color: #565cf6;
+    color: var(--primary);
     border-radius: 7px;
-    background: #eef0ff;
+    background: var(--primary-soft);
     font-size: 20px;
     font-style: normal;
 }

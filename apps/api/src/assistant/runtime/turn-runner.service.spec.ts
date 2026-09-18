@@ -12,6 +12,7 @@ import { ToolRegistryService } from '../tools/tool-registry';
 import type { ToolExecutionResult } from '../tools/tool.types';
 import { AssistantMessageContentService } from './message-content.service';
 import { ContextBuilderService } from './context-builder.service';
+import { IntentCapabilityService } from './intent-capability.service';
 import { TurnRunnerService } from './turn-runner.service';
 import { TurnStateService } from './turn-state.service';
 
@@ -107,21 +108,26 @@ describe('TurnRunnerService', () => {
         await harness.service.startTurn({
             conversationId: CONVERSATION_ID,
             idempotencyKey: 'key-kb-off',
-            content: '内部文档里怎么写的？',
+            content: '请按常规方式回答这个问题',
             mode: 'standard',
         });
-        await consumeAll(await harness.service.subscribeTurn({
+        const events = await consumeAll(await harness.service.subscribeTurn({
             conversationId: CONVERSATION_ID,
             turnId: TURN_ID,
             afterSeq: 0,
         }));
 
-        // 开关关闭：过滤后无可用工具，走纯文本轮次；模型从未拿到知识库工具。
+        // 开关关闭且消息未提知识库：过滤后无可用工具，走纯文本轮次；模型从未拿到知识库工具。
         expect(harness.gateway.streamChat).toHaveBeenCalled();
         expect(harness.gateway.streamToolTurn).not.toHaveBeenCalled();
         expect(harness.state.createTurn).toHaveBeenCalledWith(expect.objectContaining({
             knowledgeBaseEnabled: false,
         }));
+        expect(startedCapabilities(events)).toEqual({
+            webSearch: false,
+            knowledgeBase: false,
+            autoEnabled: [],
+        });
     });
 
     it('exposes knowledge_search to the model when the turn-level switch is on', async () => {
@@ -145,6 +151,58 @@ describe('TurnRunnerService', () => {
             expect.anything(),
             expect.any(AbortSignal),
         );
+    });
+
+    it('auto-enables web_search for a turn whose message explicitly asks to search online', async () => {
+        const harness = createHarness({ allowedTools: [chatTool('web_search')] });
+
+        await harness.service.startTurn({
+            conversationId: CONVERSATION_ID,
+            idempotencyKey: 'key-web-intent',
+            content: '联网查一下奥特之王的最新消息',
+            mode: 'standard',
+        });
+        const events = await consumeAll(await harness.service.subscribeTurn({
+            conversationId: CONVERSATION_ID,
+            turnId: TURN_ID,
+            afterSeq: 0,
+        }));
+
+        // 未显式开启开关，但消息明确提到“联网”：本轮自动启用并把 autoEnabled 回传前端。
+        expect(startedCapabilities(events)).toEqual({
+            webSearch: true,
+            knowledgeBase: false,
+            autoEnabled: ['web_search'],
+        });
+        expect(harness.gateway.streamToolTurn).toHaveBeenCalledWith(
+            expect.objectContaining({ tools: [chatTool('web_search')] }),
+            expect.anything(),
+            expect.any(AbortSignal),
+        );
+    });
+
+    it('does not mark an explicitly enabled capability as auto-enabled', async () => {
+        const harness = createHarness({ allowedTools: [chatTool('web_search')] });
+
+        await harness.service.startTurn({
+            conversationId: CONVERSATION_ID,
+            idempotencyKey: 'key-web-explicit',
+            content: '帮我看看这个',
+            mode: 'standard',
+            webSearchEnabled: true,
+        });
+        const events = await consumeAll(await harness.service.subscribeTurn({
+            conversationId: CONVERSATION_ID,
+            turnId: TURN_ID,
+            afterSeq: 0,
+        }));
+
+        // 用户显式开启不计入 autoEnabled，避免前端提示“自动启用”。
+        expect(startedCapabilities(events)).toEqual({
+            webSearch: true,
+            knowledgeBase: false,
+            autoEnabled: [],
+        });
     });
 
     it('reuses an idempotent turn only when the multimodal request hash matches', async () => {
@@ -366,6 +424,8 @@ describe('TurnRunnerService', () => {
             idempotencyKey: 'key-web-search',
             content: '搜索 CEES',
             mode: 'standard',
+            // 联网工具受本轮对话级开关门控；显式开启后模型工具列表才包含 web_search。
+            webSearchEnabled: true,
         });
         const events = await consumeAll(await harness.service.subscribeTurn({
             conversationId: CONVERSATION_ID,
@@ -812,6 +872,7 @@ function createHarness(options: {
         toolPolicy as unknown as ToolPolicyService,
         state as unknown as TurnStateService,
         messageContent as unknown as AssistantMessageContentService,
+        new IntentCapabilityService(),
     );
     return {
         service,
@@ -928,16 +989,24 @@ async function consumeAll(generator: AsyncGenerator<PublicTurnStreamEvent>): Pro
     return result;
 }
 
+/** 取出 started 事件里的“本轮有效能力”，便于断言显式开关与意图自动启用的合并结果。 */
+function startedCapabilities(events: PublicTurnStreamEvent[]): unknown {
+    const started = events.find((event): event is Extract<PublicTurnStreamEvent, { type: 'started' }> => event.type === 'started');
+    return started?.capabilities;
+}
+
 function hashTurnRequestForTest(
     conversationId: string,
     mode: string,
     content: string,
     imageFileIds: string[] = [],
+    documentFileIds: string[] = [],
     knowledgeBaseEnabled = false,
+    webSearchEnabled = false,
 ): string {
     const { createHash } = require('node:crypto') as typeof import('node:crypto');
     return createHash('sha256')
-        .update(JSON.stringify({ conversationId, mode, content, imageFileIds, knowledgeBaseEnabled }))
+        .update(JSON.stringify({ conversationId, mode, content, imageFileIds, documentFileIds, knowledgeBaseEnabled, webSearchEnabled }))
         .digest('hex');
 }
 

@@ -8,13 +8,14 @@ import {
 } from '@ant-design/icons';
 import { App as AntdApp, Avatar, Badge, Button, Empty, Image as AntImage, Input, Modal, Select, Spin, Tag, Tooltip, Dropdown } from 'antd';
 import { useQuery } from '@tanstack/react-query';
+// import { ArrowLeft, ArrowRight, BookOpen, Download, ExternalLink, Eye, FileImage, FileText as FileTextIcon, Globe2, ImagePlus, Pencil, RotateCw, Send, Trash2, Upload, X } from 'lucide-react';
 import { ArrowLeft, ArrowRight, BookOpen, Download, ExternalLink, Eye, FileImage, FileText as FileTextIcon, Globe2, ImagePlus, Pencil, RotateCw, Save, Send, Trash2, Upload, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { type Components } from 'react-markdown';
 import { useLocation, useNavigate } from 'react-router-dom';
 import remarkGfm from 'remark-gfm';
 import {
-    cancelTurn, createConversation, createTurn, deleteConversation, getConversation, getDashboardOverview, getDashboardTodos, getDashboardUpcomingMeetings, getDocument, getImage, replayTurnEvents, updateConversation, uploadAttachmentFile,
+    cancelTurn, createConversation, createTurn, deleteConversation, exportDocument, getConversation, getDashboardOverview, getDashboardTodos, getDashboardUpcomingMeetings, getDocument, getImage, replayTurnEvents, updateConversation, uploadAttachmentFile,
     getUnreadNotificationCount, hasStoredSession, listConversations, listDocuments, listTenantMembers, logout,
     createKnowledgeDocument, deleteKnowledgeDocument, listWritableKnowledgeBases,
     type Conversation, type ConversationMessage, type DashboardOverview, type DashboardTodoItem, type DashboardUpcomingMeeting, type ImageAccess,
@@ -35,6 +36,7 @@ import HrManagement from '../features/hr/HrManagement';
 import FinanceManagement from '../features/finance/FinanceManagement';
 import LegalContractManagement from '../features/legal/LegalContractManagement';
 import KnowledgeManagement from '../features/knowledge/KnowledgeManagement';
+import ManagedDocumentsPage from '../features/documents/ManagedDocumentsPage';
 import { useDateFormatter, useI18n } from '../core/i18n';
 
 interface WebviewElement extends HTMLWebViewElement {
@@ -50,27 +52,100 @@ interface NavItem {
     icon: JSX.Element;
 }
 
+interface NavSection {
+    key: string;
+    label: string;
+    icon: JSX.Element;
+    items: NavItem[];
+}
+
 function CeesLogo({ className }: { className?: string }): JSX.Element {
     return <img className={className} src="./assests/logo.webp" alt="CEES AI" />;
 }
 
-const navItems: NavItem[] = [
+/**
+ * 分组折叠箭头：自绘细线 chevron，未展开指向右（>），展开后指向下（v）。
+ * 不用 antd 的实心三角/线条图标，避免在 12px 字号下笔画发粗、显得笨重。
+ */
+function NavCaret({ open }: { open: boolean }): JSX.Element {
+    return <span className={`nav-group-caret ${open ? 'is-open' : ''}`} aria-hidden="true">
+        <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M6 3.5 10.5 8 6 12.5" />
+        </svg>
+    </span>;
+}
+
+/**
+ * 回答/预览正文里的 Markdown 图片一律不渲染为 <img>。
+ *
+ * 契约（docs/api/assistant-api.md）规定图片只以服务端 resources 的稳定引用为准，
+ * 不从消息正文文本中解析图片地址；模型在正文里写出的地址通常是幻觉或上一轮
+ * 搜索结果残留，直接渲染就会出现「打不开/一片空白」的坏图。这里降级为可见的
+ * 文字提示：既不再产生坏图，也不丢失模型想表达的信息。
+ */
+const markdownRenderComponents: Components = {
+    img: ({ alt }) => <span className="chat-inline-image-fallback">{(alt ?? '').trim() || '图片'}</span>,
+};
+
+/** 始终置顶的独立入口：首页、AI 助手、应用中心 */
+const pinnedNavItems: NavItem[] = [
     { path: '/', label: '首页', icon: <HomeOutlined /> },
     { path: '/assistant', label: 'AI 助手', icon: <MessageOutlined /> },
-    { path: '/projects', label: '项目管理', icon: <ProjectOutlined /> },
-    { path: '/meetings', label: '会议管理', icon: <CalendarOutlined /> },
-    { path: '/reports', label: '工作报告', icon: <ProfileOutlined /> },
     { path: '/applications', label: '应用中心', icon: <AppstoreOutlined /> },
-    { path: '/architecture', label: '架构管理', icon: <TeamOutlined /> },
-    { path: '/roles', label: '角色权限', icon: <SafetyCertificateOutlined /> },
-    { path: '/assignment', label: '分配策略', icon: <PartitionOutlined /> },
-    { path: '/hr', label: '人力资源', icon: <UserOutlined /> },
-    { path: '/finance', label: '财务管理', icon: <BankOutlined /> },
-    { path: '/legal', label: '合同台账', icon: <FileProtectOutlined /> },
-    { path: '/dingtalk', label: '钉钉管理', icon: <CloudSyncOutlined /> },
-    { path: '/knowledge', label: '知识管理', icon: <BookOutlined /> },
-    { path: '/notifications', label: '通知中心', icon: <NotificationOutlined /> },
 ];
+
+/** 其余功能按业务域归类到可折叠的父级管理中 */
+const navSections: NavSection[] = [
+    {
+        key: 'collaboration',
+        label: '协作管理',
+        icon: <ProjectOutlined />,
+        items: [
+            { path: '/projects', label: '项目管理', icon: <ProjectOutlined /> },
+            { path: '/meetings', label: '会议管理', icon: <CalendarOutlined /> },
+            { path: '/reports', label: '工作报告', icon: <ProfileOutlined /> },
+        ],
+    },
+    {
+        key: 'organization',
+        label: '组织管理',
+        icon: <TeamOutlined />,
+        items: [
+            { path: '/architecture', label: '架构管理', icon: <TeamOutlined /> },
+            { path: '/roles', label: '角色权限', icon: <SafetyCertificateOutlined /> },
+            { path: '/assignment', label: '分配策略', icon: <PartitionOutlined /> },
+            { path: '/dingtalk', label: '钉钉管理', icon: <CloudSyncOutlined /> },
+        ],
+    },
+    {
+        key: 'business',
+        label: '业务管理',
+        icon: <BankOutlined />,
+        items: [
+            { path: '/hr', label: '人力资源', icon: <UserOutlined /> },
+            { path: '/finance', label: '财务管理', icon: <BankOutlined /> },
+            { path: '/legal', label: '合同台账', icon: <FileProtectOutlined /> },
+        ],
+    },
+    {
+        key: 'content',
+        label: '内容管理',
+        icon: <FolderOutlined />,
+        items: [
+            { path: '/documents', label: '生成文档', icon: <FileTextOutlined /> },
+            { path: '/knowledge', label: '知识管理', icon: <BookOutlined /> },
+        ],
+    },
+    {
+        key: 'message',
+        label: '消息中心',
+        icon: <BellOutlined />,
+        items: [
+            { path: '/notifications', label: '通知中心', icon: <NotificationOutlined /> },
+        ],
+    },
+];
+
 
 const appItems = [
     { name: '智能文档助手', description: '总结、润色与多语言翻译', icon: <FileTextOutlined />, tone: 'indigo', category: '办公协作' },
@@ -89,6 +164,7 @@ const navPermissionByPath: Record<string, string> = {
     '/projects': 'project.read',
     '/meetings': 'meeting.read',
     '/reports': 'work_report.read',
+    '/documents': 'document.read',
     '/knowledge': 'knowledge_base.read',
     '/notifications': 'notification.read',
 };
@@ -113,7 +189,35 @@ function SideNavigation({ collapsed, permissions, unreadCount, onToggle, onLogou
     const { message } = AntdApp.useApp();
     const [debugModalOpen, setDebugModalOpen] = useState(false);
     const [debugPassword, setDebugPassword] = useState('');
+    const [openSections, setOpenSections] = useState<string[]>([]);
     const debugClickTimes = useRef<number[]>([]);
+
+    const isPermitted = (item: NavItem): boolean => {
+        const requiredPermission = navPermissionByPath[item.path];
+        const anyPermissions = navAnyPermissionByPath[item.path];
+        return (!requiredPermission || permissions.includes(requiredPermission)) && (!anyPermissions || anyPermissions.some((permission) => permissions.includes(permission)));
+    };
+
+    const visiblePinnedItems = pinnedNavItems.filter(isPermitted);
+    const visibleSections = navSections
+        .map((section) => ({ ...section, items: section.items.filter(isPermitted) }))
+        .filter((section) => section.items.length > 0);
+    const activeSectionKey = visibleSections.find((section) => section.items.some((item) => item.path === location.pathname))?.key;
+
+    useEffect(() => {
+        if (!activeSectionKey) return;
+        setOpenSections((previous) => previous.includes(activeSectionKey) ? previous : [...previous, activeSectionKey]);
+    }, [activeSectionKey]);
+
+    const toggleSection = (key: string): void => {
+        setOpenSections((previous) => previous.includes(key) ? previous.filter((item) => item !== key) : [...previous, key]);
+    };
+
+    const renderNavItem = (item: NavItem, isChild = false): JSX.Element => <Tooltip key={item.path} title={collapsed ? t(item.label) : ''} placement="right">
+        <button className={`nav-item ${isChild ? 'is-child' : ''} ${location.pathname === item.path ? 'is-active' : ''}`} type="button" onClick={() => navigate(item.path)}>
+            {item.path === '/notifications' ? <Badge count={unreadCount} size="small" offset={[2, -2]}>{item.icon}</Badge> : item.icon}{!collapsed && <span>{t(item.label)}</span>}
+        </button>
+    </Tooltip>;
 
     const handleBrandClick = (): void => {
         const now = Date.now();
@@ -142,15 +246,23 @@ function SideNavigation({ collapsed, permissions, unreadCount, onToggle, onLogou
             {!collapsed && <span><strong>CEES AI</strong><small>{t('企业智能工作台')}</small></span>}
         </div>
         <nav className="nav-list">
-            {navItems.filter((item) => {
-                const requiredPermission = navPermissionByPath[item.path];
-                const anyPermissions = navAnyPermissionByPath[item.path];
-                return (!requiredPermission || permissions.includes(requiredPermission)) && (!anyPermissions || anyPermissions.some((permission) => permissions.includes(permission)));
-            }).map((item) => <Tooltip key={item.path} title={collapsed ? t(item.label) : ''} placement="right">
-                <button className={`nav-item ${location.pathname === item.path ? 'is-active' : ''}`} type="button" onClick={() => navigate(item.path)}>
-                    {item.path === '/notifications' ? <Badge count={unreadCount} size="small" offset={[2, -2]}>{item.icon}</Badge> : item.icon}{!collapsed && <span>{t(item.label)}</span>}
-                </button>
-            </Tooltip>)}
+            {visiblePinnedItems.map((item) => renderNavItem(item))}
+            {collapsed
+                ? visibleSections.map((section, index) => <div className="nav-group-collapsed" key={section.key}>
+                    {index > 0 && <span className="nav-divider" />}
+                    {section.items.map((item) => renderNavItem(item))}
+                </div>)
+                : visibleSections.map((section) => {
+                    const isOpen = openSections.includes(section.key);
+                    return <div className="nav-group" key={section.key}>
+                        <button className={`nav-group-header ${activeSectionKey === section.key ? 'is-active' : ''}`} type="button" onClick={() => toggleSection(section.key)} aria-expanded={isOpen}>
+                            {section.icon}
+                            <span className="nav-group-label">{t(section.label)}</span>
+                            <NavCaret open={isOpen} />
+                        </button>
+                        {isOpen && <div className="nav-group-items">{section.items.map((item) => renderNavItem(item, true))}</div>}
+                    </div>;
+                })}
         </nav>
         <div className="nav-bottom">
             <Tooltip title={collapsed ? t('个人中心') : ''} placement="right"><button className={`nav-item ${location.pathname === '/profile' ? 'is-active' : ''}`} type="button" onClick={() => navigate('/profile')}><UserOutlined />{!collapsed && <span>{t('个人中心')}</span>}</button></Tooltip>
@@ -171,26 +283,25 @@ function PageHeader({ title, description, actions }: { title: string; descriptio
     </header>;
 }
 
-function HomePage({ authContext, documents, memberCount, dashboard, todos, upcomingMeetings, dashboardLoading, onNavigate }: {
+function HomePage({ authContext, documents, memberCount }: {
     authContext: MeResult;
     documents: ManagedDocumentSummary[];
     memberCount: number;
-    dashboard: DashboardOverview | undefined;
-    todos: DashboardTodoItem[];
-    upcomingMeetings: DashboardUpcomingMeeting[];
-    dashboardLoading: boolean;
-    onNavigate: (path: string) => void;
 }): JSX.Element {
+    const navigate = useNavigate();
     const { message } = AntdApp.useApp();
     const { t } = useI18n();
     const formatDate = useDateFormatter();
+    const hasPermission = (code: string): boolean => authContext.permissions.includes(code);
+    const dashboardQuery = useQuery({ queryKey: ['dashboard-overview'], queryFn: () => getDashboardOverview(), enabled: hasPermission('dashboard.read'), refetchInterval: 120_000 });
+    const todosQuery = useQuery({ queryKey: ['dashboard-todos'], queryFn: () => getDashboardTodos({ taskLimit: 5, reportLimit: 5, meetingLimit: 5 }), enabled: hasPermission('dashboard.read'), refetchInterval: 120_000 });
+    const upcomingQuery = useQuery({ queryKey: ['dashboard-upcoming'], queryFn: () => getDashboardUpcomingMeetings(5), enabled: hasPermission('dashboard.read') && hasPermission('meeting.read'), refetchInterval: 120_000 });
+    const dashboard = dashboardQuery.data;
+    const todos = [...(todosQuery.data?.tasks ?? []), ...(todosQuery.data?.reports ?? []), ...(todosQuery.data?.meetings ?? [])];
+    const upcomingMeetings = upcomingQuery.data?.items ?? [];
+    const dashboardLoading = dashboardQuery.isLoading || todosQuery.isLoading;
     const numberValue = (value: unknown): string => value === undefined || value === null ? '-' : String(value);
-    const todoRows = dashboardLoading
-        ? []
-        : [
-            ...(todos ?? []).map((todo) => ({ title: todo.title ?? todo.id ?? '', due: todo.dueDate ? formatDate(todo.dueDate) : '', kind: '任务' })),
-        ];
-    const todoTasks = (todos ?? []);
+    const todoTasks = todos;
     return <div className="workspace-page home-page">
         <PageHeader title={t('下午好，{name}', { name: authContext.user.displayName })} description={t('欢迎回到 {tenant}，今天也一起高效工作', { tenant: authContext.tenant.name })} actions={<div className="header-actions"><Input prefix={<SearchOutlined />} placeholder={t('搜索文档、应用、成员')} /><Button type="primary" icon={<PlusOutlined />}>{t('新建')}</Button></div>} />
         <div className="metric-grid">
@@ -214,7 +325,7 @@ function HomePage({ authContext, documents, memberCount, dashboard, todos, upcom
                     {documents.length ? documents.slice(0, 3).map((document) => <div className="document-row" key={document.id}><i><FileTextOutlined /></i><span><strong>{document.title}</strong><small>{document.visibility === 'TENANT' ? t('租户可见') : t('私有')} · {formatDate(document.updatedAt)}</small></span><Tag>{document.visibility === 'TENANT' ? t('租户') : t('私有')}</Tag></div>) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('当前权限范围内暂无文档')} />}
                 </section>
                 <section className="surface-panel task-panel">
-                    <div className="panel-heading"><h3>{t('待办事项')}</h3><button type="button" onClick={() => onNavigate('/projects')}>{t('全部待办')}</button></div>
+                    <div className="panel-heading"><h3>{t('待办事项')}</h3><button type="button" onClick={() => navigate('/projects')}>{t('全部待办')}</button></div>
                     {dashboardLoading ? <div className="data-loading"><Spin /></div> : todoTasks.length ? todoTasks.slice(0, 5).map((todo) => <div className="task-row" key={todo.id ?? todo.title}><span>{todo.title}</span>{todo.dueDate && <strong className="warning-text">{formatDate(todo.dueDate)}</strong>}</div>) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('当前没有待办')} />}
                 </section>
             </div>
@@ -225,7 +336,7 @@ function HomePage({ authContext, documents, memberCount, dashboard, todos, upcom
                     <button type="button" onClick={() => message.info(t('请从左侧进入 AI 助手开始对话'))}>{t('输入你的问题…')}<Send size={16} /></button>
                 </section>
                 <section className="surface-panel activity-panel">
-                    <div className="panel-heading"><h3>{t('近期会议')}</h3><button type="button" onClick={() => onNavigate('/meetings')}>{t('查看全部')}</button></div>
+                    <div className="panel-heading"><h3>{t('近期会议')}</h3><button type="button" onClick={() => navigate('/meetings')}>{t('查看全部')}</button></div>
                     {dashboardLoading ? <div className="data-loading"><Spin /></div> : upcomingMeetings.length ? upcomingMeetings.map((meeting) => <div className="activity-row" key={meeting.id ?? meeting.title}><Avatar size={26} icon={<CalendarOutlined />} /><span>{meeting.title}<small>{meeting.startsAt ? formatDate(meeting.startsAt) : ''}</small></span></div>) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('近期没有会议')} />}
                 </section>
             </div>
@@ -248,6 +359,7 @@ interface ChatResource {
     id: string;
     type: 'IMAGE' | 'DOCUMENT';
     url?: string | null;
+    format?: 'docx' | 'pdf' | 'pptx';
 }
 
 interface ChatSource {
@@ -283,10 +395,23 @@ function ChatResourceCard({ resource, onPreviewDocument, onSaveToKnowledge }: { 
     const [image, setImage] = useState<ImageAccess>();
     const [documentTitle, setDocumentTitle] = useState('生成文档');
     const [documentContent, setDocumentContent] = useState<string>();
+    const [documentFormat, setDocumentFormat] = useState(resource.format);
+    const [documentExportable, setDocumentExportable] = useState(false);
     useEffect(() => {
         if (resource.type === 'IMAGE' && !resource.url) void getImage(resource.id).then(setImage).catch(() => undefined);
-        if (resource.type === 'DOCUMENT') void getDocument(resource.id).then((document) => { setDocumentTitle(document.title); setDocumentContent(document.content); }).catch(() => undefined);
-    }, [resource.id, resource.type]);
+        if (resource.type === 'DOCUMENT') void getDocument(resource.id).then((document) => {
+            setDocumentTitle(document.title);
+            setDocumentContent(document.content);
+            setDocumentFormat(resource.format ?? documentFormatFromMimeType(document.fileMimeType));
+            // 生成类文档携带 documentSpec，可随时渲染为 DOCX/PDF/PPTX 真文件；
+            // 规格缺失（人工创建或历史数据）时才退回 Markdown 交付。
+            setDocumentExportable(document.documentSpec != null);
+        }).catch(() => undefined);
+    }, [resource.id, resource.type, resource.url, resource.format]);
+    const exportAs = async (format: 'docx' | 'pdf' | 'pptx'): Promise<void> => {
+        try { await exportDocument(resource.id, format, documentTitle); }
+        catch (error) { message.error(error instanceof Error ? error.message : '资源下载失败'); }
+    };
     const download = async (): Promise<void> => {
         try {
             if (resource.type === 'IMAGE') {
@@ -294,6 +419,11 @@ function ChatResourceCard({ resource, onPreviewDocument, onSaveToKnowledge }: { 
                 const response = await fetch(access.url);
                 const blobUrl = URL.createObjectURL(await response.blob());
                 const anchor = document.createElement('a'); anchor.href = blobUrl; anchor.download = `${resource.id}.${access.mimeType.split('/')[1]}`; anchor.click(); URL.revokeObjectURL(blobUrl);
+            } else if (documentFormat) {
+                await exportDocument(resource.id, documentFormat, documentTitle);
+            } else if (documentExportable) {
+                // 无法判定原始格式时默认导出 PDF（通用可打开），避免把 Markdown 字节当作 pptx/pdf 交付。
+                await exportDocument(resource.id, 'pdf', documentTitle);
             } else if (documentContent !== undefined) {
                 const blobUrl = URL.createObjectURL(new Blob([documentContent], { type: 'text/markdown;charset=utf-8' }));
                 const anchor = document.createElement('a'); anchor.href = blobUrl; anchor.download = `${documentTitle}.md`; anchor.click(); URL.revokeObjectURL(blobUrl);
@@ -303,9 +433,16 @@ function ChatResourceCard({ resource, onPreviewDocument, onSaveToKnowledge }: { 
     return <div className={`chat-resource ${resource.type.toLowerCase()}`}>
         {resource.type === 'IMAGE' && <>{image || resource.url ? <AntImage className="chat-resource-image" src={image?.url ?? resource.url ?? undefined} alt="AI 生成图片" preview={{ mask: '点击放大' }} /> : <Spin size="small" />}<Button size="small" disabled={!image && !resource.url} icon={<Download size={15} />} onClick={() => void download()}>{'下载'}</Button></>}
         {resource.type === 'DOCUMENT' && <>
-            <div className="chat-resource-header"><span><FileTextIcon size={17} />{documentTitle}</span><span className="chat-resource-actions"><Button size="small" icon={<Save size={15} />} onClick={() => onSaveToKnowledge({ sourceType: 'DOCUMENT', sourceId: resource.id, defaultName: documentTitle })}>{t('存入知识库')}</Button><Button size="small" disabled={documentContent === undefined} icon={<Eye size={15} />} onClick={() => documentContent !== undefined && onPreviewDocument({ id: resource.id, title: documentTitle, content: documentContent })}>{'查看内容'}</Button><Button size="small" disabled={documentContent === undefined} icon={<Download size={15} />} onClick={() => void download()}>{'下载'}</Button></span></div>
+            <div className="chat-resource-header"><span><FileTextIcon size={17} />{documentTitle}</span><span className="chat-resource-actions"><Button size="small" icon={<Save size={15} />} onClick={() => onSaveToKnowledge({ sourceType: 'DOCUMENT', sourceId: resource.id, defaultName: documentTitle })}>{t('存入知识库')}</Button><Button size="small" disabled={documentContent === undefined} icon={<Eye size={15} />} onClick={() => documentContent !== undefined && onPreviewDocument({ id: resource.id, title: documentTitle, content: documentContent })}>{'查看内容'}</Button>{documentFormat ? <Button size="small" disabled={documentContent === undefined} icon={<Download size={15} />} onClick={() => void download()}>{`下载 ${documentFormat.toUpperCase()}`}</Button> : documentExportable ? <Dropdown trigger={['click']} menu={{ items: [{ key: 'docx', label: 'DOCX' }, { key: 'pdf', label: 'PDF' }, { key: 'pptx', label: 'PPTX' }], onClick: ({ key }) => void exportAs(key as 'docx' | 'pdf' | 'pptx') }}><Button size="small" icon={<Download size={15} />}>{'导出文档'}</Button></Dropdown> : <Button size="small" disabled={documentContent === undefined} icon={<Download size={15} />} onClick={() => void download()}>{'下载 Markdown'}</Button>}</span></div>
         </>}
     </div>;
+}
+
+function documentFormatFromMimeType(mimeType: string | null): ChatResource['format'] {
+    if (mimeType === 'application/pdf') return 'pdf';
+    if (mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') return 'docx';
+    if (mimeType === 'application/vnd.openxmlformats-officedocument.presentationml.presentation') return 'pptx';
+    return undefined;
 }
 
 function ChatSourceCard({ source }: { source: ChatSource }): JSX.Element {
@@ -439,6 +576,18 @@ function SaveToKnowledgeModal({ target, onClose, onSaved }: {
     </Modal>;
 }
 
+/** 已删除引用按会话记录，只保存文档 ID；不再整份缓存来源/引用，避免把历史轮次的来源串到当前回答上。 */
+const DELETED_CITATIONS_KEY = 'cees.chat.citations.deleted';
+
+function readDeletedCitationIds(conversationId: string): Set<string> {
+    try {
+        const raw = JSON.parse(localStorage.getItem(`${DELETED_CITATIONS_KEY}.${conversationId}`) ?? '[]') as unknown;
+        return new Set(Array.isArray(raw) ? raw.filter((item): item is string => typeof item === 'string') : []);
+    } catch {
+        return new Set();
+    }
+}
+
 function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element {
     const { t } = useI18n();
     const { message } = AntdApp.useApp();
@@ -448,6 +597,7 @@ function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element 
     const [mode, setMode] = useState<'standard' | 'ultra'>('standard');
     const [networkSearch, setNetworkSearch] = useState(false);
     const [knowledgeBase, setKnowledgeBase] = useState(false);
+    const [autoEnabledCapabilities, setAutoEnabledCapabilities] = useState<Array<'web_search' | 'knowledge_search'>>([]);
     const [attachment, setAttachment] = useState<{ name: string; id: string; isImage: boolean }>();
     const [imageGenerating, setImageGenerating] = useState(false);
     const fileInput = useRef<HTMLInputElement>(null);
@@ -459,12 +609,46 @@ function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element 
     const abortController = useRef<AbortController>();
     const requestVersion = useRef(0);
     const streamFlush = useRef<ReturnType<typeof setTimeout>>();
+    const messageStream = useRef<HTMLDivElement>(null);
+    const questionAnchors = useRef(new Map<string, HTMLDivElement>());
+    const pendingQuestionFocus = useRef<string>();
+    const [activeQuestionId, setActiveQuestionId] = useState<string>();
     const [previewDocument, setPreviewDocument] = useState<{ id: string; title: string; content: string }>();
     const [saveTarget, setSaveTarget] = useState<SaveTarget>();
     const [renameTarget, setRenameTarget] = useState<Conversation>();
     const [renameValue, setRenameValue] = useState('');
     useEffect(() => { void listConversations().then((result) => { setConversations(result.items); if (result.items[0]) void selectConversation(result.items[0]); }).catch((error) => message.error(error instanceof Error ? error.message : '加载会话失败')); }, []);
     useEffect(() => () => abortController.current?.abort(), []);
+    useEffect(() => {
+        const questionId = pendingQuestionFocus.current;
+        if (!questionId) return;
+        const anchor = questionAnchors.current.get(questionId);
+        if (!anchor) return;
+        pendingQuestionFocus.current = undefined;
+        setActiveQuestionId(questionId);
+        anchor.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, [messages]);
+
+    const syncActiveQuestion = (): void => {
+        const stream = messageStream.current;
+        if (!stream) return;
+        const streamTop = stream.getBoundingClientRect().top;
+        let closestId: string | undefined;
+        let closestDistance = Number.POSITIVE_INFINITY;
+        for (const [questionId, anchor] of questionAnchors.current) {
+            const distance = Math.abs(anchor.getBoundingClientRect().top - streamTop - 18);
+            if (distance < closestDistance) {
+                closestId = questionId;
+                closestDistance = distance;
+            }
+        }
+        if (closestId) setActiveQuestionId(closestId);
+    };
+
+    const scrollToQuestion = (questionId: string): void => {
+        setActiveQuestionId(questionId);
+        questionAnchors.current.get(questionId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
 
     const copyText = async (text: string): Promise<void> => {
         try {
@@ -490,12 +674,12 @@ function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element 
         void createConversation().then((conversation) => { setConversations((items) => [conversation, ...items]); setActiveConversationId(conversation.id); setMessages([]); setPreviewDocument(undefined); }).catch((error) => message.error(error instanceof Error ? error.message : '创建会话失败'));
     };
 
-    /** 删除成功后同步会话级引用缓存，重开对话时直接展示已删除态（块 4）。 */
+    /** 删除成功后只记录该文档 ID，重开对话时按 ID 标记已删除态（块 4）。 */
     const handleCitationDeleted = (citationId: string): void => {
         if (!activeConversationId) return;
-        const key = `cees.chat.citations.${activeConversationId}`;
-        const cached = JSON.parse(localStorage.getItem(key) ?? '[]') as ChatCitation[];
-        localStorage.setItem(key, JSON.stringify(cached.map((item) => item.id === citationId ? { ...item, deleted: true } : item)));
+        const deleted = readDeletedCitationIds(activeConversationId);
+        deleted.add(citationId);
+        localStorage.setItem(`${DELETED_CITATIONS_KEY}.${activeConversationId}`, JSON.stringify([...deleted]));
     };
 
     const selectConversation = async (conversation: Conversation): Promise<void> => {
@@ -508,70 +692,83 @@ function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element 
         setActiveConversationId(conversation.id);
         const detail = await getConversation(conversation.id);
         if (activeConversationId && activeConversationId !== conversation.id) return;
-        const cachedSources = JSON.parse(localStorage.getItem(`cees.chat.sources.${conversation.id}`) ?? '[]') as ChatSource[];
-        const cachedCitations = JSON.parse(localStorage.getItem(`cees.chat.citations.${conversation.id}`) ?? '[]') as ChatCitation[];
+        const deletedCitationIds = readDeletedCitationIds(conversation.id);
+        // 服务端把资源、来源、引用按轮次落库在 TOOL 消息上，这里按 turnId 归组，
+        // 再挂回同一轮次的 assistant 回答，避免历史来源/引用串到当前问题。
         const resourcesByTurn = new Map<string, ChatResource[]>();
+        const sourcesByTurn = new Map<string, ChatSource[]>();
+        const citationsByTurn = new Map<string, ChatCitation[]>();
         for (const item of detail.messages) {
+            if (!item.turnId) continue;
             const resources = item.resources?.map((resource): ChatResource => ({ id: resource.id || resource.resourceId || '', type: resource.type, url: resource.url ?? resource.resourceUrl })) ?? [];
-            const legacyImageUrl = item.role === 'TOOL' ? item.content.match(/https?:\/\/\S+/)?.[0] : undefined;
-            if (legacyImageUrl && item.turnId && item.toolCallId) resources.push({ id: item.toolCallId, type: 'IMAGE', url: legacyImageUrl });
-            if (resources.length && item.turnId) resourcesByTurn.set(item.turnId, [...(resourcesByTurn.get(item.turnId) ?? []), ...resources]);
+            if (resources.length) resourcesByTurn.set(item.turnId, [...(resourcesByTurn.get(item.turnId) ?? []), ...resources]);
+            if (item.sources?.length) sourcesByTurn.set(item.turnId, [...(sourcesByTurn.get(item.turnId) ?? []), ...item.sources]);
+            if (item.citations?.length) citationsByTurn.set(item.turnId, [...(citationsByTurn.get(item.turnId) ?? []), ...item.citations.map((citation): ChatCitation => ({ ...citation, deleted: deletedCitationIds.has(citation.id) }))]);
         }
-        const restored: LocalChatMessage[] = detail.messages.filter((item) => item.role !== 'TOOL').map((item) => ({ id: item.id, role: item.role === 'USER' ? 'user' : 'assistant', content: item.content, persisted: true, resources: item.role === 'ASSISTANT' ? resourcesByTurn.get(item.turnId ?? '') : undefined }));
-        if (cachedSources.length) {
-            const lastAssistantMessage = [...restored].reverse().find((item) => item.role === 'assistant');
-            if (lastAssistantMessage) lastAssistantMessage.sources = cachedSources;
-        }
-        if (cachedCitations.length) {
-            const lastAssistantMessage = [...restored].reverse().find((item) => item.role === 'assistant');
-            if (lastAssistantMessage) lastAssistantMessage.citations = cachedCitations;
-        }
+        const restored: LocalChatMessage[] = detail.messages.filter((item) => item.role !== 'TOOL').map((item) => {
+            const message: LocalChatMessage = { id: item.id, role: item.role === 'USER' ? 'user' : 'assistant', content: item.content, persisted: true };
+            if (item.role === 'ASSISTANT' && item.turnId) {
+                message.resources = resourcesByTurn.get(item.turnId);
+                message.sources = sourcesByTurn.get(item.turnId);
+                message.citations = citationsByTurn.get(item.turnId);
+            }
+            return message;
+        });
         setMessages(restored);
     };
 
     const sendMessage = async (): Promise<void> => {
         const text = input.trim();
         const imageFileIds = attachment?.isImage ? [attachment.id] : [];
-        const options = [networkSearch && '使用联网搜索', attachment && !attachment.isImage && `参考附件：${attachment.name}（${attachment.id}）`].filter(Boolean);
+        const fileIds = attachment && !attachment.isImage ? [attachment.id] : [];
+        const options = [attachment && !attachment.isImage && `参考附件：${attachment.name}`].filter(Boolean);
         const content = [selectedPrompt, ...options, text].filter(Boolean).join('\n') || (imageFileIds.length ? t('请分析这张图片') : '');
-        if ((!content && !imageFileIds.length) || sending) return;
+        if ((!content && !imageFileIds.length && !fileIds.length) || sending) return;
         setInput('');
         setSelectedPrompt(undefined);
         setAttachment(undefined);
+        setAutoEnabledCapabilities([]);
         setSending(true);
         const version = ++requestVersion.current;
         const controller = new AbortController();
         abortController.current = controller;
         const userMessage: LocalChatMessage = { id: `m-${Date.now()}`, role: 'user', content };
+        pendingQuestionFocus.current = userMessage.id;
         setMessages((items) => [...items, userMessage]);
         try {
             const conversationId = activeConversationId ?? (await createConversation()).id;
             setActiveConversationId(conversationId);
             if (!conversations.some((item) => item.id === conversationId)) setConversations((items) => [{ id: conversationId, title: t('新对话'), mode, visibility: 'PRIVATE', version: 1, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }, ...items]);
-            let turnId = ''; let seq = 0; let answer = ''; let terminal = false; const streamingMessageId = `streaming-${Date.now()}`; const resources: ChatResource[] = []; const sources: ChatSource[] = []; const citations: ChatCitation[] = []; const toolTypes = new Map<string, ChatResource['type']>();
+            let turnId = ''; let seq = 0; let answer = ''; let terminal = false; const streamingMessageId = `streaming-${Date.now()}`; const resources: ChatResource[] = []; const sources: ChatSource[] = []; const citations: ChatCitation[] = []; const toolTypes = new Map<string, ChatResource['type']>(); const toolFormats = new Map<string, ChatResource['format']>();
             const updateStreamingMessage = (): void => setMessages((items) => [...items.filter((item) => item.id !== streamingMessageId), { id: streamingMessageId, role: 'assistant', content: answer, resources: [...resources], sources: [...sources], citations: [...citations] }]);
             const handle = (event: TurnStreamEvent): void => {
                 if (event.seq <= seq) return;
                 seq = event.seq;
-                if (event.type === 'started') { turnId = event.turnId; setActiveTurn({ conversationId, turnId, seq }); }
+                if (event.type === 'started') { turnId = event.turnId; setActiveTurn({ conversationId, turnId, seq }); setAutoEnabledCapabilities(event.capabilities?.autoEnabled ?? []); }
                 if (event.type === 'content_delta') { answer += event.text; if (!streamFlush.current) streamFlush.current = setTimeout(() => { streamFlush.current = undefined; updateStreamingMessage(); }, 50); }
-                if (event.type === 'tool_call') { if (event.name === 'generate_document') toolTypes.set(event.toolCallId, 'DOCUMENT'); else if (event.name === 'generate_image') { toolTypes.set(event.toolCallId, 'IMAGE'); setImageGenerating(true); } }
+                if (event.type === 'tool_call') {
+                    if (event.name === 'generate_document' || event.name === 'generate_docx' || event.name === 'generate_pdf' || event.name === 'generate_pptx') {
+                        toolTypes.set(event.toolCallId, 'DOCUMENT');
+                        if (event.name !== 'generate_document') toolFormats.set(event.toolCallId, event.name.replace('generate_', '') as ChatResource['format']);
+                    } else if (event.name === 'generate_image') { toolTypes.set(event.toolCallId, 'IMAGE'); setImageGenerating(true); }
+                    else if (event.name === 'insert_document_image') { toolTypes.set(event.toolCallId, 'DOCUMENT'); }
+                }
                 if (event.type === 'tool_result' && event.status === 'completed') {
                     if (event.sources?.length) { sources.push(...event.sources); updateStreamingMessage(); }
                     if (event.citations?.length) { citations.push(...event.citations); updateStreamingMessage(); }
                     const resourceId = event.resource?.id ?? event.resourceId;
                     const resourceType = event.resource?.type ?? toolTypes.get(event.toolCallId);
-                    if (resourceId && resourceType) { resources.push({ id: resourceId, type: resourceType, url: event.resourceUrl }); if (resourceType === 'IMAGE') setImageGenerating(false); updateStreamingMessage(); }
+                    if (resourceId && resourceType) { resources.push({ id: resourceId, type: resourceType, url: event.resourceUrl, format: toolFormats.get(event.toolCallId) }); if (resourceType === 'IMAGE') setImageGenerating(false); updateStreamingMessage(); }
                 }
                 if (event.type === 'error') { terminal = true; setImageGenerating(false); throw new Error(event.error.message); }
-                if (event.type === 'completed') { terminal = true; setImageGenerating(false); if (sources.length) localStorage.setItem(`cees.chat.sources.${conversationId}`, JSON.stringify(sources)); if (citations.length) localStorage.setItem(`cees.chat.citations.${conversationId}`, JSON.stringify(citations)); if (event.finishReason === 'length') message.warning(t('回答达到长度上限，内容可能不完整')); }
+                if (event.type === 'completed') { terminal = true; setImageGenerating(false); if (event.finishReason === 'length') message.warning(t('回答达到长度上限，内容可能不完整')); }
             };
             const replay = async (): Promise<void> => {
                 for (let attempt = 0; attempt < 3 && !terminal; attempt += 1) await replayTurnEvents(conversationId, turnId, seq, handle, controller.signal);
                 if (!terminal) throw new Error(t('连接已断开，请稍后重试'));
             };
             try {
-                await createTurn(conversationId, { content, mode, imageFileIds, knowledgeBaseEnabled: knowledgeBase }, crypto.randomUUID(), handle, controller.signal);
+                await createTurn(conversationId, { content, mode, imageFileIds, fileIds, knowledgeBaseEnabled: knowledgeBase, webSearchEnabled: networkSearch }, crypto.randomUUID(), handle, controller.signal);
             } catch (error) {
                 if (!turnId || controller.signal.aborted || terminal) throw error;
                 await replay();
@@ -585,30 +782,44 @@ function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element 
         }
     };
 
+    const questions = messages.filter((item) => item.role === 'user');
+
     return <div className={`assistant-layout ${previewDocument ? 'has-preview' : ''}`}>
         <aside className="conversation-list">
             <div className="conversation-heading"><h2>{t('对话')}</h2><Button type="primary" icon={<PlusOutlined />} onClick={newConversation}>{t('新对话')}</Button></div>
-            {conversations.map((conversation) => <Dropdown key={conversation.id} trigger={['contextMenu']} menu={{ items: [{ key: 'rename', icon: <Pencil size={15} />, label: t('重命名'), onClick: () => { setRenameTarget(conversation); setRenameValue(conversation.title); } }, { key: 'delete', danger: true, icon: <Trash2 size={15} />, label: t('删除对话'), onClick: () => Modal.confirm({ title: t('删除对话'), content: t('删除后无法恢复，确认删除吗？'), onOk: async () => { await deleteConversation(conversation.id, conversation.version); setConversations((items) => items.filter((item) => item.id !== conversation.id)); if (activeConversationId === conversation.id) { setActiveConversationId(undefined); setMessages([]); } } }) }] }}><button className={`conversation-item ${conversation.id === activeConversationId ? 'is-active' : ''}`} type="button" onClick={() => void selectConversation(conversation)}><strong>{conversation.title || t('新对话')}</strong><small>{conversation.lastTurnAt ? new Date(conversation.lastTurnAt).toLocaleString() : t('尚未开始')}</small></button></Dropdown>)}
+            {conversations.map((conversation) => <Dropdown key={conversation.id} trigger={['contextMenu']} menu={{ items: [{ key: 'rename', icon: <Pencil size={15} />, label: t('重命名'), onClick: () => { setRenameTarget(conversation); setRenameValue(conversation.title); } }, { key: 'delete', danger: true, icon: <Trash2 size={15} />, label: t('删除对话'), onClick: () => Modal.confirm({ title: t('删除对话'), content: t('删除后无法恢复，确认删除吗？'), onOk: async () => { await deleteConversation(conversation.id, conversation.version); localStorage.removeItem(`${DELETED_CITATIONS_KEY}.${conversation.id}`); setConversations((items) => items.filter((item) => item.id !== conversation.id)); if (activeConversationId === conversation.id) { setActiveConversationId(undefined); setMessages([]); } } }) }] }}><button className={`conversation-item ${conversation.id === activeConversationId ? 'is-active' : ''}`} type="button" onClick={() => void selectConversation(conversation)}><strong>{conversation.title || t('新对话')}</strong><small>{conversation.lastTurnAt ? new Date(conversation.lastTurnAt).toLocaleString() : t('尚未开始')}</small></button></Dropdown>)}
         </aside>
         <section className="chat-panel">
             <header className="chat-header"><span><i><CeesLogo /></i><strong>{t('CEES AI 助手')}</strong></span><span>{activeTurn && <Button size="small" danger onClick={() => { abortController.current?.abort(); setImageGenerating(false); void cancelTurn(activeTurn.conversationId, activeTurn.turnId).finally(() => setActiveTurn(undefined)); }}>{t('停止生成')}</Button>}</span></header>
-            <div className="message-stream">
-                {messages.map((item, index) => <div className={`chat-message ${item.role}`} key={`${item.role}-${index}`}>
-                    {item.role === 'assistant' && <i className="assistant-avatar"><CeesLogo /></i>}
-                    <div className="chat-message-body">
-                        <div className="chat-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}>{item.content}</ReactMarkdown></div>
-                        {item.resources?.map((resource) => <ChatResourceCard key={`${resource.type}-${resource.id}`} resource={resource} onPreviewDocument={setPreviewDocument} onSaveToKnowledge={canSaveToKnowledge ? setSaveTarget : () => undefined} />)}
-                        {item.sources?.length ? <div className="chat-sources">{item.sources.map((source) => <ChatSourceCard key={source.id} source={source} />)}</div> : null}
-                        {item.citations?.length ? <div className="chat-sources">{groupCitations(item.citations).map((citation) => <KnowledgeCitationCard key={citation.id} citation={citation} onDeleted={handleCitationDeleted} />)}</div> : null}
-                        <div className="chat-message-actions">
-                            <button className="chat-copy" type="button" onClick={() => void copyText(item.content)}><CopyOutlined />{t('复制')}</button>
-                            {item.persisted && canSaveToKnowledge && <button className="chat-copy chat-save-to-knowledge" type="button" onClick={() => setSaveTarget({ sourceType: 'MESSAGE', sourceId: item.id })}><Save size={13} />{t('存入知识库')}</button>}
+            <div className="message-stream-shell">
+                <div className="message-stream" ref={messageStream} onScroll={syncActiveQuestion}>
+                    {messages.map((item) => <div className={`chat-message ${item.role}`} key={item.id} ref={item.role === 'user' ? (element) => { if (element) questionAnchors.current.set(item.id, element); else questionAnchors.current.delete(item.id); } : undefined}>
+                        {item.role === 'assistant' && <i className="assistant-avatar"><CeesLogo /></i>}
+                        <div className="chat-message-body">
+                            <div className="chat-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownRenderComponents}>{item.content}</ReactMarkdown></div>
+                            {item.resources?.map((resource) => <ChatResourceCard key={`${resource.type}-${resource.id}`} resource={resource} onPreviewDocument={setPreviewDocument} onSaveToKnowledge={canSaveToKnowledge ? setSaveTarget : () => undefined} />)}
+                            {item.sources?.length ? <div className="chat-sources">{item.sources.map((source) => <ChatSourceCard key={source.id} source={source} />)}</div> : null}
+                            {item.citations?.length ? <div className="chat-sources">{groupCitations(item.citations).map((citation) => <KnowledgeCitationCard key={citation.id} citation={citation} onDeleted={handleCitationDeleted} />)}</div> : null}
+                            <div className="chat-message-actions">
+                                <button className="chat-copy" type="button" onClick={() => void copyText(item.content)}><CopyOutlined />{t('复制')}</button>
+                                {item.persisted && canSaveToKnowledge && <button className="chat-copy chat-save-to-knowledge" type="button" onClick={() => setSaveTarget({ sourceType: 'MESSAGE', sourceId: item.id })}><Save size={13} />{t('存入知识库')}</button>}
+                            </div>
                         </div>
-                    </div>
-                </div>)}
-                {sending && <div className="chat-message assistant"><i className="assistant-avatar"><CeesLogo /></i><div className={`chat-generation-status ${imageGenerating ? 'is-image-generation' : ''}`}><span className={imageGenerating ? 'image-generating-orbit' : 'thinking-dots'} />{imageGenerating ? <span>图片生成中</span> : <span>{t('正在思考…')}</span>}</div></div>}
+                    </div>)}
+                    {sending && <div className="chat-message assistant"><i className="assistant-avatar"><CeesLogo /></i><div className={`chat-generation-status ${imageGenerating ? 'is-image-generation' : ''}`}><span className={imageGenerating ? 'image-generating-orbit' : 'thinking-dots'} />{imageGenerating ? <span>图片生成中</span> : <span>{t('正在思考…')}</span>}</div></div>}
+                </div>
+                {questions.length > 0 && <nav className="chat-question-nav" aria-label={t('历史提问快速跳转')}>
+                    {questions.map((question) => <button className={question.id === activeQuestionId ? 'is-active' : ''} type="button" key={question.id} onClick={() => scrollToQuestion(question.id)} title={question.content}>
+                        <span className="chat-question-nav-line" />
+                        <span className="chat-question-nav-label">{question.content.replace(/\s+/g, ' ').trim()}</span>
+                    </button>)}
+                </nav>}
             </div>
             <div className="composer-area">
+                {autoEnabledCapabilities.length > 0 && <div className="composer-auto-capabilities">
+                    <span>{t('本轮已自动启用：')}</span>
+                    {autoEnabledCapabilities.map((capability) => <Tag key={capability} closable color="processing" onClose={() => setAutoEnabledCapabilities((items) => items.filter((item) => item !== capability))}>{capability === 'web_search' ? t('联网搜索') : t('知识库检索')}</Tag>)}
+                </div>}
                 <div className="message-composer">
                     <div className="message-editor">
                         {selectedPrompt && <Tag closable onClose={() => setSelectedPrompt(undefined)}>{t(selectedPrompt)}</Tag>}
@@ -626,12 +837,12 @@ function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element 
                 </div>
             </div>
         </section>
-        {previewDocument && <aside className="document-preview-panel"><div className="document-preview-heading"><span><FileTextIcon size={18} /><strong>{previewDocument.title}</strong></span><Button type="text" onClick={() => setPreviewDocument(undefined)}>×</Button></div><div className="document-preview-content chat-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}>{previewDocument.content}</ReactMarkdown></div></aside>}
+        {previewDocument && <aside className="document-preview-panel"><div className="document-preview-heading"><span><FileTextIcon size={18} /><strong>{previewDocument.title}</strong></span><Button type="text" onClick={() => setPreviewDocument(undefined)}>×</Button></div><div className="document-preview-content chat-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownRenderComponents}>{previewDocument.content}</ReactMarkdown></div></aside>}
         {saveTarget && <SaveToKnowledgeModal target={saveTarget} onClose={() => setSaveTarget(undefined)} onSaved={(document) => { message.success(t('已存入知识库：文档《{name}》正在解析索引，处理完成后即可被知识库检索引用。', { name: document.name })); setSaveTarget(undefined); }} />}
         <Modal open={!!renameTarget} title={t('重命名对话')} okText={t('确定')} cancelText={t('取消')} onOk={submitRename} onCancel={() => setRenameTarget(undefined)}>
             <Input value={renameValue} onChange={(event) => setRenameValue(event.target.value)} onPressEnter={submitRename} maxLength={128} autoFocus placeholder={t('请输入新的对话名称')} />
         </Modal>
-    </div>;
+    </div >;
 }
 
 function BrowserPage(): JSX.Element {
@@ -711,15 +922,9 @@ function ApplicationsPage(): JSX.Element {
 }
 
 function CurrentPage({ authContext, members, documents, membersLoading, documentsLoading, onSessionExpired, onProfileUpdated }: { authContext: MeResult; members: TenantMember[]; documents: ManagedDocumentSummary[]; membersLoading: boolean; documentsLoading: boolean; onSessionExpired: () => void; onProfileUpdated: (displayName: string) => void }): JSX.Element {
-    const navigate = useNavigate();
-    const hasPermission = (code: string): boolean => authContext.permissions.includes(code);
-    const dashboardQuery = useQuery({ queryKey: ['dashboard-overview'], queryFn: () => getDashboardOverview(), enabled: hasPermission('dashboard.read'), refetchInterval: 120_000 });
-    const todosQuery = useQuery({ queryKey: ['dashboard-todos'], queryFn: () => getDashboardTodos({ taskLimit: 5, reportLimit: 5, meetingLimit: 5 }), enabled: hasPermission('dashboard.read'), refetchInterval: 120_000 });
-    const upcomingQuery = useQuery({ queryKey: ['dashboard-upcoming'], queryFn: () => getDashboardUpcomingMeetings(5), enabled: hasPermission('dashboard.read') && hasPermission('meeting.read'), refetchInterval: 120_000 });
-    const unreadQuery = useQuery({ queryKey: ['notifications-unread'], queryFn: () => getUnreadNotificationCount(), enabled: hasPermission('notification.read'), refetchInterval: 60_000 });
-
     const location = useLocation();
     if (location.pathname === '/browser') return <BrowserPage />;
+    // if (location.pathname === '/assistant') return <AssistantPage />;
     if (location.pathname === '/assistant') return <AssistantPage permissions={authContext.permissions} />;
     if (location.pathname === '/projects') return <ProjectManagement authContext={authContext} onSessionExpired={onSessionExpired} />;
     if (location.pathname === '/meetings') return <MeetingManagement authContext={authContext} onSessionExpired={onSessionExpired} />;
@@ -732,19 +937,105 @@ function CurrentPage({ authContext, members, documents, membersLoading, document
     if (location.pathname === '/legal') return <LegalContractManagement authContext={authContext} onSessionExpired={onSessionExpired} />;
     if (location.pathname === '/roles') return <RoleManagement authContext={authContext} onSessionExpired={onSessionExpired} />;
     if (location.pathname === '/dingtalk') return <DingTalkOrganizationPage authContext={authContext} onSessionExpired={onSessionExpired} />;
+    if (location.pathname === '/documents') return <ManagedDocumentsPage documents={documents} loading={documentsLoading} />;
     if (location.pathname === '/knowledge') return <KnowledgeManagement authContext={authContext} onSessionExpired={onSessionExpired} />;
     if (location.pathname === '/profile') return <ProfileSettings tenantName={authContext.tenant.name} onProfileUpdated={onProfileUpdated} onSessionExpired={onSessionExpired} />;
     if (location.pathname === '/notifications') return <NotificationCenter authContext={authContext} onSessionExpired={onSessionExpired} />;
-    return <HomePage
-        authContext={authContext}
-        documents={documents}
-        memberCount={members.length}
-        dashboard={dashboardQuery.data}
-        todos={[...(todosQuery.data?.tasks ?? []), ...(todosQuery.data?.reports ?? []), ...(todosQuery.data?.meetings ?? [])]}
-        upcomingMeetings={upcomingQuery.data?.items ?? []}
-        dashboardLoading={dashboardQuery.isLoading || todosQuery.isLoading}
-        onNavigate={(path) => navigate(path)}
-    />;
+    return <HomePage authContext={authContext} documents={documents} memberCount={members.length} />;
+    /*
+    function DocumentEditorModal({ documentId, onClose }: { documentId?: string; onClose: () => void }): JSX.Element {
+        const { message } = AntdApp.useApp();
+        const { t } = useI18n();
+        const [document, setDocument] = useState<ManagedDocumentDetail>();
+        const [content, setContent] = useState('');
+        const [loading, setLoading] = useState(false);
+        const [saving, setSaving] = useState(false);
+        const [exporting, setExporting] = useState<'docx' | 'pdf' | 'pptx'>();
+
+        useEffect(() => {
+            if (!documentId) return;
+            setLoading(true);
+            getDocument(documentId)
+                .then((doc) => { setDocument(doc); setContent(doc.content); })
+                .catch((error) => message.error(error instanceof Error ? error.message : t('加载文档失败')))
+                .finally(() => setLoading(false));
+        }, [documentId, message, t]);
+
+        const handleSave = async (): Promise<void> => {
+            if (!document) return;
+            setSaving(true);
+            try {
+                const updated = await updateDocument(document.id, { content, version: document.version });
+                setDocument(updated);
+                message.success(t('已保存'));
+            } catch (error) {
+                message.error(error instanceof Error ? error.message : t('保存失败'));
+            } finally {
+                setSaving(false);
+            }
+        };
+
+        const handleExport = async (format: 'docx' | 'pdf' | 'pptx'): Promise<void> => {
+            if (!document) return;
+            setExporting(format);
+            try {
+                await exportDocument(document.id, format, document.title);
+            } catch (error) {
+                message.error(error instanceof Error ? error.message : t('导出失败'));
+            } finally {
+                setExporting(undefined);
+            }
+        };
+
+        return <Modal open={Boolean(documentId)} onCancel={onClose} footer={null} width={760} title={document?.title ?? t('文档')} destroyOnHidden>
+            {loading ? <div className="data-loading"><Spin /></div> : <>
+                <Input.TextArea value={content} onChange={(event) => setContent(event.target.value)} rows={16} style={{ fontFamily: 'Menlo, Consolas, monospace' }} />
+                <div style={{ display: 'flex', gap: 8, marginTop: 12, justifyContent: 'flex-end' }}>
+                    <Button icon={<Download size={15} />} loading={exporting === 'docx'} onClick={() => void handleExport('docx')}>{t('DOCX')}</Button>
+                    <Button icon={<Download size={15} />} loading={exporting === 'pdf'} onClick={() => void handleExport('pdf')}>{t('PDF')}</Button>
+                    <Button icon={<Download size={15} />} loading={exporting === 'pptx'} onClick={() => void handleExport('pptx')}>{t('PPTX')}</Button>
+                    <Button type="primary" loading={saving} onClick={() => void handleSave()}>{t('保存')}</Button>
+                </div>
+            </>}
+        </Modal>;
+    }
+
+    function KnowledgePage({ documents, loading }: { documents: ManagedDocumentSummary[]; loading: boolean }): JSX.Element {
+        const { t } = useI18n();
+        const formatDate = useDateFormatter();
+        const [search, setSearch] = useState('');
+        const filteredDocuments = documents.filter((document) => document.title.toLowerCase().includes(search.toLowerCase()));
+        const [selectedId, setSelectedId] = useState<string>();
+        const [editingId, setEditingId] = useState<string>();
+        const selected = documents.find((document) => document.id === selectedId) ?? documents[0];
+
+        return <div className="workspace-page knowledge-page">
+            <PageHeader title={t('知识管理')} description={t('沉淀、组织并安全共享企业知识')} actions={<Button type="primary" icon={<PlusOutlined />}>{t('新建文档')}</Button>} />
+            <div className="knowledge-layout">
+                <aside className="knowledge-folders surface-panel"><h3>{t('受控文档')}</h3><button className="is-active" type="button"><BookOutlined />{t('全部文档')}<span>{documents.length}</span></button><button type="button"><FolderOutlined />{t('租户可见')}<span>{documents.filter((document) => document.visibility === 'TENANT').length}</span></button><button type="button"><FolderOutlined />{t('我的私有')}<span>{documents.filter((document) => document.visibility === 'PRIVATE').length}</span></button></aside>
+                <section className="knowledge-list surface-panel"><div className="knowledge-toolbar"><Input value={search} onChange={(event) => setSearch(event.target.value)} prefix={<SearchOutlined />} placeholder={t('搜索受控文档')} /><Button icon={<StarOutlined />}>{t('收藏')}</Button></div><div className="knowledge-table-head"><span>{t('文档名称')}</span><span>{t('可见性')}</span><span>{t('更新时间')}</span><span>{t('版本')}</span></div>{loading ? <div className="data-loading"><Spin /></div> : filteredDocuments.length ? filteredDocuments.map((document) => <button className={`knowledge-row ${selected?.id === document.id ? 'is-selected' : ''}`} type="button" key={document.id} onClick={() => setSelectedId(document.id)}><span><i><FileTextOutlined /></i><b>{document.title}</b><small>{t('受控文档')}</small></span><span>{document.visibility === 'TENANT' ? t('租户可见') : t('私有')}</span><span>{formatDate(document.updatedAt)}</span><span><Tag>v{document.version}</Tag></span></button>) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('当前权限范围内暂无文档')} />}</section>
+                <aside className="knowledge-detail surface-panel">{selected ? <><i className="knowledge-file-icon"><FileTextOutlined /></i><h2>{selected.title}</h2><Tag>{selected.visibility === 'TENANT' ? t('租户可见') : t('私有')}</Tag><p>{t('该受控文档由 NestJS 统一执行权限、资源范围、版本控制与审计。')}</p><dl><div><dt>{t('最近更新')}</dt><dd>{formatDate(selected.updatedAt)}</dd></div><div><dt>{t('当前版本')}</dt><dd>v{selected.version}</dd></div><div><dt>{t('有效权限')}</dt><dd>{selected.currentPermissions?.join('、') || t('读取')}</dd></div></dl><Button type="primary" block onClick={() => setEditingId(selected.id)}>{t('打开文档')}</Button></> : <Empty description={t('请选择文档')} />}</aside>
+            </div>
+            <DocumentEditorModal documentId={editingId} onClose={() => setEditingId(undefined)} />
+        </div>;
+    }
+
+    function CurrentPage({ authContext, members, documents, membersLoading, documentsLoading, onSessionExpired, onProfileUpdated }: { authContext: MeResult; members: TenantMember[]; documents: ManagedDocumentSummary[]; membersLoading: boolean; documentsLoading: boolean; onSessionExpired: () => void; onProfileUpdated: (displayName: string) => void }): JSX.Element {
+        return <Routes>
+            <Route path="/" element={<HomePage authContext={authContext} documents={documents} memberCount={members.length} />} />
+            <Route path="/browser" element={<BrowserPage />} />
+            <Route path="/assistant" element={<AssistantPage />} />
+            <Route path="/projects" element={<ProjectManagement authContext={authContext} onSessionExpired={onSessionExpired} />} />
+            <Route path="/meetings" element={<MeetingManagement authContext={authContext} onSessionExpired={onSessionExpired} />} />
+            <Route path="/reports" element={<WorkReportPage authContext={authContext} onSessionExpired={onSessionExpired} />} />
+            <Route path="/applications" element={<ApplicationsPage />} />
+            <Route path="/architecture" element={<OrganizationManagement authContext={authContext} fallbackMembers={members} membersLoading={membersLoading} onSessionExpired={onSessionExpired} />} />
+            <Route path="/roles" element={<RoleManagement authContext={authContext} onSessionExpired={onSessionExpired} />} />
+            <Route path="/knowledge" element={<KnowledgePage documents={documents} loading={documentsLoading} />} />
+            <Route path="/profile" element={<ProfileSettings tenantName={authContext.tenant.name} onProfileUpdated={onProfileUpdated} onSessionExpired={onSessionExpired} />} />
+            <Route path="/notifications" element={<NotificationCenter authContext={authContext} onSessionExpired={onSessionExpired} />} />
+        </Routes>;
+    */
 }
 
 export default function Workspace({ authContext, onSessionExpired, onProfileUpdated }: WorkspaceProps): JSX.Element {

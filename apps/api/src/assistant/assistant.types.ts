@@ -38,8 +38,14 @@ export interface PublicConversationMessage {
   content: string;
   /** 稳定的图片文件引用；不保存或返回带签名的长期 URL。 */
   imageFileIds: string[];
+  /** 稳定的文档文件引用；不保存或返回带签名的长期 URL。 */
+  documentFileIds: string[];
   /** 工具产生的稳定正式资源引用；非 TOOL 消息为空数组；访问 URL 由资源接口按需签发。 */
   resources: PublicResourceReference[];
+  /** TOOL 消息对应工具调用返回的结构化来源；其他角色为空数组；来源按轮次归属。 */
+  sources: PublicToolSource[];
+  /** TOOL 消息对应工具调用返回的知识库文档引用；其他角色为空数组；引用按轮次归属。 */
+  citations: PublicKnowledgeToolCitation[];
   createdAt: Date;
   turnId: string | null;
   toolCallId: string | null;
@@ -74,6 +80,17 @@ export interface PublicContextUsage {
   estimatedInputTokens: number;
 }
 
+/** 服务端可自动启用的能力标识，与公开契约 TurnCapabilities.autoEnabled 一致。 */
+export type PublicAutoEnabledCapability = 'web_search' | 'knowledge_search';
+
+/** 本轮实际生效的对话能力：显式开关与意图自动启用合并后的结果。 */
+export interface PublicTurnCapabilities {
+  webSearch: boolean;
+  knowledgeBase: boolean;
+  /** 由服务端意图识别自动启用的能力；用户显式开启的不计入本数组。 */
+  autoEnabled: PublicAutoEnabledCapability[];
+}
+
 export interface PublicTurnErrorDetail {
   code: string;
   message: string;
@@ -96,6 +113,10 @@ export interface PublicKnowledgeToolCitation {
   title: string;
   snippet: string;
   pageIndex: number | null;
+  /** 文档所属知识库 ID；用于对话页定位与删除操作。 */
+  knowledgeBaseId?: string | null;
+  /** 当前用户是否可直接删除该文档。 */
+  deletable?: boolean;
 }
 /**
  * 公开轮次事件联合。纯文本轮次只产出 started/status/content_delta/usage/completed/error；
@@ -104,36 +125,38 @@ export interface PublicKnowledgeToolCitation {
  */
 export type PublicTurnStreamEvent =
   | {
-      type: 'started';
-      seq: number;
-      requestId: string;
-      conversationId: string;
-      turnId: string;
-      mode: PublicTurnMode;
-      contextUsage: PublicContextUsage;
-    }
+    type: 'started';
+    seq: number;
+    requestId: string;
+    conversationId: string;
+    turnId: string;
+    mode: PublicTurnMode;
+    contextUsage: PublicContextUsage;
+    /** 本轮实际生效的对话能力；老事件可能缺少该字段。 */
+    capabilities?: PublicTurnCapabilities;
+  }
   | { type: 'status'; seq: number; phase: PublicTurnPhase }
   | { type: 'content_delta'; seq: number; text: string }
   | { type: 'usage'; seq: number; tokenUsage: PublicTokenUsage }
   | {
-      type: 'tool_call';
-      seq: number;
-      toolCallId: string;
-      name: string;
-      arguments: Record<string, unknown>;
-    }
+    type: 'tool_call';
+    seq: number;
+    toolCallId: string;
+    name: string;
+    arguments: Record<string, unknown>;
+  }
   | {
-      type: 'tool_result';
-      seq: number;
-      toolCallId: string;
-      status: PublicToolResultStatus;
-      resource: { type: 'IMAGE' | 'DOCUMENT'; id: string } | null;
-      /** 联网搜索等非资源型工具返回的结构化来源。老事件可能缺少该字段。 */
-      sources?: PublicToolSource[];
-      /** 知识库检索命中的文档引用。老事件可能缺少该字段。 */
-      citations?: PublicKnowledgeToolCitation[];
-      error: { code: string; message: string } | null;
-    }
+    type: 'tool_result';
+    seq: number;
+    toolCallId: string;
+    status: PublicToolResultStatus;
+    resource: { type: 'IMAGE' | 'DOCUMENT'; id: string } | null;
+    /** 联网搜索等非资源型工具返回的结构化来源。老事件可能缺少该字段。 */
+    sources?: PublicToolSource[];
+    /** 知识库检索命中的文档引用。老事件可能缺少该字段。 */
+    citations?: PublicKnowledgeToolCitation[];
+    error: { code: string; message: string } | null;
+  }
   | { type: 'completed'; seq: number; latencyMs: number; finishReason: string | null }
   | { type: 'error'; seq: number; error: PublicTurnErrorDetail };
 

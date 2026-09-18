@@ -1,6 +1,6 @@
 # AI 助手工具循环
 
-> 状态：阶段 0-4 已落地（纯文本会话迁移 + 服务端会话 + 断线重连 + 取消 + 幂等，2026-09-10）；阶段 5-6、9 已落地（Tool Loop / 统一注册与批准 / generate_image 图片生成，2026-09-11）；阶段 10 部分落地（generate_document 文档生成，2026-09-11）；上下文压缩已升级为条数与 Token 预算双约束触发（2026-09-14，见 13.1）；额度（QuotaService）与任务、会议等其余工具执行器暂缓；联网搜索（Tavily）只读工具与结构化来源回填已于 2026-09-14 落地；2026-09-15 补充第 3.1 节三层关系说明。本文件定义 NestJS 统一驱动的 Assistant Tool Loop 架构、数据模型、工具协议与实施顺序。最后更新：2026-09-15。
+> 状态：阶段 0-4 已落地（纯文本会话迁移 + 服务端会话 + 断线重连 + 取消 + 幂等，2026-09-10）；阶段 5-6、9 已落地（Tool Loop / 统一注册与批准 / generate_image 图片生成，2026-09-11）；阶段 10 部分落地（generate_document 文档生成，2026-09-11）；上下文压缩已升级为条数与 Token 预算双约束触发（2026-09-14，见 13.1）；额度（QuotaService）与任务、会议等其余工具执行器暂缓；联网搜索（Tavily）只读工具与结构化来源回填已于 2026-09-14 落地；2026-09-15 补充第 3.1 节三层关系说明；文档插图工具 `insert_document_image`（在已有生成文档章节末尾插图，覆盖 PDF/DOCX/PPTX）已于 2026-09-18 落地（见 17）。本文件定义 NestJS 统一驱动的 Assistant Tool Loop 架构、数据模型、工具协议与实施顺序。最后更新：2026-09-18。
 
 ## 1. 目标与定位
 
@@ -341,6 +341,7 @@ POST   /conversations/{conversationId}/turns/{turnId}/cancel              取消
 | 6 | ✅ 落地（部分） | `assistant/tools/`：ToolRegistry（listAllowed 权限过滤）+ ToolPolicyService（存在性/权限/参数两点批准）；QuotaService 暂缓 |
 | 9 | ✅ 落地（2026-09-11） | `image` 模块：generate_image 执行器 → `ImageService`（ai-service 出图 → COS 落盘 → FileObject/Resource(IMAGE)/ManagedImage → AIActionDraft(EXECUTED) → 审计），以 tool_call_id 幂等 |
 | 10 | ✅ 落地（部分，2026-09-11） | `document` 模块：generate_document 执行器 → `DocumentService.createGeneratedDocument`（ai-service compose 出 DocumentSpec → NestJS 序列化为 Markdown → Resource(DOCUMENT)/ManagedDocument → AIActionDraft(EXECUTED) → 审计），以 tool_call_id 幂等；任务、会议等其余工具暂缓 |
+| 10 | ✅ 落地（2026-09-18） | 生成工具拆分为 `generate_docx` / `generate_pdf` / `generate_pptx` 三个独立工具；新增 `insert_document_image`：读目标文档 `DocumentSpec` → 章节末尾追加 `ImageBlock`（`cos://{objectKey}` 稳定引用）→ 原位重渲染同一文档，正文不被改写（见 17） |
 
 实现与设计的偏差（有意为之）：
 
@@ -386,3 +387,38 @@ POST   /conversations/{conversationId}/turns/{turnId}/cancel              取消
 搜索来源通过公开 `tool_result.sources` 可选字段回填。来源不是正式 Resource，不创建图片、文档或其他业务数据。当前只支持 Tavily Search API，不支持任意 URL 抓取、浏览器自动化、知识库 RAG 或 LlamaIndex 检索。
 
 实现与配置详见 [联网搜索（Tavily）](web-search.md)。
+
+## 17. 文档插图工具（insert_document_image，2026-09-18）
+
+新增 `insert_document_image` 写工具，把本轮对话中已有的一张图片（用户本轮上传的附件，或本轮船次 `generate_image` 生成的图片）插入到本会话内某份「AI 生成文档」的指定章节末尾。它不新建文档、不重写正文：只读取目标文档已落库的 `DocumentSpec`，定位目标章节后在 `blocks` 尾部追加一个 `ImageBlock`，再按原格式重渲染并原地更新同一 `ManagedDocument`。
+
+### 17.1 参数与语义
+
+- `section_title`（可选）：目标章节标题；省略时命中最后一节；命中不到直接拒绝（`DOCUMENT_SECTION_NOT_FOUND`），不静默插错位置。定位采用「精确 → 归一化（忽略空白与序号标点）→ 包含」三级匹配。
+- `caption`（可选）：图注。
+- `image_index`（可选，1-based）：使用本轮第几张图片；省略时用最后一张。图片清单由 `AssistantMessageContentService.resolveTurnImageReferences(turnId)` 从会话事实源重建（附件在前、本轮船次生成图片在后），进程重启或轮次重试后依然可重建。
+- `document_title`（可选）：本会话存在多份生成文档时消歧；省略时取最近生成的一份。
+- 权限码复用 `ai.document.generate`，`riskLevel: WRITE`，不新增权限与迁移。
+
+### 17.2 图片引用与签名（关键）
+
+- 落库的 `DocumentSpec` 中 `ImageBlock.url` 只保存稳定引用 `cos://{objectKey}`，**绝不落库会过期的签名 URL**。
+- 渲染前由 `DocumentService.signSpecImageReferences` 现场把 `cos://{objectKey}` 递归替换为短期下载 URL（同一对象键在一次渲染内只签发一次），再交给 ai-service `render-docx/pdf/pptx`。
+- 导出（`exportDocumentDocx/Pdf/Pptx`）与插图重渲染共用同一签发逻辑，ai-service 始终不持有 COS 长期凭据。
+
+### 17.3 幂等与一致性
+
+- 以 `tool_call_id` 幂等：先原子抢占 `AIActionDraft`（`operation: insert_document_image`），重复执行直接回放已落库的 `EXECUTED` 结果（`findInsertedImageResult`）。
+- 落库前再次核对工具执行租约（`requireLiveToolCall`）；事务内确认文档未并发变更（`updateMany` 命中数为 1）。
+- 重渲染并上传 COS 成功后写 `FileObject`（`GENERATED_DOCUMENT`）+ 更新 `ManagedDocument.fileObjectId` + `version++`，并清理被替换的旧文件；渲染/上传失败不阻断插图——`DocumentSpec` 已更新，导出时仍会实时渲染（`managed_documents.file_object_id` 可空）。
+- 审计动作 `DOCUMENT_IMAGE_INSERTED` / `DOCUMENT_IMAGE_INSERT_FAILED`。
+
+### 17.4 渲染器支持
+
+`ImageBlock` 已由三个渲染器支持：`pdf_renderer.py` / `docx_renderer.py` / `pptx_renderer.py`；取图与解码统一走 `apps/ai-service/app/documents/images.py`。PPTX 由 `documentSpecToPptxSpec` 把 `image` 块映射到所属章节页（`PptxImageBlock` 不接受 `width_ratio`，尺寸由渲染器按版面自适应）。
+
+### 17.5 边界
+
+- 只作用于「本会话内由 `generate_docx/pdf/pptx` 生成的文档」；手工创建或正文被手工改写导致无 `DocumentSpec` 的文档返回 `DOCUMENT_SPEC_MISSING`。
+- 不做二进制原位编辑：插入是「读 spec → 定点追加 ImageBlock → 原地重渲染」，用户对既有二进制的手动排版不在保留范围内（与 [PDF 与 PPT 生成](pdf-pptx-generation.md) 的 3.6 节一致）。
+- ai-service 仍不接触 Prisma/COS 长期凭据，只做无状态渲染。

@@ -420,6 +420,7 @@ export { ToolResultResourceReference } from './models/ToolResultResourceReferenc
 export type { ToolSource } from './models/ToolSource';
 export type { TransferProjectOwnerRequest } from './models/TransferProjectOwnerRequest';
 export type { Turn } from './models/Turn';
+export type { TurnCapabilities } from './models/TurnCapabilities';
 export type { TurnErrorDetail } from './models/TurnErrorDetail';
 export { TurnPhase } from './models/TurnPhase';
 export type { TurnResponseEnvelope } from './models/TurnResponseEnvelope';

@@ -6,26 +6,28 @@ import { GenerateDocumentTool } from './generate-document.tool';
 describe('GenerateDocumentTool', () => {
     let registry: ToolRegistryService;
     let documentService: jest.Mocked<Pick<DocumentService, 'createGeneratedDocument'>>;
-    let definition: ReturnType<ToolRegistryService['get']>;
 
     beforeEach(() => {
         registry = new ToolRegistryService();
         documentService = { createGeneratedDocument: jest.fn() };
         const tool = new GenerateDocumentTool(registry, documentService as unknown as DocumentService);
         tool.onModuleInit();
-        definition = registry.get('generate_document');
     });
 
-    it('self-registers with the ai.document.generate permission and a JSON Schema', () => {
-        expect(definition).toBeDefined();
-        expect(definition?.requiredPermissions).toEqual(['ai.document.generate']);
-        expect(definition?.parameters).toEqual(expect.objectContaining({
-            type: 'object',
-            required: ['instruction'],
-        }));
+    it('self-registers three format tools with the ai.document.generate permission', () => {
+        for (const name of ['generate_docx', 'generate_pdf', 'generate_pptx']) {
+            const definition = registry.get(name);
+            expect(definition).toBeDefined();
+            expect(definition?.requiredPermissions).toEqual(['ai.document.generate']);
+            expect(definition?.parameters).toEqual(expect.objectContaining({
+                type: 'object',
+                required: ['instruction'],
+            }));
+        }
     });
 
     it('validates the instruction and defaults visibility to PRIVATE', () => {
+        const definition = registry.get('generate_pdf');
         expect(() => definition?.validate(null)).toThrow('工具参数必须为对象');
         expect(() => definition?.validate({ instruction: '' })).toThrow('instruction 必须是非空字符串');
         expect(() => definition?.validate({ instruction: 42 })).toThrow('instruction 必须是非空字符串');
@@ -36,6 +38,7 @@ describe('GenerateDocumentTool', () => {
     });
 
     it('validates title and visibility options', () => {
+        const definition = registry.get('generate_pdf');
         expect(() => definition?.validate({ instruction: 'ok', title: '' })).toThrow('title 必须是非空字符串');
         expect(() => definition?.validate({ instruction: 'ok', visibility: 'PUBLIC' })).toThrow('visibility');
         expect(definition?.validate({ instruction: 'ok', title: ' 周报 ', visibility: 'TENANT' })).toEqual({
@@ -46,6 +49,7 @@ describe('GenerateDocumentTool', () => {
     });
 
     it('executes via DocumentService and returns the resource summary', async () => {
+        const definition = registry.get('generate_pdf');
         documentService.createGeneratedDocument.mockResolvedValue({
             documentId: 'doc-1',
             title: '项目周报',
@@ -65,6 +69,7 @@ describe('GenerateDocumentTool', () => {
             executionToken: 'execution-token-1',
             permissions: ['ai.document.generate'],
             knowledgeBaseEnabled: false,
+            webSearchEnabled: false,
         }, { instruction: '写一份周报', visibility: 'PRIVATE' });
 
         expect(documentService.createGeneratedDocument).toHaveBeenCalledWith(expect.objectContaining({
@@ -79,7 +84,7 @@ describe('GenerateDocumentTool', () => {
             resourceId: 'doc-1',
             summary: expect.stringContaining('项目周报') as unknown,
         });
-        expect(result.summary).toContain('文档已生成');
+        expect(result.summary).toContain('PDF 文档已生成');
         expect(result.summary).toContain('共 1200 字');
         // 回喂模型的摘要不携带系统内部信息：文档 ID 与模型名不得进入模型答复。
         expect(result.summary).not.toContain('doc-1');

@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, ServerSentEventsResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { AnswerKnowledgeData, AnswerKnowledgeErrors, AnswerKnowledgeResponses, CompactChatData, CompactChatErrors, CompactChatResponses, ComposeDocumentData, ComposeDocumentErrors, ComposeDocumentResponses, DeleteKnowledgeIndexData, DeleteKnowledgeIndexErrors, DeleteKnowledgeIndexResponses, EditImageData, EditImageErrors, EditImageResponses, ExtractFileData, ExtractFileErrors, ExtractFileResponses, GenerateDocumentDocxData, GenerateDocumentDocxErrors, GenerateDocumentDocxResponses, GenerateImageData, GenerateImageErrors, GenerateImageResponses, GetHealthData, GetHealthResponses, GetReadinessData, GetReadinessErrors, GetReadinessResponses, IndexKnowledgeDocumentData, IndexKnowledgeDocumentErrors, IndexKnowledgeDocumentResponses, InvokeChatData, InvokeChatErrors, InvokeChatResponses, InvokeLlmData, InvokeLlmErrors, InvokeLlmResponses, PreviewImageData, PreviewImageErrors, PreviewImageResponses, RenderDocumentDocxData, RenderDocumentDocxErrors, RenderDocumentDocxResponses, RetrieveKnowledgeData, RetrieveKnowledgeErrors, RetrieveKnowledgeResponses, StreamChatData, StreamChatErrors, StreamChatResponse, StreamChatResponses, StreamChatToolTurnData, StreamChatToolTurnErrors, StreamChatToolTurnResponse, StreamChatToolTurnResponses, StreamLlmData, StreamLlmErrors, StreamLlmResponse, StreamLlmResponses } from './types.gen';
+import type { AnswerKnowledgeData, AnswerKnowledgeErrors, AnswerKnowledgeResponses, CompactChatData, CompactChatErrors, CompactChatResponses, ComposeDocumentData, ComposeDocumentErrors, ComposeDocumentResponses, DeleteKnowledgeIndexData, DeleteKnowledgeIndexErrors, DeleteKnowledgeIndexResponses, EditImageData, EditImageErrors, EditImageResponses, ExtractFileData, ExtractFileErrors, ExtractFileResponses, GenerateDocumentDocxData, GenerateDocumentDocxErrors, GenerateDocumentDocxResponses, GenerateImageData, GenerateImageErrors, GenerateImageResponses, GetHealthData, GetHealthResponses, GetReadinessData, GetReadinessErrors, GetReadinessResponses, IndexKnowledgeDocumentData, IndexKnowledgeDocumentErrors, IndexKnowledgeDocumentResponses, InvokeChatData, InvokeChatErrors, InvokeChatResponses, InvokeLlmData, InvokeLlmErrors, InvokeLlmResponses, PreviewImageData, PreviewImageErrors, PreviewImageResponses, RenderDocumentDocxData, RenderDocumentDocxErrors, RenderDocumentDocxResponses, RenderDocumentPdfData, RenderDocumentPdfErrors, RenderDocumentPdfResponses, RenderDocumentPptxData, RenderDocumentPptxErrors, RenderDocumentPptxResponses, RetrieveKnowledgeData, RetrieveKnowledgeErrors, RetrieveKnowledgeResponses, StreamChatData, StreamChatErrors, StreamChatResponse, StreamChatResponses, StreamChatToolTurnData, StreamChatToolTurnErrors, StreamChatToolTurnResponse, StreamChatToolTurnResponses, StreamLlmData, StreamLlmErrors, StreamLlmResponse, StreamLlmResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -218,6 +218,36 @@ export const renderDocumentDocx = <ThrowOnError extends boolean = false>(options
 export const generateDocumentDocx = <ThrowOnError extends boolean = false>(options: Options<GenerateDocumentDocxData, ThrowOnError>): RequestResult<GenerateDocumentDocxResponses, GenerateDocumentDocxErrors, ThrowOnError> => (options.client ?? client).post<GenerateDocumentDocxResponses, GenerateDocumentDocxErrors, ThrowOnError>({
     security: [{ name: 'X-AI-Internal-Token', type: 'apiKey' }],
     url: '/internal/v1/documents/generate-docx',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Render a DocumentSpec as PDF
+ *
+ * Deterministically renders a validated DocumentSpec as a PDF with embedded CJK fonts, without invoking an LLM.
+ */
+export const renderDocumentPdf = <ThrowOnError extends boolean = false>(options: Options<RenderDocumentPdfData, ThrowOnError>): RequestResult<RenderDocumentPdfResponses, RenderDocumentPdfErrors, ThrowOnError> => (options.client ?? client).post<RenderDocumentPdfResponses, RenderDocumentPdfErrors, ThrowOnError>({
+    security: [{ name: 'X-AI-Internal-Token', type: 'apiKey' }],
+    url: '/internal/v1/documents/render-pdf',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Render a PptxSpec as PPTX
+ *
+ * Deterministically renders a validated PptxSpec as a PPTX presentation, without invoking an LLM.
+ */
+export const renderDocumentPptx = <ThrowOnError extends boolean = false>(options: Options<RenderDocumentPptxData, ThrowOnError>): RequestResult<RenderDocumentPptxResponses, RenderDocumentPptxErrors, ThrowOnError> => (options.client ?? client).post<RenderDocumentPptxResponses, RenderDocumentPptxErrors, ThrowOnError>({
+    security: [{ name: 'X-AI-Internal-Token', type: 'apiKey' }],
+    url: '/internal/v1/documents/render-pptx',
     ...options,
     headers: {
         'Content-Type': 'application/json',

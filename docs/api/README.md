@@ -100,6 +100,9 @@ GET    /api/v1/documents/{documentId}
 PATCH  /api/v1/documents/{documentId}
 DELETE /api/v1/documents/{documentId}?version={version}
 GET    /api/v1/documents/{documentId}/export
+GET    /api/v1/documents/{documentId}/export/pdf
+GET    /api/v1/documents/{documentId}/export/pptx
+GET    /api/v1/documents/{documentId}/file
 
 GET    /api/v1/resources/{resourceId}/acl
 POST   /api/v1/resources/{resourceId}/acl
@@ -247,7 +250,7 @@ GET    /api/v1/projects/{projectId}/tasks/{taskId}/activities
 - ACL 仅支持 `MEMBERSHIP`、`ROLE` 主体和 `document.read/update/delete/share` 权限，可设置过期时间；
 - Document 修改、删除和 ACL 撤销使用 `version` 乐观锁；Document 删除为软删除，ACL 正常撤销为硬删除；
 - Document 与 Resource 共用同一个 ID，创建、修改、删除和 ACL 变更均写入审计日志。
-- DOCX 导出（`GET /documents/{documentId}/export`）复用 `document.read` 权限，是同一文档资源的交付视图而不是独立资源；文件由生成时落库的 `document_spec` 经 ai-service 确定性渲染，不调用 LLM。
+- DOCX/PDF/PPTX 导出（`GET /documents/{documentId}/export`、`/export/pdf`、`/export/pptx`）复用 `document.read` 权限，是同一文档资源的交付视图而不是独立资源；文件由生成时落库的 `document_spec` 经 ai-service 确定性渲染，不调用 LLM；附件名取自文档主题（落库 `title`，清洗后为空时回退 `document_spec.title`，仍无则 `document`），并以 RFC 5987 `filename*=UTF-8''...` 携带中文名。
 
 ## 0.6.0 迁移说明
 
@@ -402,6 +405,14 @@ GET    /api/v1/projects/{projectId}/tasks/{taskId}/activities
 - ai-service 内部契约兼容新增 `POST /internal/v1/knowledge/answer`（retrieve + rag role 答案生成，citation ID 校验，空结果短路）；检索 scope 的 `acl_version` 改为可选，NestJS 检索不传（权限由实时 scope 折叠保证），ACL 版本机制推迟到引入查询缓存时；
 - Prisma 新增 `0028_knowledge_query_api` 迁移：知识库锚点字段、成员权限枚举、`KnowledgeQueryLog` 扩展；TypeScript 客户端已重新生成；
 - 详细业务边界见 [知识库管理 API](knowledge-base-api.md)，架构说明见 [知识库 RAG](../architecture/knowledge-rag.md)。
+
+## 导出文件按主题命名说明（2026-09-18）
+
+- 导出 `docx`/`pdf`/`pptx` 的附件名不再固定为 `document.<ext>`：服务端按「落库 `title` → `document_spec.title` → `document`」顺序解析文档主题名，并清洗 `\ / : * ? " < > |` 与控制字符、折叠空白、去掉结尾点、截断到 120 字符；
+- `Content-Disposition` 同时给出 ASCII 回退名 `document.<ext>` 与 RFC 5987 百分号编码的 `filename*=UTF-8''<pct-encoded>`；编码由严格实现产生，`!'()*` 也一并编码（它们不属于 RFC 5987 的 `attr-char`，`encodeURIComponent` 会漏掉）；浏览器优先采用扩展名，中文标题（如 `铭记九一八 · 勿忘国耻 吾辈自强.pdf`）原样落地；
+- `apps/api` 通过 CORS `exposedHeaders: ['Content-Disposition']` 暴露该响应头，客户端才能读到文件名；桌面端响应头不可读或只是通用兜底名时，回退到文档详情中的标题，确保不会下载到 `document.pdf`；
+- 解析出的标题同时作为渲染封面标题传给 ai-service，避免历史上被误转码的坏标题（如落库为 `??????`）一路带到文件封面与文件名；
+- 导出与文件名解析未新增契约字段与权限码，PDF/PPTX 导出同样复用 `document.read`。
 
 ## 契约事实源
 

@@ -70,6 +70,7 @@ describe('CreateKnowledgeBaseTool', () => {
             executionToken: 'execution-token-1',
             permissions: ['knowledge_base.create'],
             knowledgeBaseEnabled: false,
+            webSearchEnabled: false,
         }, {
             // ToolPolicy 已在执行前完成 validate，此处传入验证后的干净参数（与真实调用链一致）。
             name: '产品知识库',

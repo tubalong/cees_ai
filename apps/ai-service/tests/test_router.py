@@ -490,3 +490,13 @@ async def test_chooses_vision_profile_when_image_content_is_present() -> None:
     assert routed.profile_name == "vision"
     assert not text_provider.calls
     assert len(vision_provider.calls) == 1
+
+
+def test_build_provider_rejects_example_api_key(monkeypatch) -> None:
+    monkeypatch.setenv("TEST_KEY", "change_me")
+
+    with pytest.raises(AIServiceError) as raised:
+        LLMRouter._build_provider("primary", profile())
+
+    assert raised.value.code == "AI_SERVICE_NOT_READY"
+    assert "TEST_KEY" in raised.value.message
