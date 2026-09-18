@@ -25,3 +25,20 @@ apps/ai-service/config/models.*.toml
 !apps/ai-service/config/models.*.example.toml
 apps/ai-service/config/fonts/
 .release-cache/
+
+# 本地调试与验证产物，不入库
+tmp-export-check/
+tmp-render-check/
+apps/api/_*.cjs
+apps/api/seed-spec.cjs
+apps/api/jest-*.txt
+apps/api/jest-*.json
+apps/api/jr*.json
+apps/api/probe-image.bin
+apps/ai-service/_*.py
+apps/ai-service/repro_*.py
+apps/ai-service/tmp-*
+apps/ai-service/tmp_*
+scripts/_*.log
+scripts/_*.ps1
+scripts/_*.diff
