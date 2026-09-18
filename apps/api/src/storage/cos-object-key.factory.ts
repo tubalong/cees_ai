@@ -32,6 +32,16 @@ export class CosObjectKeyFactory {
         assertUuid(input.toolCallId, 'toolCallId');
         return `${this.config.objectPrefix}/tenants/${input.tenantId}/generated-images/${input.toolCallId}/source`;
     }
+
+    /**
+     * AI 生成文档（DOCX/PDF/PPTX）使用与工具调用 + 格式绑定的确定性对象键。
+     * 相同 toolCallId + format 的恢复或重试始终覆盖同一对象，避免产生无限孤儿对象。
+     */
+    buildGeneratedDocumentKey(input: { tenantId: string; toolCallId: string; format: 'docx' | 'pdf' | 'pptx' }): string {
+        assertUuid(input.tenantId, 'tenantId');
+        assertUuid(input.toolCallId, 'toolCallId');
+        return `${this.config.objectPrefix}/tenants/${input.tenantId}/generated-documents/${input.toolCallId}/${input.format}`;
+    }
 }
 
 function assertUuid(value: string, name: string): void {

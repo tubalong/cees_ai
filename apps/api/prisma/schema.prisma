@@ -312,6 +312,8 @@ enum FilePurpose {
   ATTACHMENT
   /// AI 图片生成结果正式文件。
   GENERATED_IMAGE
+  /// AI 文档生成结果正式文件（DOCX/PDF/PPTX）。
+  GENERATED_DOCUMENT
 }
 
 enum UploadSessionStatus {
@@ -817,6 +819,9 @@ model ManagedDocument {
   content               String             @db.Text
   /// ai-service compose 返回的结构化 DocumentSpec（导出 DOCX 的事实源）；人工创建或内容被手工修改的文档为空。
   documentSpec          Json?              @map("document_spec")
+  /// 生成时落盘的文件字节（DOCX/PDF/PPTX）；人工创建文档为空。
+  fileObjectId          String?            @unique @map("file_object_id") @db.Uuid
+  fileObject            FileObject?        @relation(fields: [fileObjectId], references: [id], onDelete: Restrict)
   visibility            DocumentVisibility @default(PRIVATE)
   createdAt             DateTime           @default(now()) @map("created_at")
   updatedAt             DateTime           @updatedAt @map("updated_at")
@@ -1561,6 +1566,7 @@ model FileObject {
   etag                      String?
   taskAttachments           TaskAttachment[]
   managedImages             ManagedImage[]
+  managedDocuments          ManagedDocument[]
   financeExpenseAttachments FinanceExpenseAttachment[]
   legalContractAttachments  LegalContractAttachment[]
   createdAt                 DateTime                   @default(now()) @map("created_at")
@@ -2059,6 +2065,8 @@ model ConversationMessage {
   content        String                  @db.Text
   /// 稳定的图片文件引用；模型请求前由 Assistant 动态解析为短期 URL。
   imageFileIds   String[]                @default([]) @map("image_file_ids")
+  /// 稳定的文档文件引用；模型请求前由 Assistant 抽取文本注入上下文。
+  documentFileIds String[]               @default([]) @map("document_file_ids")
   /// TOOL 消息对应的工具调用 ID；其他角色为空，工具阶段启用。
   toolCallId     String?                 @unique @map("tool_call_id") @db.Uuid
   toolCall       ToolCall?               @relation("ToolCallMessage", fields: [toolCallId], references: [id])

@@ -14,6 +14,9 @@ export interface DocumentSummaryResult {
 
 export interface DocumentResult extends DocumentSummaryResult {
     content: string;
+    documentSpec: unknown;
+    fileObjectId: string | null;
+    fileMimeType: string | null;
 }
 
 export interface DocumentListResult {
