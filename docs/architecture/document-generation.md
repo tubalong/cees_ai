@@ -70,7 +70,7 @@ Schema 禁止额外字段并限制章节、块、表格与文本长度。表格�
 
 ## 6. DOCX 安全与样式
 
-第一版模板 `business-standard` 使用 A4、固定页边距、受控中文字体、标题层级、段落、列表和表格样式。文件名由标题清理得到，响应同时提供安全的 ASCII fallback 和 RFC 5987 UTF-8 文件名。
+第一版模板 `business-standard` 使用 A4、固定页边距、受控中文字体、标题层级、段落、列表和表格样式。文件名由标题清理得到：按「落库 `title` → `DocumentSpec.title` → `document`」取值，去除文件系统非法字符并截断，响应同时提供安全的 ASCII fallback（`document.<ext>`）和 RFC 5987 UTF-8 文件名 `filename*=UTF-8''...`；同一标题也用作封面标题，详见 `docs/architecture/generated-document-format-delivery.md`。
 
 渲染器不接受文件路径、模板文件、XML、宏、链接关系或任意样式字典。目录使用 Word TOC 字段，内容由 Word 或兼容软件打开时更新。
 

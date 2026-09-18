@@ -62,6 +62,25 @@ ai.web.search
 
 权限在 `ToolRegistry.listAllowed` 阶段过滤，并在 `ToolPolicyService.approve` 执行前再次校验。首版 Prisma migration 只默认授予系统 `tenant_admin` 角色，其他角色需要通过 RBAC 显式授予。
 
+### 4.1 对话级开关与意图自动启用
+
+`web_search` 除了权限，还受**本轮对话级开关**约束，与知识库检索一致：
+
+- `CreateTurnRequest.webSearchEnabled`（可选，默认 `false`）决定本轮是否允许联网搜索；关闭时工具列表被过滤，且执行器 `WebSearchTool` 在真正搜索前二次兜底校验（`webSearchEnabled=false` 时抛 `ToolPolicyError`，`tools/tool.types` 统一回喂友好文案）；
+- 当用户未显式开启，但消息文本明确提到需要联网时（如“联网查一下”“最新新闻”“股价/汇率”“搜索一下”等），`IntentCapabilityService` 会为本轮**自动临时启用** `web_search`，不改变用户设置；
+- 本轮**有效能力** = 显式开关 ∪ 意图识别结果。有效能力决定哪些检索工具进入模型工具列表，并通过 `started` 事件的 `capabilities` 回传：
+
+```json
+{
+  "type": "started",
+  "capabilities": { "webSearch": true, "knowledgeBase": false, "autoEnabled": ["web_search"] }
+}
+```
+
+`autoEnabled` 只含由服务端意图识别自动启用的能力，用户显式开启的不计入；前端据此展示可关闭的提示标签，保证自动启用可见、可控。
+
+意图识别只做“把用户已经明确表达的需求翻译成能力开关”，不猜测隐含意图；无文本或无法识别时一律不启用，绝不误开。有效能力同时写入轮次审计元数据，便于事后解释某一轮为何（未）使用联网工具。
+
 工具参数：
 
 ```json
@@ -89,6 +108,8 @@ ai.web.search
 每个搜索工具调用生成稳定的来源 ID。模型只能引用搜索结果中存在的 `source_id`，不能编造来源。
 
 公开 `tool_result` 事件新增可选 `sources` 字段。来源不是 CEES 正式 `Resource`，因此搜索结果不创建图片、文档或其他业务资源。旧客户端可以忽略 `sources` 字段，来源通过事件重放保留。
+
+来源按**轮次归属**：`GET /conversations/{id}` 的 TOOL 消息回传所属轮次的 `sources`，桌面端按 `turnId` 把来源与回答一一归组；不再按会话在 `localStorage` 累积缓存来源，避免上一轮的网页引用串到当前问题下方（同一会话多轮连续性由此保持隔离）。
 
 ## 6. 失败语义
 
@@ -124,5 +145,5 @@ pnpm contracts:check
 pnpm --filter @cees/api build
 ```
 
-当前实现状态：Provider、Service、Tool、权限、完整 Tool Loop、失败/超时/空结果、来源事件、测试、契约和环境变量示例均已落地。桌面端来源卡片展示不属于本次后端实现范围。
+当前实现状态：Provider、Service、Tool、权限、完整 Tool Loop、失败/超时/空结果、来源事件、对话级开关与意图自动启用、测试、契约和环境变量示例均已落地。桌面端来源卡片与自动启用提示标签展示由前端实现。
 

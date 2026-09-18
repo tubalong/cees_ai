@@ -84,5 +84,8 @@ flowchart LR
 - [C 后端主体 P0 复检](backend-subject-p0-review.md)
 - [Image Generation](image-generation.md)
 - [通用文档生成](document-generation.md)
+- [PDF 与 PPT 生成](pdf-pptx-generation.md)
+- [生成文档格式交付](generated-document-format-delivery.md)
+- [生成文档落 COS 与附件注入](generated-document-storage-and-attachment-injection.md)
 - [文件上传与 COS 设计](file-upload.md)
 - [Redis 基础能力](redis-foundation.md)

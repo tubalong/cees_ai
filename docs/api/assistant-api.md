@@ -13,7 +13,8 @@ Assistant 是 NestJS 提供的服务端会话与 AI 编排入口。NestJS 负责
 当前已接入的工具：
 
 - `generate_image`：调用图片模型，上传生成结果到 COS，并登记 `FileObject`、`Resource(IMAGE)`、`ManagedImage`、`AIActionDraft` 和审计记录。
-- `generate_document`：调用文档模型，把结构化 `DocumentSpec` 序列化为 Markdown，登记 `Resource(DOCUMENT)`、`ManagedDocument`、`AIActionDraft` 和审计记录。
+- `generate_docx` / `generate_pdf` / `generate_pptx`：调用文档模型生成结构化 `DocumentSpec`，渲染为对应格式并落 COS，登记 `Resource(DOCUMENT)`、`ManagedDocument`、`FileObject`、`AIActionDraft` 和审计记录；需 `ai.document.generate` 权限。
+- `insert_document_image`：把本轮对话中已有的一张图片（用户上传附件或本轮船次生成的图片）插入到本会话内某份 AI 生成文档的指定章节末尾；只读 `DocumentSpec` 并在章节 `blocks` 尾部追加 `ImageBlock`，按原格式原位重渲染同一文档，正文不被改写。需 `ai.document.generate` 权限。
 - `web_search`：调用 Tavily 搜索公开互联网资料，通过 `tool_result.sources` 返回可引用的网页来源，不产生正式业务资源。需要 `ai.web.search` 权限，当前仅默认授予租户管理员角色，其他角色由管理员在 RBAC 中显式授予。
 
 额度预占/结算和人工审批流本次暂不实现。工具调用目前是 NestJS 的程序化批准（工具存在、权限和参数校验），不是等待人工点击的审批单。
@@ -88,7 +89,8 @@ Authorization: Bearer <access-token>
 - `content` 是持久化文本，不携带任何签名 URL；
 - 用户消息的图片引用（用户输入的附件）在 `imageFileIds` 中，展示/下载地址由前端通过文件接口按需获取；
 - 工具消息（`role: TOOL`）携带 `toolCallId` 和 `resources`：`resources` 是工具产生的稳定正式资源引用（`IMAGE` 为 AI 生成图片、`DOCUMENT` 为 AI 生成文档），非 TOOL 消息为空数组；
-- 图片访问 URL 通过 `GET /api/v1/images/{imageId}` 按需生成（短期有效，过期后重新请求即可），文档资源同理走对应资源接口。前端拿到 `resources` 后按需换取 URL，不要缓存或持久化签名 URL，历史消息中的图片/文档由此永久可恢复。
+- 工具消息还按轮次回传该轮的 `sources`（联网来源）与 `citations`（知识库引用）；前端按消息的 `turnId` 把它们挂回同一轮的助手回答，**不跨轮累积、不做会话级缓存**，避免上一轮的来源/引用串到当前回答下方；
+- 图片访问 URL 通过 `GET /api/v1/images/{imageId}` 按需生成（短期有效，过期后重新请求即可），文档资源同理走对应资源接口。前端拿到 `resources` 后按需换取 URL，不要缓存或持久化签名 URL，历史消息中的图片/文档由此永久可恢复。图片只以服务端 `resources` 的稳定引用为准，**不从消息正文文本中猜测图片地址**。
 
 ### 3.4 修改会话标题
 
@@ -129,7 +131,9 @@ Accept: text/event-stream
 {
   "content": "请看看这张图里的问题",
   "imageFileIds": ["<uploaded-file-object-id>"],
-  "mode": "standard"
+  "mode": "standard",
+  "knowledgeBaseEnabled": false,
+  "webSearchEnabled": false
 }
 ```
 
@@ -141,6 +145,16 @@ Accept: text/event-stream
 ```
 
 签名 URL 不写入会话、事件、ToolCall 或调用日志；`tool_result` 事件与历史消息只携带稳定资源引用（`resource` / `resources`），访问 URL 一律由前端通过资源接口按需生成。
+
+### 4.1.1 本轮能力开关
+
+`knowledgeBaseEnabled` 与 `webSearchEnabled`（均可选、默认 `false`）分别决定本轮是否允许知识库检索与联网搜索：
+
+- 关闭时，模型工具列表中不包含对应检索工具（`knowledge_search` / `web_search`），即使模型仍发起调用，执行器还有一次开关兜底校验；
+- 当用户未显式开启，但消息文本明确表达了需求（如「联网查一下」「公司制度里是怎么写的」）时，服务端可为该轮**自动临时启用**对应能力，并以 `started` 事件的 `capabilities.autoEnabled` 回传，由前端展示为可关闭的提示标签；
+- 显式开关与意图识别结果取并集，构成**本轮有效能力**，写回 `started.capabilities` 与审计元数据。
+
+两个字段参与请求哈希：同一 `Idempotency-Key` 下改动开关视为不同请求，按 `409 IDEMPOTENCY_KEY_CONFLICT` 处理。
 
 同一会话内重复提交相同 `Idempotency-Key` 且请求内容相同，会重新订阅原轮次事件，不会创建新轮次；同一键对应不同内容返回 `409 IDEMPOTENCY_KEY_CONFLICT`。幂等键长度为 1～128 个字符。
 
@@ -158,7 +172,7 @@ data: {"type":"content_delta","seq":7,"text":"你好"}
 
 | type | 作用 |
 | --- | --- |
-| `started` | 返回 request/conversation/turn 标识及上下文使用情况 |
+| `started` | 返回 request/conversation/turn 标识、本轮实际生效的能力（`capabilities`）及上下文使用情况 |
 | `status` | `reasoning`、`answering` 或 `tool_executing` 阶段 |
 | `content_delta` | 增量回答文本；客户端按顺序拼接 `text` |
 | `tool_call` | 模型提出工具建议；不代表已获准执行 |
@@ -168,6 +182,24 @@ data: {"type":"content_delta","seq":7,"text":"你好"}
 | `error` | 轮次失败或工具循环达到安全上限 |
 
 ai-service 的 `completed` 表示一次模型调用完成；当该调用同时产生 `tool_call` 时，NestJS 先执行/拒绝工具并继续下一次模型调用，不能把该事件误认为整个 AssistantTurn 已完成。公开 SSE 只在最终回答完成后发送整个轮次的 `completed`。
+
+`started` 事件携带本轮实际生效的 `capabilities`：
+
+```json
+{
+  "type": "started",
+  "seq": 1,
+  "turnId": "…",
+  "mode": "standard",
+  "capabilities": {
+    "webSearch": true,
+    "knowledgeBase": false,
+    "autoEnabled": ["web_search"]
+  }
+}
+```
+
+`webSearch` / `knowledgeBase` 是合并显式开关与意图识别后的有效能力；`autoEnabled` 只包含由服务端因意图识别**自动启用**的能力（用户显式开启的不计入），供前端展示透明提示。旧客户端可忽略该字段。
 
 工具结果示例：
 
