@@ -308,6 +308,43 @@ describe('KnowledgeIndexingService', () => {
         });
     });
 
+    it('cleans the fresh index when the document was soft-deleted during indexing', async () => {
+        const mocks = createMocks();
+        mocks.prisma.knowledgeDocument.findMany.mockResolvedValueOnce([]).mockResolvedValue([pendingDocument()]);
+        mocks.prisma.knowledgeDocument.updateMany.mockResolvedValue({ count: 1 });
+        mocks.prisma.documentVersion.findFirst.mockResolvedValue(documentVersion());
+        mocks.prisma.fileObject.findFirst.mockResolvedValue(fileObject());
+        mocks.parser.parse.mockResolvedValue(parsedDocument());
+        mocks.gateway.indexKnowledge.mockResolvedValue({
+            request_id: 'request-id',
+            indexed_chunks: 1,
+            chunking_version: 'knowledge-chunking-v1',
+            embedding_profile: 'deterministic',
+            index_version: 'knowledge-index-v1',
+            latency_ms: 12,
+        });
+        // 索引完成后文档已被软删：findFirst 返回 null，不再标回 READY。
+        mocks.prisma.knowledgeDocument.findFirst.mockResolvedValue(null);
+        mocks.gateway.deleteKnowledgeIndex.mockResolvedValue({
+            request_id: 'request-id',
+            deleted_chunks: 1,
+            document_version_id: VERSION_ID,
+            index_version: 'knowledge-index-v1',
+        });
+        const service = createService(mocks);
+
+        await service.runOnce();
+
+        // 已删文档不再标回 READY（PARSED/INDEXING 状态更新仍正常发生）。
+        expect(mocks.prisma.knowledgeDocument.update).not.toHaveBeenCalledWith(expect.objectContaining({
+            data: expect.objectContaining({ status: KnowledgeDocumentStatus.READY }),
+        }));
+        expect(mocks.gateway.deleteKnowledgeIndex).toHaveBeenCalledWith(expect.objectContaining({
+            tenant_id: TENANT_ID,
+            document_version_id: VERSION_ID,
+        }));
+    });
+
     it('cleans all version indexes of a knowledge base and tolerates single failures', async () => {
         const mocks = createMocks();
         mocks.prisma.knowledgeDocument.findMany.mockResolvedValue([
@@ -364,6 +401,7 @@ function createMocks(): Mocks {
             findMany: jest.fn().mockResolvedValue([]),
             updateMany: jest.fn(),
             update: jest.fn(),
+            findFirst: jest.fn().mockResolvedValue({ id: DOCUMENT_ID }),
         },
         documentVersion: { findFirst: jest.fn(), findMany: jest.fn() },
         fileObject: { findFirst: jest.fn() },

@@ -573,17 +573,20 @@ describe('KnowledgeService', () => {
 
     it('searches all visible knowledge bases for the assistant with folded scope and backfills document titles', async () => {
         const prisma = createPrismaMock();
-        prisma.knowledgeBaseMember.findMany.mockResolvedValue([
-            { knowledgeBaseId: KNOWLEDGE_BASE_ID },
-            { knowledgeBaseId: OTHER_KNOWLEDGE_BASE_ID },
-        ]);
+        // 第一次 findMany：可见库列表；第二次 findMany：用户 EDITOR 及以上可删库列表。
+        prisma.knowledgeBaseMember.findMany
+            .mockResolvedValueOnce([
+                { knowledgeBaseId: KNOWLEDGE_BASE_ID },
+                { knowledgeBaseId: OTHER_KNOWLEDGE_BASE_ID },
+            ])
+            .mockResolvedValueOnce([{ knowledgeBaseId: KNOWLEDGE_BASE_ID, permission: 'EDITOR' }]);
         prisma.tenantMembership.findFirst.mockResolvedValue({ departmentId: 'dept-root' });
         prisma.department.findMany.mockResolvedValue([
             { id: 'dept-root', parentId: null },
             { id: 'dept-child', parentId: 'dept-root' },
         ]);
         prisma.projectMember.findMany.mockResolvedValue([{ projectId: 'project-1' }]);
-        prisma.knowledgeDocument.findMany.mockResolvedValue([{ id: 'doc-1', name: '项目延期管理制度' }]);
+        prisma.knowledgeDocument.findMany.mockResolvedValue([{ id: 'doc-1', name: '项目延期管理制度', knowledgeBaseId: KNOWLEDGE_BASE_ID }]);
         const gateway = { answerKnowledge: jest.fn().mockResolvedValue(answerResponse()) };
         const service = createService(prisma, ['knowledge_base.query'], gateway);
 
@@ -605,6 +608,8 @@ describe('KnowledgeService', () => {
                 title: '项目延期管理制度',
                 snippet: '项目延期超过两周时需要升级到项目委员会。',
                 pageIndex: 3,
+                knowledgeBaseId: KNOWLEDGE_BASE_ID,
+                deletable: true,
             }],
             searchedKnowledgeBaseIds: [KNOWLEDGE_BASE_ID, OTHER_KNOWLEDGE_BASE_ID],
         });

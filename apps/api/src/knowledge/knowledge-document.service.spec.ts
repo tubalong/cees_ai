@@ -362,6 +362,69 @@ describe('KnowledgeDocumentService', () => {
             select: { id: true },
         });
     });
+
+    it('soft-deletes a document and cleans all version indexes', async () => {
+        const prisma = createPrismaMock();
+        prisma.knowledgeBase.findFirst.mockResolvedValue(knowledgeBaseRecord());
+        prisma.knowledgeBaseMember.findUnique.mockResolvedValue({ permission: 'EDITOR' });
+        prisma.knowledgeDocument.findFirst.mockResolvedValue(documentRecord({ status: 'READY' }));
+        prisma.documentVersion.findMany.mockResolvedValue([{ id: VERSION_ID }, { id: NEW_VERSION_ID }]);
+        prisma.knowledgeDocument.updateMany.mockResolvedValue({ count: 1 });
+        deleteVersionIndexSpy.mockClear();
+        deleteVersionIndexSpy.mockResolvedValue(undefined);
+        const service = createService(prisma);
+
+        await service.deleteDocument(KNOWLEDGE_BASE_ID, DOCUMENT_ID);
+
+        expect(prisma.knowledgeDocument.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+            where: expect.objectContaining({
+                id: DOCUMENT_ID,
+                tenantId: TENANT_ID,
+                knowledgeBaseId: KNOWLEDGE_BASE_ID,
+                deletedAt: null,
+            }),
+            data: expect.objectContaining({
+                deletedAt: expect.any(Date),
+                updatedBy: USER_ID,
+            }),
+        }));
+        expect(prisma.auditLog.create).toHaveBeenCalledWith({
+            data: expect.objectContaining({
+                action: 'KNOWLEDGE_DOCUMENT_DELETED',
+                metadata: expect.objectContaining({ name: '产品手册', versionCount: 2 }),
+            }),
+        });
+        expect(deleteVersionIndexSpy).toHaveBeenCalledWith(TENANT_ID, USER_ID, VERSION_ID);
+        expect(deleteVersionIndexSpy).toHaveBeenCalledWith(TENANT_ID, USER_ID, NEW_VERSION_ID);
+    });
+
+    it('rejects document deletion when the member permission is below EDITOR', async () => {
+        const prisma = createPrismaMock();
+        prisma.knowledgeBase.findFirst.mockResolvedValue(knowledgeBaseRecord());
+        prisma.knowledgeBaseMember.findUnique.mockResolvedValue({ permission: 'READER' });
+        const service = createService(prisma);
+
+        await expect(service.deleteDocument(KNOWLEDGE_BASE_ID, DOCUMENT_ID))
+            .rejects.toMatchObject({
+                response: expect.objectContaining({ code: 'KNOWLEDGE_BASE_MEMBER_PERMISSION_DENIED' }),
+            });
+        expect(prisma.knowledgeDocument.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('rejects deletion of a document that does not exist', async () => {
+        const prisma = createPrismaMock();
+        prisma.knowledgeBase.findFirst.mockResolvedValue(knowledgeBaseRecord());
+        prisma.knowledgeBaseMember.findUnique.mockResolvedValue({ permission: 'EDITOR' });
+        prisma.knowledgeDocument.findFirst.mockResolvedValue(null);
+        deleteVersionIndexSpy.mockClear();
+        const service = createService(prisma);
+
+        await expect(service.deleteDocument(KNOWLEDGE_BASE_ID, DOCUMENT_ID))
+            .rejects.toMatchObject({
+                response: expect.objectContaining({ code: 'KNOWLEDGE_DOCUMENT_NOT_FOUND' }),
+            });
+        expect(deleteVersionIndexSpy).not.toHaveBeenCalled();
+    });
 });
 
 const TENANT_ID = '10000000-0000-0000-0000-000000000001';

@@ -75,6 +75,8 @@ export class KnowledgeSearchTool implements OnModuleInit {
             title: citation.title,
             snippet: citation.snippet,
             pageIndex: citation.pageIndex,
+            knowledgeBaseId: citation.knowledgeBaseId,
+            deletable: citation.deletable,
         }));
         // 回喂模型的摘要只含业务内容：回答正文与引用（标签/标题/片段/页码）；
         // document_id/chunk_id 等内部标识只进结构化字段与审计，不进模型上下文。

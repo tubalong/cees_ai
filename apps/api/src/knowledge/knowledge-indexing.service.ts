@@ -232,6 +232,23 @@ export class KnowledgeIndexingService implements OnModuleInit, OnModuleDestroy {
             const indexResult = await this.gateway.indexKnowledge(
                 this.buildIndexRequest(document, version, parsed),
             );
+            // 删除与索引并发竞态：索引完成后文档可能已被软删，此时不再标回 READY，
+            // 并补删刚写入的向量索引，避免已删文档残留可检索的向量数据。
+            const surviving = await this.prisma.knowledgeDocument.findFirst({
+                where: { id: document.id, deletedAt: null },
+                select: { id: true },
+            });
+            if (!surviving) {
+                void this.deleteDocumentVersionIndex(
+                    document.tenantId,
+                    document.createdBy ?? 'system',
+                    version.id,
+                ).catch((error: unknown) => {
+                    const message = error instanceof Error ? error.message : 'unknown error';
+                    this.logger.warn(`已删文档索引竞态清理失败（版本 ${version.id}）：${message}`);
+                });
+                return true;
+            }
             await this.prisma.knowledgeDocument.update({
                 where: { id: document.id },
                 data: {

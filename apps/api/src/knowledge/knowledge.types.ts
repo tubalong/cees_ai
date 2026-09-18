@@ -117,6 +117,10 @@ export interface AssistantKnowledgeSearchResult {
         title: string;
         snippet: string;
         pageIndex: number | null;
+        /** 文档所属知识库 ID；文档已删除或库不可见时为空。 */
+        knowledgeBaseId: string | null;
+        /** 当前用户是否为该文档所属库的 EDITOR 及以上成员（或 manage_all），可直接删除该文档。 */
+        deletable: boolean;
     }[];
     searchedKnowledgeBaseIds: string[];
 }

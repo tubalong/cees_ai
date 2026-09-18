@@ -696,6 +696,49 @@ export class KnowledgeDocumentService {
         return this.requireDocument(knowledgeBaseId, documentId);
     }
 
+    /**
+     * 删除文档：软删业务记录并异步清理全部版本的向量索引。
+     * 门槛与文档写入一致（库内 EDITOR 及以上，manage_all 短路放行）。
+     * 处理中（PARSING/INDEXING）的文档同样允许删除；索引流程在提交 READY
+     * 前检查 deletedAt，已删文档不再标回 READY 并补删刚写入的向量索引。
+     */
+    async deleteDocument(knowledgeBaseId: string, documentId: string): Promise<void> {
+        const context = this.tenantContext.require();
+        await this.knowledgeService.requireKnowledgeBaseAccess(knowledgeBaseId, 'EDITOR');
+        const document = await this.requireDocumentRecord(context.tenantId, knowledgeBaseId, documentId);
+        const versions = await this.prisma.documentVersion.findMany({
+            where: { tenantId: context.tenantId, documentId },
+            select: { id: true },
+        });
+        await this.prisma.$transaction(async (transaction) => {
+            const deleted = await transaction.knowledgeDocument.updateMany({
+                where: { id: documentId, tenantId: context.tenantId, knowledgeBaseId, deletedAt: null },
+                data: {
+                    deletedAt: new Date(),
+                    updatedBy: context.userId,
+                    version: { increment: 1 },
+                },
+            });
+            if (deleted.count !== 1) throw this.documentNotFound();
+            await this.writeAudit(transaction, context, 'KNOWLEDGE_DOCUMENT_DELETED', documentId, {
+                knowledgeBaseId,
+                name: document.name,
+                status: document.status,
+                versionCount: versions.length,
+            });
+        });
+        for (const version of versions) {
+            void this.indexingService.deleteDocumentVersionIndex(
+                context.tenantId,
+                context.userId,
+                version.id,
+            ).catch((error: unknown) => {
+                const message = error instanceof Error ? error.message : 'unknown error';
+                this.logger.warn(`清理文档派生索引失败（版本 ${version.id}）：${message}`);
+            });
+        }
+    }
+
     private async requireDocument(knowledgeBaseId: string, documentId: string): Promise<KnowledgeDocumentResult> {
         const { tenantId } = this.tenantContext.require();
         const record = await this.requireDocumentRecord(tenantId, knowledgeBaseId, documentId);
