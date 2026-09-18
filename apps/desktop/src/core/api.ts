@@ -250,6 +250,20 @@ interface CursorPage<T> {
     nextCursor: string | null;
 }
 
+async function collectCursorPages<T>(pathForCursor: (cursor?: string) => string): Promise<CursorPage<T>> {
+    const items: T[] = [];
+    const visited = new Set<string>();
+    let cursor: string | undefined;
+    do {
+        const page = await authorizedRequest<CursorPage<T>>(pathForCursor(cursor));
+        items.push(...page.items);
+        cursor = page.nextCursor ?? undefined;
+        if (cursor && visited.has(cursor)) throw new Error('分页游标重复，无法继续加载数据');
+        if (cursor) visited.add(cursor);
+    } while (cursor);
+    return { items, nextCursor: null };
+}
+
 interface ApiSuccess<T> {
     success: true;
     data: T;
@@ -2414,8 +2428,12 @@ export interface HrProfileInput {
 }
 
 export async function listHrProfiles(keyword?: string): Promise<CursorPage<HrProfile>> {
-    const query = new URLSearchParams({ limit: '100' }); if (keyword) query.set('keyword', keyword);
-    return authorizedRequest<CursorPage<HrProfile>>(`v1/hr/profiles?${query}`);
+    return collectCursorPages((cursor) => {
+        const query = new URLSearchParams({ limit: '100' });
+        if (keyword) query.set('keyword', keyword);
+        if (cursor) query.set('cursor', cursor);
+        return `v1/hr/profiles?${query}`;
+    });
 }
 export async function createHrProfile(input: HrProfileInput & { membershipId: string }): Promise<HrProfile> { return authorizedRequest<HrProfile>('v1/hr/profiles', { method: 'POST', body: JSON.stringify(input) }); }
 export async function updateHrProfile(membershipId: string, input: HrProfileInput & { version: number }): Promise<HrProfile> { return authorizedRequest<HrProfile>(`v1/hr/profiles/${encodeURIComponent(membershipId)}`, { method: 'PATCH', body: JSON.stringify(input) }); }
@@ -2423,23 +2441,23 @@ export async function listHrLeaveTypes(): Promise<{ items: HrLeaveType[] }> { re
 export async function createHrLeaveType(input: Omit<HrLeaveType, 'id' | 'version'>): Promise<HrLeaveType> { return authorizedRequest<HrLeaveType>('v1/hr/leave-types', { method: 'POST', body: JSON.stringify(input) }); }
 export async function updateHrLeaveType(id: string, input: Partial<Omit<HrLeaveType, 'id'>> & { version: number }): Promise<HrLeaveType> { return authorizedRequest<HrLeaveType>(`v1/hr/leave-types/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(input) }); }
 export async function deleteHrLeaveType(id: string, version: number): Promise<void> { return authorizedRequest<void>(`v1/hr/leave-types/${encodeURIComponent(id)}?version=${version}`, { method: 'DELETE' }); }
-export async function listHrLeaveBalances(year?: number): Promise<{ items: HrLeaveBalance[] }> { return authorizedRequest<{ items: HrLeaveBalance[] }>(`v1/hr/leave-balances${year ? `?year=${year}` : ''}`); }
+export async function listHrLeaveBalances(year?: number): Promise<CursorPage<HrLeaveBalance>> { return collectCursorPages((cursor) => { const query = new URLSearchParams({ limit: '100' }); if (year) query.set('year', String(year)); if (cursor) query.set('cursor', cursor); return `v1/hr/leave-balances?${query}`; }); }
 export async function adjustHrLeaveBalance(input: { membershipId: string; leaveTypeId: string; year: number; deltaDays: number; reason: string }): Promise<HrLeaveBalance> { return authorizedRequest<HrLeaveBalance>('v1/hr/leave-balances/adjust', { method: 'POST', body: JSON.stringify(input) }); }
-export async function listHrLeaveRequests(status?: HrRequestStatus): Promise<CursorPage<HrLeaveRequest>> { return authorizedRequest<CursorPage<HrLeaveRequest>>(`v1/hr/leave-requests?limit=100${status ? `&status=${status}` : ''}`); }
+export async function listHrLeaveRequests(status?: HrRequestStatus): Promise<CursorPage<HrLeaveRequest>> { return collectCursorPages((cursor) => `v1/hr/leave-requests?limit=100${status ? `&status=${status}` : ''}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`); }
 export async function createHrLeaveRequest(input: { leaveTypeId: string; startAt: string; endAt: string; durationDays?: number; reason?: string | null }): Promise<HrLeaveRequest> { return authorizedRequest<HrLeaveRequest>('v1/hr/leave-requests', { method: 'POST', body: JSON.stringify(input) }); }
 export async function reviewHrLeaveRequest(id: string, decision: 'APPROVE' | 'REJECT', version: number, comment?: string): Promise<HrLeaveRequest> { return authorizedRequest<HrLeaveRequest>(`v1/hr/leave-requests/${encodeURIComponent(id)}/review`, { method: 'POST', body: JSON.stringify({ decision, version, comment }) }); }
 export async function withdrawHrLeaveRequest(id: string, version: number): Promise<HrLeaveRequest> { return authorizedRequest<HrLeaveRequest>(`v1/hr/leave-requests/${encodeURIComponent(id)}/withdraw`, { method: 'POST', body: JSON.stringify({ version }) }); }
 export async function cancelHrLeaveRequest(id: string, version: number, reason?: string): Promise<HrLeaveRequest> { return authorizedRequest<HrLeaveRequest>(`v1/hr/leave-requests/${encodeURIComponent(id)}/cancel`, { method: 'POST', body: JSON.stringify({ version, reason }) }); }
-export async function listHrAttendanceRecords(): Promise<CursorPage<HrAttendanceRecord>> { return authorizedRequest<CursorPage<HrAttendanceRecord>>('v1/hr/attendance-records?limit=100'); }
+export async function listHrAttendanceRecords(): Promise<CursorPage<HrAttendanceRecord>> { return collectCursorPages((cursor) => `v1/hr/attendance-records?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`); }
 export async function createHrAttendanceRecord(input: { membershipId: string; workDate: string; checkInAt?: string | null; checkOutAt?: string | null; status: HrAttendanceStatus; note?: string | null }): Promise<HrAttendanceRecord> { return authorizedRequest<HrAttendanceRecord>('v1/hr/attendance-records', { method: 'POST', body: JSON.stringify(input) }); }
 export async function importHrAttendanceRecords(records: Array<{ membershipId: string; workDate: string; checkInAt?: string | null; checkOutAt?: string | null; status: HrAttendanceStatus; note?: string | null }>): Promise<{ total: number; imported: number; failed: number; failures: Array<{ index: number; code: string; message: string }> }> { return authorizedRequest('v1/hr/attendance-records/import', { method: 'POST', body: JSON.stringify({ records }) }); }
 export async function updateHrAttendanceRecord(id: string, input: { checkInAt?: string | null; checkOutAt?: string | null; status?: HrAttendanceStatus; note?: string | null; version: number }): Promise<HrAttendanceRecord> { return authorizedRequest<HrAttendanceRecord>(`v1/hr/attendance-records/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(input) }); }
 export async function reviewHrAttendanceRecord(id: string, decision: 'APPROVE' | 'REJECT', version: number, comment?: string): Promise<HrAttendanceRecord> { return authorizedRequest<HrAttendanceRecord>(`v1/hr/attendance-records/${encodeURIComponent(id)}/review`, { method: 'POST', body: JSON.stringify({ decision, version, comment }) }); }
-export async function listHrOvertimeRequests(): Promise<CursorPage<HrOvertimeRequest>> { return authorizedRequest<CursorPage<HrOvertimeRequest>>('v1/hr/overtime-requests?limit=100'); }
+export async function listHrOvertimeRequests(): Promise<CursorPage<HrOvertimeRequest>> { return collectCursorPages((cursor) => `v1/hr/overtime-requests?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`); }
 export async function createHrOvertimeRequest(input: { startAt: string; endAt: string; durationHours: number; reason: string }): Promise<HrOvertimeRequest> { return authorizedRequest<HrOvertimeRequest>('v1/hr/overtime-requests', { method: 'POST', body: JSON.stringify(input) }); }
 export async function reviewHrOvertimeRequest(id: string, decision: 'APPROVE' | 'REJECT', version: number, comment?: string): Promise<HrOvertimeRequest> { return authorizedRequest<HrOvertimeRequest>(`v1/hr/overtime-requests/${encodeURIComponent(id)}/review`, { method: 'POST', body: JSON.stringify({ decision, version, comment }) }); }
 export async function cancelHrOvertimeRequest(id: string, version: number): Promise<HrOvertimeRequest> { return authorizedRequest<HrOvertimeRequest>(`v1/hr/overtime-requests/${encodeURIComponent(id)}/cancel`, { method: 'POST', body: JSON.stringify({ version }) }); }
-export async function listHrEmployeeChanges(): Promise<CursorPage<HrEmployeeChange>> { return authorizedRequest<CursorPage<HrEmployeeChange>>('v1/hr/employee-changes?limit=100'); }
+export async function listHrEmployeeChanges(): Promise<CursorPage<HrEmployeeChange>> { return collectCursorPages((cursor) => `v1/hr/employee-changes?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`); }
 export async function createHrEmployeeChange(input: { membershipId: string; type: HrEmployeeChangeType; effectiveDate: string; fromDepartmentId?: string | null; toDepartmentId?: string | null; fromPosition?: string | null; toPosition?: string | null; fromManagerMembershipId?: string | null; toManagerMembershipId?: string | null; reason?: string | null }): Promise<HrEmployeeChange> { return authorizedRequest<HrEmployeeChange>('v1/hr/employee-changes', { method: 'POST', body: JSON.stringify(input) }); }
 export async function reviewHrEmployeeChange(id: string, decision: 'APPROVE' | 'REJECT', version: number, comment?: string): Promise<HrEmployeeChange> { return authorizedRequest<HrEmployeeChange>(`v1/hr/employee-changes/${encodeURIComponent(id)}/review`, { method: 'POST', body: JSON.stringify({ decision, version, comment }) }); }
 export async function cancelHrEmployeeChange(id: string, version: number): Promise<HrEmployeeChange> { return authorizedRequest<HrEmployeeChange>(`v1/hr/employee-changes/${encodeURIComponent(id)}/cancel`, { method: 'POST', body: JSON.stringify({ version }) }); }
@@ -2518,16 +2536,19 @@ export async function deleteFinanceExpenseCategory(id: string, version: number):
     return authorizedRequest(`v1/finance/expense-categories/${encodeURIComponent(id)}?version=${version}`, { method: 'DELETE' });
 }
 export async function listFinanceExpenseReports(filters: FinanceExpenseReportFilters = {}): Promise<CursorPage<FinanceExpenseReport>> {
-    const query = new URLSearchParams({ limit: '100' });
-    if (filters.keyword?.trim()) query.set('keyword', filters.keyword.trim());
-    if (filters.status) query.set('status', filters.status);
-    if (filters.requesterMembershipId) query.set('requesterMembershipId', filters.requesterMembershipId);
-    if (filters.departmentId) query.set('departmentId', filters.departmentId);
-    if (filters.projectId) query.set('projectId', filters.projectId);
-    if (filters.categoryId) query.set('categoryId', filters.categoryId);
-    if (filters.dateFrom) query.set('dateFrom', filters.dateFrom);
-    if (filters.dateTo) query.set('dateTo', filters.dateTo);
-    return authorizedRequest(`v1/finance/expense-reports?${query}`);
+    return collectCursorPages((cursor) => {
+        const query = new URLSearchParams({ limit: '100' });
+        if (filters.keyword?.trim()) query.set('keyword', filters.keyword.trim());
+        if (filters.status) query.set('status', filters.status);
+        if (filters.requesterMembershipId) query.set('requesterMembershipId', filters.requesterMembershipId);
+        if (filters.departmentId) query.set('departmentId', filters.departmentId);
+        if (filters.projectId) query.set('projectId', filters.projectId);
+        if (filters.categoryId) query.set('categoryId', filters.categoryId);
+        if (filters.dateFrom) query.set('dateFrom', filters.dateFrom);
+        if (filters.dateTo) query.set('dateTo', filters.dateTo);
+        if (cursor) query.set('cursor', cursor);
+        return `v1/finance/expense-reports?${query}`;
+    });
 }
 export async function getFinanceExpenseReport(id: string): Promise<FinanceExpenseReport> {
     return authorizedRequest(`v1/finance/expense-reports/${encodeURIComponent(id)}`);

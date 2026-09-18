@@ -5,5 +5,6 @@
 import type { HrLeaveBalance } from './HrLeaveBalance';
 export type HrLeaveBalanceList = {
     items: Array<HrLeaveBalance>;
+    nextCursor: string | null;
 };
 

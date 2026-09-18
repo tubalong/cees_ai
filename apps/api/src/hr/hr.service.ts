@@ -1,10 +1,10 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import {
     AuditOutcome, HrAttendanceSource, HrAttendanceStatus, HrEmployeeChangeStatus, HrEmployeeChangeType,
     HrLeaveRequestStatus, HrLeaveUnit, HrOvertimeRequestStatus, HrProfileStatus, MembershipStatus, Prisma,
 } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
-import { DEFAULT_TENANT_TIMEZONE, localDateKey } from '../common/tenant-time';
+import { dateKeyToUtcMidnight, DEFAULT_TENANT_TIMEZONE, localDateKey, startOfLocalDate } from '../common/tenant-time';
 import { DataScopeResolverService } from '../rbac/data-scope-resolver.service';
 import { TENANT_ADMIN_ROLE_CODE } from '../rbac/permission-catalog';
 import { TenantContext } from '../tenant/tenant-context';
@@ -19,9 +19,17 @@ import {
 
 type DbClient = PrismaService | Prisma.TransactionClient;
 type JsonRecord = Record<string, unknown>;
+type HrWriteContext = {
+    tenantId: string;
+    userId: string | null;
+    membershipId: string | null;
+    requestId: string;
+};
 
 @Injectable()
 export class HrService {
+    private readonly logger = new Logger(HrService.name);
+
     constructor(
         private readonly prisma: PrismaService,
         private readonly tenantContext: TenantContext,
@@ -189,18 +197,20 @@ export class HrService {
 
     async listLeaveBalances(query: ListHrLeaveBalancesQueryDto): Promise<JsonRecord> {
         const context = this.tenantContext.require();
-        const membershipIds = await this.scopedMembershipIds();
-        if (query.membershipId) await this.assertMembershipAccess(query.membershipId);
+        const membershipIds = await this.scopedMembershipIds(undefined, 'hr.leave.manage_all');
+        if (query.membershipId) await this.assertMembershipAccess(query.membershipId, 'hr.leave.manage_all');
+        await this.validateCursor('hrLeaveBalance', query.cursor, context.tenantId);
         const items = await this.prisma.hrLeaveBalance.findMany({ where: {
             tenantId: context.tenantId, deletedAt: null,
             membershipId: query.membershipId ?? (membershipIds ? { in: membershipIds } : undefined), year: query.year,
-        }, orderBy: [{ year: 'desc' }, { createdAt: 'asc' }] });
-        return { items: items.map(toLeaveBalance) };
+        }, orderBy: [{ year: 'desc' }, { createdAt: 'asc' }, { id: 'asc' }],
+        cursor: query.cursor ? { id: query.cursor } : undefined, skip: query.cursor ? 1 : 0, take: query.limit + 1 });
+        return cursorPage(items, query.limit, toLeaveBalance);
     }
 
     async adjustLeaveBalance(input: AdjustHrLeaveBalanceDto): Promise<JsonRecord> {
         const context = this.tenantContext.require();
-        await this.assertMembershipAccess(input.membershipId);
+        await this.assertMembershipAccess(input.membershipId, 'hr.leave.manage_all');
         await this.requireMembership(input.membershipId);
         const leaveType = await this.requireLeaveType(input.leaveTypeId);
         const result = await this.prisma.$transaction(async (transaction) => {
@@ -208,12 +218,23 @@ export class HrService {
                 tenantId: context.tenantId, membershipId: input.membershipId, leaveTypeId: input.leaveTypeId,
                 year: input.year, deletedAt: null,
             } });
-            const totalDays = decimal(existing?.totalDays) + input.deltaDays;
-            const remainingDays = decimal(existing?.remainingDays) + input.deltaDays;
-            if (totalDays < 0 || remainingDays < 0) throw new BadRequestException({ code: 'HR_LEAVE_BALANCE_NEGATIVE', message: '调整后假期余额不能为负数' });
-            const balance = existing ? await transaction.hrLeaveBalance.update({ where: { id: existing.id }, data: {
-                totalDays, remainingDays, updatedBy: context.userId, version: { increment: 1 },
-            } }) : await transaction.hrLeaveBalance.create({ data: {
+            if (!existing && input.deltaDays < 0) {
+                throw new BadRequestException({ code: 'HR_LEAVE_BALANCE_NEGATIVE', message: '调整后假期余额不能为负数' });
+            }
+            let balance: Record<string, any>;
+            if (existing) {
+                const minimum = input.deltaDays < 0 ? -input.deltaDays : undefined;
+                const changed = await transaction.hrLeaveBalance.updateMany({ where: {
+                    id: existing.id, tenantId: context.tenantId, deletedAt: null,
+                    totalDays: minimum === undefined ? undefined : { gte: minimum },
+                    remainingDays: minimum === undefined ? undefined : { gte: minimum },
+                }, data: {
+                    totalDays: { increment: input.deltaDays }, remainingDays: { increment: input.deltaDays },
+                    updatedBy: context.userId, version: { increment: 1 },
+                } });
+                if (changed.count !== 1) throw new BadRequestException({ code: 'HR_LEAVE_BALANCE_NEGATIVE', message: '调整后假期余额不能为负数' });
+                balance = await transaction.hrLeaveBalance.findUniqueOrThrow({ where: { id: existing.id } });
+            } else balance = await transaction.hrLeaveBalance.create({ data: {
                 tenantId: context.tenantId, membershipId: input.membershipId, leaveTypeId: input.leaveTypeId,
                 year: input.year, totalDays: input.deltaDays, remainingDays: input.deltaDays, unit: leaveType.unit,
                 createdBy: context.userId, updatedBy: context.userId,
@@ -283,14 +304,14 @@ export class HrService {
 
     async getLeaveRequest(id: string): Promise<JsonRecord> {
         const item = await this.requireLeaveRequest(id);
-        await this.assertMembershipAccess(item.membershipId);
+        await this.assertMembershipAccess(item.membershipId, 'hr.leave.manage_all');
         return toLeaveRequest(item);
     }
 
     async reviewLeaveRequest(id: string, input: ReviewRequestDto): Promise<JsonRecord> {
         const context = this.tenantContext.require();
         const request = await this.requireLeaveRequest(id);
-        await this.assertMembershipAccess(request.membershipId);
+        await this.assertMembershipAccess(request.membershipId, 'hr.leave.manage_all');
         this.assertNotSelfReview(request.membershipId);
         if (request.status !== HrLeaveRequestStatus.SUBMITTED) throw this.stateConflict('请假申请不是待审批状态');
         const status = input.decision === 'APPROVE' ? HrLeaveRequestStatus.APPROVED : HrLeaveRequestStatus.REJECTED;
@@ -318,7 +339,7 @@ export class HrService {
 
     async cancelLeaveRequest(id: string, input: CancelHrLeaveRequestDto): Promise<JsonRecord> {
         const request = await this.requireLeaveRequest(id);
-        await this.assertMembershipAccess(request.membershipId);
+        await this.assertMembershipAccess(request.membershipId, 'hr.leave.manage_all');
         return this.releaseLeaveRequest(request, input.version, 'HR_LEAVE_REQUEST_CANCELLED', input.reason);
     }
 
@@ -417,10 +438,23 @@ export class HrService {
         const startAt = parseDate(input.startAt);
         const endAt = parseDate(input.endAt);
         if (startAt >= endAt) throw new BadRequestException({ code: 'HR_DATE_RANGE_INVALID', message: '加班结束时间必须晚于开始时间' });
+        const durationHours = deriveOvertimeDurationHours(startAt, endAt);
+        if (Math.abs(input.durationHours - durationHours) > OVERTIME_DURATION_TOLERANCE_HOURS) {
+            throw new BadRequestException({
+                code: 'HR_OVERTIME_DURATION_MISMATCH',
+                message: `加班时长与申请时间折算结果不一致，按起止时间应为 ${durationHours} 小时`,
+            });
+        }
         const item = await this.prisma.$transaction(async (transaction) => {
+            const overlap = await transaction.hrOvertimeRequest.findFirst({ where: {
+                tenantId: context.tenantId, membershipId: context.membershipId, deletedAt: null,
+                status: { in: [HrOvertimeRequestStatus.SUBMITTED, HrOvertimeRequestStatus.APPROVED] },
+                startAt: { lt: endAt }, endAt: { gt: startAt },
+            }, select: { id: true } });
+            if (overlap) throw new ConflictException({ code: 'HR_OVERTIME_REQUEST_OVERLAP', message: '该时间段已有待审批或已批准的加班申请' });
             const created = await transaction.hrOvertimeRequest.create({ data: {
                 tenantId: context.tenantId, membershipId: context.membershipId, startAt, endAt,
-                durationHours: input.durationHours, reason: input.reason.trim(), status: HrOvertimeRequestStatus.SUBMITTED,
+                durationHours, reason: input.reason.trim(), status: HrOvertimeRequestStatus.SUBMITTED,
                 createdBy: context.userId, updatedBy: context.userId,
             } });
             await this.audit(transaction, 'HR_OVERTIME_SUBMITTED', 'HR_OVERTIME_REQUEST', created.id);
@@ -470,11 +504,20 @@ export class HrService {
         const context = this.tenantContext.require();
         await this.assertMembershipAccess(input.membershipId);
         const profile = await this.requireProfile(input.membershipId);
+        const effectiveDate = dateOnly(input.effectiveDate)!;
+        this.assertEmployeeChangeAllowed(profile, input);
         await this.validateProfileReferences(input.toDepartmentId, input.toManagerMembershipId);
         const item = await this.prisma.$transaction(async (transaction) => {
+            const pending = await transaction.hrEmployeeChange.findFirst({ where: {
+                tenantId: context.tenantId, membershipId: input.membershipId, deletedAt: null,
+                status: { in: [HrEmployeeChangeStatus.SUBMITTED, HrEmployeeChangeStatus.APPROVED] },
+            }, select: { id: true } });
+            if (pending) throw new ConflictException({
+                code: 'HR_EMPLOYEE_CHANGE_PENDING', message: '该员工已有待审批或待生效的人事异动',
+            });
             const created = await transaction.hrEmployeeChange.create({ data: {
                 tenantId: context.tenantId, membershipId: input.membershipId, type: input.type,
-                effectiveDate: dateOnly(input.effectiveDate)!, fromDepartmentId: input.fromDepartmentId ?? profile.departmentId,
+                effectiveDate, fromDepartmentId: input.fromDepartmentId ?? profile.departmentId,
                 toDepartmentId: input.toDepartmentId, fromPosition: normalizeNullable(input.fromPosition) ?? profile.position,
                 toPosition: normalizeNullable(input.toPosition), fromManagerMembershipId: input.fromManagerMembershipId ?? profile.managerMembershipId,
                 toManagerMembershipId: input.toManagerMembershipId, reason: normalizeNullable(input.reason),
@@ -505,25 +548,64 @@ export class HrService {
         await this.assertMembershipAccess(item.membershipId);
         this.assertNotSelfReview(item.membershipId);
         if (item.status !== HrEmployeeChangeStatus.SUBMITTED) throw this.stateConflict('人事异动不是待审批状态');
+        const timeZone = await this.tenantTimeZone();
+        const effectiveNow = formatDate(item.effectiveDate) <= localDateKey(timeZone, new Date());
         const result = await this.prisma.$transaction(async (transaction) => {
-            const status = input.decision === 'APPROVE' ? HrEmployeeChangeStatus.EFFECTIVE : HrEmployeeChangeStatus.REJECTED;
+            const status = input.decision === 'APPROVE'
+                ? effectiveNow ? HrEmployeeChangeStatus.EFFECTIVE : HrEmployeeChangeStatus.APPROVED
+                : HrEmployeeChangeStatus.REJECTED;
             const changed = await transaction.hrEmployeeChange.updateMany({
                 where: { id, tenantId: context.tenantId, status: HrEmployeeChangeStatus.SUBMITTED, version: input.version },
                 data: { status, reviewedBy: context.membershipId, reviewedAt: new Date(), reviewComment: normalizeNullable(input.comment),
                     updatedBy: context.userId, version: { increment: 1 } },
             });
             if (changed.count !== 1) throw this.versionConflict();
-            if (input.decision === 'APPROVE') await this.applyEmployeeChange(transaction, item);
+            if (input.decision === 'APPROVE' && effectiveNow) await this.applyEmployeeChange(transaction, item);
             await this.audit(transaction, 'HR_EMPLOYEE_CHANGE_REVIEWED', 'HR_EMPLOYEE_CHANGE', id, { decision: input.decision });
             return transaction.hrEmployeeChange.findUniqueOrThrow({ where: { id } });
         });
         return toEmployeeChange(result);
     }
 
+    async processApprovedEmployeeChanges(now = new Date()): Promise<number> {
+        const items = await this.prisma.hrEmployeeChange.findMany({
+            where: { status: HrEmployeeChangeStatus.APPROVED, deletedAt: null },
+            include: { tenant: { select: { timezone: true } } },
+        });
+        let applied = 0;
+        for (const item of items) {
+            const timeZone = item.tenant.timezone || DEFAULT_TENANT_TIMEZONE;
+            if (item.effectiveDate > dateKeyToUtcMidnight(localDateKey(timeZone, now))) continue;
+            const actor: HrWriteContext = {
+                tenantId: item.tenantId,
+                userId: null,
+                membershipId: null,
+                requestId: `system:hr-employee-change:${now.toISOString()}`,
+            };
+            try {
+                applied += await this.prisma.$transaction(async (transaction) => {
+                    const changed = await transaction.hrEmployeeChange.updateMany({
+                        where: { id: item.id, tenantId: item.tenantId, status: HrEmployeeChangeStatus.APPROVED, version: item.version },
+                        data: { status: HrEmployeeChangeStatus.EFFECTIVE, updatedBy: null, version: { increment: 1 } },
+                    });
+                    if (changed.count !== 1) return 0;
+                    await this.applyEmployeeChange(transaction, item, actor);
+                    await this.audit(transaction, 'HR_EMPLOYEE_CHANGE_EFFECTIVE', 'HR_EMPLOYEE_CHANGE', item.id, {
+                        trigger: 'BACKGROUND_JOB', effectiveDate: formatDate(item.effectiveDate),
+                    }, actor);
+                    return 1;
+                });
+            } catch (error) {
+                this.logger.error(`定时生效人事异动失败: ${item.id}`, error instanceof Error ? error.stack : undefined);
+            }
+        }
+        return applied;
+    }
+
     async getHeadcountReport(query: HeadcountReportQueryDto): Promise<JsonRecord> {
         const context = this.tenantContext.require();
         const membershipIds = await this.scopedMembershipIds(query.departmentId);
-        const asOf = dateOnly(query.asOf) ?? dateOnly(new Date().toISOString())!;
+        const asOf = dateOnly(query.asOf) ?? dateKeyToUtcMidnight(localDateKey(await this.tenantTimeZone(), new Date()));
         const profiles = await this.prisma.hrProfile.findMany({ where: {
             tenantId: context.tenantId, deletedAt: null, membershipId: membershipIds ? { in: membershipIds } : undefined,
             departmentId: query.departmentId,
@@ -545,16 +627,21 @@ export class HrService {
     async getLeaveSummaryReport(query: LeaveSummaryReportQueryDto): Promise<JsonRecord> {
         const context = this.tenantContext.require();
         const membershipIds = await this.scopedMembershipIds(query.departmentId);
+        const timeZone = await this.tenantTimeZone();
+        const yearStart = startOfLocalDate(timeZone, `${query.year}-01-01`);
+        const nextYearStart = startOfLocalDate(timeZone, `${query.year + 1}-01-01`);
         const requests = await this.prisma.hrLeaveRequest.findMany({ where: {
             tenantId: context.tenantId, deletedAt: null, membershipId: membershipIds ? { in: membershipIds } : undefined,
-            leaveTypeId: query.leaveTypeId, startAt: { gte: new Date(Date.UTC(query.year, 0, 1)), lt: new Date(Date.UTC(query.year + 1, 0, 1)) },
+            leaveTypeId: query.leaveTypeId, startAt: { lt: nextYearStart }, endAt: { gt: yearStart },
             status: { not: HrLeaveRequestStatus.CANCELLED },
         }, include: { leaveType: { select: { name: true } } } });
         const grouped = new Map<string, { leaveTypeId: string; leaveTypeName: string; requestedDays: number; approvedDays: number }>();
         for (const request of requests) {
+            const requestedDays = leaveYearAllocations(request).find((allocation) => allocation.year === query.year)?.days ?? 0;
+            if (requestedDays <= 0) continue;
             const current = grouped.get(request.leaveTypeId) ?? { leaveTypeId: request.leaveTypeId, leaveTypeName: request.leaveType.name, requestedDays: 0, approvedDays: 0 };
-            current.requestedDays += decimal(request.durationDays);
-            if (request.status === HrLeaveRequestStatus.APPROVED) current.approvedDays += decimal(request.durationDays);
+            current.requestedDays += requestedDays;
+            if (request.status === HrLeaveRequestStatus.APPROVED) current.approvedDays += requestedDays;
             grouped.set(request.leaveTypeId, current);
         }
         const byLeaveType = [...grouped.values()];
@@ -580,10 +667,13 @@ export class HrService {
         this.assertDateRange(query.dateFrom, query.dateTo);
         const context = this.tenantContext.require();
         const membershipIds = await this.scopedMembershipIds(query.departmentId);
+        const timeZone = await this.tenantTimeZone();
+        const rangeStart = startOfLocalDate(timeZone, query.dateFrom);
+        const rangeEnd = startOfLocalDate(timeZone, nextDateKey(query.dateTo));
         const requests = await this.prisma.hrOvertimeRequest.findMany({ where: {
             tenantId: context.tenantId, deletedAt: null, membershipId: membershipIds ? { in: membershipIds } : undefined,
             status: HrOvertimeRequestStatus.APPROVED,
-            startAt: { gte: parseDate(`${query.dateFrom}T00:00:00.000Z`), lte: parseDate(`${query.dateTo}T23:59:59.999Z`) },
+            startAt: { gte: rangeStart, lt: rangeEnd },
         }, include: { membership: { include: { user: { select: { displayName: true } } } } } });
         const grouped = new Map<string, { membershipId: string; displayName: string; overtimeHours: number }>();
         for (const request of requests) {
@@ -670,10 +760,13 @@ export class HrService {
         });
     }
 
-    private async applyEmployeeChange(transaction: Prisma.TransactionClient, item: Record<string, any>): Promise<void> {
-        const context = this.tenantContext.require();
+    private async applyEmployeeChange(
+        transaction: Prisma.TransactionClient,
+        item: Record<string, any>,
+        actor: HrWriteContext = this.currentWriteContext(),
+    ): Promise<void> {
         const isOffboarding = [HrEmployeeChangeType.RESIGNATION, HrEmployeeChangeType.TERMINATION].includes(item.type);
-        const data: Prisma.HrProfileUpdateManyMutationInput = { updatedBy: context.userId, version: { increment: 1 } };
+        const data: Prisma.HrProfileUpdateManyMutationInput = { updatedBy: actor.userId, version: { increment: 1 } };
         if (item.toDepartmentId !== null) data.departmentId = item.toDepartmentId;
         if (item.toPosition !== null) data.position = item.toPosition;
         if (item.toManagerMembershipId !== null) data.managerMembershipId = item.toManagerMembershipId;
@@ -683,21 +776,25 @@ export class HrService {
             data.leaveDate = item.effectiveDate;
             data.status = HrProfileStatus.TERMINATED;
         }
-        await transaction.hrProfile.updateMany({ where: { tenantId: context.tenantId, membershipId: item.membershipId, deletedAt: null }, data });
+        const profile = await transaction.hrProfile.updateMany({ where: { tenantId: actor.tenantId, membershipId: item.membershipId, deletedAt: null }, data });
+        if (profile.count !== 1) throw this.stateConflict('员工档案已发生变化，无法生效人事异动');
         if (isOffboarding) {
-            await this.disableOffboardedMembership(transaction, item);
+            await this.disableOffboardedMembership(transaction, item, actor);
         } else if (item.toDepartmentId !== null) {
             await transaction.tenantMembership.updateMany({
-                where: { tenantId: context.tenantId, id: item.membershipId, deletedAt: null },
-                data: { departmentId: item.toDepartmentId, updatedBy: context.userId, version: { increment: 1 } },
+                where: { tenantId: actor.tenantId, id: item.membershipId, deletedAt: null },
+                data: { departmentId: item.toDepartmentId, updatedBy: actor.userId, version: { increment: 1 } },
             });
         }
     }
 
-    private async disableOffboardedMembership(transaction: Prisma.TransactionClient, item: Record<string, any>): Promise<void> {
-        const context = this.tenantContext.require();
+    private async disableOffboardedMembership(
+        transaction: Prisma.TransactionClient,
+        item: Record<string, any>,
+        actor: HrWriteContext,
+    ): Promise<void> {
         const membership = await transaction.tenantMembership.findFirst({
-            where: { tenantId: context.tenantId, id: item.membershipId, deletedAt: null },
+            where: { tenantId: actor.tenantId, id: item.membershipId, deletedAt: null },
             include: {
                 membershipRoles: {
                     where: { role: { deletedAt: null } },
@@ -713,7 +810,7 @@ export class HrService {
         if (isActiveTenantAdmin) {
             const otherAdminCount = await transaction.tenantMembership.count({
                 where: {
-                    tenantId: context.tenantId,
+                    tenantId: actor.tenantId,
                     id: { not: item.membershipId },
                     status: MembershipStatus.ACTIVE,
                     deletedAt: null,
@@ -730,24 +827,24 @@ export class HrService {
 
         const now = new Date();
         const disabled = await transaction.tenantMembership.updateMany({
-            where: { tenantId: context.tenantId, id: item.membershipId, deletedAt: null },
+            where: { tenantId: actor.tenantId, id: item.membershipId, deletedAt: null },
             data: {
                 status: MembershipStatus.DISABLED,
                 departmentId: item.toDepartmentId ?? membership.departmentId,
-                updatedBy: context.userId,
+                updatedBy: actor.userId,
                 version: { increment: 1 },
             },
         });
         if (disabled.count !== 1) throw this.stateConflict('离职人员主体状态已发生变化');
         const revokedSessions = await transaction.authSession.updateMany({
-            where: { tenantId: context.tenantId, membershipId: item.membershipId, revokedAt: null },
+            where: { tenantId: actor.tenantId, membershipId: item.membershipId, revokedAt: null },
             data: { revokedAt: now },
         });
         await this.audit(transaction, 'HR_OFFBOARDING_SUBJECT_DISABLED', 'TENANT_MEMBERSHIP', item.membershipId, {
             employeeChangeId: item.id,
             employeeChangeType: item.type,
             revokedSessionCount: revokedSessions.count,
-        });
+        }, actor);
     }
 
     private async listMemberResource(
@@ -757,8 +854,9 @@ export class HrService {
         mapper: (item: Record<string, any>) => JsonRecord,
     ): Promise<JsonRecord> {
         const context = this.tenantContext.require();
-        const membershipIds = await this.scopedMembershipIds();
-        if (query.membershipId) await this.assertMembershipAccess(query.membershipId);
+        const bypassPermission = model === 'hrLeaveRequest' ? 'hr.leave.manage_all' : undefined;
+        const membershipIds = await this.scopedMembershipIds(undefined, bypassPermission);
+        if (query.membershipId) await this.assertMembershipAccess(query.membershipId, bypassPermission);
         await this.validateCursor(model, query.cursor, context.tenantId);
         const items = await (this.prisma[model] as any).findMany({ where: {
             tenantId: context.tenantId, deletedAt: null,
@@ -768,7 +866,11 @@ export class HrService {
         return cursorPage(items, query.limit, mapper);
     }
 
-    private async scopedMembershipIds(departmentId?: string): Promise<string[] | undefined> {
+    private async scopedMembershipIds(departmentId?: string, bypassPermission?: string): Promise<string[] | undefined> {
+        const context = this.tenantContext.require();
+        if (bypassPermission && context.permissions.includes(bypassPermission)) {
+            return departmentId ? this.membersInDepartment(departmentId) : undefined;
+        }
         const scope = await this.dataScopeResolver.resolve();
         if (scope.tenantWide) return departmentId ? this.membersInDepartment(departmentId) : undefined;
         if (!departmentId) return scope.membershipIds;
@@ -786,7 +888,9 @@ export class HrService {
         return members.map((member) => member.id);
     }
 
-    private async assertMembershipAccess(membershipId: string): Promise<void> {
+    private async assertMembershipAccess(membershipId: string, bypassPermission?: string): Promise<void> {
+        const context = this.tenantContext.require();
+        if (bypassPermission && context.permissions.includes(bypassPermission)) return;
         const scope = await this.dataScopeResolver.resolve();
         if (!scope.tenantWide && !scope.membershipIds.includes(membershipId)) {
             throw new ForbiddenException({ code: 'DATA_SCOPE_FORBIDDEN', message: '无权访问该成员的人事数据' });
@@ -866,6 +970,28 @@ export class HrService {
         }
     }
 
+    private assertEmployeeChangeAllowed(profile: Record<string, any>, input: CreateHrEmployeeChangeDto): void {
+        const offboarding = input.type === HrEmployeeChangeType.RESIGNATION
+            || input.type === HrEmployeeChangeType.TERMINATION;
+        if (profile.status === HrProfileStatus.TERMINATED && input.type !== HrEmployeeChangeType.ONBOARD) {
+            throw new ConflictException({ code: 'HR_EMPLOYEE_CHANGE_STATE_INVALID', message: '已离职员工只能通过入职异动重新启用' });
+        }
+        if (input.type === HrEmployeeChangeType.ONBOARD && profile.status !== HrProfileStatus.TERMINATED) {
+            throw new ConflictException({ code: 'HR_EMPLOYEE_CHANGE_STATE_INVALID', message: '当前员工状态不允许执行入职异动' });
+        }
+        if (offboarding && profile.status === HrProfileStatus.TERMINATED) {
+            throw new ConflictException({ code: 'HR_EMPLOYEE_CHANGE_STATE_INVALID', message: '员工已经离职' });
+        }
+        if (input.type === HrEmployeeChangeType.TRANSFER
+            && (!input.toDepartmentId || input.toDepartmentId === profile.departmentId)) {
+            throw new BadRequestException({ code: 'HR_EMPLOYEE_CHANGE_TARGET_REQUIRED', message: '调岗必须指定不同的目标部门' });
+        }
+        if ((input.type === HrEmployeeChangeType.PROMOTION || input.type === HrEmployeeChangeType.DEMOTION)
+            && (!input.toPosition?.trim() || input.toPosition.trim() === profile.position)) {
+            throw new BadRequestException({ code: 'HR_EMPLOYEE_CHANGE_TARGET_REQUIRED', message: '晋升或降级必须指定不同的目标岗位' });
+        }
+    }
+
     private async validateProfileReferences(departmentId?: string | null, managerId?: string | null): Promise<void> {
         if (departmentId) await this.membersInDepartment(departmentId);
         if (managerId) await this.requireMembership(managerId);
@@ -908,11 +1034,24 @@ export class HrService {
         if (from && to && parseDate(from) > parseDate(to)) throw new BadRequestException({ code: 'HR_DATE_RANGE_INVALID', message: '开始日期不能晚于结束日期' });
     }
 
-    private async audit(transaction: DbClient, action: string, resourceType: string, resourceId: string, metadata?: JsonRecord): Promise<void> {
+    private currentWriteContext(): HrWriteContext {
         const context = this.tenantContext.require();
+        return {
+            tenantId: context.tenantId, userId: context.userId, membershipId: context.membershipId, requestId: context.requestId,
+        };
+    }
+
+    private async audit(
+        transaction: DbClient,
+        action: string,
+        resourceType: string,
+        resourceId: string,
+        metadata?: JsonRecord,
+        actor: HrWriteContext = this.currentWriteContext(),
+    ): Promise<void> {
         await transaction.auditLog.create({ data: {
-            tenantId: context.tenantId, actorUserId: context.userId, actorMembershipId: context.membershipId,
-            action, outcome: AuditOutcome.SUCCESS, resourceType, resourceId, requestId: context.requestId,
+            tenantId: actor.tenantId, actorUserId: actor.userId, actorMembershipId: actor.membershipId,
+            action, outcome: AuditOutcome.SUCCESS, resourceType, resourceId, requestId: actor.requestId,
             metadata: metadata as Prisma.InputJsonValue | undefined,
         } });
     }
@@ -1043,6 +1182,7 @@ const WORKDAY_HOURS = 8;
 const HALF_DAY_DAYS = 0.5;
 const DURATION_TOLERANCE = 0.005;
 const MIN_LEAVE_DURATION_DAYS = 0.01;
+const OVERTIME_DURATION_TOLERANCE_HOURS = 0.01;
 
 /** 历史数据没有年度拆分时，按开始年度的 UTC 年份单年占用，保持迁移前语义。 */
 function leaveYearAllocations(item: Record<string, any>): LeaveYearAllocation[] {
@@ -1125,6 +1265,16 @@ function localDayIndex(dateKey: string): number {
 
 function roundDays(value: number): number {
     return Math.round(value * 100) / 100;
+}
+
+function deriveOvertimeDurationHours(startAt: Date, endAt: Date): number {
+    return Math.round(((endAt.getTime() - startAt.getTime()) / 3_600_000) * 100) / 100;
+}
+
+function nextDateKey(dateKey: string): string {
+    const value = new Date(`${dateKey}T00:00:00.000Z`);
+    value.setUTCDate(value.getUTCDate() + 1);
+    return value.toISOString().slice(0, 10);
 }
 
 function toAttendanceRecord(item: Record<string, any>): JsonRecord {

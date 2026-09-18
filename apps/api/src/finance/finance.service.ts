@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { AuditOutcome, FilePurpose, FinanceExpenseStatus, MembershipStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
+import { calendarYear, DEFAULT_TENANT_TIMEZONE } from '../common/tenant-time';
 import { DataScopeResolverService } from '../rbac/data-scope-resolver.service';
 import { TenantContext } from '../tenant/tenant-context';
 import {
@@ -128,6 +129,7 @@ export class FinanceService {
         const context = this.tenantContext.require();
         const membership = await this.requireActiveMembership(context.membershipId);
         const prepared = await this.prepareReportInput(input);
+        const attachmentIds = input.attachmentIds ?? [];
         const report = await this.prisma.$transaction(async (transaction) => {
             const reportNo = await this.nextReportNo(transaction);
             const created = await transaction.financeExpenseReport.create({
@@ -137,7 +139,7 @@ export class FinanceService {
                     description: normalizeNullable(input.description), currency: normalizeCurrency(input.currency),
                     totalAmount: prepared.totalAmount, createdBy: context.userId, updatedBy: context.userId,
                     items: { create: prepared.items.map((item, index) => this.itemCreateData(item, index)) },
-                    attachments: { create: input.attachmentIds.map((fileObjectId) => ({ tenantId: context.tenantId, fileObjectId })) },
+                    attachments: { create: attachmentIds.map((fileObjectId) => ({ tenantId: context.tenantId, fileObjectId })) },
                     statusHistory: { create: {
                         tenantId: context.tenantId, toStatus: FinanceExpenseStatus.DRAFT,
                         actorMembershipId: context.membershipId,
@@ -162,6 +164,7 @@ export class FinanceService {
         const existing = await this.requireOwnedReport(reportId);
         this.assertEditable(existing.status);
         const prepared = await this.prepareReportInput(input);
+        const attachmentIds = input.attachmentIds ?? [];
         const report = await this.prisma.$transaction(async (transaction) => {
             const changed = await transaction.financeExpenseReport.updateMany({
                 where: { id: reportId, tenantId: context.tenantId, deletedAt: null, version: input.version, status: existing.status },
@@ -178,8 +181,8 @@ export class FinanceService {
             await transaction.financeExpenseItem.createMany({ data: prepared.items.map((item, index) => ({
                 reportId, ...this.itemCreateData(item, index),
             })) });
-            if (input.attachmentIds.length > 0) await transaction.financeExpenseAttachment.createMany({
-                data: input.attachmentIds.map((fileObjectId) => ({ tenantId: context.tenantId, reportId, fileObjectId })),
+            if (attachmentIds.length > 0) await transaction.financeExpenseAttachment.createMany({
+                data: attachmentIds.map((fileObjectId) => ({ tenantId: context.tenantId, reportId, fileObjectId })),
             });
             if (existing.status !== FinanceExpenseStatus.DRAFT) await this.addHistory(
                 transaction, reportId, existing.status, FinanceExpenseStatus.DRAFT, '修改后重新进入草稿',
@@ -360,7 +363,7 @@ export class FinanceService {
         if (categories.length !== categoryIds.length) {
             throw new BadRequestException({ code: 'FINANCE_EXPENSE_CATEGORY_INVALID', message: '报销明细包含不存在或已停用的费用类别' });
         }
-        await this.validateReferences(input.items, input.attachmentIds);
+        await this.validateReferences(input.items, input.attachmentIds ?? []);
         const totalAmount = input.items.reduce((total, item) => total.add(new Prisma.Decimal(item.amount)), new Prisma.Decimal(0));
         if (totalAmount.lte(0)) throw new BadRequestException({ code: 'FINANCE_EXPENSE_AMOUNT_INVALID', message: '报销总金额必须大于零' });
         return { items: input.items, totalAmount };
@@ -371,7 +374,12 @@ export class FinanceService {
         const projectIds = unique(items.flatMap((item) => item.projectId ? [item.projectId] : []));
         const departmentIds = unique(items.flatMap((item) => item.departmentId ? [item.departmentId] : []));
         if (projectIds.length > 0) {
-            const count = await this.prisma.project.count({ where: { tenantId: context.tenantId, id: { in: projectIds }, deletedAt: null } });
+            const unrestricted = context.permissions.includes('finance.expense.manage_all')
+                || context.permissions.includes('project.manage_all');
+            const count = await this.prisma.project.count({ where: {
+                tenantId: context.tenantId, id: { in: projectIds }, deletedAt: null,
+                members: unrestricted ? undefined : { some: { membershipId: context.membershipId, deletedAt: null } },
+            } });
             if (count !== projectIds.length) throw new BadRequestException({ code: 'FINANCE_EXPENSE_PROJECT_INVALID', message: '费用明细包含无效项目' });
         }
         if (departmentIds.length > 0) {
@@ -467,7 +475,11 @@ export class FinanceService {
 
     private async nextReportNo(transaction: Prisma.TransactionClient): Promise<string> {
         const context = this.tenantContext.require();
-        const year = new Date().getUTCFullYear();
+        const tenant = await transaction.tenant.findFirst({
+            where: { id: context.tenantId, deletedAt: null }, select: { timezone: true },
+        });
+        if (!tenant) throw new BadRequestException({ code: 'TENANT_NOT_FOUND', message: '当前租户不存在' });
+        const year = calendarYear(tenant.timezone || DEFAULT_TENANT_TIMEZONE, new Date());
         const sequence = await transaction.financeExpenseReportSequence.upsert({
             where: { tenantId_year: { tenantId: context.tenantId, year } },
             create: { tenantId: context.tenantId, year, lastNumber: 1 },

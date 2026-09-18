@@ -67,6 +67,13 @@ export function dateKeyToUtcMidnight(dateKey: string): Date {
     return parsed;
 }
 
+/** 把租户本地 YYYY-MM-DD 的 00:00 换算为绝对时刻。 */
+export function startOfLocalDate(timeZone: string, dateKey: string): Date {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateKey);
+    if (!match) throw new RangeError(`无法解析业务日期 ${dateKey}`);
+    return zonedWallClockToInstant(timeZone, Number(match[1]), Number(match[2]), Number(match[3]));
+}
+
 interface LocalParts {
     year: number;
     month: number;

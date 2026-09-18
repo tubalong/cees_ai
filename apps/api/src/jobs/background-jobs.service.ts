@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { dateKeyToUtcMidnight, DEFAULT_TENANT_TIMEZONE, shiftLocalDateKey } from '../common/tenant-time';
 import { PrismaService } from '../database/prisma.service';
 import { LegalService } from '../legal/legal.service';
+import { HrService } from '../hr/hr.service';
 import { NotificationService } from '../notification/notification.service';
 import { RedisService } from '../redis/redis.service';
 
@@ -13,6 +14,7 @@ export interface BackgroundJobRunResult {
     expiredAiActionDrafts: number;
     workReportReminderNotifications: number;
     legalContractTransitions: number;
+    hrEmployeeChangesApplied: number;
 }
 
 const DEFAULT_INTERVAL_SECONDS = 60;
@@ -29,6 +31,7 @@ export class BackgroundJobsService implements OnModuleInit, OnModuleDestroy {
         private readonly redis: RedisService,
         private readonly notifications: NotificationService,
         private readonly legalService: LegalService,
+        private readonly hrService: HrService,
     ) { }
 
     onModuleInit(): void {
@@ -50,18 +53,21 @@ export class BackgroundJobsService implements OnModuleInit, OnModuleDestroy {
             expiredAiActionDrafts: 0,
             workReportReminderNotifications: 0,
             legalContractTransitions: 0,
+            hrEmployeeChangesApplied: 0,
         };
         try {
             const expiredUploadSessions = await this.expireUploadSessions(now);
             const expiredAiActionDrafts = await this.expireAiActionDrafts(now);
             const workReportReminderNotifications = await this.createDailyReportReminders(now);
             const legalContractTransitions = await this.legalService.processLifecycle(now);
+            const hrEmployeeChangesApplied = await this.hrService.processApprovedEmployeeChanges(now);
             return {
                 skipped: false,
                 expiredUploadSessions,
                 expiredAiActionDrafts,
                 workReportReminderNotifications,
                 legalContractTransitions,
+                hrEmployeeChangesApplied,
             };
         } finally {
             await this.redis.deleteIfValue(LOCK_KEY, lockToken);

@@ -96,7 +96,7 @@ export class DeleteVersionQueryDto {
     @Type(() => Number) @IsInt() @Min(1) version!: number;
 }
 
-export class ListHrLeaveBalancesQueryDto {
+export class ListHrLeaveBalancesQueryDto extends CursorQueryDto {
     @IsOptional() @IsUUID() membershipId?: string;
     @IsOptional() @Type(() => Number) @IsInt() @Min(2024) @Max(2100) year?: number;
 }

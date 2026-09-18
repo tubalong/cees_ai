@@ -47,18 +47,24 @@ export class LegalService {
         const expiringRange = query.expiringWithinDays === undefined
             ? undefined
             : await this.expiringDateRange(query.expiringWithinDays);
+        if (expiringRange && query.status && !ACTIVE_LIFECYCLE_STATUSES.includes(query.status)) {
+            return { items: [], nextCursor: null };
+        }
+        const endDateRange = optionalDateRange(query.endDateFrom, query.endDateTo);
+        const scopeFilters: Prisma.LegalContractWhereInput[] = [await this.contractScopeWhere()];
+        if (expiringRange) scopeFilters.push({ endDate: expiringRange });
+        if (endDateRange) scopeFilters.push({ endDate: endDateRange });
         const contracts = await this.prisma.legalContract.findMany({
             where: {
                 tenantId: context.tenantId,
                 deletedAt: null,
-                AND: [await this.contractScopeWhere()],
-                status: expiringRange ? { in: ACTIVE_LIFECYCLE_STATUSES } : query.status,
+                AND: scopeFilters,
+                status: query.status ?? (expiringRange ? { in: ACTIVE_LIFECYCLE_STATUSES } : undefined),
                 type: query.type,
                 ownerMembershipId: query.ownerMembershipId,
                 departmentId: query.departmentId,
                 projectId: query.projectId,
                 currency,
-                endDate: expiringRange ?? optionalDateRange(query.endDateFrom, query.endDateTo),
                 OR: query.keyword?.trim() ? [
                     { contractNo: { contains: query.keyword.trim(), mode: 'insensitive' } },
                     { name: { contains: query.keyword.trim(), mode: 'insensitive' } },
@@ -79,6 +85,7 @@ export class LegalService {
     async createContract(input: CreateLegalContractDto): Promise<JsonRecord> {
         const context = this.tenantContext.require();
         const prepared = await this.prepareCreateInput(input);
+        const attachmentIds = input.attachmentIds ?? [];
         try {
             const contract = await this.prisma.$transaction(async (transaction) => {
                 const contractNo = input.contractNo
@@ -104,7 +111,7 @@ export class LegalService {
                         createdBy: context.userId,
                         updatedBy: context.userId,
                         attachments: {
-                            create: input.attachmentIds.map((fileObjectId) => ({ tenantId: context.tenantId, fileObjectId })),
+                            create: attachmentIds.map((fileObjectId) => ({ tenantId: context.tenantId, fileObjectId })),
                         },
                         statusHistory: {
                             create: {
@@ -245,8 +252,9 @@ export class LegalService {
         }
         if (!existing.endDate) throw this.stateConflict('无固定期限合同不能续签');
         const newEndDate = parseDateOnly(input.newEndDate);
-        if (newEndDate <= existing.endDate) {
-            throw new BadRequestException({ code: 'LEGAL_CONTRACT_RENEWAL_DATE_INVALID', message: '新到期日期必须晚于原到期日期' });
+        const today = await this.currentTenantDate();
+        if (newEndDate <= existing.endDate || newEndDate < today) {
+            throw new BadRequestException({ code: 'LEGAL_CONTRACT_RENEWAL_DATE_INVALID', message: '新到期日期必须晚于原到期日期且不得早于当前租户日期' });
         }
         return this.transition(existing, input.version, LegalContractStatus.ACTIVE, 'LEGAL_CONTRACT_RENEWED', {
             endDate: newEndDate,
@@ -489,7 +497,7 @@ export class LegalService {
             input.ownerMembershipId,
             input.departmentId ?? null,
             input.projectId ?? null,
-            input.attachmentIds,
+            input.attachmentIds ?? [],
         );
         await this.assertWriteScope(input.ownerMembershipId, input.departmentId ?? null, input.projectId ?? null);
         return { startDate, endDate, signedAt };
