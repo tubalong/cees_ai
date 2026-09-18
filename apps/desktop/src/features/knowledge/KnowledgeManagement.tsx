@@ -3,7 +3,7 @@ import { App as AntdApp, Button, Descriptions, Empty, Input, Modal, Popconfirm, 
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 import {
-    addKnowledgeBaseMember, createKnowledgeBase, deleteKnowledgeBase, hasStoredSession,
+    addKnowledgeBaseMember, createKnowledgeBase, deleteKnowledgeBase, deleteKnowledgeDocument, hasStoredSession,
     listDepartments, listKnowledgeBaseMembers, listKnowledgeBases, listKnowledgeDocuments, listProjects,
     listTenantMembers, removeKnowledgeBaseMember, retryKnowledgeDocument, updateKnowledgeBase,
     updateKnowledgeBaseMember, uploadAttachmentFile, uploadKnowledgeDocument,
@@ -319,6 +319,17 @@ export default function KnowledgeManagement({ authContext, onSessionExpired }: K
         }
     };
 
+    const handleDeleteDocument = async (document: KnowledgeDocumentResult): Promise<void> => {
+        if (!selected) return;
+        try {
+            await deleteKnowledgeDocument(selected.id, document.id);
+            message.success(t('文档已删除'));
+            refreshDocuments();
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : t('删除失败'));
+        }
+    };
+
     const existingMemberIds = new Set((membersQuery.data?.items ?? []).map((member) => member.membershipId));
     const memberCandidates = (tenantMembersQuery.data?.items ?? [])
         .filter((member) => member.status === 'ACTIVE')
@@ -408,9 +419,14 @@ export default function KnowledgeManagement({ authContext, onSessionExpired }: K
         {
             title: t('操作'),
             key: 'actions',
-            width: 90,
-            render: (document: KnowledgeDocumentResult) => document.status === 'FAILED' && selectedEditable
-                ? <Button size="small" onClick={() => void handleRetryDocument(document)}>{t('重试')}</Button>
+            width: 140,
+            render: (document: KnowledgeDocumentResult) => selectedEditable
+                ? <span className="kb-row-actions">
+                    {document.status === 'FAILED' && <Button size="small" onClick={() => void handleRetryDocument(document)}>{t('重试')}</Button>}
+                    <Popconfirm title={t('删除文档')} description={t('删除后文档将无法被检索引用，确认删除吗？')} onConfirm={() => void handleDeleteDocument(document)}>
+                        <Button size="small" type="text" danger icon={<DeleteOutlined />}>{t('删除')}</Button>
+                    </Popconfirm>
+                </span>
                 : <span className="kb-muted">—</span>,
         },
     ];

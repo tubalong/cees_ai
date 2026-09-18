@@ -550,6 +550,11 @@ export async function retryKnowledgeDocument(knowledgeBaseId: string, documentId
     });
 }
 
+/** 删除文档：软删业务记录并异步清理全部版本的向量索引（需库内 EDITOR 及以上权限）。 */
+export async function deleteKnowledgeDocument(knowledgeBaseId: string, documentId: string): Promise<void> {
+    return authorizedRequest<void>(`v1/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/documents/${encodeURIComponent(documentId)}`, { method: 'DELETE' });
+}
+
 /** 对话数据转知识库：附件 / AI 生成文档 / 对话消息走统一转存端点（块 7c）。 */
 export async function createKnowledgeDocument(knowledgeBaseId: string, input: {
     sourceType: KnowledgeSourceType;

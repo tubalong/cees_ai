@@ -16,7 +16,7 @@ import remarkGfm from 'remark-gfm';
 import {
     cancelTurn, createConversation, createTurn, deleteConversation, getConversation, getDashboardOverview, getDashboardTodos, getDashboardUpcomingMeetings, getDocument, getImage, replayTurnEvents, updateConversation, uploadAttachmentFile,
     getUnreadNotificationCount, hasStoredSession, listConversations, listDocuments, listTenantMembers, logout,
-    createKnowledgeDocument, listWritableKnowledgeBases,
+    createKnowledgeDocument, deleteKnowledgeDocument, listWritableKnowledgeBases,
     type Conversation, type ConversationMessage, type DashboardOverview, type DashboardTodoItem, type DashboardUpcomingMeeting, type ImageAccess,
     type TurnStreamEvent,
     type KnowledgeBaseSummary, type KnowledgeSourceType,
@@ -264,6 +264,10 @@ interface ChatCitation {
     title: string;
     snippet: string;
     pageIndex?: number | null;
+    knowledgeBaseId?: string | null;
+    deletable?: boolean;
+    /** 本地标记：该文档已在当前客户端被删除，历史缓存恢复时直接展示已删除态。 */
+    deleted?: boolean;
 }
 
 /** 转存目标：确定性按钮携带的来源三元组，弹确认框选目标库与可见范围（块 7c）。 */
@@ -315,6 +319,10 @@ function ChatSourceCard({ source }: { source: ChatSource }): JSX.Element {
 interface GroupedCitation {
     id: string;
     title: string;
+    knowledgeBaseId?: string | null;
+    deletable?: boolean;
+    /** 本地标记：该文档已在当前客户端被删除，历史缓存恢复时直接展示已删除态。 */
+    deleted?: boolean;
     fragments: Array<{ snippet: string; pageIndex?: number | null }>;
 }
 
@@ -329,20 +337,47 @@ function groupCitations(citations: ChatCitation[]): GroupedCitation[] {
             continue;
         }
         order.push(citation.id);
-        groups.set(citation.id, { id: citation.id, title: citation.title, fragments: [{ snippet: citation.snippet, pageIndex: citation.pageIndex }] });
+        groups.set(citation.id, { id: citation.id, title: citation.title, knowledgeBaseId: citation.knowledgeBaseId, deletable: citation.deletable, deleted: citation.deleted, fragments: [{ snippet: citation.snippet, pageIndex: citation.pageIndex }] });
     }
     return order.map((id) => groups.get(id) as GroupedCitation);
 }
 
-/** 知识库引用卡片：点击展开查看完整命中片段（默认截断两行，同文档多片段合并展示）。 */
-function KnowledgeCitationCard({ citation }: { citation: GroupedCitation }): JSX.Element {
+/** 知识库引用卡片：点击展开查看完整命中片段（默认截断两行，同文档多片段合并展示）；deletable 时提供删除入口（二次确认）。 */
+function KnowledgeCitationCard({ citation, onDeleted }: { citation: GroupedCitation; onDeleted?: (citationId: string) => void }): JSX.Element {
     const { t } = useI18n();
+    const { message } = AntdApp.useApp();
     const [expanded, setExpanded] = useState(false);
+    const [deleted, setDeleted] = useState(citation.deleted === true);
     const multiple = citation.fragments.length > 1;
+    const confirmDelete = (): void => {
+        const knowledgeBaseId = citation.knowledgeBaseId;
+        if (!knowledgeBaseId) return;
+        Modal.confirm({
+            title: t('删除文档'),
+            content: t('删除后文档将无法被知识库检索引用，确认删除吗？'),
+            okText: t('删除'),
+            okButtonProps: { danger: true },
+            cancelText: t('取消'),
+            onOk: async () => {
+                try {
+                    await deleteKnowledgeDocument(knowledgeBaseId, citation.id);
+                    setDeleted(true);
+                    onDeleted?.(citation.id);
+                    message.success(t('文档已删除'));
+                } catch (error) {
+                    message.error(error instanceof Error ? error.message : t('删除失败'));
+                }
+            },
+        });
+    };
+    if (deleted) return <div className="chat-source chat-citation is-deleted">
+        <span className="chat-source-heading"><BookOpen size={15} /><strong>{citation.title}</strong><em className="chat-citation-page">{t('已删除')}</em></span>
+    </div>;
     const fragments = expanded ? citation.fragments : citation.fragments.slice(0, 1);
     return <div className={`chat-source chat-citation${expanded ? ' is-expanded' : ''}`} onClick={() => setExpanded((value) => !value)} title={expanded ? t('点击收起') : t('点击展开完整片段')}>
         <span className="chat-source-heading"><BookOpen size={15} /><strong>{citation.title}</strong>{multiple && <em className="chat-citation-count">{t('{count} 处引用', { count: citation.fragments.length })}</em>}</span>
         {fragments.map((fragment, index) => <span className="chat-source-snippet" key={index}>{fragment.pageIndex !== null && fragment.pageIndex !== undefined && <em className="chat-citation-page">{t('第 {page} 页', { page: fragment.pageIndex + 1 })}</em>}{fragment.snippet}</span>)}
+        {citation.deletable && citation.knowledgeBaseId && <button className="chat-citation-delete" type="button" title={t('删除文档')} onClick={(event) => { event.stopPropagation(); confirmDelete(); }}><Trash2 size={13} /></button>}
     </div>;
 }
 
@@ -455,6 +490,14 @@ function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element 
         void createConversation().then((conversation) => { setConversations((items) => [conversation, ...items]); setActiveConversationId(conversation.id); setMessages([]); setPreviewDocument(undefined); }).catch((error) => message.error(error instanceof Error ? error.message : '创建会话失败'));
     };
 
+    /** 删除成功后同步会话级引用缓存，重开对话时直接展示已删除态（块 4）。 */
+    const handleCitationDeleted = (citationId: string): void => {
+        if (!activeConversationId) return;
+        const key = `cees.chat.citations.${activeConversationId}`;
+        const cached = JSON.parse(localStorage.getItem(key) ?? '[]') as ChatCitation[];
+        localStorage.setItem(key, JSON.stringify(cached.map((item) => item.id === citationId ? { ...item, deleted: true } : item)));
+    };
+
     const selectConversation = async (conversation: Conversation): Promise<void> => {
         requestVersion.current += 1;
         abortController.current?.abort();
@@ -556,7 +599,7 @@ function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element 
                         <div className="chat-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}>{item.content}</ReactMarkdown></div>
                         {item.resources?.map((resource) => <ChatResourceCard key={`${resource.type}-${resource.id}`} resource={resource} onPreviewDocument={setPreviewDocument} onSaveToKnowledge={canSaveToKnowledge ? setSaveTarget : () => undefined} />)}
                         {item.sources?.length ? <div className="chat-sources">{item.sources.map((source) => <ChatSourceCard key={source.id} source={source} />)}</div> : null}
-                        {item.citations?.length ? <div className="chat-sources">{groupCitations(item.citations).map((citation) => <KnowledgeCitationCard key={citation.id} citation={citation} />)}</div> : null}
+                        {item.citations?.length ? <div className="chat-sources">{groupCitations(item.citations).map((citation) => <KnowledgeCitationCard key={citation.id} citation={citation} onDeleted={handleCitationDeleted} />)}</div> : null}
                         <div className="chat-message-actions">
                             <button className="chat-copy" type="button" onClick={() => void copyText(item.content)}><CopyOutlined />{t('复制')}</button>
                             {item.persisted && canSaveToKnowledge && <button className="chat-copy chat-save-to-knowledge" type="button" onClick={() => setSaveTarget({ sourceType: 'MESSAGE', sourceId: item.id })}><Save size={13} />{t('存入知识库')}</button>}
