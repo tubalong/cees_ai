@@ -899,6 +899,27 @@
     white-space: nowrap;
 }
 
+.chat-citation {
+    cursor: pointer;
+}
+
+.chat-citation-count {
+    margin-left: 4px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: var(--primary-soft);
+    color: var(--primary);
+    font-size: 11px;
+    font-style: normal;
+    white-space: nowrap;
+}
+
+.chat-citation.is-expanded .chat-source-snippet {
+    display: block;
+    -webkit-line-clamp: unset;
+    white-space: pre-wrap;
+}
+
 .chat-document-preview {
     width: 100%;
     min-width: 0;
