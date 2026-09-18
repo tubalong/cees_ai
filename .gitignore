@@ -5,6 +5,7 @@ node_modules/
 .idea/
 dist/
 dist-electron/
+apps/desktop/release/
 coverage/
 *.tsbuildinfo
 .env
@@ -22,4 +23,5 @@ apps/mobile/.flutter-plugins*
 infra/data/
 apps/ai-service/config/models.*.toml
 !apps/ai-service/config/models.*.example.toml
+apps/ai-service/config/fonts/
 .release-cache/
