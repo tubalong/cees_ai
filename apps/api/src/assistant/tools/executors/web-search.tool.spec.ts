@@ -1,4 +1,5 @@
 import { WebSearchTool } from './web-search.tool';
+import { ToolPolicyError } from '../tool-policy.service';
 import { ToolRegistryService } from '../tool-registry';
 import type { ToolExecutionContext } from '../tool.types';
 import type { WebSearchService } from '../../../web-search/web-search.service';
@@ -18,6 +19,7 @@ describe('WebSearchTool', () => {
     executionToken: 'execution-token',
     permissions: ['ai.web.search'],
     knowledgeBaseEnabled: false,
+    webSearchEnabled: true,
   };
 
   beforeEach(() => {
@@ -111,5 +113,17 @@ describe('WebSearchTool', () => {
       results: [],
       notice: '未找到匹配的公开资料。',
     }));
+  });
+
+  it('rejects execution when the turn-level switch is off and never calls the provider', async () => {
+    const tool = new WebSearchTool(registry, searchService as unknown as WebSearchService);
+    tool.onModuleInit();
+    const definition = registry.get('web_search')!;
+
+    await expect(definition.execute(
+      { ...context, webSearchEnabled: false },
+      { query: 'CEES', recency: 'any', domains: [] },
+    )).rejects.toBeInstanceOf(ToolPolicyError);
+    expect(searchService.search).not.toHaveBeenCalled();
   });
 });

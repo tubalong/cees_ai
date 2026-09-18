@@ -49,6 +49,7 @@ interface HistoryMessage {
   turnId: string | null;
   toolCallId: string | null;
   imageFileIds: string[];
+  documentFileIds: string[];
 }
 
 interface ToolCallHistoryRow {
@@ -72,7 +73,7 @@ export class ContextBuilderService {
     private readonly prisma: PrismaService,
     private readonly gateway: AiServiceGateway,
     private readonly messageContent: AssistantMessageContentService,
-  ) {}
+  ) { }
 
   /** 纯文本轮次：过滤 TOOL 消息，组装普通 ChatRequest。 */
   async buildChatRequest(input: BuildChatRequestInput): Promise<ChatRequest> {
@@ -110,18 +111,18 @@ export class ContextBuilderService {
     const toolCalls: ToolCallHistoryRow[] =
       retainedToolCallIds.length > 0
         ? await this.prisma.toolCall.findMany({
-            where: { tenantId: conversation.tenantId, id: { in: retainedToolCallIds } },
-            orderBy: [{ turnId: 'asc' }, { seq: 'asc' }],
-            select: {
-              id: true,
-              turnId: true,
-              modelStep: true,
-              upstreamCallId: true,
-              assistantContent: true,
-              name: true,
-              arguments: true,
-            },
-          })
+          where: { tenantId: conversation.tenantId, id: { in: retainedToolCallIds } },
+          orderBy: [{ turnId: 'asc' }, { seq: 'asc' }],
+          select: {
+            id: true,
+            turnId: true,
+            modelStep: true,
+            upstreamCallId: true,
+            assistantContent: true,
+            name: true,
+            arguments: true,
+          },
+        })
         : [];
     const callById = new Map(toolCalls.map((call) => [call.id, call]));
     const callsByStep = new Map<string, NonNullable<ToolTurnMessage['tool_calls']>>();
@@ -308,6 +309,7 @@ export class ContextBuilderService {
       role: true,
       content: true,
       imageFileIds: true,
+      documentFileIds: true,
       turnId: true,
       toolCallId: true,
     } as const;
@@ -362,10 +364,12 @@ export class ContextBuilderService {
     return this.messageContent.toModelParts(
       message.content,
       message.imageFileIds,
+      message.documentFileIds,
       {
         tenantId: input.conversation.tenantId,
         userId: input.userId,
         membershipId: input.membershipId,
+        requestId: input.requestId,
       },
     );
   }

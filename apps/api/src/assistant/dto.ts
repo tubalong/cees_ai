@@ -105,6 +105,18 @@ export class CreateTurnRequestDto {
   imageFileIds?: string[];
 
   @ApiPropertyOptional({
+    description: '本轮 user 消息引用的已上传文档文件 ID；服务端会校验归属并在调用模型前抽取文本注入上下文',
+    type: [String],
+    maxItems: 8,
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(8)
+  @IsUUID(undefined, { each: true })
+  fileIds?: string[];
+
+  @ApiPropertyOptional({
     description: '本轮对话执行模式；省略时使用会话的默认模式',
     enum: ['standard', 'ultra'],
   })
@@ -119,6 +131,15 @@ export class CreateTurnRequestDto {
   @IsOptional()
   @IsBoolean()
   knowledgeBaseEnabled?: boolean;
+
+  @ApiPropertyOptional({
+    description: '本轮是否允许联网搜索；省略时默认关闭。关闭时 AI 不获得联网检索工具；'
+      + '若用户消息明确提到需要联网，服务端可为本轮自动临时启用并在 started 事件的 capabilities.autoEnabled 回传',
+    default: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  webSearchEnabled?: boolean;
 }
 
 export class ReplayTurnEventsQueryDto {

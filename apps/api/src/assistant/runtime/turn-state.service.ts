@@ -39,7 +39,7 @@ export class TurnStateService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly events: EventService,
-  ) {}
+  ) { }
 
   /** 原子创建 Turn、用户消息并分配会话内序号；幂等冲突返回 undefined。 */
   async createTurn(input: {
@@ -52,6 +52,7 @@ export class TurnStateService {
     requestHash: string;
     content: string | null | undefined;
     imageFileIds?: string[];
+    documentFileIds?: string[];
     mode: PublicTurnMode;
     knowledgeBaseEnabled: boolean;
     executionOwner: string;
@@ -115,6 +116,7 @@ export class TurnStateService {
             role: 'USER',
             content: input.content ?? '',
             imageFileIds: input.imageFileIds ?? [],
+            documentFileIds: input.documentFileIds ?? [],
           },
         });
         return turn;
@@ -633,9 +635,9 @@ export class TurnStateService {
           error: input.eventStatus === 'completed'
             ? null
             : {
-                code: input.code ?? 'TOOL_EXECUTION_FAILED',
-                message: input.errorMessage ?? input.summary,
-              },
+              code: input.code ?? 'TOOL_EXECUTION_FAILED',
+              message: input.errorMessage ?? input.summary,
+            },
         },
       );
       return true;
@@ -837,15 +839,15 @@ export class TurnStateService {
       );
       const error: TurnErrorDetail = hasExecutingTool
         ? {
-            code: 'TOOL_EXECUTION_RECOVERY_REQUIRED',
-            message: '服务重启时工具可能已产生外部副作用，需要核对后再处理',
-            retryable: false,
-          }
+          code: 'TOOL_EXECUTION_RECOVERY_REQUIRED',
+          message: '服务重启时工具可能已产生外部副作用，需要核对后再处理',
+          retryable: false,
+        }
         : {
-            code: 'TURN_EXECUTION_LOST',
-            message: '轮次执行进程已失联，请重新发起本轮请求',
-            retryable: true,
-          };
+          code: 'TURN_EXECUTION_LOST',
+          message: '轮次执行进程已失联，请重新发起本轮请求',
+          retryable: true,
+        };
       const updated = await transaction.assistantTurn.updateMany({
         where: {
           id: turnId,

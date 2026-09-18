@@ -74,6 +74,7 @@ describe('ListKnowledgeBasesTool', () => {
             executionToken: 'execution-token-1',
             permissions: ['knowledge_base.read'],
             knowledgeBaseEnabled: false,
+            webSearchEnabled: false,
         }, {});
 
         expect(knowledgeService.listKnowledgeBasesForAssistant).toHaveBeenCalledWith({
@@ -111,6 +112,7 @@ describe('ListKnowledgeBasesTool', () => {
             executionToken: 'execution-token-1',
             permissions: ['knowledge_base.read'],
             knowledgeBaseEnabled: false,
+            webSearchEnabled: false,
         }, {});
 
         const summary = JSON.parse(result.summary) as { candidates: unknown[]; instruction: string };

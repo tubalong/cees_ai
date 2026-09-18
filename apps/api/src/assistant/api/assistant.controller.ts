@@ -58,7 +58,7 @@ export class AssistantController {
   constructor(
     private readonly conversationService: ConversationService,
     private readonly turnRunner: TurnRunnerService,
-  ) {}
+  ) { }
 
   @Post()
   @HttpCode(HttpStatus.OK)
@@ -129,8 +129,10 @@ export class AssistantController {
         idempotencyKey: normalizedKey,
         content: input.content,
         imageFileIds: input.imageFileIds,
+        documentFileIds: input.fileIds,
         mode: input.mode,
         knowledgeBaseEnabled: input.knowledgeBaseEnabled,
+        webSearchEnabled: input.webSearchEnabled,
       });
       const events = await this.turnRunner.subscribeTurn(
         { conversationId, turnId: started.turnId, afterSeq: 0 },

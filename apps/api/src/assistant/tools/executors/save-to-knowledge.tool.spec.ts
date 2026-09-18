@@ -105,6 +105,7 @@ describe('SaveToKnowledgeTool', () => {
             executionToken: 'execution-token-1',
             permissions: ['knowledge_base.read'],
             knowledgeBaseEnabled: false,
+            webSearchEnabled: false,
         }, {
             sourceType: 'MESSAGE',
             sourceId: 'msg-1',
@@ -158,6 +159,7 @@ describe('SaveToKnowledgeTool', () => {
             executionToken: 'execution-token-1',
             permissions: ['knowledge_base.read'],
             knowledgeBaseEnabled: false,
+            webSearchEnabled: false,
         }, {
             content: '林波是图巴隆公司的超级管理员。',
             knowledgeBaseId: 'kb-1',

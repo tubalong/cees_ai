@@ -19,6 +19,7 @@ describe('KnowledgeSearchTool', () => {
         executionToken: 'execution-token',
         permissions: ['knowledge_base.query'],
         knowledgeBaseEnabled: true,
+        webSearchEnabled: false,
     };
 
     beforeEach(() => {

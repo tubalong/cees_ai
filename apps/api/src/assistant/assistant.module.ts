@@ -9,6 +9,7 @@ import { AssistantController } from './api/assistant.controller';
 import { ConversationService } from './conversation/conversation.service';
 import { EventService } from './conversation/event.service';
 import { ContextBuilderService } from './runtime/context-builder.service';
+import { IntentCapabilityService } from './runtime/intent-capability.service';
 import { TurnRunnerService } from './runtime/turn-runner.service';
 import { TurnRecoveryService } from './runtime/turn-recovery.service';
 import { TurnStateService } from './runtime/turn-state.service';
@@ -21,6 +22,7 @@ import { CreateKnowledgeBaseTool } from './tools/executors/create-knowledge-base
 import { KnowledgeSearchTool } from './tools/executors/knowledge-search.tool';
 import { ListKnowledgeBasesTool } from './tools/executors/list-knowledge-bases.tool';
 import { SaveToKnowledgeTool } from './tools/executors/save-to-knowledge.tool';
+import { InsertDocumentImageTool } from './tools/executors/insert-document-image.tool';
 import { WebSearchTool } from './tools/executors/web-search.tool';
 
 /**
@@ -36,6 +38,7 @@ import { WebSearchTool } from './tools/executors/web-search.tool';
     ConversationService,
     EventService,
     ContextBuilderService,
+    IntentCapabilityService,
     ToolRegistryService,
     ToolPolicyService,
     TurnStateService,
@@ -48,7 +51,8 @@ import { WebSearchTool } from './tools/executors/web-search.tool';
     KnowledgeSearchTool,
     ListKnowledgeBasesTool,
     SaveToKnowledgeTool,
+    InsertDocumentImageTool,
     WebSearchTool,
   ],
 })
-export class AssistantModule {}
+export class AssistantModule { }

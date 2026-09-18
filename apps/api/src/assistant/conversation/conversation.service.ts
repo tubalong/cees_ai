@@ -16,6 +16,8 @@ import type {
   PublicConversation,
   PublicConversationDetail,
   PublicConversationListResult,
+  PublicKnowledgeToolCitation,
+  PublicToolSource,
   PublicTurnMode,
 } from '../assistant.types';
 import { lockConversationForUpdate } from './conversation-transaction-lock';
@@ -23,6 +25,8 @@ import { lockConversationForUpdate } from './conversation-transaction-lock';
 const DEFAULT_LIST_LIMIT = 20;
 const MAX_LIST_LIMIT = 100;
 const MAX_TITLE_LENGTH = 128;
+/** 回传来源/引用的上限，与公开契约 ConversationMessage 的 maxItems 保持一致。 */
+const MAX_RESULT_REFERENCES = 20;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const BASE64URL_PATTERN = /^[A-Za-z0-9_-]+$/;
 
@@ -60,7 +64,7 @@ export class ConversationService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenantContext: TenantContext,
-  ) {}
+  ) { }
 
   async create(title?: string | null, mode?: PublicTurnMode): Promise<PublicConversation> {
     const context = this.tenantContext.require();
@@ -105,11 +109,11 @@ export class ConversationService {
         deletedAt: null,
         ...(keyset
           ? {
-              OR: [
-                { updatedAt: { lt: keyset.updatedAt } },
-                { updatedAt: keyset.updatedAt, id: { lt: keyset.id } },
-              ],
-            }
+            OR: [
+              { updatedAt: { lt: keyset.updatedAt } },
+              { updatedAt: keyset.updatedAt, id: { lt: keyset.id } },
+            ],
+          }
           : {}),
       },
       orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
@@ -137,11 +141,12 @@ export class ConversationService {
         role: true,
         content: true,
         imageFileIds: true,
+        documentFileIds: true,
         createdAt: true,
         turnId: true,
         toolCallId: true,
         turn: { select: { seq: true } },
-        toolCall: { select: { executedResourceType: true, executedResourceId: true } },
+        toolCall: { select: { executedResourceType: true, executedResourceId: true, result: true } },
       },
     });
     const ordered = messages.slice().sort(compareMessagesByTurn);
@@ -152,15 +157,20 @@ export class ConversationService {
         role: message.role,
         content: message.content,
         imageFileIds: message.imageFileIds,
+        documentFileIds: message.documentFileIds,
         resources:
           message.toolCall?.executedResourceType && message.toolCall.executedResourceId
             ? [
-                {
-                  type: message.toolCall.executedResourceType as 'IMAGE' | 'DOCUMENT',
-                  id: message.toolCall.executedResourceId,
-                },
-              ]
+              {
+                type: message.toolCall.executedResourceType as 'IMAGE' | 'DOCUMENT',
+                id: message.toolCall.executedResourceId,
+              },
+            ]
             : [],
+        // 来源与引用按轮次落库在 ToolCall.result 中，这里只回传结构化字段；
+        // 聊天界面据此把来源挂回所属轮次的回答，避免跨轮串用历史引用。
+        sources: toPublicToolSources(message.toolCall?.result),
+        citations: toPublicToolCitations(message.toolCall?.result),
         createdAt: message.createdAt,
         turnId: message.turnId,
         toolCallId: message.toolCallId,
@@ -348,6 +358,82 @@ function compareMessagesByTurn(
   const timeDelta = a.createdAt.getTime() - b.createdAt.getTime();
   if (timeDelta !== 0) return timeDelta;
   return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+}
+
+/**
+ * 从 ToolCall.result 快照中取出结构化来源。
+ *
+ * 结果 JSON 是历史快照，可能由旧版本写入（缺字段、字段类型不同），因此逐字段
+ * 校验后再回传：任何不合规条目直接丢弃，绝不把脏数据当成可点击来源透出。
+ */
+function toPublicToolSources(result: Prisma.JsonValue | null | undefined): PublicToolSource[] {
+  const sources: PublicToolSource[] = [];
+  for (const item of readResultArray(result, 'sources')) {
+    const id = readNonEmptyString(item.id);
+    const url = readNonEmptyString(item.url);
+    if (!id || !url) continue;
+    sources.push({
+      id,
+      title: readNonEmptyString(item.title) ?? '',
+      url,
+      domain: readNonEmptyString(item.domain) ?? '',
+      snippet: readString(item.snippet) ?? '',
+      publishedAt: readString(item.publishedAt),
+    });
+    if (sources.length >= MAX_RESULT_REFERENCES) break;
+  }
+  return sources;
+}
+
+/**
+ * 从 ToolCall.result 快照中取出知识库文档引用；校验规则同 toPublicToolSources。
+ * knowledgeBaseId / deletable 是历史快照可缺省的字段，缺失时按「不可删除」处理，
+ * 前端仍然只读展示，不会误给出删除入口。
+ */
+function toPublicToolCitations(
+  result: Prisma.JsonValue | null | undefined,
+): PublicKnowledgeToolCitation[] {
+  const citations: PublicKnowledgeToolCitation[] = [];
+  for (const item of readResultArray(result, 'citations')) {
+    const id = readNonEmptyString(item.id);
+    const title = readNonEmptyString(item.title);
+    if (!id || !title) continue;
+    citations.push({
+      id,
+      title,
+      snippet: readString(item.snippet) ?? '',
+      pageIndex:
+        typeof item.pageIndex === 'number' && Number.isSafeInteger(item.pageIndex) && item.pageIndex >= 0
+          ? item.pageIndex
+          : null,
+      knowledgeBaseId: readNonEmptyString(item.knowledgeBaseId),
+      deletable: item.deletable === true,
+    });
+    if (citations.length >= MAX_RESULT_REFERENCES) break;
+  }
+  return citations;
+}
+
+/** 读取 ToolCall.result 中以 key 命名的对象数组；结构不符时返回空数组。 */
+function readResultArray(
+  result: Prisma.JsonValue | null | undefined,
+  key: 'sources' | 'citations',
+): Array<Record<string, unknown>> {
+  if (!result || typeof result !== 'object' || Array.isArray(result)) return [];
+  const value = (result as Record<string, unknown>)[key];
+  if (!Array.isArray(value)) return [];
+  return value.filter(
+    (item): item is Record<string, unknown> =>
+      Boolean(item) && typeof item === 'object' && !Array.isArray(item),
+  );
+}
+
+function readString(value: unknown): string | null {
+  return typeof value === 'string' ? value : null;
+}
+
+function readNonEmptyString(value: unknown): string | null {
+  return typeof value === 'string' && value.length > 0 ? value : null;
 }
 
 function normalizeConversationMode(mode: PublicTurnMode | undefined): 'standard' | 'ultra' {
