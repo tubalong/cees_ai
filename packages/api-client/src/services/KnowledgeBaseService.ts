@@ -442,6 +442,39 @@ export class KnowledgeBaseService {
         });
     }
     /**
+     * 删除知识库文档
+     * 软删除文档并异步清理全部版本的向量索引；库内 EDITOR 及以上（或 knowledge_base.manage_all）可执行。
+     * @returns void
+     * @throws ApiError
+     */
+    public static deleteKnowledgeDocument({
+        knowledgeBaseId,
+        documentId,
+    }: {
+        /**
+         * 知识库 ID
+         */
+        knowledgeBaseId: string,
+        /**
+         * 文档 ID
+         */
+        documentId: string,
+    }): CancelablePromise<void> {
+        return __request(OpenAPI, {
+            method: 'DELETE',
+            url: '/knowledge-bases/{knowledgeBaseId}/documents/{documentId}',
+            path: {
+                'knowledgeBaseId': knowledgeBaseId,
+                'documentId': documentId,
+            },
+            errors: {
+                401: `登录状态无效或缺少有效租户成员身份`,
+                403: `缺少 knowledge_base.read 权限或知识库 EDITOR 权限`,
+                404: `知识库或文档不存在`,
+            },
+        });
+    }
+    /**
      * 修改知识库成员权限
      * 知识库创建者必须始终保留 MANAGER 权限。
      * @returns KnowledgeBaseMemberResponseEnvelope 知识库成员权限已修改
