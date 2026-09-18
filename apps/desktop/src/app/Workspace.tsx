@@ -312,11 +312,37 @@ function ChatSourceCard({ source }: { source: ChatSource }): JSX.Element {
     </a>;
 }
 
-function KnowledgeCitationCard({ citation }: { citation: ChatCitation }): JSX.Element {
+interface GroupedCitation {
+    id: string;
+    title: string;
+    fragments: Array<{ snippet: string; pageIndex?: number | null }>;
+}
+
+/** 同一文档的多个命中片段合并为一张引用卡片，避免标题重复刷屏。 */
+function groupCitations(citations: ChatCitation[]): GroupedCitation[] {
+    const order: string[] = [];
+    const groups = new Map<string, GroupedCitation>();
+    for (const citation of citations) {
+        const existing = groups.get(citation.id);
+        if (existing) {
+            existing.fragments.push({ snippet: citation.snippet, pageIndex: citation.pageIndex });
+            continue;
+        }
+        order.push(citation.id);
+        groups.set(citation.id, { id: citation.id, title: citation.title, fragments: [{ snippet: citation.snippet, pageIndex: citation.pageIndex }] });
+    }
+    return order.map((id) => groups.get(id) as GroupedCitation);
+}
+
+/** 知识库引用卡片：点击展开查看完整命中片段（默认截断两行，同文档多片段合并展示）。 */
+function KnowledgeCitationCard({ citation }: { citation: GroupedCitation }): JSX.Element {
     const { t } = useI18n();
-    return <div className="chat-source chat-citation">
-        <span className="chat-source-heading"><BookOpen size={15} /><strong>{citation.title}</strong>{citation.pageIndex !== null && citation.pageIndex !== undefined && <em className="chat-citation-page">{t('第 {page} 页', { page: citation.pageIndex + 1 })}</em>}</span>
-        {citation.snippet && <span className="chat-source-snippet">{citation.snippet}</span>}
+    const [expanded, setExpanded] = useState(false);
+    const multiple = citation.fragments.length > 1;
+    const fragments = expanded ? citation.fragments : citation.fragments.slice(0, 1);
+    return <div className={`chat-source chat-citation${expanded ? ' is-expanded' : ''}`} onClick={() => setExpanded((value) => !value)} title={expanded ? t('点击收起') : t('点击展开完整片段')}>
+        <span className="chat-source-heading"><BookOpen size={15} /><strong>{citation.title}</strong>{multiple && <em className="chat-citation-count">{t('{count} 处引用', { count: citation.fragments.length })}</em>}</span>
+        {fragments.map((fragment, index) => <span className="chat-source-snippet" key={index}>{fragment.pageIndex !== null && fragment.pageIndex !== undefined && <em className="chat-citation-page">{t('第 {page} 页', { page: fragment.pageIndex + 1 })}</em>}{fragment.snippet}</span>)}
     </div>;
 }
 
@@ -530,7 +556,7 @@ function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element 
                         <div className="chat-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}>{item.content}</ReactMarkdown></div>
                         {item.resources?.map((resource) => <ChatResourceCard key={`${resource.type}-${resource.id}`} resource={resource} onPreviewDocument={setPreviewDocument} onSaveToKnowledge={canSaveToKnowledge ? setSaveTarget : () => undefined} />)}
                         {item.sources?.length ? <div className="chat-sources">{item.sources.map((source) => <ChatSourceCard key={source.id} source={source} />)}</div> : null}
-                        {item.citations?.length ? <div className="chat-sources">{item.citations.map((citation, index) => <KnowledgeCitationCard key={`${citation.id}-${index}`} citation={citation} />)}</div> : null}
+                        {item.citations?.length ? <div className="chat-sources">{groupCitations(item.citations).map((citation) => <KnowledgeCitationCard key={citation.id} citation={citation} />)}</div> : null}
                         <div className="chat-message-actions">
                             <button className="chat-copy" type="button" onClick={() => void copyText(item.content)}><CopyOutlined />{t('复制')}</button>
                             {item.persisted && canSaveToKnowledge && <button className="chat-copy chat-save-to-knowledge" type="button" onClick={() => setSaveTarget({ sourceType: 'MESSAGE', sourceId: item.id })}><Save size={13} />{t('存入知识库')}</button>}
