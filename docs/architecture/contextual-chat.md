@@ -150,3 +150,33 @@ NestJS Assistant 通过 `AiServiceGateway` 统一调用本服务，公开入口�
 桌面端发送新消息后，应将本轮用户提问定位到消息视口顶部，并让后续流式回答在其下方持续展示，避免长会话仍停留在旧消息位置。消息区右侧滚动条旁提供按用户提问生成的快速导航：默认显示短横线，悬停或键盘聚焦时展开问题摘要，点击后平滑跳转到对应提问；当前视口最接近的提问使用主题色标识。
 
 ai-service 不保存消息、回答或摘要正文；NestJS 保存会话事实。当前 Token 记录不等于企业或成员额度体系，也不执行额度扣减或超额拦截；额度预占/结算和人工审批属于后续能力。
+
+## 9. 待实现与验证缺口
+
+### 9.1 相关问题推荐（三个推荐回复）——未实现，暂缓待确认
+
+**状态**：未实现（已记录为待办，此前暂缓）。AI 回答结束后附带 3 个相关问题，供用户一键继续提问。
+
+**计划落点**（接口形态未定，实现前需先与用户讨论确认；契约优先，见 AGENTS.md 第 3 条）：
+
+1. 契约（`packages/contracts`）：在公开对话契约中新增推荐问题的下发形态——候选为「turn 完成事件携带 `relatedQuestions` 字段」或「独立 SSE 事件」，待与用户确认后再定，避免先写代码后返工；
+2. NestJS Assistant（`apps/api`）：在 turn 收尾阶段生成/透传推荐问题（生成策略未定：模型生成或服务端规则），随流式事件或完成事件下发，并考虑与审计/ToolCall 状态的先后顺序；
+3. 桌面端（`apps/desktop`）：对话页回答末尾渲染 3 个推荐问题按钮，点击即发起新一轮提问（复用现有 turn 提交流程）；mobile 视契约形态跟进。
+
+**边界**：推荐问题只影响「提问」链路，不涉及知识库检索、工具调用或权限模型，实现时按新功能独立分块。
+
+### 9.2 上下文压缩——已实现（代码 + 单测），真机长对话触发未验证
+
+**实现状态：已实现**，两端均落地：
+
+- NestJS 侧 `ContextBuilderService.loadHistoryWithCompaction`（`apps/api/src/assistant/runtime/context-builder.service.ts`）作为唯一策略源：
+  - 触发条件双轨：文本消息数超过 **80 条**（`COMPACTION_THRESHOLD`），或「摘要 + 文本历史」估算 Token 超过模式预算的 **80%**（`COMPACTION_TOKEN_RATIO`，standard 64K / ultra 128K，预算来自 ai-service `/ready.chat_context_budgets`，未就绪时回退默认值）；
+  - 压缩量取两条约束中「保留更少、压缩更多」的一方，压缩后保留最近 **20 条**（`RETAIN_RECENT_COUNT`）；
+  - 压缩边界按 Turn 对齐（避免只摘要用户请求、把该轮回答留在增量区间造成语义重复或工具消息孤立）；
+  - 摘要持久化到 `ConversationSummary`（`summary` + `summarizedThroughMessageId` 边界），后续轮次只加载边界之后的增量消息，避免摘要与原始历史重复注入；工具轮次（`buildToolTurnMessages`）截断点同样对齐轮次边界。
+- ai-service 侧 `ChatCompactor.compact`（`/internal/v1/chat/compact`）：按 `compaction_role` 用 LLM 生成摘要；空摘要返回 `CHAT_SUMMARY_INVALID`、输出截断返回 `CHAT_COMPACTION_TRUNCATED`，不把不完整摘要当作成功结果。
+- 测试覆盖：`context-builder.service.spec.ts` 已覆盖触发与边界对齐等场景；ai-service 压缩错误语义有 pytest 覆盖。
+
+**验证缺口（待办）**：本地开发库 `conversation_summaries` 暂无记录（截至 2026-09-18 为 0 条），说明压缩链路尚未在真实长对话中被实际触发验证。待办：构造超过 80 条（或 Token 超预算）的长对话实测一次，验证「摘要生成 → 边界持久化 → 后续轮次上下文恢复 → 工具轮次不拆散」的端到端行为；如摘要质量不达预期再调优 `compaction_role` 提示词。
+
+**与长期记忆的边界**：压缩是会话内能力，不跨会话生效；跨会话长期记忆（新会话继承用户偏好与历史决策）尚未规划实现，如需支持需另立设计（参考记忆功能规划）。
