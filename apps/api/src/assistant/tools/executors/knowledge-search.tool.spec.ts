@@ -80,6 +80,8 @@ describe('KnowledgeSearchTool', () => {
                 title: '项目周报规范',
                 snippet: '周报需在每周五 18:00 前提交。',
                 pageIndex: 2,
+                knowledgeBaseId: 'kb-1',
+                deletable: true,
             }],
             searchedKnowledgeBaseIds: ['kb-1'],
         });
@@ -101,6 +103,8 @@ describe('KnowledgeSearchTool', () => {
             title: '项目周报规范',
             snippet: '周报需在每周五 18:00 前提交。',
             pageIndex: 2,
+            knowledgeBaseId: 'kb-1',
+            deletable: true,
         }]);
         const summary = JSON.parse(result.summary) as Record<string, unknown>;
         expect(summary).toEqual(expect.objectContaining({

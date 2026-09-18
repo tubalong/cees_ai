@@ -900,6 +900,7 @@
 }
 
 .chat-citation {
+    position: relative;
     cursor: pointer;
 }
 
@@ -918,6 +919,39 @@
     display: block;
     -webkit-line-clamp: unset;
     white-space: pre-wrap;
+}
+
+/* 知识库引用卡片：右上角删除入口（仅 deletable 展示）与已删除态（块 4）。 */
+.chat-citation-delete {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    transition: color .15s ease, background .15s ease;
+}
+
+.chat-citation-delete:hover {
+    color: #ff4d4f;
+    background: rgba(255, 77, 79, .1);
+}
+
+.chat-citation.is-deleted {
+    opacity: .55;
+}
+
+.chat-citation.is-deleted .chat-citation-page {
+    background: var(--workspace-bg);
+    color: var(--muted);
 }
 
 .chat-document-preview {

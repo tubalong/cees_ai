@@ -1,8 +1,8 @@
 # 知识库管理
 
-> 状态：第一至五阶段已落地（知识库与成员管理、文档上传与处理状态机、公开知识库查询、对话数据转知识库、权限收敛与归属锚点+知识管理页面）
-> 最后同步：2026-09-17
-> 公开契约版本：`0.28.0`
+> 状态：第一至六阶段已落地（知识库与成员管理、文档上传与处理状态机、公开知识库查询、对话数据转知识库、权限收敛与归属锚点+知识管理页面、文档删除）
+> 最后同步：2026-09-18
+> 公开契约版本：`0.30.0`
 
 ## 1. 阶段范围
 
@@ -51,7 +51,14 @@
 - 知识库归属锚点：`visibilityScope`（PRIVATE/DEPARTMENT/PROJECT/TENANT）+ `departmentId`/`projectId` 二选一互斥，锚点人群（部门树成员/项目成员/全员）动态计算为虚拟 `READER`（不物化成员行，只覆盖库级浏览）；创建/修改校验归属属于当前租户（`KNOWLEDGE_BASE_SCOPE_INVALID`）；迁移 `20260917065945_knowledge_base_visibility_scope`；
 - 公开知识库响应增加 `myPermission` 标注当前用户成员等级（`manage_all` 恒 MANAGER、成员等级优先、其余恒 READER），前端据此控制编辑/成员管理入口；
 - 桌面端「知识管理」页面：库列表与搜索、创建/修改（含归属表单：部门树/项目选择）、删除、成员管理（添加/改级/移除，创建者保留 MANAGER 不可降级移除）；页面入口按 `knowledge_base.read`、创建按 `knowledge_base.create`、编辑与成员管理按 `myPermission` 为 MANAGER（或 `manage_all`）。
-- 桌面端「文档管理」面板：文档列表（名称/处理状态/版本/可见范围/失败原因）、上传文档（拖动或点击选择 PDF、Word、Excel、PPT、CSV、Markdown、TXT、JSON 与图片，文件先直传 COS 登记文件对象再关联创建文档进入解析索引队列，文档名默认取文件名可改）、失败重试；库内上传统一按 `PRIVATE`（仅知识库成员可见）提交，不做文档级范围选择（文档级可见范围是版本级属性，后端与转存链路保留 `TENANT` 等能力）；上传/重试按 `myPermission` 为 EDITOR 及以上（或 `manage_all`）开放，只读成员仅可浏览；存在处理中的文档时列表每 5 秒自动刷新，全部落定后停止。
+- 桌面端「文档管理」面板：文档列表（名称/处理状态/版本/可见范围/失败原因）、上传文档（拖动或点击选择 PDF、Word、Excel、PPT、CSV、Markdown、TXT、JSON 与图片，文件先直传 COS 登记文件对象再关联创建文档进入解析索引队列，文档名默认取文件名可改）、失败重试、删除（带二次确认，`myPermission` 为 EDITOR 及以上或 `manage_all` 才展示入口）；库内上传统一按 `PRIVATE`（仅知识库成员可见）提交，不做文档级范围选择（文档级可见范围是版本级属性，后端与转存链路保留 `TENANT` 等能力）；上传/重试/删除按 `myPermission` 为 EDITOR 及以上（或 `manage_all`）开放，只读成员仅可浏览；存在处理中的文档时列表每 5 秒自动刷新，全部落定后停止。
+
+第六阶段落地文档删除：
+
+- 删除为软删除：业务记录打 `deletedAt`（列表与检索即时不可见），事务内写入 `KNOWLEDGE_DOCUMENT_DELETED` 审计，异步清理该文档全部版本的向量索引；处理中（`PARSING`/`INDEXING`）的文档同样允许删除，索引流程在提交 `READY` 前检查 `deletedAt`，已删文档不再标回 `READY` 并补删刚写入的向量索引，避免残留可检索向量；
+- 删除门槛与文档写入一致：知识库成员 `EDITOR` 及以上（`manage_all` 短路放行），接口层要求 `knowledge_base.read` 权限码；
+- 桌面端删除入口有两处：知识管理页文档列表（EDITOR 及以上可见，二次确认）与对话页知识库引用卡片（引用右上角删除图标）；引用卡片删除能力由后端逐用户计算 `deletable` 标记（当前用户为引用文档所属库的 EDITOR/MANAGER 成员或 `manage_all`），仅 `deletable` 的引用才展示删除入口，删除成功后卡片转为「已删除」态并同步会话级引用缓存；AI 工具层仍不提供删除能力，删除必须由人点击入口、经正式 API 执行；
+- 引用契约 `KnowledgeToolCitation` 增加可选 `knowledgeBaseId` 与 `deletable` 字段（老缓存无该字段自然不展示删除入口）。
 
 ## 2. 知识库可见范围
 
@@ -68,7 +75,7 @@
 | 权限 | 能力 |
 | --- | --- |
 | `READER` | 读取知识库及后续允许读取的内容 |
-| `EDITOR` | 在 `READER` 基础上编辑知识库内容：上传/转存文档与文档新版本（第四阶段落地） |
+| `EDITOR` | 在 `READER` 基础上编辑知识库内容：上传/转存文档、文档新版本与文档删除（第四、六阶段落地） |
 | `MANAGER` | 在 `EDITOR` 基础上管理知识库资料和成员 |
 
 权限等级为 `READER < EDITOR < MANAGER`。知识库创建者创建时自动加入当前用户并获得 `MANAGER`。创建者不能被降级或移除，知识库不能移除最后一名 `MANAGER`。
@@ -94,9 +101,10 @@
 | `POST /knowledge-bases/{knowledgeBaseId}/documents` | 关联文件对象或转存来源（附件/AI 生成文档/对话消息）创建文档，进入处理队列 | `knowledge_base.read` + EDITOR |
 | `POST /knowledge-bases/{knowledgeBaseId}/documents/{documentId}/versions` | 上传新版本，重新进入处理队列 | `knowledge_base.read` + EDITOR |
 | `POST /knowledge-bases/{knowledgeBaseId}/documents/{documentId}/retry` | 重试处理失败的文档 | `knowledge_base.read` + EDITOR |
+| `DELETE /knowledge-bases/{knowledgeBaseId}/documents/{documentId}` | 软删除文档并异步清理全部版本的向量索引 | `knowledge_base.read` + EDITOR |
 | `POST /knowledge-bases/{knowledgeBaseId}/query` | 按知识库内容回答问题，返回带引用的答案 | `knowledge_base.query` + 知识库成员（锚点人群虚拟 READER 不覆盖 AI 问答） |
 
-权限码（租户级开关）收敛为五码：`knowledge_base.create`（创建）、`knowledge_base.read`（查看自己可访问的知识库，所有写操作的基础门槛）、`knowledge_base.query`（知识库问答的 AI 额度）、`knowledge_base.read_all`（只读查看当前租户全部知识库）与 `knowledge_base.manage_all`（读写管理当前租户全部知识库）。写操作的深度由库内成员等级校验（对象级）：编辑资料/成员管理要求 `MANAGER`，文档写入要求 `EDITOR`。
+权限码（租户级开关）收敛为五码：`knowledge_base.create`（创建）、`knowledge_base.read`（查看自己可访问的知识库，所有写操作的基础门槛）、`knowledge_base.query`（知识库问答的 AI 额度）、`knowledge_base.read_all`（只读查看当前租户全部知识库）与 `knowledge_base.manage_all`（读写管理当前租户全部知识库）。写操作的深度由库内成员等级校验（对象级）：编辑资料/成员管理要求 `MANAGER`，文档写入与删除要求 `EDITOR`。
 
 ### 4.1 创建示例
 
@@ -145,6 +153,7 @@
 | `409` | `KNOWLEDGE_BASE_OWNER_REQUIRED` | 创建者必须保留 MANAGER，不能降级或移除 |
 | `409` | `KNOWLEDGE_BASE_LAST_MANAGER` | 不能移除最后一名 MANAGER |
 | `404` | `KNOWLEDGE_DOCUMENT_NOT_FOUND` | 文档不存在、已删除或不属于该知识库 |
+| `403` | `KNOWLEDGE_BASE_MEMBER_PERMISSION_DENIED` | 成员权限不满足操作要求（转存与文档删除要求 `EDITOR`） |
 | `409` | `KNOWLEDGE_DOCUMENT_RETRY_INVALID` | 只有 `FAILED` 状态的文档可以重试 |
 | `400` | `KNOWLEDGE_DOCUMENT_SCOPE_INVALID` | 可见范围缺少部门/项目，或部门/项目不属于当前租户 |
 | `404` | `KNOWLEDGE_FILE_OBJECT_NOT_FOUND` | 文件不存在、非当前租户或已删除 |
@@ -171,6 +180,7 @@
 - `KNOWLEDGE_DOCUMENT_CREATED`；
 - `KNOWLEDGE_DOCUMENT_VERSION_CREATED`；
 - `KNOWLEDGE_DOCUMENT_RETRY_REQUESTED`；
+- `KNOWLEDGE_DOCUMENT_DELETED`；
 - `KNOWLEDGE_DOCUMENT_INDEXED`（后台任务，无操作者）；
 - `KNOWLEDGE_DOCUMENT_PROCESS_FAILED`（后台任务，无操作者）；
 - `KNOWLEDGE_DOCUMENT_PROCESS_RECOVERED`（后台任务，无操作者；孤儿状态回收）；
@@ -185,7 +195,7 @@ KnowledgeBase
         └── DocumentVersion（版本级可见范围，fileObjectId 唯一）
 ```
 
-`KnowledgeBaseMember` 以 `tenantId + knowledgeBaseId + userId` 保证成员关系唯一。知识库删除采用软删除；成员关系当前没有 `deletedAt` 字段，移除采用硬删除。
+`KnowledgeBaseMember` 以 `tenantId + knowledgeBaseId + userId` 保证成员关系唯一。知识库与文档删除均采用软删除（`deletedAt`）；成员关系当前没有 `deletedAt` 字段，移除采用硬删除。
 
 数据库迁移为 `apps/api/prisma/migrations/0015_knowledge_base_management/migration.sql`（第一阶段）、`0026_knowledge_document_indexing/migration.sql`（第二阶段：处理状态机字段、可见范围下沉 `DocumentVersion`、删除 `DocumentChunk.embedding`）、`0028_knowledge_query_api/migration.sql`（第三阶段：知识库锚点字段、成员权限枚举、`KnowledgeQueryLog` 扩展）、`20260916084227_assistant_knowledge_tool`（Assistant RAG 工具接入：对话级知识库开关字段）、`20260916094414_add_knowledge_document_source_anchor`（第四阶段：来源锚定字段与部分唯一索引）、`20260917064450_converge_knowledge_base_permissions`（第五阶段：权限码收敛为五码）与 `20260917065945_knowledge_base_visibility_scope`（第五阶段：库级归属锚点字段）。
 
@@ -193,7 +203,7 @@ KnowledgeBase
 
 后续实现应在新的契约和迁移中逐步加入：
 
-1. 文档删除、配额、病毒扫描与后台任务监控；
+1. 文档配额、病毒扫描与后台任务监控；
 2. 检索分数阈值拒答（原计划随块 6 落地，尚未实现）；
 3. 助手人设中的知识库功能告知与交流层边界（架构文档 knowledge-rag.md 3.9，块 7d）；
 4. 锚点失效提醒：挂接的部门/项目被删除后管理界面提示重新挂接（悬挂数据保留，自动授权自然失效）。

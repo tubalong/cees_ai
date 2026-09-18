@@ -188,4 +188,15 @@ export class KnowledgeController {
     ): Promise<KnowledgeDocumentResult> {
         return this.knowledgeDocumentService.retryDocument(knowledgeBaseId, documentId);
     }
+
+    @Delete(':knowledgeBaseId/documents/:documentId')
+    @RequirePermissions('knowledge_base.read')
+    @HttpCode(HttpStatus.NO_CONTENT)
+    @ApiNoContentResponse({ description: '文档已软删除' })
+    deleteDocument(
+        @Param('knowledgeBaseId', new ParseUUIDPipe()) knowledgeBaseId: string,
+        @Param('documentId', new ParseUUIDPipe()) documentId: string,
+    ): Promise<void> {
+        return this.knowledgeDocumentService.deleteDocument(knowledgeBaseId, documentId);
+    }
 }

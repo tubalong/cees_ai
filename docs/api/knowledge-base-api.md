@@ -1,6 +1,6 @@
 # 知识库管理 API
 
-公开契约版本：`0.28.0`。所有接口使用租户 Access Token，路径基于 `/api/v1`。
+公开契约版本：`0.30.0`。所有接口使用租户 Access Token，路径基于 `/api/v1`。
 
 ## 知识库
 
@@ -38,10 +38,11 @@ DELETE /knowledge-bases/{knowledgeBaseId}/members/{membershipId}
 ## 知识库文档
 
 ```text
-GET  /knowledge-bases/{knowledgeBaseId}/documents?keyword={keyword}&limit={limit}&cursor={cursor}
-POST /knowledge-bases/{knowledgeBaseId}/documents
-POST /knowledge-bases/{knowledgeBaseId}/documents/{documentId}/versions
-POST /knowledge-bases/{knowledgeBaseId}/documents/{documentId}/retry
+GET    /knowledge-bases/{knowledgeBaseId}/documents?keyword={keyword}&limit={limit}&cursor={cursor}
+POST   /knowledge-bases/{knowledgeBaseId}/documents
+POST   /knowledge-bases/{knowledgeBaseId}/documents/{documentId}/versions
+POST   /knowledge-bases/{knowledgeBaseId}/documents/{documentId}/retry
+DELETE /knowledge-bases/{knowledgeBaseId}/documents/{documentId}
 ```
 
 创建文档请求示例：
@@ -70,6 +71,8 @@ POST /knowledge-bases/{knowledgeBaseId}/documents/{documentId}/retry
 `sourceType` 为 `FILE_OBJECT`（附件文件）/ `DOCUMENT`（AI 生成文档）/ `MESSAGE`（对话消息），与 `sourceId` 配套；`fileObjectId` 与 `sourceType`+`sourceId` 只能二选一。转存先把来源物化为文件快照，再进入与人工上传相同的解析→索引链路；同一来源（sourceType+sourceId）只能存入一个知识库，重复转存到同一知识库追加新版本，转存到其他知识库返回 `KNOWLEDGE_SOURCE_ALREADY_SAVED`。`name` 省略时沿用来源资源名称。
 
 文档创建后立即进入后台处理队列，状态机为 `PENDING -> PARSING -> PARSED -> INDEXING -> READY`，失败置 `FAILED`。可重试错误自动回 `PENDING` 重试，达到上限（默认 3 次）后置 `FAILED`，此时可调用 retry 接口手动重试。文档列表返回当前版本的可见范围、版本号与最新处理状态。
+
+删除文档需要知识库成员权限 `EDITOR` 及以上（`manage_all` 短路放行），与文档写入同门槛。删除为软删除：业务记录打 `deletedAt` 后不再出现在列表与检索结果中，同时异步清理该文档全部版本的向量索引；处理中（`PARSING`/`INDEXING`）的文档同样允许删除，索引流程在提交 `READY` 前检查 `deletedAt`，已删文档不再标回 `READY` 并补删刚写入的向量索引，避免已删文档残留可检索向量。删除成功返回 HTTP `204`。
 
 ## 知识库查询
 
@@ -165,7 +168,7 @@ POST /knowledge-bases/{knowledgeBaseId}/query
 | `KNOWLEDGE_SOURCE_DOCUMENT_NOT_FOUND` | 转存的 AI 文档不存在或无权访问 |
 | `KNOWLEDGE_SOURCE_MESSAGE_NOT_FOUND` | 转存的对话消息不存在或无权访问 |
 | `KNOWLEDGE_SOURCE_MESSAGE_INVALID` | 该消息类型不支持转存（仅用户或助手消息） |
-| `KNOWLEDGE_BASE_MEMBER_PERMISSION_DENIED` | 成员权限不满足操作要求（转存要求 `EDITOR`） |
+| `KNOWLEDGE_BASE_MEMBER_PERMISSION_DENIED` | 成员权限不满足操作要求（转存与文档删除要求 `EDITOR`） |
 | `KNOWLEDGE_DOCUMENT_RETRY_INVALID` | 只有 `FAILED` 状态的文档可以重试 |
 | `KNOWLEDGE_DOCUMENT_SCOPE_INVALID` | 可见范围缺少部门/项目，或部门/项目不属于当前租户 |
 | `KNOWLEDGE_FILE_OBJECT_NOT_FOUND` | 文件不存在、非当前租户或已删除 |

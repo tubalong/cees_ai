@@ -317,7 +317,7 @@ PENDING -> PARSING -> PARSED -> INDEXING -> READY
   - 对话级开关：`CreateTurnRequest.knowledgeBaseEnabled`（可选，默认 false）决定本轮是否暴露/允许 `knowledge_search`；关闭时工具列表被过滤，且工具执行前二次校验兼底（拒绝时 `ToolPolicyError` 告知用户「未在本轮启用」）；
   - 检索走 `KnowledgeService.searchKnowledgeForAssistant`：显式传 tenantId/userId/membershipId/permissions（后台执行不依赖 AsyncLocalStorage），`manage_all` / `read_all` 短路为全租户库，否则按成员可见库折叠三层 scope；ai-service 不返回标题时按 `document_id` 查 `KnowledgeDocument` 补标题；
   - 回喂模型的 summary 只含业务内容（S1 标签/标题/snippet/pageIndex），不含 document_id/chunk_id/知识库 ID 等内部标识；
-  - 公开侧 `TurnStreamToolResultEvent` 新增可选 `citations`（兼容新增，老客户端忽略），desktop 渲染知识库引用卡片（标题+摘录+页码），并按会话 localStorage 恢复；
+  - 公开侧 `TurnStreamToolResultEvent` 新增可选 `citations`（兼容新增，老客户端忽略），desktop 渲染知识库引用卡片（标题+摘录+页码），并按会话 localStorage 恢复；引用契约 `KnowledgeToolCitation` 新增可选 `knowledgeBaseId`/`deletable`（块 9 落地）：`deletable` 由 NestJS 按当前用户对引用文档所属库的成员等级（EDITOR/MANAGER 或 `manage_all`）逐用户计算，仅 `deletable` 的引用卡片展示删除入口（二次确认后调正式 DELETE 文档端点），AI 工具层不提供删除能力；
   - 多库检索时 `KnowledgeQueryLog.knowledgeBaseId` 记 null，审计 `resourceId` 为 null、`metadata.knowledgeBaseIds` 记录实际范围（块 7b 落地）。
 
 ## 8. 分块实施计划
@@ -335,6 +335,7 @@ PENDING -> PARSING -> PARSED -> INDEXING -> READY
 | 7c | 对话数据转知识库（3.8 节：双层入口 + 三条红线；附件/AI 生成文档/对话消息）+ 助手可见库清单与创建知识库工具 | 块 3、7b | ✅ 已落地 |
 | 7d | 助手人设功能告知与交流层边界（3.9 节） | 块 7b | 部分落地（语言约束与内部标识脱敏已写入 BASE_SYSTEM_PROMPT；介绍类告知话术待落地） |
 | 8 | 知识库归属锚点管理与自动授权（3.6 节：项目/部门/公司级分类、锚点人群虚拟 READER、悬挂处理）+ 权限码收敛与知识管理页面 | 块 5 | ✅ 已落地 |
+| 9 | 文档删除（公开 DELETE 端点 + 软删/审计/异步向量清理 + 索引删除竞态处理 + 对话引用卡片 deletable 删除入口） | 块 4、7b、8 | ✅ 已落地 |
 
 每块独立可验证、可提交；块 2 使用内存向量库与假解析产物，不依赖 GPU 服务器。
 
@@ -362,4 +363,5 @@ PENDING -> PARSING -> PARSED -> INDEXING -> READY
 | 7b | jest 34 用例（开关关闭过滤工具并二次校验拒绝、权限折叠检索（成员+manage_all）、summary 脱敏、标题补全、多库日志与审计范围）；tsc 全绿；契约兼容检查（redocly lint + api-client 重新生成）；desktop tsc + 生产构建通过（开关结构化传参、citations 卡片渲染与恢复） | ✅ 完成 |
 | 7c | jest：saveFromSource 13 用例（物化快照、EDITOR 校验、MESSAGE 归属/TOOL 拒绝、可读文档命名、同源追加版本、跨库拒绝、并发锚点冲突、source 字段互斥）+ saveDirectContent 2 用例（无锚定直存 + 权限拒绝）+ 工具 8 用例（save_to_knowledge 含 content 直存路径与二选一校验 / list_knowledge_bases 含脱敏指令：审批/EDITOR 校验/无意图不转存/引用不存在拒绝）+ 助手可见库清单 3 用例（权限标注/非成员空结果/manage_all 短路）+ create_knowledge_base 3 用例（注册/参数校验/显式上下文创建与回喂新库 id + 脱敏指令）+ turn-runner 工具轮预告语不发布 1 用例 + knowledge_search description 检索优先断言 2 例；pytest：chat context 7 用例（含语言/脱敏/检索优先约束 prompt）；tsc 全绿；契约校验 + 客户端重生成；desktop tsc + 生产构建通过（三入口 + 确认框） | ✅ 完成 |
 | 8 | jest：权限收敛（5 码目录/迁移/旧码清理）与锚点行为 118 用例（创建互斥校验、部门树可见、项目/全员锚点、助手标注、query 拒绝锚点、审计 before/after）+ 更新锚点契约 null 语义；redocly lint + api-client 重新生成；desktop tsc + 生产构建通过（知识管理页面：库 CRUD/归属表单/成员管理） | ✅ 完成 |
+| 9 | jest 117 用例（软删/审计/向量清理、READER 拒绝、文档不存在、索引删除竞态、deletable 逐用户计算与 citations 透传）；redocly lint + api-client 重新生成；desktop tsc + 生产构建通过（管理页删除入口 + 对话引用卡片删除与已删除态）；重复文档清理验证（业务表软删 + 审计 + 向量库一致） | ✅ 完成 |
 | 7d | jest/真机：介绍性问题带知识库功能告知；诱导提问不泄露系统层信息（抽样对抗用例） | 待验证 |

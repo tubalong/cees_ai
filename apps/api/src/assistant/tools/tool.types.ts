@@ -41,6 +41,10 @@ export interface KnowledgeToolCitation {
   title: string;
   snippet: string;
   pageIndex: number | null;
+  /** 文档所属知识库 ID；用于前端定位与删除操作。 */
+  knowledgeBaseId: string | null;
+  /** 当前用户是否为该文档所属库的 EDITOR 及以上成员（或 manage_all），可直接删除该文档。 */
+  deletable: boolean;
 }
 
 /** 工具执行成功结果：正式资源引用供公开 tool_result 事件与 TOOL 消息使用。 */

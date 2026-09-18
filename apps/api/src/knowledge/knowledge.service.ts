@@ -732,14 +732,33 @@ export class KnowledgeService {
             await this.writeAssistantQueryFailureAudit(input, knowledgeBaseIds, error);
             throw error;
         }
-        // ai-service 的 citation 不带文档标题，按 document_id 回查业务文档补齐。
-        const titles = await this.resolveDocumentTitles(input.tenantId, response.citations);
-        const citations = response.citations.map((citation) => ({
-            id: citation.document_id,
-            title: titles.get(citation.document_id) ?? '知识库文档',
-            snippet: citation.text,
-            pageIndex: citation.page_index ?? null,
-        }));
+        // ai-service 的 citation 不带文档标题与所属库，按 document_id 回查业务文档补齐。
+        const documents = await this.resolveCitationDocuments(input.tenantId, response.citations);
+        // 当前用户可删除文档的库集合：manage_all 覆盖全部可检索库，否则按库内成员等级（EDITOR 及以上）。
+        const deletableKnowledgeBaseIds = new Set(
+            input.permissions.includes('knowledge_base.manage_all')
+                ? knowledgeBaseIds
+                : (await this.prisma.knowledgeBaseMember.findMany({
+                    where: {
+                        tenantId: input.tenantId,
+                        userId: input.userId,
+                        permission: { in: ['EDITOR', 'MANAGER'] },
+                    },
+                    select: { knowledgeBaseId: true },
+                })).map((member) => member.knowledgeBaseId),
+        );
+        const citations = response.citations.map((citation) => {
+            const meta = documents.get(citation.document_id);
+            const knowledgeBaseId = meta?.knowledgeBaseId ?? null;
+            return {
+                id: citation.document_id,
+                title: meta?.name ?? '知识库文档',
+                snippet: citation.text,
+                pageIndex: citation.page_index ?? null,
+                knowledgeBaseId,
+                deletable: knowledgeBaseId !== null && deletableKnowledgeBaseIds.has(knowledgeBaseId),
+            };
+        });
         const citationLog = response.citations.map((citation) => ({
             citationId: citation.citation_id,
             documentId: citation.document_id,
@@ -799,18 +818,18 @@ export class KnowledgeService {
             || permissions.includes('knowledge_base.read_all');
     }
 
-    /** 按 document_id 回查文档标题；缺失的文档回退默认标题。 */
-    private async resolveDocumentTitles(
+    /** 按 document_id 回查文档标题与所属库；缺失的文档回退默认标题。 */
+    private async resolveCitationDocuments(
         tenantId: string,
         citations: KnowledgeAnswerResponse['citations'],
-    ): Promise<Map<string, string>> {
+    ): Promise<Map<string, { name: string; knowledgeBaseId: string }>> {
         const documentIds = [...new Set(citations.map((citation) => citation.document_id))];
         if (documentIds.length === 0) return new Map();
         const documents = await this.prisma.knowledgeDocument.findMany({
             where: { tenantId, id: { in: documentIds } },
-            select: { id: true, name: true },
+            select: { id: true, name: true, knowledgeBaseId: true },
         });
-        return new Map(documents.map((document) => [document.id, document.name]));
+        return new Map(documents.map((document) => [document.id, { name: document.name, knowledgeBaseId: document.knowledgeBaseId }]));
     }
 
     private async writeAssistantQueryFailureAudit(

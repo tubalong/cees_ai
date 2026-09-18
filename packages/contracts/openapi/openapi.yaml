@@ -4903,6 +4903,44 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
 
+  /knowledge-bases/{knowledgeBaseId}/documents/{documentId}:
+    parameters:
+      - name: knowledgeBaseId
+        in: path
+        required: true
+        description: 知识库 ID
+        schema: { type: string, format: uuid }
+      - name: documentId
+        in: path
+        required: true
+        description: 文档 ID
+        schema: { type: string, format: uuid }
+    delete:
+      summary: 删除知识库文档
+      description: 软删除文档并异步清理全部版本的向量索引；库内 EDITOR 及以上（或 knowledge_base.manage_all）可执行。
+      operationId: deleteKnowledgeDocument
+      tags: [KnowledgeBase]
+      security:
+        - bearerAuth: []
+      responses:
+        '204':
+          description: 文档已软删除
+        '401':
+          description: 登录状态无效或缺少有效租户成员身份
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
+        '403':
+          description: 缺少 knowledge_base.read 权限或知识库 EDITOR 权限
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
+        '404':
+          description: 知识库或文档不存在
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
+
   /dingtalk/integration:
     get:
       summary: 查询当前租户钉钉企业绑定
@@ -9581,6 +9619,14 @@ components:
           type: [integer, 'null']
           minimum: 0
           description: 命中文档页码；解析器未提供页码时为 null
+        knowledgeBaseId:
+          type: string
+          format: uuid
+          description: 文档所属知识库 ID；用于对话页定位与删除操作
+        deletable:
+          type: boolean
+          default: false
+          description: 当前用户是否为该文档所属库的 EDITOR 及以上成员（或 manage_all），可直接删除该文档
       description: 知识库检索命中的文档引用，属于 CEES 正式业务资源
 
     TurnStreamCompletedEvent:
