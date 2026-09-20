@@ -391,6 +391,7 @@ export class TurnStateService {
     executionOwner: string;
     content: string;
     completion: { latencyMs: number; finishReason: string | null };
+    relatedQuestions?: string[] | null;
   }): Promise<boolean> {
     return this.prisma.$transaction(async (transaction) => {
       const now = new Date();
@@ -412,6 +413,9 @@ export class TurnStateService {
           executionOwner: null,
           leaseExpiresAt: null,
           heartbeatAt: now,
+          relatedQuestions: (input.relatedQuestions?.length
+            ? input.relatedQuestions
+            : null) as Prisma.InputJsonValue,
         },
       });
       if (updated.count !== 1) return false;

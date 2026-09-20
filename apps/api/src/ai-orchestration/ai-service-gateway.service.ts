@@ -8,7 +8,6 @@ import {
   extractFile as requestFileExtraction,
   generateDocumentDocx as requestGenerateDocumentDocx,
   generateImage as requestImageGeneration,
-  generateRelatedQuestions as requestRelatedQuestions,
   getReadiness,
   indexKnowledgeDocument,
   invokeChat as requestChatInvocation,
@@ -45,8 +44,6 @@ import {
   type RenderDocxRequest,
   type RenderPdfRequest,
   type RenderPptxRequest,
-  type RelatedQuestionsRequest,
-  type RelatedQuestionsResponse,
   type StreamExecutionMetadata,
   type TokenUsage,
   type ToolTurnRequest,
@@ -226,42 +223,6 @@ export class AiServiceGateway {
       operation: 'chat.compact',
       execution: toRecordedExecution(response.execution),
       metadata: { outcome: 'completed' },
-    });
-    return response;
-  }
-
-  /**
-   * 调用 ai-service 推荐问题生成路由：基于本轮用户消息与最终答复，
-   * 生成至多 3 条简短追问建议；不落业务表，由调用方决定是否下发事件。
-   */
-  async relatedQuestions(
-    input: RelatedQuestionsRequest,
-    tracking: ChatInvocationTracking,
-  ): Promise<RelatedQuestionsResponse> {
-    const result = await requestRelatedQuestions({ client: this.getClient(), body: input });
-    if (result.error) {
-      const error = this.toInvocationError(result.error, result.response?.status);
-      await this.recordFailedChatInvocation({
-        input,
-        tracking,
-        operation: 'chat.related_questions',
-        error,
-      });
-      throw error;
-    }
-    if (!result.data) throw this.emptyResponseError();
-
-    const response = result.data;
-    await this.invocationRecorder.record({
-      tenantId: input.tenant_id,
-      userId: input.user_id,
-      membershipId: tracking.membershipId,
-      conversationId: input.conversation_id,
-      turnId: tracking.turnId,
-      requestId: input.request_id,
-      operation: 'chat.related_questions',
-      execution: toRecordedExecution(response.execution),
-      metadata: { outcome: 'completed', questionCount: response.questions.length },
     });
     return response;
   }

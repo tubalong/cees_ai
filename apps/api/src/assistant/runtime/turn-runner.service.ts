@@ -11,7 +11,6 @@ import {
   AssistantEventType,
   AssistantTurnStage,
   AssistantTurnStatus,
-  ConversationMessageRole,
   Prisma,
 } from '@prisma/client';
 import { createHash, randomUUID } from 'node:crypto';
@@ -348,6 +347,7 @@ export class TurnRunnerService implements OnModuleDestroy {
         await this.completeTurn(turnId, conversation, content, {
           latencyMs: event.latency_ms,
           finishReason: event.finish_reason ?? null,
+          relatedQuestions: event.related_questions ?? null,
         });
         return;
       }
@@ -431,7 +431,13 @@ export class TurnRunnerService implements OnModuleDestroy {
       // 工具调用轮次的模型文本是「调用工具前的说明/预告」，不属于用户可见回答：
       // 先缓存；若该轮最终没有工具调用（纯回答轮）再按序补发，保持回答的流式体验。
       const pendingContentDeltas: DistributiveOmit<PublicTurnStreamEvent, 'seq'>[] = [];
-      let completion: { latencyMs: number; finishReason: string | null } | null = null;
+      // 追问随回答一次输出：只有最终回答轮（无工具调用）的 completed 才携带追问；
+      // 工具调用轮次的追问按 ai-service 约定不输出，此处统一丢弃。
+      let completion: {
+        latencyMs: number;
+        finishReason: string | null;
+        relatedQuestions: string[] | null;
+      } | null = null;
       let terminalError: { code: string; message: string; retryable: boolean } | null = null;
 
       streamEvents: for await (const event of upstream) {
@@ -457,6 +463,7 @@ export class TurnRunnerService implements OnModuleDestroy {
             completion = {
               latencyMs: event.latency_ms,
               finishReason: event.finish_reason ?? null,
+              relatedQuestions: suggestedCalls.length === 0 ? event.related_questions ?? null : null,
             };
             break streamEvents;
           case 'error':
@@ -738,7 +745,11 @@ export class TurnRunnerService implements OnModuleDestroy {
     turnId: string,
     conversation: { id: string; tenantId: string },
     content: string,
-    completion: { latencyMs: number; finishReason: string | null },
+    completion: {
+      latencyMs: number;
+      finishReason: string | null;
+      relatedQuestions: string[] | null;
+    },
   ): Promise<void> {
     const completed = await this.state.completeTurn({
       turnId,
@@ -746,68 +757,21 @@ export class TurnRunnerService implements OnModuleDestroy {
       conversationId: conversation.id,
       executionOwner: this.executionOwner,
       content,
-      completion,
+      completion: { latencyMs: completion.latencyMs, finishReason: completion.finishReason },
+      relatedQuestions: completion.relatedQuestions,
     });
     if (!completed) return;
     await this.conversationService.setTitleFromFirstUserMessage(conversation.id).catch((error) => {
       this.logger.error(`failed to set title for conversation ${conversation.id}: ${String(error)}`);
     });
-    // 推荐问题在主回答完成后异步生成：失败静默，不影响已完成的轮次。
-    void this.generateRelatedQuestions({
-      turnId,
-      conversation,
-      assistantReply: content,
-    }).catch((error) => {
-      this.logger.warn(`related questions generation failed for turn ${turnId}: ${String(error)}`);
-    });
-  }
-
-  /**
-   * 调用 ai-service 基于本轮用户消息与最终答复生成至多 3 条简短追问建议，
-   * 成功后以 related_questions 事件追加到轮次事件流（seq 位于 completed 之后）。
-   * 用户消息或回答为空时跳过；任何失败静默丢弃，不重试、不改写轮次结果。
-   */
-  private async generateRelatedQuestions(input: {
-    turnId: string;
-    conversation: { id: string; tenantId: string };
-    assistantReply: string;
-  }): Promise<void> {
-    const { turnId, conversation, assistantReply } = input;
-    if (!assistantReply.trim()) return;
-    const [turn, userMessageRow] = await Promise.all([
-      this.prisma.assistantTurn.findUnique({
-        where: { id: turnId },
-        select: { userId: true, membershipId: true, requestId: true },
-      }),
-      // 用户消息正文保存在 ConversationMessage 表（本轮 role=USER 的一条）。
-      this.prisma.conversationMessage.findFirst({
-        where: { turnId, role: ConversationMessageRole.USER },
-        select: { content: true },
-      }),
-    ]);
-    const userMessage = userMessageRow?.content?.trim();
-    if (!turn || !userMessage) return;
-
-    const response = await this.gateway.relatedQuestions(
-      {
-        request_id: turn.requestId,
-        tenant_id: conversation.tenantId,
-        user_id: turn.userId,
-        conversation_id: conversation.id,
-        user_message: userMessage,
-        assistant_reply: assistantReply,
-      },
-      {
-        membershipId: turn.membershipId,
-        turnId,
-        conversationId: conversation.id,
-      },
-    );
-    if (response.questions.length === 0) return;
-    await this.appendPublicEvent(turnId, conversation.tenantId, {
-      type: 'related_questions',
-      questions: response.questions,
-    });
+    // 追问已随回答一次输出并持久化到 Turn；这里在 completed 事件之后追加
+    // related_questions 公开事件（seq 更晚），前端在完成事件后的短暂停留窗口内仍可读到。
+    if (completion.relatedQuestions?.length) {
+      await this.appendPublicEvent(turnId, conversation.tenantId, {
+        type: 'related_questions',
+        questions: completion.relatedQuestions,
+      });
+    }
   }
 
   private async finishAfterStreamEnd(turnId: string): Promise<void> {

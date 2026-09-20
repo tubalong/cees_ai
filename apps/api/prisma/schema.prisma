@@ -2119,6 +2119,8 @@ model AssistantTurn {
   leaseExpiresAt  DateTime?           @map("lease_expires_at")
   heartbeatAt     DateTime?           @map("heartbeat_at")
   error           Json?
+  /// 本轮最终答复附带的下一条追问建议（至多 3 条，随回答同次生成）；无追问时为 null。
+  relatedQuestions Json?             @map("related_questions")
   createdAt       DateTime            @default(now()) @map("created_at")
   updatedAt       DateTime            @updatedAt @map("updated_at")
   completedAt     DateTime?           @map("completed_at")
