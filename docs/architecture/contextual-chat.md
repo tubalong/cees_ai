@@ -159,16 +159,16 @@ ai-service 不保存消息、回答或摘要正文；NestJS 保存会话事实�
 
 **已确认方案与落地形态**：
 
-- 生成方式：**异步二次调用**——主回答完成后由 NestJS fire-and-forget 调用 ai-service 轻量端点，不阻塞轮次收尾；失败静默丢弃（logger.warn），不影响已完成的轮次；
-- 下发形态：**独立 SSE 事件 `related_questions`**，位于 `completed` 之后到达（seq 递增）；SSE 连接在轮次终态后进入最长 `RELATED_QUESTIONS_LINGER_MS`（10 秒）宽限期等待该事件，宽限期到自然关闭；`error` 仍立即终止；
-- 内容约束：至多 3 条、每条不超过 30 字的简短追问；ai-service 过滤超长/空/非字符串条目；
-- 持久化：**不落业务表**（不建推荐问题专用表）；事件 payload 随既有 `assistant_events` 事件流传输与重放。
+- 生成方式：**随回答一次输出**——模型在最终回答末尾输出 `<follow_up_questions>["…"]</follow_up_questions>` 追问块，ai-service 流式剥离该块，正文照常流式下发；不再有第二次异步模型调用；
+- 下发形态：**独立 SSE 事件 `related_questions`**，位于 `completed` 之后到达（seq 递增）；追问随 ai-service 的 `completed` 事件（`related_questions` 字段）一并返回，NestJS 在公开 `completed` 之后立即追加；无追问则不出现；
+- 内容约束：至多 3 条、每条不超过 30 字的简短追问；ai-service 对块内容做严格 JSON 解析并过滤超长/空/非字符串条目；
+- 持久化：追问落到 `assistant_turns.related_questions` JSONB 列，随事件流重放即可恢复，用户再次进入会话时仍能看到上次的追问推荐。
 
 **落地明细**：
 
-1. 契约（`packages/contracts`）：公开对话契约新增 `TurnStreamRelatedQuestionsEvent`（`openapi.yaml` 0.33.0）；ai-service 内部契约新增 `/internal/v1/chat/related-questions`（`ai-service.openapi.yaml` 0.6.0）；三端客户端已重新生成；
-2. ai-service（`apps/ai-service`）：`RelatedQuestionsGenerator` 按 `related_questions_role` 生成，输出截断/非法分别返回 `RELATED_QUESTIONS_TRUNCATED` / `RELATED_QUESTIONS_INVALID`；
-3. NestJS Assistant（`apps/api`）：`TurnRunnerService.completeTurn` 在 CAS 成功后触发异步生成，成功则以 `related_questions` 事件追加；事件类型落库使用新增 `AssistantEventType.RELATED_QUESTIONS`；调用计入 AiInvocation 审计（`chat.related_questions` + `questionCount`）。
+1. 契约（`packages/contracts`）：ai-service 内部契约移除 `/internal/v1/chat/related-questions` 端点，`ChatStreamCompletedEvent` 新增可选 `related_questions`（`ai-service.openapi.yaml` 0.7.0，开发阶段破坏性变更）；公开对话契约不变（`related_questions` 事件已在 0.33.0 定义）；三端客户端已重新生成；
+2. ai-service（`apps/ai-service`）：`FollowUpStreamFilter` 流式剥离追问块；`FOLLOW_UP_INSTRUCTION` 作为 system 指令要求模型一次输出正文与追问，工具调用轮次不输出追问块；
+3. NestJS Assistant（`apps/api`）：`TurnRunnerService.completeTurn` 读取 `completed.related_questions`，随 CAS 事务持久化到 Turn，并在公开 `completed` 事件之后追加 `related_questions` 事件；工具调用轮次的追问丢弃，仅最终回答轮生效；原异步生成方法与网关端点调用已删除。
 
 **待做（前端）**：桌面端对话页回答末尾渲染推荐问题按钮，点击即发起新一轮提问（复用现有 turn 提交流程）；mobile 视契约形态跟进。
 
