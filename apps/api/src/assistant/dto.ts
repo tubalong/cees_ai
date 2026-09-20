@@ -48,10 +48,14 @@ export class UpdateConversationRequestDto {
   @MaxLength(128)
   title!: string;
 
-  @ApiProperty({ description: '当前会话版本，用于防止并发覆盖', minimum: 1 })
+  @ApiPropertyOptional({
+    description: '历史兼容字段：不再参与校验（每次发起轮次都会递增会话版本，旧客户端持有的版本必然过期），保留仅为兼容老客户端',
+    minimum: 1,
+  })
+  @IsOptional()
   @IsInt()
   @Min(1)
-  version!: number;
+  version?: number;
 }
 
 export class DeleteConversationQueryDto {

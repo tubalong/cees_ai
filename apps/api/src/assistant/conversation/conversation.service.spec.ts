@@ -1,4 +1,4 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import { NotFoundException } from '@nestjs/common';
 import { ConversationMessageRole } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { TenantContext } from '../../tenant/tenant-context';
@@ -275,7 +275,7 @@ describe('ConversationService', () => {
     expect(result.messages[1].citations).toEqual([]);
   });
 
-  it('updates a title with optimistic locking and an audit record', async () => {
+  it('updates a title without optimistic locking and writes an audit record', async () => {
     const prisma = createPrismaMock();
     prisma.conversation.findFirst.mockResolvedValue(conversationRecord({ title: '旧标题', version: 3 }));
     prisma.conversation.updateMany.mockResolvedValue({ count: 1 });
@@ -291,7 +291,6 @@ describe('ConversationService', () => {
         tenantId: TENANT_ID,
         ownerMembershipId: MEMBERSHIP_ID,
         deletedAt: null,
-        version: 3,
       },
       data: { title: '新标题', version: { increment: 1 } },
     });
@@ -300,14 +299,16 @@ describe('ConversationService', () => {
     }));
   });
 
-  it('rejects a stale title update', async () => {
+  it('accepts a stale title update (version is ignored)', async () => {
     const prisma = createPrismaMock();
     prisma.conversation.findFirst.mockResolvedValue(conversationRecord({ version: 4 }));
+    prisma.conversation.updateMany.mockResolvedValue({ count: 1 });
+    prisma.conversation.findUniqueOrThrow.mockResolvedValue(conversationRecord({ title: '新标题', version: 5 }));
     const service = createService(prisma);
 
-    await expect(service.updateTitle(CONVERSATION_ID, '新标题', 3))
-      .rejects.toBeInstanceOf(ConflictException);
-    expect(prisma.conversation.updateMany).not.toHaveBeenCalled();
+    await expect(service.updateTitle(CONVERSATION_ID, '新标题', 3)).resolves.toEqual(
+      expect.objectContaining({ title: '新标题', version: 5 }),
+    );
   });
 
   it('soft-deletes a conversation only when no turn is active', async () => {

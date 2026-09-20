@@ -28,7 +28,7 @@ Assistant 是 NestJS 提供的服务端会话与 AI 编排入口。NestJS 负责
 - 错误使用统一错误包络；稳定业务错误码位于 `error.code`（具体 envelope 以 OpenAPI 为准）。
 - ID 使用 UUID；不要根据 User ID 推断 Membership ID。
 - 会话删除是软删除，消息、工具调用、事件和审计事实保留；有运行中轮次时删除返回 `409 CONVERSATION_ACTIVE_TURN`。
-- 标题更新和删除使用 `version` 乐观锁；版本不匹配返回 `409`。
+- 删除使用 `version` 乐观锁；版本不匹配返回 `409`。标题更新不校验版本：每次发起轮次都会递增会话版本，客户端持有的版本必然过期，因此服务端忽略请求中的 `version`（字段保留仅为兼容老客户端）。
 
 ## 3. 会话生命周期
 
@@ -99,10 +99,10 @@ PATCH /api/v1/conversations/{conversationId}
 Authorization: Bearer <access-token>
 Content-Type: application/json
 
-{ "title": "新的标题", "version": 3 }
+{ "title": "新的标题" }
 ```
 
-标题长度为 1～128 个字符。成功返回更新后的会话（版本变为 `4`）；版本冲突返回 `409 CONVERSATION_VERSION_CONFLICT`。
+标题长度为 1～128 个字符。成功返回更新后的会话（版本号递增 `1`）；请求中的 `version` 是历史兼容字段，服务端忽略其值，老客户端照常携带也不会报错。
 
 ### 3.5 删除会话
 
@@ -292,7 +292,7 @@ Assistant 不接受把任意公网 URL 直接写入消息。前端先走现有 F
 | 400 | `PAGINATION_CURSOR_INVALID` / `EVENT_SEQUENCE_INVALID` | 游标或事件序号非法 |
 | 403 | `IMAGE_REFERENCE_ACCESS_DENIED` | 无权使用被引用图片 |
 | 404 | `CONVERSATION_NOT_FOUND` / `TURN_NOT_FOUND` | 不存在或不属于当前成员 |
-| 409 | `CONVERSATION_VERSION_CONFLICT` | 会话版本冲突 |
+| 409 | `CONVERSATION_VERSION_CONFLICT` | 会话删除时版本冲突 |
 | 409 | `CONVERSATION_ACTIVE_TURN` | 会话仍有执行中的轮次 |
 | 409 | `TURN_NOT_CANCELLABLE` | 轮次已经结束 |
 | 409 | `IDEMPOTENCY_KEY_CONFLICT` | 幂等键对应不同请求内容 |
