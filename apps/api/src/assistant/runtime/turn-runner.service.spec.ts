@@ -620,6 +620,134 @@ describe('TurnRunnerService', () => {
             afterSeq: 0,
         })).rejects.toBeInstanceOf(NotFoundException);
     });
+
+    it('appends a related_questions event after completion when the ai-service returns suggestions', async () => {
+        const harness = createHarness();
+        // 幂等检查按 conversationId_idempotencyKey 查询；按 id 查询是推荐问题生成路径。
+        harness.prisma.assistantTurn.findUnique.mockImplementation((args: { where: Record<string, unknown> }) => {
+            if (args.where.id === TURN_ID) {
+                return Promise.resolve({ userId: USER_ID, membershipId: MEMBERSHIP_ID, requestId: REQUEST_ID });
+            }
+            return Promise.resolve(null);
+        });
+        harness.gateway.relatedQuestions.mockResolvedValue({
+            request_id: REQUEST_ID,
+            conversation_id: CONVERSATION_ID,
+            questions: ['怎么申请试用？', '有免费额度吗？', '如何邀请同事？'],
+            execution: { profile: 'primary', request_id: REQUEST_ID, provider: 'stub' },
+        });
+
+        await harness.service.startTurn({
+            conversationId: CONVERSATION_ID,
+            idempotencyKey: 'key-related-ok',
+            content: '你好',
+        });
+        const events = await consumeAll(await harness.service.subscribeTurn({
+            conversationId: CONVERSATION_ID,
+            turnId: TURN_ID,
+            afterSeq: 0,
+            // 与生产相同：poll 会等满宽限期才结束；测试用短窗口保持快速。
+            lingerMs: 200,
+        }));
+
+        expect(events.map((event) => event.type)).toEqual([
+            'started', 'status', 'content_delta', 'usage', 'completed', 'related_questions',
+        ]);
+        expect(events.at(-1)).toEqual({
+            type: 'related_questions',
+            seq: 6,
+            questions: ['怎么申请试用？', '有免费额度吗？', '如何邀请同事？'],
+        });
+        expect(harness.gateway.relatedQuestions).toHaveBeenCalledWith(
+            expect.objectContaining({
+                request_id: REQUEST_ID,
+                tenant_id: TENANT_ID,
+                user_id: USER_ID,
+                conversation_id: CONVERSATION_ID,
+                user_message: '你好',
+                assistant_reply: '你好！',
+            }),
+            expect.objectContaining({
+                membershipId: MEMBERSHIP_ID,
+                turnId: TURN_ID,
+                conversationId: CONVERSATION_ID,
+            }),
+        );
+    });
+
+    it('keeps the turn completed when related questions generation fails', async () => {
+        const harness = createHarness();
+        harness.prisma.assistantTurn.findUnique.mockImplementation((args: { where: Record<string, unknown> }) => {
+            if (args.where.id === TURN_ID) {
+                return Promise.resolve({ userId: USER_ID, membershipId: MEMBERSHIP_ID, requestId: REQUEST_ID });
+            }
+            return Promise.resolve(null);
+        });
+        harness.gateway.relatedQuestions.mockRejectedValue(new Error('ai-service down'));
+
+        await harness.service.startTurn({
+            conversationId: CONVERSATION_ID,
+            idempotencyKey: 'key-related-fail',
+            content: '你好',
+        });
+        const events = await consumeAll(await harness.service.subscribeTurn({
+            conversationId: CONVERSATION_ID,
+            turnId: TURN_ID,
+            afterSeq: 0,
+            lingerMs: 500,
+        }));
+
+        expect(events.map((event) => event.type)).toEqual([
+            'started', 'status', 'content_delta', 'usage', 'completed',
+        ]);
+        expect(harness.state.failTurn).not.toHaveBeenCalled();
+    });
+
+    it('skips related questions when the user message row is missing', async () => {
+        const harness = createHarness();
+        harness.prisma.assistantTurn.findUnique.mockImplementation((args: { where: Record<string, unknown> }) => {
+            if (args.where.id === TURN_ID) {
+                return Promise.resolve({ userId: USER_ID, membershipId: MEMBERSHIP_ID, requestId: REQUEST_ID });
+            }
+            return Promise.resolve(null);
+        });
+        harness.prisma.conversationMessage.findFirst.mockResolvedValue(null);
+
+        await harness.service.startTurn({
+            conversationId: CONVERSATION_ID,
+            idempotencyKey: 'key-related-no-message',
+            content: '你好',
+        });
+        await consumeAll(await harness.service.subscribeTurn({
+            conversationId: CONVERSATION_ID,
+            turnId: TURN_ID,
+            afterSeq: 0,
+            lingerMs: 500,
+        }));
+
+        expect(harness.gateway.relatedQuestions).not.toHaveBeenCalled();
+    });
+
+    it('skips related questions when the assistant reply is empty', async () => {
+        const harness = createHarness();
+        harness.gateway.streamChat.mockImplementation(async () => (async function* stream() {
+            yield { type: 'completed', latency_ms: 1, finish_reason: 'stop' } as ChatStreamEvent;
+        })());
+
+        await harness.service.startTurn({
+            conversationId: CONVERSATION_ID,
+            idempotencyKey: 'key-related-empty-reply',
+            content: '你好',
+        });
+        await consumeAll(await harness.service.subscribeTurn({
+            conversationId: CONVERSATION_ID,
+            turnId: TURN_ID,
+            afterSeq: 0,
+            lingerMs: 500,
+        }));
+
+        expect(harness.gateway.relatedQuestions).not.toHaveBeenCalled();
+    });
 });
 
 const TENANT_ID = '10000000-0000-0000-0000-000000000001';
@@ -656,6 +784,9 @@ function createHarness(options: {
         assistantTurn: {
             findUnique: jest.fn().mockResolvedValue(null),
             findFirst: jest.fn().mockResolvedValue({ tenantId: TENANT_ID }),
+        },
+        conversationMessage: {
+            findFirst: jest.fn().mockResolvedValue({ content: '你好' }),
         },
         membershipRole: {
             findMany: jest.fn().mockResolvedValue([{ roleId: 'role-1' }]),
@@ -707,7 +838,14 @@ function createHarness(options: {
             appendEvent(event);
             return events.at(-1)?.seq ?? 0;
         }),
-        poll: jest.fn(async function* poll(_turnId: string, afterSeq: number, signal?: AbortSignal) {
+        poll: jest.fn(async function* poll(
+            _turnId: string,
+            afterSeq: number,
+            signal?: AbortSignal,
+            pollOptions?: { lingerMs?: number },
+        ) {
+            const lingerMs = pollOptions?.lingerMs ?? 0;
+            let lingerUntil: number | null = null;
             let lastSeq = afterSeq;
             while (!signal?.aborted) {
                 const pending = events.filter((event) => event.seq > lastSeq);
@@ -715,11 +853,16 @@ function createHarness(options: {
                     lastSeq = event.seq;
                     yield event;
                 }
-                // 与生产 poll 对齐：最近已消费事件为终态（或内部 terminal 标志）即结束订阅。
+                // 与生产 poll 对齐：最近已消费事件为终态（或内部 terminal 标志）即结束订阅；
+                // 指定 lingerMs 时，终态后进入宽限期等待异步追加的 related_questions。
                 const lastConsumed = events.filter((event) => event.seq <= lastSeq).at(-1);
                 const isTerminalEvent = lastConsumed
                     && (lastConsumed.type === 'completed' || lastConsumed.type === 'error');
-                if ((terminal || isTerminalEvent) && events.every((event) => event.seq <= lastSeq)) return;
+                if ((terminal || isTerminalEvent) && events.every((event) => event.seq <= lastSeq)) {
+                    if (lingerMs <= 0) return;
+                    if (lingerUntil === null) lingerUntil = Date.now() + lingerMs;
+                    if (Date.now() >= lingerUntil) return;
+                }
                 await delay(1);
             }
         }),
@@ -747,6 +890,13 @@ function createHarness(options: {
         streamToolTurn: jest.fn(async (_input: unknown, _tracking: unknown, signal?: AbortSignal) => {
             const factory = options.toolTurnStreams?.shift();
             return factory ? factory(signal) : secondRoundCompletedStream();
+        }),
+        // 默认返回空推荐：不传 lingerMs 的既有测试行为不受影响。
+        relatedQuestions: jest.fn().mockResolvedValue({
+            request_id: REQUEST_ID,
+            conversation_id: CONVERSATION_ID,
+            questions: [],
+            execution: null,
         }),
     };
     const toolRegistry = {

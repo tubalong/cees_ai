@@ -11,6 +11,7 @@ import {
   AssistantEventType,
   AssistantTurnStage,
   AssistantTurnStatus,
+  ConversationMessageRole,
   Prisma,
 } from '@prisma/client';
 import { createHash, randomUUID } from 'node:crypto';
@@ -207,10 +208,14 @@ export class TurnRunnerService implements OnModuleDestroy {
     conversationId: string;
     turnId: string;
     afterSeq: number;
+    /** 终态后等待异步追加事件（related_questions）的宽限毫秒数；省略时终态即结束。 */
+    lingerMs?: number;
   }, signal?: AbortSignal): Promise<AsyncGenerator<PublicTurnStreamEvent>> {
     assertAfterSeq(input.afterSeq);
     await this.requireConversationTurn(input.conversationId, input.turnId);
-    return this.eventService.poll(input.turnId, input.afterSeq, signal);
+    return this.eventService.poll(input.turnId, input.afterSeq, signal, {
+      lingerMs: input.lingerMs,
+    });
   }
 
   /** 取消仅允许 RUNNING → CANCELLED；终态冲突按公开契约返回 409。 */
@@ -747,6 +752,62 @@ export class TurnRunnerService implements OnModuleDestroy {
     await this.conversationService.setTitleFromFirstUserMessage(conversation.id).catch((error) => {
       this.logger.error(`failed to set title for conversation ${conversation.id}: ${String(error)}`);
     });
+    // 推荐问题在主回答完成后异步生成：失败静默，不影响已完成的轮次。
+    void this.generateRelatedQuestions({
+      turnId,
+      conversation,
+      assistantReply: content,
+    }).catch((error) => {
+      this.logger.warn(`related questions generation failed for turn ${turnId}: ${String(error)}`);
+    });
+  }
+
+  /**
+   * 调用 ai-service 基于本轮用户消息与最终答复生成至多 3 条简短追问建议，
+   * 成功后以 related_questions 事件追加到轮次事件流（seq 位于 completed 之后）。
+   * 用户消息或回答为空时跳过；任何失败静默丢弃，不重试、不改写轮次结果。
+   */
+  private async generateRelatedQuestions(input: {
+    turnId: string;
+    conversation: { id: string; tenantId: string };
+    assistantReply: string;
+  }): Promise<void> {
+    const { turnId, conversation, assistantReply } = input;
+    if (!assistantReply.trim()) return;
+    const [turn, userMessageRow] = await Promise.all([
+      this.prisma.assistantTurn.findUnique({
+        where: { id: turnId },
+        select: { userId: true, membershipId: true, requestId: true },
+      }),
+      // 用户消息正文保存在 ConversationMessage 表（本轮 role=USER 的一条）。
+      this.prisma.conversationMessage.findFirst({
+        where: { turnId, role: ConversationMessageRole.USER },
+        select: { content: true },
+      }),
+    ]);
+    const userMessage = userMessageRow?.content?.trim();
+    if (!turn || !userMessage) return;
+
+    const response = await this.gateway.relatedQuestions(
+      {
+        request_id: turn.requestId,
+        tenant_id: conversation.tenantId,
+        user_id: turn.userId,
+        conversation_id: conversation.id,
+        user_message: userMessage,
+        assistant_reply: assistantReply,
+      },
+      {
+        membershipId: turn.membershipId,
+        turnId,
+        conversationId: conversation.id,
+      },
+    );
+    if (response.questions.length === 0) return;
+    await this.appendPublicEvent(turnId, conversation.tenantId, {
+      type: 'related_questions',
+      questions: response.questions,
+    });
   }
 
   private async finishAfterStreamEnd(turnId: string): Promise<void> {
@@ -921,6 +982,7 @@ function toAssistantEventType(type: PublicTurnStreamEvent['type']): AssistantEve
     case 'tool_result': return AssistantEventType.TOOL_RESULT;
     case 'usage': return AssistantEventType.USAGE;
     case 'completed': return AssistantEventType.COMPLETED;
+    case 'related_questions': return AssistantEventType.RELATED_QUESTIONS;
     case 'error': return AssistantEventType.ERROR;
   }
 }

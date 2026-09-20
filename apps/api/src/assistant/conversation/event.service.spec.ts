@@ -99,6 +99,55 @@ describe('EventService', () => {
             jest.useRealTimers();
         }
     });
+
+    it('yields late events appended within the linger window after terminal status', async () => {
+        jest.useFakeTimers();
+        try {
+            const prisma = createPrismaMock();
+            const service = new EventService(prisma as unknown as PrismaService);
+            prisma.assistantEvent.findMany
+                .mockResolvedValueOnce([])
+                .mockResolvedValueOnce([eventRecord(6, AssistantEventType.RELATED_QUESTIONS, {
+                    type: 'related_questions',
+                    questions: ['怎么申请试用？'],
+                    seq: 6,
+                })])
+                .mockResolvedValue([]);
+            prisma.assistantTurn.findUnique.mockResolvedValue({ status: 'COMPLETED' });
+
+            const polled = service.poll(TURN_ID, 5, undefined, { lingerMs: 10_000 });
+            const pending = polled.next();
+            await jest.advanceTimersByTimeAsync(250);
+
+            const first = await pending;
+            expect(first.done).toBe(false);
+            expect(first.value).toEqual({ type: 'related_questions', questions: ['怎么申请试用？'], seq: 6 });
+
+            const ending = polled.next();
+            await jest.advanceTimersByTimeAsync(10_000 + 250);
+            expect((await ending).done).toBe(true);
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
+    it('ends after the linger window when no late events arrive', async () => {
+        jest.useFakeTimers();
+        try {
+            const prisma = createPrismaMock();
+            const service = new EventService(prisma as unknown as PrismaService);
+            prisma.assistantEvent.findMany.mockResolvedValue([]);
+            prisma.assistantTurn.findUnique.mockResolvedValue({ status: 'COMPLETED' });
+
+            const polled = service.poll(TURN_ID, 0, undefined, { lingerMs: 500 });
+            const ending = polled.next();
+            await jest.advanceTimersByTimeAsync(500 + 250);
+
+            expect((await ending).done).toBe(true);
+        } finally {
+            jest.useRealTimers();
+        }
+    });
 });
 
 const TENANT_ID = '10000000-0000-0000-0000-000000000001';

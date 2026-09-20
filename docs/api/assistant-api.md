@@ -179,9 +179,12 @@ data: {"type":"content_delta","seq":7,"text":"你好"}
 | `tool_result` | 工具完成、失败或被拒绝；包含稳定 `resource` 引用、联网搜索 `sources` 或错误（错误码见 `error.code`，不携带签名 URL） |
 | `usage` | 本次模型调用的 Token 指标 |
 | `completed` | 本次轮次完成（无未处理工具调用） |
+| `related_questions` | 基于本轮答复生成的追问建议（至多 3 条、每条不超过 30 字），在 `completed` 之后到达 |
 | `error` | 轮次失败或工具循环达到安全上限 |
 
 ai-service 的 `completed` 表示一次模型调用完成；当该调用同时产生 `tool_call` 时，NestJS 先执行/拒绝工具并继续下一次模型调用，不能把该事件误认为整个 AssistantTurn 已完成。公开 SSE 只在最终回答完成后发送整个轮次的 `completed`。
+
+`related_questions` 是异步生成的可选事件：`completed` 之后最长 10 秒内可能到达，也可能不出现（生成失败时静默丢弃）。SSE 连接在轮次终态后最多再保持 10 秒等待该事件，之后自然关闭；客户端不应把 `related_questions` 视为轮次终止信号。
 
 `started` 事件携带本轮实际生效的 `capabilities`：
 
@@ -255,7 +258,7 @@ Authorization: Bearer <access-token>
 Accept: text/event-stream
 ```
 
-服务端先重放 `seq > afterSeq` 的已提交事件，再继续推送实时事件，直到轮次进入终态。`afterSeq` 必须是 `0` 或安全整数；非法值返回 `400 EVENT_SEQUENCE_INVALID`。客户端应保存最后一个成功处理的 `seq`，重连时原样提交。
+服务端先重放 `seq > afterSeq` 的已提交事件，再继续推送实时事件，直到轮次进入终态；终态后连接最多再保持 10 秒等待异步的 `related_questions` 事件，宽限期结束自然关闭。`afterSeq` 必须是 `0` 或安全整数；非法值返回 `400 EVENT_SEQUENCE_INVALID`。客户端应保存最后一个成功处理的 `seq`，重连时原样提交。
 
 SSE 客户端断开只停止订阅，不取消后台轮次。若客户端库不能直接消费生成的普通 API Client 的 POST SSE 方法，应使用 Fetch/ReadableStream 适配器解析 SSE；生成 Client 仍可用于普通 JSON 接口。
 
@@ -302,5 +305,5 @@ Assistant 不接受把任意公网 URL 直接写入消息。前端先走现有 F
 - 创建轮次时始终发送新的 `Idempotency-Key`，重试同一提交必须复用原键。
 - 按 `seq` 去重并持久化游标；重连使用 `events?afterSeq=N`。
 - 收到 `tool_result.resource` 后按资源类型调用对应资源接口，不持久化签名 URL。
-- 将 `completed`/`error` 作为轮次终止信号；普通网络断开不是取消。
+- 将 `completed`/`error` 作为轮次终止信号；`related_questions` 在 `completed` 之后到达，不是终止信号；普通网络断开不是取消。
 - 不把 `ai-service` 内部地址、内部 Token 或模型名发送到客户端。

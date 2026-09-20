@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from typing import NamedTuple
 
 CREDENTIAL_STATUS_CODES = frozenset({401, 403})

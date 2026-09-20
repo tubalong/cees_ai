@@ -246,6 +246,18 @@ class CompactChatRequest(BaseModel):
     messages: list[ChatMessage] = Field(..., max_length=128, min_length=1)
 
 
+class RelatedQuestionsRequest(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    request_id: constr(min_length=1, max_length=128)
+    tenant_id: constr(min_length=1, max_length=128)
+    user_id: constr(min_length=1, max_length=128)
+    conversation_id: constr(min_length=1, max_length=128)
+    user_message: constr(min_length=1, max_length=65536)
+    assistant_reply: constr(min_length=1, max_length=131072)
+
+
 class ChatStreamStartedEvent(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
@@ -1168,6 +1180,21 @@ class CompactChatResponse(BaseModel):
     conversation_id: str
     summary: constr(min_length=1)
     summarized_through_message_id: str | None = None
+    execution: ExecutionMetadata
+
+
+class RelatedQuestionsResponse(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    request_id: str
+    conversation_id: str
+    questions: list[constr(min_length=1, max_length=30)] = Field(
+        ...,
+        description="Short follow-up questions derived from the assistant's reply; each at most 30 characters.",
+        max_length=3,
+        min_length=1,
+    )
     execution: ExecutionMetadata
 
 

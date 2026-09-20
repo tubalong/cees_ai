@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CEES AI API
-  version: 0.32.0
+  version: 0.33.0
   description: 以本文件为唯一事实源的公开 API 契约。资源与操作按 docs/api 约定补充。
 
 servers:
@@ -253,7 +253,9 @@ paths:
       description: |
         客户端只提交本轮 user 消息；历史消息与摘要由服务端加载并组装上下文。
         成功建立流后，每个 SSE `data` 字段都是一个 `TurnStreamEvent` JSON 对象，所有事件携带递增 `seq`。
-        事件依次为 `started`、可选 `status`、零个或多个 `content_delta`、可选 `usage` 和 `completed`；流开始后的失败以 `error` 事件终止。
+        事件依次为 `started`、可选 `status`、零个或多个 `content_delta`、可选 `usage` 和 `completed`；
+        `completed` 之后可能异步到达一个 `related_questions` 事件（基于本轮答复生成的后续提问建议，生成失败则不发）；
+        流开始后的失败以 `error` 事件终止。
         客户端断开连接只解除订阅，不取消执行；重连后通过事件重放接口继续接收。
         重复提交同一 `Idempotency-Key` 时返回原 Turn 的事件流，不重新生成。
       operationId: createTurn
@@ -9843,6 +9845,28 @@ components:
           type: [string, 'null']
           description: Provider 结束原因；length 表示回答可能被输出上限截断
 
+    TurnStreamRelatedQuestionsEvent:
+      type: object
+      additionalProperties: false
+      required: [type, seq, questions]
+      properties:
+        type:
+          type: string
+          const: related_questions
+        seq:
+          type: integer
+          minimum: 1
+          description: 轮次内递增的事件序号；位于 completed 之后
+        questions:
+          type: array
+          minItems: 1
+          maxItems: 3
+          items:
+            type: string
+            minLength: 1
+            maxLength: 30
+          description: 基于本轮答复生成的简短追问建议，每个不超过 30 字
+
     TurnErrorDetail:
       type: object
       additionalProperties: false
@@ -9883,6 +9907,7 @@ components:
         - $ref: '#/components/schemas/TurnStreamToolResultEvent'
         - $ref: '#/components/schemas/TurnStreamUsageEvent'
         - $ref: '#/components/schemas/TurnStreamCompletedEvent'
+        - $ref: '#/components/schemas/TurnStreamRelatedQuestionsEvent'
         - $ref: '#/components/schemas/TurnStreamErrorEvent'
       discriminator:
         propertyName: type
@@ -9894,6 +9919,7 @@ components:
           tool_result: '#/components/schemas/TurnStreamToolResultEvent'
           usage: '#/components/schemas/TurnStreamUsageEvent'
           completed: '#/components/schemas/TurnStreamCompletedEvent'
+          related_questions: '#/components/schemas/TurnStreamRelatedQuestionsEvent'
           error: '#/components/schemas/TurnStreamErrorEvent'
 
     WorkReportType:

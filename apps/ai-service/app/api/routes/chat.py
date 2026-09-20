@@ -26,6 +26,8 @@ from app.api.generated.models import (
     ErrorResponse,
     ExecutionMetadata,
     Provider,
+    RelatedQuestionsRequest,
+    RelatedQuestionsResponse,
     StreamErrorEvent,
     StreamExecutionMetadata,
     TokenUsage,
@@ -38,6 +40,7 @@ from app.api.generated.models import (
 )
 from app.chat.compactor import ChatCompactor
 from app.chat.orchestrator import ChatOrchestrator, PreparedChat
+from app.chat.related_questions import RelatedQuestionsGenerator
 from app.chat.tool_turn import PreparedToolTurn, ToolTurnOrchestrator
 from app.core.config import ModelProfile
 from app.core.errors import (
@@ -130,6 +133,28 @@ async def compact_chat(payload: CompactChatRequest, request: Request) -> Compact
 
 
 @router.post(
+    "/related-questions",
+    response_model=RelatedQuestionsResponse,
+    operation_id="generateRelatedQuestions",
+    summary="Generate short follow-up questions for a completed chat reply",
+    response_description="Follow-up questions generated",
+    responses=CHAT_ERROR_RESPONSES,
+)
+async def related_questions(
+    payload: RelatedQuestionsRequest, request: Request
+) -> RelatedQuestionsResponse:
+    generation = await RelatedQuestionsGenerator(
+        _require_router(request, payload.request_id)
+    ).generate(payload)
+    return RelatedQuestionsResponse(
+        request_id=payload.request_id,
+        conversation_id=payload.conversation_id,
+        questions=generation.questions,
+        execution=_execution_metadata(generation.routing),
+    )
+
+
+@router.post(
     "/stream",
     response_class=StreamingResponse,
     response_model=None,
@@ -161,9 +186,7 @@ async def stream_chat(payload: ChatRequest, request: Request) -> StreamingRespon
     response_description="Tool-capable turn events are streamed",
     responses=CHAT_ERROR_RESPONSES,
 )
-async def stream_chat_tool_turn(
-    payload: ToolTurnRequest, request: Request
-) -> StreamingResponse:
+async def stream_chat_tool_turn(payload: ToolTurnRequest, request: Request) -> StreamingResponse:
     llm_router = _require_router(request, payload.request_id)
     prepared = ToolTurnOrchestrator().prepare(payload)
     return StreamingResponse(

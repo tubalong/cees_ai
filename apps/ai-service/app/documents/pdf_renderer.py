@@ -16,13 +16,15 @@ from reportlab.pdfbase.cidfonts import UnicodeCIDFont
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import (
     HRFlowable,
-    Image as ReportlabImage,
     PageBreak,
     Paragraph,
     SimpleDocTemplate,
     Spacer,
     Table,
     TableStyle,
+)
+from reportlab.platypus import (
+    Image as ReportlabImage,
 )
 
 from app.api.generated.models import (
@@ -209,7 +211,9 @@ def _append_block(
         story.append(Paragraph(_inline_markup(block.text), style))
     elif isinstance(block, BulletListBlock):
         for item in block.items:
-            story.append(Paragraph(f"\u2022\u00a0{_inline_markup(_clean_item(item))}", styles["Bullet"]))
+            story.append(
+                Paragraph(f"\u2022\u00a0{_inline_markup(_clean_item(item))}", styles["Bullet"])
+            )
     elif isinstance(block, NumberedListBlock):
         for index, item in enumerate(block.items, start=1):
             story.append(
