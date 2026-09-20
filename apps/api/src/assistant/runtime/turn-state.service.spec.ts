@@ -166,6 +166,60 @@ describe('TurnStateService', () => {
       expect.objectContaining({ type: 'error' }),
     );
   });
+
+  it('persists related questions on the turn and nulls them when absent', async () => {
+    const harness = createHarness();
+
+    await expect(harness.service.completeTurn({
+      turnId: TURN_ID,
+      tenantId: TENANT_ID,
+      conversationId: CONVERSATION_ID,
+      executionOwner: EXECUTION_OWNER,
+      content: '你好！',
+      completion: { latencyMs: 12, finishReason: 'stop' },
+      relatedQuestions: ['怎么申请试用？', '有免费额度吗？'],
+    })).resolves.toBe(true);
+
+    expect(harness.tx.assistantTurn.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        id: TURN_ID,
+        tenantId: TENANT_ID,
+        conversationId: CONVERSATION_ID,
+        status: AssistantTurnStatus.RUNNING,
+      }),
+      data: expect.objectContaining({
+        status: AssistantTurnStatus.COMPLETED,
+        relatedQuestions: ['怎么申请试用？', '有免费额度吗？'],
+      }),
+    }));
+    expect(harness.tx.conversationMessage.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        turnId: TURN_ID,
+        role: 'ASSISTANT',
+        content: '你好！',
+      }),
+    });
+    expect(harness.events.appendInTransaction).toHaveBeenCalledWith(
+      harness.tx,
+      TURN_ID,
+      TENANT_ID,
+      AssistantEventType.COMPLETED,
+      expect.objectContaining({ type: 'completed', latencyMs: 12, finishReason: 'stop' }),
+    );
+
+    await expect(harness.service.completeTurn({
+      turnId: TURN_ID,
+      tenantId: TENANT_ID,
+      conversationId: CONVERSATION_ID,
+      executionOwner: EXECUTION_OWNER,
+      content: '好的',
+      completion: { latencyMs: 8, finishReason: 'stop' },
+      relatedQuestions: null,
+    })).resolves.toBe(true);
+    expect(harness.tx.assistantTurn.updateMany).toHaveBeenLastCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ relatedQuestions: null }),
+    }));
+  });
 });
 
 function createHarness(options: {

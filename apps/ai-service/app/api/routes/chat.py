@@ -26,8 +26,6 @@ from app.api.generated.models import (
     ErrorResponse,
     ExecutionMetadata,
     Provider,
-    RelatedQuestionsRequest,
-    RelatedQuestionsResponse,
     StreamErrorEvent,
     StreamExecutionMetadata,
     TokenUsage,
@@ -39,8 +37,8 @@ from app.api.generated.models import (
     ToolCall as ApiToolCall,
 )
 from app.chat.compactor import ChatCompactor
+from app.chat.follow_up import FollowUpStreamFilter
 from app.chat.orchestrator import ChatOrchestrator, PreparedChat
-from app.chat.related_questions import RelatedQuestionsGenerator
 from app.chat.tool_turn import PreparedToolTurn, ToolTurnOrchestrator
 from app.core.config import ModelProfile
 from app.core.errors import (
@@ -129,28 +127,6 @@ async def compact_chat(payload: CompactChatRequest, request: Request) -> Compact
         summary=compaction.summary,
         summarized_through_message_id=compaction.summarized_through_message_id,
         execution=_execution_metadata(compaction.routing),
-    )
-
-
-@router.post(
-    "/related-questions",
-    response_model=RelatedQuestionsResponse,
-    operation_id="generateRelatedQuestions",
-    summary="Generate short follow-up questions for a completed chat reply",
-    response_description="Follow-up questions generated",
-    responses=CHAT_ERROR_RESPONSES,
-)
-async def related_questions(
-    payload: RelatedQuestionsRequest, request: Request
-) -> RelatedQuestionsResponse:
-    generation = await RelatedQuestionsGenerator(
-        _require_router(request, payload.request_id)
-    ).generate(payload)
-    return RelatedQuestionsResponse(
-        request_id=payload.request_id,
-        conversation_id=payload.conversation_id,
-        questions=generation.questions,
-        execution=_execution_metadata(generation.routing),
     )
 
 
@@ -263,12 +239,15 @@ async def _tool_turn_stream_events(
         )
     )
 
+    follow_up = FollowUpStreamFilter()
     token_usage: TokenUsageData | None = None
     finish_reason: str | None = None
     try:
         async for chunk in routed.chunks:
             if chunk.text:
-                yield _encode_sse(ContentDeltaEvent(type="content_delta", text=chunk.text))
+                visible = follow_up.feed(chunk.text)
+                if visible:
+                    yield _encode_sse(ContentDeltaEvent(type="content_delta", text=visible))
             if chunk.tool_calls:
                 yield _encode_sse(
                     ToolTurnToolCallsEvent(
@@ -333,6 +312,10 @@ async def _tool_turn_stream_events(
         )
         return
 
+    tail = follow_up.finish()
+    if tail:
+        yield _encode_sse(ContentDeltaEvent(type="content_delta", text=tail))
+    questions = follow_up.result()
     if token_usage is not None:
         yield _encode_sse(
             UsageEvent(
@@ -345,13 +328,14 @@ async def _tool_turn_stream_events(
             )
         )
     latency_ms = round((time.perf_counter() - routed.started_at) * 1000)
-    yield _encode_sse(
-        ChatStreamCompletedEvent(
-            type="completed",
-            latency_ms=latency_ms,
-            finish_reason=finish_reason,
-        )
-    )
+    completion: dict[str, object] = {
+        "type": "completed",
+        "latency_ms": latency_ms,
+        "finish_reason": finish_reason,
+    }
+    if questions:
+        completion["related_questions"] = questions
+    yield _encode_sse(ChatStreamCompletedEvent(**completion))
     logger.info(
         "tool turn stream completed",
         extra={
@@ -434,12 +418,15 @@ async def _chat_stream_events(
         )
     )
 
+    follow_up = FollowUpStreamFilter()
     token_usage: TokenUsageData | None = None
     finish_reason: str | None = None
     try:
         async for chunk in routed.chunks:
             if chunk.text:
-                yield _encode_sse(ContentDeltaEvent(type="content_delta", text=chunk.text))
+                visible = follow_up.feed(chunk.text)
+                if visible:
+                    yield _encode_sse(ContentDeltaEvent(type="content_delta", text=visible))
             if chunk.token_usage is not None:
                 token_usage = chunk.token_usage
             if chunk.finish_reason is not None:
@@ -490,6 +477,10 @@ async def _chat_stream_events(
         )
         return
 
+    tail = follow_up.finish()
+    if tail:
+        yield _encode_sse(ContentDeltaEvent(type="content_delta", text=tail))
+    questions = follow_up.result()
     if token_usage is not None:
         yield _encode_sse(
             UsageEvent(
@@ -502,13 +493,14 @@ async def _chat_stream_events(
             )
         )
     latency_ms = round((time.perf_counter() - routed.started_at) * 1000)
-    yield _encode_sse(
-        ChatStreamCompletedEvent(
-            type="completed",
-            latency_ms=latency_ms,
-            finish_reason=finish_reason,
-        )
-    )
+    completion: dict[str, object] = {
+        "type": "completed",
+        "latency_ms": latency_ms,
+        "finish_reason": finish_reason,
+    }
+    if questions:
+        completion["related_questions"] = questions
+    yield _encode_sse(ChatStreamCompletedEvent(**completion))
     logger.info(
         "chat stream completed",
         extra={
@@ -587,4 +579,5 @@ def _encode_stream_error(*, request_id: str, code: str, message: str, retryable:
 
 def _encode_sse(event: BaseModel) -> str:
     event_type = event.type
-    return f"event: {event_type}\ndata: {event.model_dump_json(by_alias=True)}\n\n"
+    payload = event.model_dump_json(by_alias=True, exclude_none=True)
+    return f"event: {event_type}\ndata: {payload}\n\n"

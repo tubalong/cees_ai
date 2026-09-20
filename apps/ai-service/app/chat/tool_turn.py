@@ -7,6 +7,7 @@ from app.api.generated.models import ToolCall as ApiToolCall
 from app.api.generated.models import ToolTurnRequest
 from app.api.message_content import message_content_to_internal
 from app.chat.context import BASE_SYSTEM_PROMPT, estimate_message_tokens
+from app.chat.follow_up import FOLLOW_UP_INSTRUCTION
 from app.core.config import ChatMode
 from app.core.errors import AIServiceError
 from app.llm.types import ChatMessage, ToolCall
@@ -36,6 +37,7 @@ class ToolTurnOrchestrator:
         fixed_messages = [ChatMessage(role="system", content=BASE_SYSTEM_PROMPT)]
         if request.instructions:
             fixed_messages.append(ChatMessage(role="system", content=request.instructions))
+        fixed_messages.append(ChatMessage(role="system", content=FOLLOW_UP_INSTRUCTION))
         if request.conversation_summary:
             fixed_messages.append(
                 ChatMessage(

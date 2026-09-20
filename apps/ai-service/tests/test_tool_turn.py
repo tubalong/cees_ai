@@ -156,3 +156,39 @@ def test_tool_turn_stream_returns_tool_calls_event() -> None:
         }
     ]
     assert events[3][1]["token_usage"]["total_tokens"] == 14
+
+
+def test_tool_turn_stream_extracts_follow_up_questions() -> None:
+    tool_profile = profile(capabilities={ModelCapability.chat, ModelCapability.tool_calling})
+    provider = StubProvider(
+        tool_profile,
+        [],
+        tool_stream_outcomes=[
+            [
+                ProviderStreamChunk(text="已生成图片。"),
+                ProviderStreamChunk(
+                    text='<follow_up_questions>["换成黑白的？"]</follow_up_questions>',
+                ),
+                ProviderStreamChunk(finish_reason="stop"),
+            ]
+        ],
+    )
+    model_catalog = catalog(
+        {"tool": tool_profile},
+        {ModelRole.orchestrator: ["tool"]},
+    )
+    router = LLMRouter(model_catalog, lambda _name, _profile: provider)
+    client = TestClient(create_app(runtime=ready_runtime(router, model_catalog)))
+
+    with client:
+        response = client.post(
+            "/internal/v1/chat/tool-turn/stream",
+            headers={"X-AI-Internal-Token": "secret"},
+            json=tool_turn_payload(),
+        )
+
+    assert response.status_code == 200
+    events = parse_sse_events(response.text)
+    deltas = [data["text"] for name, data in events if name == "content_delta"]
+    assert "".join(deltas) == "已生成图片。"
+    assert events[-1][1]["related_questions"] == ["换成黑白的？"]
