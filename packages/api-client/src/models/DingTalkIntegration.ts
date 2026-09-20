@@ -2,12 +2,19 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
+import type { DingTalkIntegrationMode } from './DingTalkIntegrationMode';
+import type { DingTalkIntegrationStatus } from './DingTalkIntegrationStatus';
 export type DingTalkIntegration = {
     id: string;
     tenantId: string;
-    corpId: string;
-    appKey: string;
-    status: DingTalkIntegration.status;
+    mode: DingTalkIntegrationMode;
+    corpId: string | null;
+    appKey: string | null;
+    authorizedByMembershipId: string | null;
+    authorizedExternalUserId: string | null;
+    authorizedProfile: string | null;
+    grantedCapabilities: Array<string>;
+    status: DingTalkIntegrationStatus;
     lastVerifiedAt: string | null;
     lastSyncedAt: string | null;
     lastErrorCode: string | null;
@@ -16,10 +23,4 @@ export type DingTalkIntegration = {
     createdAt: string;
     updatedAt: string;
 };
-export namespace DingTalkIntegration {
-    export enum status {
-        ACTIVE = 'ACTIVE',
-        DISABLED = 'DISABLED',
-    }
-}
 

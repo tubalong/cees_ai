@@ -1,6 +1,7 @@
 import {
     BadRequestException,
     ConflictException,
+    ForbiddenException,
     Injectable,
     NotFoundException,
 } from '@nestjs/common';
@@ -21,6 +22,7 @@ import {
     normalizeAccount,
 } from '../auth/account';
 import { PrismaService } from '../database/prisma.service';
+import { TENANT_ADMIN_ROLE_CODE } from '../rbac/permission-catalog';
 import { TenantContext } from '../tenant/tenant-context';
 import {
     ApplyDingTalkMappingDto,
@@ -35,7 +37,6 @@ import {
 } from './dingtalk.types';
 
 const ROOT_EXTERNAL_DEPARTMENT_ID = '1';
-const TENANT_ADMIN_ROLE_CODE = 'tenant_admin';
 
 type DepartmentRecord = {
     id: string;
@@ -93,12 +94,14 @@ export class DingTalkMappingService {
     ) { }
 
     async preview(input: PreviewDingTalkMappingDto): Promise<DingTalkMappingPreviewResult> {
+        this.assertTenantAdmin();
         const plan = await this.buildPlan(input);
         return plan.preview;
     }
 
     async apply(input: ApplyDingTalkMappingDto): Promise<DingTalkMappingResult> {
         const context = this.tenantContext.require();
+        this.assertTenantAdmin();
         const plan = await this.buildPlan(input);
         const departmentResolutions = new Map(
             input.departmentResolutions.map((resolution) => [resolution.dingtalkDepartmentId, resolution]),
@@ -581,6 +584,12 @@ export class DingTalkMappingService {
     }
     private invalidResolution(message: string): BadRequestException {
         return new BadRequestException({ code: 'DINGTALK_MAPPING_RESOLUTION_INVALID', message });
+    }
+
+    private assertTenantAdmin(): void {
+        if (!this.tenantContext.require().roles.includes(TENANT_ADMIN_ROLE_CODE)) {
+            throw new ForbiddenException({ code: 'DINGTALK_TENANT_ADMIN_REQUIRED', message: '只有 CEES 租户管理员可以导入钉钉组织' });
+        }
     }
 
     private async writeAudit(

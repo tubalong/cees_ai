@@ -90,6 +90,44 @@ describe('TurnRunnerService', () => {
         expect(harness.state.createTurn).not.toHaveBeenCalled();
     });
 
+    it('rejects connector contexts that contain credentials', async () => {
+        const harness = createHarness();
+
+        await expect(harness.service.startTurn({
+            conversationId: CONVERSATION_ID,
+            idempotencyKey: 'key-connector-secret',
+            content: '查看我的钉钉信息',
+            mode: 'standard',
+            connectorContexts: [{
+                provider: 'DINGTALK',
+                toolId: 'dws_read_0123456789abcdef',
+                toolName: 'contact.user.get_self',
+                fetchedAt: '2026-09-20T00:00:00.000Z',
+                data: { accessToken: 'must-not-pass' },
+            }],
+        })).rejects.toMatchObject({ response: { code: 'CONNECTOR_CONTEXT_SECRET_REJECTED' } });
+        expect(harness.state.createTurn).not.toHaveBeenCalled();
+    });
+
+    it('rejects oversized connector contexts before creating a turn', async () => {
+        const harness = createHarness();
+
+        await expect(harness.service.startTurn({
+            conversationId: CONVERSATION_ID,
+            idempotencyKey: 'key-connector-large',
+            content: '查看我的钉钉信息',
+            mode: 'standard',
+            connectorContexts: [{
+                provider: 'DINGTALK',
+                toolId: 'dws_read_0123456789abcdef',
+                toolName: 'contact.user.get_self',
+                fetchedAt: '2026-09-20T00:00:00.000Z',
+                data: { value: 'x'.repeat(70 * 1024) },
+            }],
+        })).rejects.toMatchObject({ response: { code: 'CONNECTOR_CONTEXT_TOO_LARGE' } });
+        expect(harness.state.createTurn).not.toHaveBeenCalled();
+    });
+
     it('uses the conversation default mode when the request omits mode', async () => {
         const harness = createHarness({ conversationMode: 'ultra' });
 
@@ -1132,12 +1170,13 @@ function hashTurnRequestForTest(
     content: string,
     imageFileIds: string[] = [],
     documentFileIds: string[] = [],
+    connectorContexts: unknown[] = [],
     knowledgeBaseEnabled = false,
     webSearchEnabled = false,
 ): string {
     const { createHash } = require('node:crypto') as typeof import('node:crypto');
     return createHash('sha256')
-        .update(JSON.stringify({ conversationId, mode, content, imageFileIds, documentFileIds, knowledgeBaseEnabled, webSearchEnabled }))
+        .update(JSON.stringify({ conversationId, mode, content, imageFileIds, documentFileIds, connectorContexts, knowledgeBaseEnabled, webSearchEnabled }))
         .digest('hex');
 }
 

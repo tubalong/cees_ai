@@ -25,6 +25,7 @@ import { PrismaService } from '../../database/prisma.service';
 import { TenantContext } from '../../tenant/tenant-context';
 import { describeAssistantError } from '../assistant.errors';
 import {
+  ConnectorContextInput,
   isTerminalTurnStatus,
   PublicTurn,
   PublicTurnCapabilities,
@@ -98,6 +99,7 @@ export class TurnRunnerService implements OnModuleDestroy {
     content?: string | null;
     imageFileIds?: string[];
     documentFileIds?: string[];
+    connectorContexts?: ConnectorContextInput[];
     /** 未显式指定时使用会话的默认模式。 */
     mode?: PublicTurnMode;
     /** 本轮是否允许检索知识库；省略时默认关闭。 */
@@ -121,6 +123,7 @@ export class TurnRunnerService implements OnModuleDestroy {
       requestId: context.requestId,
     });
     const documentFileIds = input.documentFileIds ?? [];
+    const connectorContexts = normalizeConnectorContexts(input.connectorContexts);
     if (!input.content?.trim() && imageFileIds.length === 0 && documentFileIds.length === 0) {
       throw new BadRequestException({
         code: 'MESSAGE_CONTENT_EMPTY',
@@ -133,6 +136,7 @@ export class TurnRunnerService implements OnModuleDestroy {
       input.content ?? '',
       imageFileIds,
       documentFileIds,
+      connectorContexts,
       input.knowledgeBaseEnabled ?? false,
       input.webSearchEnabled ?? false,
     );
@@ -166,6 +170,7 @@ export class TurnRunnerService implements OnModuleDestroy {
       content: input.content,
       imageFileIds,
       documentFileIds,
+      connectorContexts,
       mode,
       knowledgeBaseEnabled: input.knowledgeBaseEnabled ?? false,
       executionOwner: this.executionOwner,
@@ -957,6 +962,7 @@ function hashTurnRequest(
   content: string,
   imageFileIds: readonly string[] = [],
   documentFileIds: readonly string[] = [],
+  connectorContexts: readonly ConnectorContextInput[] = [],
   knowledgeBaseEnabled = false,
   webSearchEnabled = false,
 ): string {
@@ -967,10 +973,50 @@ function hashTurnRequest(
       content,
       imageFileIds,
       documentFileIds,
+      connectorContexts,
       knowledgeBaseEnabled,
       webSearchEnabled,
     }))
     .digest('hex');
+}
+
+function normalizeConnectorContexts(input: readonly ConnectorContextInput[] | undefined): ConnectorContextInput[] {
+  if (!input?.length) return [];
+  const serialized = JSON.stringify(input);
+  if (Buffer.byteLength(serialized, 'utf8') > 64 * 1024) {
+    throw new BadRequestException({
+      code: 'CONNECTOR_CONTEXT_TOO_LARGE',
+      message: '本轮连接器上下文超过 64KB，请缩小查询范围后重试',
+    });
+  }
+  assertNoConnectorSecrets(input);
+  return input.map((context) => ({
+    provider: context.provider,
+    toolId: context.toolId,
+    toolName: context.toolName,
+    fetchedAt: context.fetchedAt,
+    data: context.data,
+  }));
+}
+
+function assertNoConnectorSecrets(value: unknown, depth = 0): void {
+  if (depth > 12) {
+    throw new BadRequestException({ code: 'CONNECTOR_CONTEXT_INVALID', message: '连接器上下文嵌套层级过深' });
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item) => assertNoConnectorSecrets(item, depth + 1));
+    return;
+  }
+  if (!value || typeof value !== 'object') return;
+  for (const [key, item] of Object.entries(value)) {
+    if (/(?:token|secret|cookie|authorization|credential|password)/i.test(key)) {
+      throw new BadRequestException({
+        code: 'CONNECTOR_CONTEXT_SECRET_REJECTED',
+        message: '连接器上下文不得包含 Token、Cookie、密码或其他授权凭据',
+      });
+    }
+    assertNoConnectorSecrets(item, depth + 1);
+  }
 }
 
 /**

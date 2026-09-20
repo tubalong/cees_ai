@@ -7,6 +7,8 @@ import type { ConversationListResponseEnvelope } from '../models/ConversationLis
 import type { ConversationResponseEnvelope } from '../models/ConversationResponseEnvelope';
 import type { CreateConversationRequest } from '../models/CreateConversationRequest';
 import type { CreateTurnRequest } from '../models/CreateTurnRequest';
+import type { DingTalkConnectorPlanRequest } from '../models/DingTalkConnectorPlanRequest';
+import type { DingTalkConnectorPlanResponseEnvelope } from '../models/DingTalkConnectorPlanResponseEnvelope';
 import type { TurnResponseEnvelope } from '../models/TurnResponseEnvelope';
 import type { TurnStreamEvent } from '../models/TurnStreamEvent';
 import type { UpdateConversationRequest } from '../models/UpdateConversationRequest';
@@ -14,6 +16,33 @@ import type { CancelablePromise } from '../core/CancelablePromise';
 import { OpenAPI } from '../core/OpenAPI';
 import { request as __request } from '../core/request';
 export class ConversationService {
+    /**
+     * Plan read-only DingTalk DWS queries for the current question
+     * Desktop dynamically discovers read-only tools from the locally installed DWS Schema. The API only asks the model
+     * to select tools and arguments; it never stores DWS credentials or executes local commands. Before execution, Desktop
+     * must reload the leaf Schema and verify effect=read, confirmation=not_required, and availability=available.
+     *
+     * @returns DingTalkConnectorPlanResponseEnvelope Up to three local read-only calls; calls is empty when DingTalk data is unnecessary
+     * @throws ApiError
+     */
+    public static planDingTalkConnectorQueries({
+        requestBody,
+    }: {
+        requestBody: DingTalkConnectorPlanRequest,
+    }): CancelablePromise<DingTalkConnectorPlanResponseEnvelope> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/assistant/connectors/dingtalk/plan',
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                400: `Invalid query or tool catalog`,
+                401: `Authentication or tenant membership is invalid`,
+                502: `AI provider returned an invalid plan`,
+                503: `AI service or model is temporarily unavailable`,
+            },
+        });
+    }
     /**
      * 创建当前成员的私有 AI 会话
      * 创建属于当前租户成员的私有会话。标题可省略，服务端在首轮完成后根据首条消息自动生成。

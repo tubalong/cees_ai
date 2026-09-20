@@ -6,6 +6,8 @@ import { KnowledgeModule } from '../knowledge/knowledge.module';
 import { StorageModule } from '../storage/storage.module';
 import { WebSearchModule } from '../web-search/web-search.module';
 import { AssistantController } from './api/assistant.controller';
+import { AssistantConnectorController } from './api/assistant-connector.controller';
+import { DingTalkConnectorPlannerService } from './connectors/dingtalk-connector-planner.service';
 import { ConversationService } from './conversation/conversation.service';
 import { EventService } from './conversation/event.service';
 import { ContextBuilderService } from './runtime/context-builder.service';
@@ -34,9 +36,10 @@ import { ListDocumentsTool } from './tools/executors/list-documents.tool';
  */
 @Module({
   imports: [AiOrchestrationModule, DocumentModule, ImageModule, KnowledgeModule, StorageModule, WebSearchModule],
-  controllers: [AssistantController],
+  controllers: [AssistantController, AssistantConnectorController],
   providers: [
     ConversationService,
+    DingTalkConnectorPlannerService,
     EventService,
     ContextBuilderService,
     IntentCapabilityService,

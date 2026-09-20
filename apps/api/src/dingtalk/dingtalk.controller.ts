@@ -20,6 +20,7 @@ import {
     UpdateDingTalkIntegrationDto,
     ApplyDingTalkMappingDto,
     PreviewDingTalkMappingDto,
+    ImportDingTalkVisibleOrganizationSnapshotDto,
 } from './dto';
 import { DingTalkMappingService } from './dingtalk-mapping.service';
 import { DingTalkService } from './dingtalk.service';
@@ -77,6 +78,15 @@ export class DingTalkController {
     @ApiOkResponse({ description: '钉钉组织架构和人员已同步' })
     syncOrganization(): Promise<DingTalkSyncJobResult> {
         return this.dingTalkService.syncOrganization();
+    }
+
+    @Post('organization/snapshot')
+    @RequirePermissions('dingtalk.organization.sync')
+    @ApiOkResponse({ description: 'DWS/MCP 可见组织快照已导入' })
+    importVisibleOrganizationSnapshot(
+        @Body() input: ImportDingTalkVisibleOrganizationSnapshotDto,
+    ): Promise<DingTalkSyncJobResult> {
+        return this.dingTalkService.importVisibleOrganizationSnapshot(input);
     }
 
     @Get('organization/departments')
