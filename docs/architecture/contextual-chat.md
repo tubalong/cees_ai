@@ -153,17 +153,24 @@ ai-service 不保存消息、回答或摘要正文；NestJS 保存会话事实�
 
 ## 9. 待实现与验证缺口
 
-### 9.1 相关问题推荐（三个推荐回复）——未实现，暂缓待确认
+### 9.1 相关问题推荐（三个推荐回复）——后端已实现，前端待接入
 
-**状态**：未实现（已记录为待办，此前暂缓）。AI 回答结束后附带 3 个相关问题，供用户一键继续提问。
+**状态**：后端已实现（契约 + ai-service + NestJS 全链路落地，含单测）；桌面/移动端渲染与点击提问尚未实现。
 
-**计划落点**（接口形态未定，实现前需先与用户讨论确认；契约优先，见 AGENTS.md 第 3 条）：
+**已确认方案与落地形态**：
 
-1. 契约（`packages/contracts`）：在公开对话契约中新增推荐问题的下发形态——候选为「turn 完成事件携带 `relatedQuestions` 字段」或「独立 SSE 事件」，待与用户确认后再定，避免先写代码后返工；
-2. NestJS Assistant（`apps/api`）：在 turn 收尾阶段生成/透传推荐问题（生成策略未定：模型生成或服务端规则），随流式事件或完成事件下发，并考虑与审计/ToolCall 状态的先后顺序；
-3. 桌面端（`apps/desktop`）：对话页回答末尾渲染 3 个推荐问题按钮，点击即发起新一轮提问（复用现有 turn 提交流程）；mobile 视契约形态跟进。
+- 生成方式：**异步二次调用**——主回答完成后由 NestJS fire-and-forget 调用 ai-service 轻量端点，不阻塞轮次收尾；失败静默丢弃（logger.warn），不影响已完成的轮次；
+- 下发形态：**独立 SSE 事件 `related_questions`**，位于 `completed` 之后到达（seq 递增）；SSE 连接在轮次终态后进入最长 `RELATED_QUESTIONS_LINGER_MS`（10 秒）宽限期等待该事件，宽限期到自然关闭；`error` 仍立即终止；
+- 内容约束：至多 3 条、每条不超过 30 字的简短追问；ai-service 过滤超长/空/非字符串条目；
+- 持久化：**不落业务表**（不建推荐问题专用表）；事件 payload 随既有 `assistant_events` 事件流传输与重放。
 
-**边界**：推荐问题只影响「提问」链路，不涉及知识库检索、工具调用或权限模型，实现时按新功能独立分块。
+**落地明细**：
+
+1. 契约（`packages/contracts`）：公开对话契约新增 `TurnStreamRelatedQuestionsEvent`（`openapi.yaml` 0.33.0）；ai-service 内部契约新增 `/internal/v1/chat/related-questions`（`ai-service.openapi.yaml` 0.6.0）；三端客户端已重新生成；
+2. ai-service（`apps/ai-service`）：`RelatedQuestionsGenerator` 按 `related_questions_role` 生成，输出截断/非法分别返回 `RELATED_QUESTIONS_TRUNCATED` / `RELATED_QUESTIONS_INVALID`；
+3. NestJS Assistant（`apps/api`）：`TurnRunnerService.completeTurn` 在 CAS 成功后触发异步生成，成功则以 `related_questions` 事件追加；事件类型落库使用新增 `AssistantEventType.RELATED_QUESTIONS`；调用计入 AiInvocation 审计（`chat.related_questions` + `questionCount`）。
+
+**待做（前端）**：桌面端对话页回答末尾渲染推荐问题按钮，点击即发起新一轮提问（复用现有 turn 提交流程）；mobile 视契约形态跟进。
 
 ### 9.2 上下文压缩——已实现（代码 + 单测），真机长对话触发未验证
 

@@ -414,6 +414,15 @@ GET    /api/v1/projects/{projectId}/tasks/{taskId}/activities
 - 解析出的标题同时作为渲染封面标题传给 ai-service，避免历史上被误转码的坏标题（如落库为 `??????`）一路带到文件封面与文件名；
 - 导出与文件名解析未新增契约字段与权限码，PDF/PPTX 导出同样复用 `document.read`。
 
+## 相关问题推荐说明（2026-09-20，契约 0.33.0）
+
+- 公开契约版本由 `0.32.0` 提升为 `0.33.0`，兼容新增 `TurnStreamRelatedQuestionsEvent`（`related_questions` 类型，至多 3 条、每条不超过 30 字），在 `completed` 之后异步到达；旧客户端可忽略未知事件类型，客户端需重新生成；
+- SSE 连接在轮次终态后最多再保持 10 秒等待该事件（宽限期），到期自然关闭；`error` 仍立即终止；推荐问题生成失败时静默丢弃，不影响轮次结果；
+- ai-service 内部契约兼容升级到 `0.6.0`，新增 `POST /internal/v1/chat/related-questions`：按 `related_questions_role` 生成，输出截断/非法分别返回 `RELATED_QUESTIONS_TRUNCATED` / `RELATED_QUESTIONS_INVALID`；
+- NestJS 在轮次 CAS 成功后 fire-and-forget 触发生成，调用计入 AiInvocation 审计（`chat.related_questions` + `questionCount`）；事件 payload 随既有 `assistant_events` 事件流传输与重放，不建推荐问题专用表；
+- Prisma 新增 `20260920012057_assistant_related_questions_event` 迁移：`AssistantEventType` 枚举新增 `RELATED_QUESTIONS`；
+- 详细业务边界见 [Assistant / Conversation API](assistant-api.md)，架构说明见 [公开 AI 对话链路与上下文压缩](../architecture/contextual-chat.md)。
+
 ## 契约事实源
 
 - `packages/contracts/openapi/openapi.yaml` 是 NestJS 公开 API 的事实源。
