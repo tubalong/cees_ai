@@ -1,0 +1,194 @@
+.connector-marketplace-page {
+    max-width: 1180px;
+    margin: 0 auto;
+}
+
+.connector-marketplace-header,
+.connector-section-heading,
+.connector-card-title,
+.connector-card-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+}
+
+.connector-marketplace-header {
+    align-items: flex-start;
+    margin-bottom: 30px;
+}
+
+.connector-marketplace-header h1 {
+    margin: 6px 0 8px;
+    font-size: 30px;
+}
+
+.connector-marketplace-header p,
+.connector-section-heading p,
+.connector-card-copy p {
+    margin: 0;
+    color: var(--muted);
+    line-height: 1.7;
+}
+
+.connector-marketplace-eyebrow {
+    color: var(--primary);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .18em;
+}
+
+.connector-section {
+    padding: 24px;
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    background: var(--surface);
+}
+
+.connector-section-heading {
+    align-items: flex-start;
+    margin-bottom: 20px;
+}
+
+.connector-section-heading h2 {
+    margin: 0 0 5px;
+    font-size: 18px;
+}
+
+.connector-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 18px;
+}
+
+.connector-card {
+    position: relative;
+    min-height: 260px;
+    display: flex;
+    flex-direction: column;
+    padding: 22px;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 15px;
+    background: linear-gradient(145deg, var(--surface) 0%, var(--surface-soft) 100%);
+    box-shadow: 0 12px 30px rgba(32, 45, 80, .06);
+}
+
+.connector-card.is-connected {
+    border-color: rgba(40, 181, 116, .38);
+    box-shadow: 0 14px 34px rgba(40, 181, 116, .1);
+}
+
+.connector-add-button {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    width: 34px;
+    height: 34px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    color: var(--primary);
+    border: 1px solid rgba(86, 92, 246, .18);
+    border-radius: 50%;
+    background: var(--surface);
+    cursor: pointer;
+    transition: transform .16s ease, box-shadow .16s ease;
+}
+
+.connector-add-button:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 7px 18px rgba(86, 92, 246, .18);
+}
+
+.connector-card.is-connected .connector-add-button {
+    color: #28a96b;
+    border-color: rgba(40, 169, 107, .2);
+}
+
+.connector-logo,
+.connector-install-logo {
+    width: 54px;
+    height: 54px;
+    display: grid;
+    place-items: center;
+    color: #fff;
+    border-radius: 14px;
+    background: linear-gradient(145deg, #1687ff, #0866df);
+    box-shadow: 0 10px 22px rgba(22, 135, 255, .25);
+    font-size: 24px;
+    font-weight: 700;
+}
+
+.connector-card-copy {
+    margin-top: 20px;
+}
+
+.connector-card-title h3 {
+    margin: 0;
+    font-size: 18px;
+}
+
+.connector-status {
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.connector-status.is-connected {
+    color: #28a96b;
+    font-weight: 600;
+}
+
+.connector-card-copy p {
+    margin-top: 12px;
+    font-size: 13px;
+}
+
+.connector-card-meta {
+    min-height: 34px;
+    margin-top: auto;
+    padding-top: 18px;
+    border-top: 1px solid var(--line);
+    color: var(--text);
+    font-size: 12px;
+}
+
+.connector-card-meta small {
+    color: var(--muted);
+}
+
+.connector-card-error {
+    margin-top: 10px;
+    color: #d84a3f;
+    font-size: 12px;
+}
+
+.connector-install-dialog {
+    display: grid;
+    grid-template-columns: 58px minmax(0, 1fr);
+    gap: 18px;
+    padding-top: 10px;
+}
+
+.connector-install-dialog p {
+    margin: 0 0 12px;
+    line-height: 1.7;
+}
+
+.connector-install-dialog ul {
+    margin: 0;
+    padding-left: 20px;
+    color: var(--muted);
+    line-height: 1.9;
+}
+
+.connector-install-warning {
+    margin-top: 12px !important;
+    color: #d88416;
+}
+
+@media (max-width: 1100px) {
+    .connector-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}

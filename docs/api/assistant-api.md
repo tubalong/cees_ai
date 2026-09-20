@@ -1,6 +1,6 @@
 # Assistant / Conversation API
 
-> 公开契约版本：`0.24.0`  
+> 公开契约版本：`0.35.0`
 > 契约事实源：[`packages/contracts/openapi/openapi.yaml`](../../packages/contracts/openapi/openapi.yaml)  
 > 最后更新：2026-09-15
 
@@ -133,7 +133,14 @@ Accept: text/event-stream
   "imageFileIds": ["<uploaded-file-object-id>"],
   "mode": "standard",
   "knowledgeBaseEnabled": false,
-  "webSearchEnabled": false
+  "webSearchEnabled": false,
+  "connectorContexts": [{
+    "provider": "DINGTALK",
+    "toolId": "dws_read_0123456789abcdef",
+    "toolName": "attendance.record.get",
+    "fetchedAt": "2026-09-20T08:00:00.000Z",
+    "data": { "date": "2026-09-20", "result": { "records": [] } }
+  }]
 }
 ```
 
@@ -155,6 +162,54 @@ Accept: text/event-stream
 - 显式开关与意图识别结果取并集，构成**本轮有效能力**，写回 `started.capabilities` 与审计元数据。
 
 两个字段参与请求哈希：同一 `Idempotency-Key` 下改动开关视为不同请求，按 `409 IDEMPOTENCY_KEY_CONFLICT` 处理。
+
+### 4.1.2 本地连接器上下文
+
+`connectorContexts` 是可选的本轮只读参考数据，当前仅接受 `DINGTALK`。每项通过 `toolId` 标识本地 DWS 工具，通过 `toolName` 保存对应的 `canonical_path`；不再使用固定能力枚举。已连接状态下，Desktop 可让模型从当前 DWS Schema 暴露的全部安全只读查询中选择工具，模型返回空计划时不会读取或上传钉钉业务数据。
+
+- API 会将上下文和用户消息一起持久化，重连、重放和模型上下文构建都以数据库记录为准；客户端不提交 DWS Token、Cookie、AppSecret 或其他凭据。
+- 单轮所有连接器上下文最大 64KB；包含 `token`、`secret`、`cookie`、`authorization`、`credential` 或 `password` 等键名时拒绝请求。
+- 上下文进入模型时包在只读参考标记中，不能成为系统指令、权限依据或正式业务写入依据；连接器当前不支持通过对话修改 CEES 或钉钉数据。
+- 钉钉组织同步仍使用 `POST /api/v1/dingtalk/organization/snapshot`，需要 CEES 租户管理员确认，不通过 `connectorContexts` 绕过组织导入权限。
+
+### 4.1.3 规划本机钉钉只读查询
+
+```http
+POST /api/v1/assistant/connectors/dingtalk/plan
+Authorization: Bearer <access-token>
+Content-Type: application/json
+```
+
+Desktop 先从本机执行 `dws schema --all --compact --format json`，只提交明确满足 `effect=read`、`confirmation=not_required`、`availability=available` 的工具定义：
+
+```json
+{
+  "query": "查一下我今天的日程",
+  "tools": [{
+    "toolId": "dws_read_0123456789abcdef",
+    "name": "calendar.event.list",
+    "description": "查询当前账号可见日程",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": { "start": { "type": "string" } }
+    }
+  }]
+}
+```
+
+响应只包含工具 ID 和结构化参数：
+
+```json
+{
+  "calls": [{
+    "toolId": "dws_read_0123456789abcdef",
+    "arguments": { "start": "2026-09-20" }
+  }]
+}
+```
+
+API 不持有 DWS Token，也不执行本地命令。由于 ai-service 单次最多接收 32 个模型工具，完整目录超过 32 项时，API 会先让模型从完整只读目录中选出最多 32 个候选，再进行参数规划；因此不会按固定产品类型截断能力。Desktop 必须在执行前重新读取具体 leaf Schema，复核工具身份、安全属性和参数白名单；模型不能提交 shell、CLI 路径或原始 argv。单次最多规划 3 个查询，无需钉钉数据时 `calls` 为空。
 
 同一会话内重复提交相同 `Idempotency-Key` 且请求内容相同，会重新订阅原轮次事件，不会创建新轮次；同一键对应不同内容返回 `409 IDEMPOTENCY_KEY_CONFLICT`。幂等键长度为 1～128 个字符。
 

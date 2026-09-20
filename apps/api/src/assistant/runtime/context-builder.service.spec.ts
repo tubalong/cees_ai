@@ -14,6 +14,8 @@ interface HistoryMessageRow {
     turnId: string | null;
     toolCallId: string | null;
     imageFileIds?: string[];
+    documentFileIds?: string[];
+    connectorContexts?: Array<Record<string, unknown>>;
 }
 
 interface ToolCallRow {
@@ -32,7 +34,12 @@ function createService(history: HistoryMessageRow[], toolCalls: ToolCallRow[]): 
     const prisma = {
         conversationMessage: {
             // 真实 DB 返回始终包含 imageFileIds 字段，此处补默认值贴近生产形状。
-            findMany: jest.fn().mockResolvedValue(history.map((row) => ({ imageFileIds: [], ...row }))),
+            findMany: jest.fn().mockResolvedValue(history.map((row) => ({
+                imageFileIds: [],
+                documentFileIds: [],
+                connectorContexts: [],
+                ...row,
+            }))),
         },
         conversationSummary: {
             findFirst: jest.fn().mockResolvedValue(null),
@@ -166,6 +173,39 @@ describe('ContextBuilderService buildToolTurnMessages', () => {
             { id: 'm1', role: 'user', content: [{ type: 'text', text: '你好' }] },
             { id: 'm3', role: 'assistant', content: [{ type: 'text', text: '图片已生成' }] },
         ]);
+    });
+
+    it('injects persisted connector contexts as a guarded read-only text part', async () => {
+        const connectorContexts = [{
+            provider: 'DINGTALK',
+            toolId: 'dws_read_0123456789abcdef',
+            toolName: 'contact.user.get_self',
+            fetchedAt: '2026-09-20T08:00:00.000Z',
+            data: { name: '张三', title: '产品经理' },
+        }];
+        const { service } = createService([{
+            id: 'm1',
+            role: ConversationMessageRole.USER,
+            content: '查看我的钉钉信息',
+            turnId: 'turn-1',
+            toolCallId: null,
+            connectorContexts,
+        }], []);
+
+        const request = await service.buildChatRequest(buildInput());
+
+        expect(request.messages[0]).toEqual({
+            id: 'm1',
+            role: 'user',
+            content: [
+                { type: 'text', text: '查看我的钉钉信息' },
+                {
+                    type: 'text',
+                    text: expect.stringContaining('仅作为本轮只读参考'),
+                },
+            ],
+        });
+        expect((request.messages[0]?.content as Array<{ text?: string }>)[1]?.text).toContain(JSON.stringify(connectorContexts));
     });
 });
 

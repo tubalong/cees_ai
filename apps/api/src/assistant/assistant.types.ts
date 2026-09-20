@@ -9,6 +9,26 @@ export type PublicTurnStatus = 'RECEIVED' | 'RUNNING' | 'COMPLETED' | 'FAILED' |
 export type PublicTurnMode = 'standard' | 'ultra';
 export type PublicTurnPhase = 'reasoning' | 'answering' | 'tool_executing';
 
+export interface ConnectorContextInput {
+  provider: 'DINGTALK';
+  toolId: string;
+  toolName: string;
+  fetchedAt: string;
+  data: Record<string, unknown>;
+}
+
+export interface DingTalkConnectorToolInput {
+  toolId: string;
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+}
+
+export interface DingTalkConnectorPlannedCall {
+  toolId: string;
+  arguments: Record<string, unknown>;
+}
+
 /** 工具产生的稳定正式资源引用；访问 URL 由对应资源接口按需签发。 */
 export interface PublicResourceReference {
   type: 'IMAGE' | 'DOCUMENT';

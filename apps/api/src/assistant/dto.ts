@@ -5,8 +5,11 @@ import {
   ArrayMaxSize,
   IsArray,
   IsBoolean,
+  IsDateString,
   IsIn,
   IsInt,
+  Matches,
+  IsObject,
   IsOptional,
   IsString,
   IsUUID,
@@ -15,8 +18,75 @@ import {
   Min,
   MinLength,
   ValidateIf,
+  ValidateNested,
 } from 'class-validator';
-import type { PublicTurnMode } from './assistant.types';
+import type { ConnectorContextInput, DingTalkConnectorToolInput, PublicTurnMode } from './assistant.types';
+
+export class ConnectorContextDto implements ConnectorContextInput {
+  @ApiProperty({ enum: ['DINGTALK'] })
+  @IsIn(['DINGTALK'])
+  provider!: 'DINGTALK';
+
+  @ApiProperty({ maxLength: 80, pattern: '^dws_read_[a-f0-9]{16}$' })
+  @IsString()
+  @Matches(/^dws_read_[a-f0-9]{16}$/)
+  @MaxLength(80)
+  toolId!: string;
+
+  @ApiProperty({ maxLength: 240 })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(240)
+  toolName!: string;
+
+  @ApiProperty({ format: 'date-time' })
+  @IsDateString()
+  fetchedAt!: string;
+
+  @ApiProperty({ type: 'object', additionalProperties: true })
+  @IsObject()
+  data!: Record<string, unknown>;
+}
+
+export class DingTalkConnectorToolDto implements DingTalkConnectorToolInput {
+  @ApiProperty({ maxLength: 80, pattern: '^dws_read_[a-f0-9]{16}$' })
+  @IsString()
+  @Matches(/^dws_read_[a-f0-9]{16}$/)
+  @MaxLength(80)
+  toolId!: string;
+
+  @ApiProperty({ maxLength: 240 })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(240)
+  name!: string;
+
+  @ApiProperty({ maxLength: 2000 })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(2000)
+  description!: string;
+
+  @ApiProperty({ type: 'object', additionalProperties: true })
+  @IsObject()
+  parameters!: Record<string, unknown>;
+}
+
+export class PlanDingTalkConnectorRequestDto {
+  @ApiProperty({ maxLength: 10000 })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(10000)
+  query!: string;
+
+  @ApiProperty({ type: [DingTalkConnectorToolDto], maxItems: 1500 })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(1500)
+  @Type(() => DingTalkConnectorToolDto)
+  @ValidateNested({ each: true })
+  tools!: DingTalkConnectorToolDto[];
+}
 
 export class CreateConversationRequestDto {
   @ApiPropertyOptional({
@@ -119,6 +189,18 @@ export class CreateTurnRequestDto {
   @ArrayMaxSize(8)
   @IsUUID(undefined, { each: true })
   fileIds?: string[];
+
+  @ApiPropertyOptional({
+    description: 'Desktop 从本地已授权连接器读取的本轮只读上下文；服务端仅用于回答，不作为业务写入和权限依据',
+    type: [ConnectorContextDto],
+    maxItems: 3,
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(3)
+  @Type(() => ConnectorContextDto)
+  @ValidateNested({ each: true })
+  connectorContexts?: ConnectorContextDto[];
 
   @ApiPropertyOptional({
     description: '本轮对话执行模式；省略时使用会话的默认模式',

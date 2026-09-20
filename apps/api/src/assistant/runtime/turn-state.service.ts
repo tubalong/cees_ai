@@ -9,7 +9,7 @@ import {
   ToolCallStatus,
 } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
-import type { PublicTurnMode, PublicTurnStreamEvent } from '../assistant.types';
+import type { ConnectorContextInput, PublicTurnMode, PublicTurnStreamEvent } from '../assistant.types';
 import { EventService } from '../conversation/event.service';
 import { lockConversationForUpdate } from '../conversation/conversation-transaction-lock';
 import type { KnowledgeToolCitation, ToolSource } from '../tools/tool.types';
@@ -53,6 +53,7 @@ export class TurnStateService {
     content: string | null | undefined;
     imageFileIds?: string[];
     documentFileIds?: string[];
+    connectorContexts?: ConnectorContextInput[];
     mode: PublicTurnMode;
     knowledgeBaseEnabled: boolean;
     executionOwner: string;
@@ -117,6 +118,7 @@ export class TurnStateService {
             content: input.content ?? '',
             imageFileIds: input.imageFileIds ?? [],
             documentFileIds: input.documentFileIds ?? [],
+            connectorContexts: (input.connectorContexts ?? []) as unknown as Prisma.InputJsonValue,
           },
         });
         return turn;

@@ -15,7 +15,8 @@
 - [知识库管理](knowledge-base-management.md)：第一阶段知识库 CRUD、成员权限、租户隔离、乐观锁和审计。
 - [用户个人资料管理](user-profile-management.md)：成员查询并修改自己在当前租户内的展示资料。
 - [密码修改与凭证安全](../security/password-management.md)：租户成员与平台管理员修改自己的密码。
-- [钉钉组织架构与人员同步](dingtalk-organization-sync.md)：一个租户绑定一个钉钉企业，验证凭证并同步外部部门和人员镜像。
+- [钉钉组织架构与人员同步](dingtalk-organization-sync.md)：兼容企业应用凭证和 DWS/MCP 可见组织快照，完成外部部门和人员镜像及管理员确认映射。
+- [钉钉 DWS/MCP 连接器](dingtalk-mcp-connector.md)：DWS 本地授权、可见范围导入、租户管理员边界和快照安全语义。
 - [分配策略与人财法](assignment-and-hr-finance-legal.md)：AssignmentPolicy、完整 HR 与 Finance 已实现；Legal 契约已冻结待实现。
 
 待补充。建议按以下维度维护：
