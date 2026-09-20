@@ -221,6 +221,22 @@ export class KnowledgeDocumentService {
                 scope,
             });
         }
+        // 同源锚定记录可能已被软删除：唯一约束仍被占用，新建会撞锚点冲突。
+        // 用户重新转存同一来源（同一库）时恢复该文档并追加新版本，符合「重新存入」预期。
+        const deleted = await this.findSourceDocument(actor.tenantId, input.sourceType, input.sourceId, true);
+        if (deleted) {
+            if (deleted.knowledgeBaseId !== input.knowledgeBaseId) throw this.sourceAlreadySaved();
+            await this.restoreSourceDocument(actor, input.knowledgeBaseId, deleted.id);
+            return this.appendSourceVersion(actor, {
+                knowledgeBaseId: input.knowledgeBaseId,
+                documentId: deleted.id,
+                previousVersionId: deleted.currentVersionId,
+                sourceType: input.sourceType,
+                sourceId: input.sourceId,
+                name: input.name,
+                scope,
+            });
+        }
         const resolved = await this.resolveSourceSnapshot(actor, {
             sourceType: input.sourceType,
             sourceId: input.sourceId,
@@ -570,10 +586,37 @@ export class KnowledgeDocumentService {
         tenantId: string,
         sourceType: KnowledgeDocumentSourceType,
         sourceId: string,
+        includeDeleted = false,
     ): Promise<{ id: string; knowledgeBaseId: string; currentVersionId: string | null } | null> {
         return this.prisma.knowledgeDocument.findFirst({
-            where: { tenantId, sourceType, sourceId, deletedAt: null },
+            where: {
+                tenantId,
+                sourceType,
+                sourceId,
+                ...(includeDeleted ? {} : { deletedAt: null }),
+            },
             select: { id: true, knowledgeBaseId: true, currentVersionId: true },
+        });
+    }
+
+    /**
+     * 恢复已软删除的同源文档：重新转存同一来源时复活业务记录，
+     * 随后由 appendSourceVersion 追加新快照版本并重新解析索引。
+     */
+    private async restoreSourceDocument(
+        actor: KnowledgeSourceSaveActor,
+        knowledgeBaseId: string,
+        documentId: string,
+    ): Promise<void> {
+        await this.prisma.$transaction(async (transaction) => {
+            const restored = await transaction.knowledgeDocument.updateMany({
+                where: { id: documentId, tenantId: actor.tenantId, deletedAt: { not: null } },
+                data: { deletedAt: null, updatedBy: actor.userId, version: { increment: 1 } },
+            });
+            if (restored.count !== 1) return;
+            await this.writeAudit(transaction, actor, 'KNOWLEDGE_DOCUMENT_RESTORED', documentId, {
+                knowledgeBaseId,
+            });
         });
     }
 
