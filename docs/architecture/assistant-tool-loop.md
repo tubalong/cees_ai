@@ -1,6 +1,6 @@
 # AI 助手工具循环
 
-> 状态：阶段 0-4 已落地（纯文本会话迁移 + 服务端会话 + 断线重连 + 取消 + 幂等，2026-09-10）；阶段 5-6、9 已落地（Tool Loop / 统一注册与批准 / generate_image 图片生成，2026-09-11）；阶段 10 部分落地（generate_document 文档生成，2026-09-11）；上下文压缩已升级为条数与 Token 预算双约束触发（2026-09-14，见 13.1）；额度（QuotaService）与任务、会议等其余工具执行器暂缓；联网搜索（Tavily）只读工具与结构化来源回填已于 2026-09-14 落地；2026-09-15 补充第 3.1 节三层关系说明；文档插图工具 `insert_document_image`（在已有生成文档章节末尾插图，覆盖 PDF/DOCX/PPTX）已于 2026-09-18 落地（见 17）。本文件定义 NestJS 统一驱动的 Assistant Tool Loop 架构、数据模型、工具协议与实施顺序。最后更新：2026-09-18。
+> 状态：阶段 0-4 已落地（纯文本会话迁移 + 服务端会话 + 断线重连 + 取消 + 幂等，2026-09-10）；阶段 5-6、9 已落地（Tool Loop / 统一注册与批准 / generate_image 图片生成，2026-09-11）；阶段 10 部分落地（generate_document 文档生成，2026-09-11）；上下文压缩已升级为条数与 Token 预算双约束触发（2026-09-14，见 13.1）；额度（QuotaService）与任务、会议等其余工具执行器暂缓；联网搜索（Tavily）只读工具与结构化来源回填已于 2026-09-14 落地；2026-09-15 补充第 3.1 节三层关系说明；文档插图工具 `insert_document_image`（在已有生成文档章节末尾插图，覆盖 PDF/DOCX/PPTX）已于 2026-09-18 落地（见 17）；文档库列表只读工具 `list_documents`（`document.read` 权限）已于 2026-09-20 落地（见 18）。本文件定义 NestJS 统一驱动的 Assistant Tool Loop 架构、数据模型、工具协议与实施顺序。最后更新：2026-09-20。
 
 ## 1. 目标与定位
 
@@ -422,3 +422,19 @@ POST   /conversations/{conversationId}/turns/{turnId}/cancel              取消
 - 只作用于「本会话内由 `generate_docx/pdf/pptx` 生成的文档」；手工创建或正文被手工改写导致无 `DocumentSpec` 的文档返回 `DOCUMENT_SPEC_MISSING`。
 - 不做二进制原位编辑：插入是「读 spec → 定点追加 ImageBlock → 原地重渲染」，用户对既有二进制的手动排版不在保留范围内（与 [PDF 与 PPT 生成](pdf-pptx-generation.md) 的 3.6 节一致）。
 - ai-service 仍不接触 Prisma/COS 长期凭据，只做无状态渲染。
+
+## 18. 文档库列表工具（list_documents，2026-09-20）
+
+新增 `list_documents` 只读工具，让助手在对话中检索当前用户可读的文档库文档（文档 ID、标题与更新时间摘要），支持按标题关键字过滤。配合既有 `save_to_knowledge` 工具（`sourceType: DOCUMENT` + `sourceId`），用户可以用自然语言要求把文档库中的某份文档转存为知识库内容：助手经用户确认后调用 `save_to_knowledge`，落库复用公开知识库写入链路，后端按「用户可读该文档 + 目标库 EDITOR 权限」校验。
+
+### 18.1 参数与语义
+
+- `keyword`（可选）：按文档标题模糊过滤；省略时返回最近更新的文档。
+- `limit`（可选，默认 20，上限 50）：候选数量上限。
+- 权限码 `document.read`，`riskLevel: READ`，不新增权限与迁移。
+- 可见范围：`document.manage_all` 持有者全量可见；否则取 owner、`TENANT` 可见或授予了 `document.read` 权限且未过期/删除的成员（含角色）ACL 授权。
+
+### 18.2 结果与脱敏
+
+- 结果摘要只含 `document_id`、`title`、`updated_at`，并附转存指令：须经用户确认后调用 `save_to_knowledge`（`sourceType: DOCUMENT`）；`document_id` 是内部标识，指令明确要求不得向用户展示。
+- 助手拿到文档 ID 后即可在用户确认下发起转存，无需新增链路：`save_to_knowledge` 已支持 DOCUMENT 来源，同源重复转存追加新版本（见 [知识库 RAG](knowledge-rag.md)）。
