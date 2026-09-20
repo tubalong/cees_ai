@@ -119,10 +119,14 @@ export const TENANT_PERMISSION_DEFINITIONS = [
 
 export const TENANT_ADMIN_ROLE_CODE = 'tenant_admin';
 
-/** 新建租户角色时默认授予的 AI 能力权限：图片/文档的生成与查看。 */
+/**
+ * 新建租户角色时默认授予的 AI 能力权限：图片/文档的生成与查看，
+ * 以及文档库与知识库的基础读取（AI 对话工具集对每个账号默认可用）。
+ */
 export const DEFAULT_ROLE_PERMISSION_CODES = [
     'image.read',
     'document.read',
+    'knowledge_base.read',
     'ai.image.generate',
     'ai.document.generate',
 ] as const;
