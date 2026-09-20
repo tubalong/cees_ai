@@ -201,24 +201,69 @@
     gap: 12px;
 }
 
-.role-permission-checkboxes {
-    max-height: 260px;
+.role-permission-groups {
+    max-height: 300px;
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
+    gap: 10px;
     overflow: auto;
     padding: 10px;
     border: 1px solid #e5e8ee;
     border-radius: 7px;
+    background: #fafbfd;
 }
 
-.role-permission-checkboxes .ant-checkbox-wrapper {
+.role-permission-section {
+    align-self: start;
+    padding: 10px 12px;
+    border: 1px solid #e9ebf0;
+    border-radius: 7px;
+    background: #fff;
+}
+
+.role-permission-section>header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 6px;
+    padding-bottom: 6px;
+    border-bottom: 1px dashed #eceef3;
+}
+
+.role-permission-section>header .ant-checkbox-wrapper {
+    margin-inline-start: 0;
+}
+
+.role-permission-section>header strong {
+    color: var(--primary);
+    font-size: 12px;
+}
+
+.role-permission-section>header small {
+    color: #9299a8;
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+}
+
+.role-permission-items {
+    display: grid;
+    gap: 4px;
+}
+
+.role-permission-items .ant-checkbox-wrapper {
     margin-inline-start: 0;
     align-items: flex-start;
 }
 
-.role-permission-checkboxes small {
+.role-permission-label {
+    /* display: block; */
+    font-size: 12px;
+    /* line-height: 1.4; */
+}
+
+.role-permission-label small {
     display: block;
-    color: #9299a8;
+    color: #a2a8b6;
     font-size: 9px;
 }

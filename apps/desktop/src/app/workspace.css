@@ -254,6 +254,7 @@
     min-width: 0;
     height: 100vh;
     overflow: auto;
+    padding: 20px;
 }
 
 .workspace-page {
@@ -1841,6 +1842,7 @@
     cursor: pointer;
 }
 
+.knowledge-folders button:hover,
 .knowledge-folders button.is-active {
     color: var(--primary);
     background: var(--primary-soft);

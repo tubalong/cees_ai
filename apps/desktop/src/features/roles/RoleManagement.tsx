@@ -42,6 +42,8 @@ export default function RoleManagement({ authContext, onSessionExpired }: { auth
     const roleQuery = useQuery({ queryKey: ['tenant-role', selectedId], queryFn: () => getTenantRole(selectedId!), enabled: Boolean(selectedId) && permissions.has('role.read') });
     const selectedRole = roleQuery.data ?? roles.find((role) => role.id === selectedId);
     const visibleRoles = roles.filter((role) => `${role.name}${role.code}${role.description ?? ''}`.toLowerCase().includes(keyword.toLowerCase()));
+    const permissionCatalog = permissionsQuery.data?.items ?? [];
+    const selectedPermissionIds = Form.useWatch<string[]>('permissionIds', form) ?? [];
 
     useEffect(() => {
         if ((rolesQuery.error || permissionsQuery.error || roleQuery.error) && !hasStoredSession()) onSessionExpired();
@@ -129,7 +131,7 @@ export default function RoleManagement({ authContext, onSessionExpired }: { auth
                     {selectedRole.isSystem && <Alert type="info" showIcon message={t('tenant_admin 是系统角色')} description={t('系统角色由平台维护，企业管理员不能修改、替换权限或删除。')} />}
                     <div className="role-summary-grid"><div><TeamOutlined /><span>{t('成员数量')}<strong>{selectedRole.memberCount}</strong></span></div><div><SafetyCertificateOutlined /><span>{t('数据范围')}<strong>{t(dataScopeLabel(selectedRole.dataScope))}</strong></span></div><div><LockOutlined /><span>{t('权限数量')}<strong>{selectedRole.permissions.length}</strong></span></div></div>
                     <h3 className="role-permission-title">{t('已授予权限')}</h3>
-                    <div className="permission-groups">{groupPermissions(selectedRole.permissions).map(([group, items]) => <section key={group}><h4>{t(groupLabel(group))}</h4>{items.map((permission) => <div key={permission.id}><span>{permission.name}</span><code>{permission.code}</code></div>)}</section>)}</div>
+                    <div className="permission-groups">{groupPermissions(selectedRole.permissions).map(([group, items]) => <section key={group}><h4>{t(groupLabel(group))}</h4>{items.map((permission) => <div key={permission.id}><span>{permission.name}</span></div>)}</section>)}</div>
                 </> : <Empty description={t('请选择角色')} />}
             </section>
         </div>
@@ -138,11 +140,63 @@ export default function RoleManagement({ authContext, onSessionExpired }: { auth
                 <div className="role-form-grid"><Form.Item name="code" label={t('角色编码')} rules={[{ required: true, message: t('请输入角色编码') }, { min: 2, max: 64 }, { pattern: /^[a-z][a-z0-9_:-]*$/, message: t('请使用小写字母开头，可包含数字、_、:、-') }]}><Input disabled={Boolean(editingRole)} placeholder="sales_manager" /></Form.Item><Form.Item name="name" label={t('角色名称')} rules={[{ required: true, message: t('请输入角色名称') }, { max: 120 }]}><Input placeholder={t('例如：销售经理')} /></Form.Item></div>
                 <Form.Item name="description" label={t('角色说明')}><Input.TextArea rows={2} maxLength={500} showCount /></Form.Item>
                 <Form.Item name="dataScope" label={t('数据范围')} rules={[{ required: true, message: t('请选择数据范围') }]}><Select options={dataScopeOptions.map((option) => ({ ...option, label: t(option.label) }))} /></Form.Item>
-                <Form.Item name="permissionIds" initialValue={[]} label={`${t('操作权限')}（${permissionsQuery.data?.items.length ?? 0}）`} rules={[{ type: 'array', max: 100, message: t('角色权限最多选择 100 项') }]}><Checkbox.Group className="role-permission-checkboxes" options={(permissionsQuery.data?.items ?? []).map((permission) => ({ label: <span>{permission.name}<small>{permission.code}</small></span>, value: permission.id }))} /></Form.Item>
+                <Form.Item name="permissionIds" initialValue={[]} label={`${t('操作权限')}（${t('已选 {selected} / {total} 项', { selected: selectedPermissionIds.length, total: permissionCatalog.length })}）`} rules={[{ type: 'array', max: 100, message: t('角色权限最多选择 100 项') }]}><PermissionChecklist permissions={permissionCatalog} /></Form.Item>
             </Form>
         </Modal>
     </div>;
 }
+
+interface PermissionChecklistProps {
+    permissions: TenantPermission[];
+    value?: string[];
+    onChange?: (next: string[]) => void;
+}
+
+/**
+ * 操作权限选择器：按权限编码前缀聚合为功能区块，区块内可全选/清空，也可单独勾选子权限。
+ * 作为 Form.Item 的受控子组件使用，写出仍然是扁平的权限 ID 数组，服务端契约不变。
+ */
+function PermissionChecklist({ permissions, value, onChange }: PermissionChecklistProps): JSX.Element {
+    const { t } = useI18n();
+    const selected = new Set(value ?? []);
+    const groups = groupPermissions(permissions);
+    if (!groups.length) return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('暂无可分配权限')} />;
+    const commit = (next: Set<string>): void => onChange?.([...next]);
+    return <div className="role-permission-groups">{groups.map(([group, items]) => {
+        const selectedInGroup = items.filter((item) => selected.has(item.id)).length;
+        const allSelected = selectedInGroup === items.length;
+        return <section className="role-permission-section" key={group}>
+            <header>
+                <Checkbox
+                    checked={allSelected}
+                    indeterminate={selectedInGroup > 0 && !allSelected}
+                    onChange={(event) => {
+                        const next = new Set(selected);
+                        for (const item of items) if (event.target.checked) next.add(item.id); else next.delete(item.id);
+                        commit(next);
+                    }}
+                ><strong>{t(groupLabel(group))}</strong></Checkbox>
+                <small>{t('已选 {selected} / {total} 项', { selected: selectedInGroup, total: items.length })}</small>
+            </header>
+            <div className="role-permission-items">{items.map((permission) => <Checkbox key={permission.id} checked={selected.has(permission.id)} onChange={(event) => {
+                const next = new Set(selected);
+                if (event.target.checked) next.add(permission.id); else next.delete(permission.id);
+                commit(next);
+            }}><span className="role-permission-label">{permission.name}</span></Checkbox>)}</div>
+        </section>;
+    })}</div>;
+}
+
+/** 分组展示顺序与中文名称；新增权限域时同步补充，避免界面上出现英文编码。 */
+const PERMISSION_GROUP_LABELS: Record<string, string> = {
+    tenant: '企业', member: '成员', department: '部门', role: '角色',
+    project: '项目', task: '任务', meeting: '会议', document: '文档',
+    knowledge_base: '知识库', work_report: '工作报告', notification: '通知中心', dashboard: '工作台',
+    image: '图片', ai: 'AI 能力', dingtalk: '钉钉集成', assignment: '分配策略',
+    hr: '人力资源', finance: '财务', legal: '法务', audit: '审计',
+};
+
+const PERMISSION_GROUP_ORDER = Object.keys(PERMISSION_GROUP_LABELS);
 
 function groupPermissions(permissions: TenantPermission[]): Array<[string, TenantPermission[]]> {
     const groups = new Map<string, TenantPermission[]>();
@@ -150,11 +204,18 @@ function groupPermissions(permissions: TenantPermission[]): Array<[string, Tenan
         const group = permission.code.split('.')[0];
         groups.set(group, [...(groups.get(group) ?? []), permission]);
     }
-    return [...groups.entries()];
+    return [...groups.entries()]
+        .map(([group, items]): [string, TenantPermission[]] => [group, [...items].sort((left, right) => left.code.localeCompare(right.code))])
+        .sort(([left], [right]) => groupOrder(left) - groupOrder(right) || left.localeCompare(right));
+}
+
+function groupOrder(group: string): number {
+    const index = PERMISSION_GROUP_ORDER.indexOf(group);
+    return index === -1 ? PERMISSION_GROUP_ORDER.length : index;
 }
 
 function groupLabel(group: string): string {
-    return { tenant: '企业', department: '部门', member: '成员', role: '角色', project: '项目', document: '文档', audit: '审计' }[group] ?? group;
+    return PERMISSION_GROUP_LABELS[group] ?? group;
 }
 
 function dataScopeLabel(scope: DataScope): string {
