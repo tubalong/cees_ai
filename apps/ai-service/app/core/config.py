@@ -129,8 +129,6 @@ class ChatConfig(BaseModel):
     compaction_role: ModelRole = ModelRole.default
     compaction_max_output_tokens: int = Field(default=2048, ge=256, le=8192)
     compaction_context_budget_tokens: int = Field(default=65536, ge=1024, le=2_000_000)
-    related_questions_role: ModelRole = ModelRole.default
-    related_questions_max_output_tokens: int = Field(default=512, ge=64, le=4096)
 
 
 class ExtractionConfig(BaseModel):
@@ -365,7 +363,6 @@ def _validate_chat_readiness(catalog: ModelCatalog, errors: list[str]) -> None:
 
     checked_roles = {policy.role for policy in catalog.chat.modes.values()} | {
         catalog.chat.compaction_role,
-        catalog.chat.related_questions_role,
     }
     for role in checked_roles:
         candidates = catalog.roles.get(role, [])
@@ -404,14 +401,6 @@ def _validate_chat_readiness(catalog: ModelCatalog, errors: list[str]) -> None:
         if catalog.chat.compaction_max_output_tokens > profile.max_output_tokens_limit:
             errors.append(f"chat compaction_max_output_tokens exceeds profile {profile_name} limit")
 
-    for profile_name in catalog.roles.get(catalog.chat.related_questions_role, []):
-        profile = catalog.profiles.get(profile_name)
-        if profile is None or not profile.enabled:
-            continue
-        if catalog.chat.related_questions_max_output_tokens > profile.max_output_tokens_limit:
-            errors.append(
-                f"chat related_questions_max_output_tokens exceeds profile {profile_name} limit"
-            )
 
 
 def load_catalog_safely(settings: Settings) -> tuple[ModelCatalog | None, list[str]]:
