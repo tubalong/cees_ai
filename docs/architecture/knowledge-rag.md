@@ -219,7 +219,7 @@ ai-service 不自行推断权限。NestJS 计算可信 scope 后随检索请求�
 - 附件文件：直接复用其 FileObject；
 - AI 生成文档 / 对话消息：以当前内容物化新 FileObject（文本快照，写入 COS）。
 
-**版本演进（同源重复转存 = 追加新版本，不覆盖不新建）**：来源锚定用 `source_type`（FILE_OBJECT / DOCUMENT / MESSAGE）+ `source_id` 唯一约束（块 7c 迁移落于 KnowledgeDocument）；同源重复转存命中已有文档 → 追加 DocumentVersion（内容为最新快照），状态回 PENDING 重新解析索引，旧版本索引后台清理（"先写新后删旧"，读请求只见全旧或全新）；同源文档被删除后再转存到同一库 → 恢复文档（软删回滚 + 审计 `KNOWLEDGE_DOCUMENT_RESTORED`）并追加新版本，仍拒绝对其他库的转存。AI 修改受控文档**不自动同步**知识库，必须再次显式转存。
+**版本演进（同源重复转存 = 追加新版本，不覆盖不新建）**：来源锚定用 `source_type`（FILE_OBJECT / DOCUMENT / MESSAGE）+ `source_id` 唯一约束（块 7c 迁移落于 KnowledgeDocument）；同源重复转存命中已有文档 → 追加 DocumentVersion（内容为最新快照），状态回 PENDING 重新解析索引，旧版本索引后台清理（"先写新后删旧"，读请求只见全旧或全新）；同源文档被删除后再转存到同一库 → 恢复文档（软删回滚 + 审计 `KNOWLEDGE_DOCUMENT_RESTORED`）并追加新版本，仍拒绝对其他库的转存；恢复时幂等清理全部既有版本索引——删除时文档可能仍在处理中，索引任务的 `deletedAt` 存活检查在恢复后会通过并写入旧版本向量，补删一次避免恢复后的文档残留旧版本内容可被检索。AI 修改受控文档**不自动同步**知识库，必须再次显式转存。
 
 **双层入口，同一落点**：
 

@@ -714,6 +714,7 @@ describe('KnowledgeDocumentService.saveFromSource', () => {
                 currentVersionId: NEW_VERSION_ID,
             }));
         prisma.knowledgeDocument.updateMany.mockResolvedValue({ count: 1 });
+        prisma.documentVersion.findMany.mockResolvedValue([{ id: VERSION_ID }]);
         prisma.conversationMessage.findFirst.mockResolvedValue(messageRecord());
         createMaterializedFileSpy.mockResolvedValue(NEW_FILE_OBJECT_ID);
         prisma.documentVersion.findFirst
@@ -753,6 +754,9 @@ describe('KnowledgeDocumentService.saveFromSource', () => {
             data: expect.objectContaining({ documentId: DOCUMENT_ID, versionNumber: 2 }),
             select: { id: true },
         });
+        // 恢复后幂等清理全部既有版本索引（处理中删除的索引任务在恢复后可能写入旧版本向量），
+        // appendSourceVersion 追加新版本后也会清理上一版本，因此至少调用两次。
+        expect(deleteVersionIndexSpy).toHaveBeenCalledWith(TENANT_ID, USER_ID, VERSION_ID);
         expect(result).toEqual(expect.objectContaining({ id: DOCUMENT_ID, versionNumber: 2 }));
     });
 

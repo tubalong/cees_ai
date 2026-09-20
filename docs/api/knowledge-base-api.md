@@ -68,7 +68,7 @@ DELETE /knowledge-bases/{knowledgeBaseId}/documents/{documentId}
 }
 ```
 
-`sourceType` 为 `FILE_OBJECT`（附件文件）/ `DOCUMENT`（AI 生成文档）/ `MESSAGE`（对话消息），与 `sourceId` 配套；`fileObjectId` 与 `sourceType`+`sourceId` 只能二选一。转存先把来源物化为文件快照，再进入与人工上传相同的解析→索引链路；同一来源（sourceType+sourceId）只能存入一个知识库，重复转存到同一知识库追加新版本，转存到其他知识库返回 `KNOWLEDGE_SOURCE_ALREADY_SAVED`；同一来源的文档被删除后再次转存到同一知识库时，恢复该文档并追加新版本。`name` 省略时沿用来源资源名称。
+`sourceType` 为 `FILE_OBJECT`（附件文件）/ `DOCUMENT`（AI 生成文档）/ `MESSAGE`（对话消息），与 `sourceId` 配套；`fileObjectId` 与 `sourceType`+`sourceId` 只能二选一。转存先把来源物化为文件快照，再进入与人工上传相同的解析→索引链路；同一来源（sourceType+sourceId）只能存入一个知识库，重复转存到同一知识库追加新版本，转存到其他知识库返回 `KNOWLEDGE_SOURCE_ALREADY_SAVED`；同一来源的文档被删除后再次转存到同一知识库时，恢复该文档并追加新版本（旧版本索引同步清理，只保留新快照内容）。`name` 省略时沿用来源资源名称。
 
 文档创建后立即进入后台处理队列，状态机为 `PENDING -> PARSING -> PARSED -> INDEXING -> READY`，失败置 `FAILED`。可重试错误自动回 `PENDING` 重试，达到上限（默认 3 次）后置 `FAILED`，此时可调用 retry 接口手动重试。文档列表返回当前版本的可见范围、版本号与最新处理状态。
 

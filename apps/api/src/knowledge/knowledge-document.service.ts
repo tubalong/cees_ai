@@ -602,6 +602,9 @@ export class KnowledgeDocumentService {
     /**
      * 恢复已软删除的同源文档：重新转存同一来源时复活业务记录，
      * 随后由 appendSourceVersion 追加新快照版本并重新解析索引。
+     * 恢复后幂等清理全部既有版本索引：删除时文档可能仍在处理中，
+     * 索引任务的 deletedAt 存活检查会在恢复后通过并写入旧版本向量，
+     * 这里补删一次，避免恢复后的文档残留旧版本内容可被检索。
      */
     private async restoreSourceDocument(
         actor: KnowledgeSourceSaveActor,
@@ -618,6 +621,20 @@ export class KnowledgeDocumentService {
                 knowledgeBaseId,
             });
         });
+        const versions = await this.prisma.documentVersion.findMany({
+            where: { tenantId: actor.tenantId, documentId },
+            select: { id: true },
+        });
+        for (const version of versions) {
+            void this.indexingService.deleteDocumentVersionIndex(
+                actor.tenantId,
+                actor.userId,
+                version.id,
+            ).catch((error: unknown) => {
+                const message = error instanceof Error ? error.message : 'unknown error';
+                this.logger.warn(`恢复文档清理旧版本索引失败（版本 ${version.id}）：${message}`);
+            });
+        }
     }
 
     private async requireDocumentAsActor(
