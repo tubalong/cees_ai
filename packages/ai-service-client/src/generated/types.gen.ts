@@ -213,25 +213,6 @@ export type CompactChatResponse = {
     execution: ExecutionMetadata;
 };
 
-export type RelatedQuestionsRequest = {
-    request_id: string;
-    tenant_id: string;
-    user_id: string;
-    conversation_id: string;
-    user_message: string;
-    assistant_reply: string;
-};
-
-export type RelatedQuestionsResponse = {
-    request_id: string;
-    conversation_id: string;
-    /**
-     * Short follow-up questions derived from the assistant's reply; each at most 30 characters.
-     */
-    questions: Array<string>;
-    execution: ExecutionMetadata;
-};
-
 export type ChatStreamStartedEvent = {
     type: 'started';
     request_id: string;
@@ -255,6 +236,10 @@ export type ChatStreamCompletedEvent = {
      * Provider completion reason. `length` indicates the output token limit was reached.
      */
     finish_reason?: string | null;
+    /**
+     * Short follow-up questions derived from the final reply; each at most 30 characters. Only present on the completed event of the stream that produced the final user-facing answer; absent when the reply contained no follow-up suggestions.
+     */
+    related_questions?: Array<string>;
 };
 
 export type ChatStreamEvent = ({
@@ -1227,51 +1212,6 @@ export type CompactChatResponses = {
 };
 
 export type CompactChatResponse2 = CompactChatResponses[keyof CompactChatResponses];
-
-export type GenerateRelatedQuestionsData = {
-    body: RelatedQuestionsRequest;
-    path?: never;
-    query?: never;
-    url: '/internal/v1/chat/related-questions';
-};
-
-export type GenerateRelatedQuestionsErrors = {
-    /**
-     * Invalid profile or unsupported output mode
-     */
-    400: ErrorResponse;
-    /**
-     * Internal authentication failed
-     */
-    401: ErrorResponse;
-    /**
-     * Request validation failed
-     */
-    422: ErrorResponse;
-    /**
-     * Unexpected internal service error
-     */
-    500: ErrorResponse;
-    /**
-     * Provider output did not match the requested schema
-     */
-    502: ErrorResponse;
-    /**
-     * Service or configured providers unavailable
-     */
-    503: ErrorResponse;
-};
-
-export type GenerateRelatedQuestionsError = GenerateRelatedQuestionsErrors[keyof GenerateRelatedQuestionsErrors];
-
-export type GenerateRelatedQuestionsResponses = {
-    /**
-     * Follow-up questions generated
-     */
-    200: RelatedQuestionsResponse;
-};
-
-export type GenerateRelatedQuestionsResponse = GenerateRelatedQuestionsResponses[keyof GenerateRelatedQuestionsResponses];
 
 export type GenerateImageData = {
     body: ImageGenerateRequest;
