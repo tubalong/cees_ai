@@ -24,6 +24,7 @@ import { ListKnowledgeBasesTool } from './tools/executors/list-knowledge-bases.t
 import { SaveToKnowledgeTool } from './tools/executors/save-to-knowledge.tool';
 import { InsertDocumentImageTool } from './tools/executors/insert-document-image.tool';
 import { WebSearchTool } from './tools/executors/web-search.tool';
+import { ListDocumentsTool } from './tools/executors/list-documents.tool';
 
 /**
  * 统一 AI 编排核心。会话事实源、事件重放与唯一 Tool Loop 运行器都在本模块内，
@@ -53,6 +54,7 @@ import { WebSearchTool } from './tools/executors/web-search.tool';
     SaveToKnowledgeTool,
     InsertDocumentImageTool,
     WebSearchTool,
+    ListDocumentsTool,
   ],
 })
 export class AssistantModule { }
