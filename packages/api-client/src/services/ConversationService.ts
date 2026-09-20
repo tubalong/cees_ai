@@ -169,7 +169,9 @@ export class ConversationService {
      * 发起一轮对话并以 SSE 流式返回事件
      * 客户端只提交本轮 user 消息；历史消息与摘要由服务端加载并组装上下文。
      * 成功建立流后，每个 SSE `data` 字段都是一个 `TurnStreamEvent` JSON 对象，所有事件携带递增 `seq`。
-     * 事件依次为 `started`、可选 `status`、零个或多个 `content_delta`、可选 `usage` 和 `completed`；流开始后的失败以 `error` 事件终止。
+     * 事件依次为 `started`、可选 `status`、零个或多个 `content_delta`、可选 `usage` 和 `completed`；
+     * `completed` 之后可能异步到达一个 `related_questions` 事件（基于本轮答复生成的后续提问建议，生成失败则不发）；
+     * 流开始后的失败以 `error` 事件终止。
      * 客户端断开连接只解除订阅，不取消执行；重连后通过事件重放接口继续接收。
      * 重复提交同一 `Idempotency-Key` 时返回原 Turn 的事件流，不重新生成。
      *

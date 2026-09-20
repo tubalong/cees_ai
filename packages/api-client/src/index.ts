@@ -429,6 +429,7 @@ export type { TurnStreamCompletedEvent } from './models/TurnStreamCompletedEvent
 export type { TurnStreamContentDeltaEvent } from './models/TurnStreamContentDeltaEvent';
 export type { TurnStreamErrorEvent } from './models/TurnStreamErrorEvent';
 export type { TurnStreamEvent } from './models/TurnStreamEvent';
+export type { TurnStreamRelatedQuestionsEvent } from './models/TurnStreamRelatedQuestionsEvent';
 export type { TurnStreamStartedEvent } from './models/TurnStreamStartedEvent';
 export type { TurnStreamStatusEvent } from './models/TurnStreamStatusEvent';
 export type { TurnStreamToolCallEvent } from './models/TurnStreamToolCallEvent';

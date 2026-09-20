@@ -362,6 +362,8 @@ enum AssistantEventType {
   USAGE
   COMPLETED
   ERROR
+  /// 基于本轮答复生成的追问建议；在 COMPLETED 之后异步到达。
+  RELATED_QUESTIONS
 }
 
 /// 工具调用生命周期：程序化批准结论与执行结果。
