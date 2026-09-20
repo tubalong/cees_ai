@@ -389,7 +389,7 @@ interface SaveTarget {
     defaultName?: string;
 }
 
-function ChatResourceCard({ resource, onPreviewDocument, onSaveToKnowledge }: { resource: ChatResource; onPreviewDocument: (document: { id: string; title: string; content: string }) => void; onSaveToKnowledge: (target: SaveTarget) => void }): JSX.Element {
+function ChatResourceCard({ resource, onPreviewDocument, onSaveToKnowledge }: { resource: ChatResource; onPreviewDocument: (document: { id: string; title: string; content: string }) => void; onSaveToKnowledge?: (target: SaveTarget) => void }): JSX.Element {
     const { message } = AntdApp.useApp();
     const { t } = useI18n();
     const [image, setImage] = useState<ImageAccess>();
@@ -433,7 +433,7 @@ function ChatResourceCard({ resource, onPreviewDocument, onSaveToKnowledge }: { 
     return <div className={`chat-resource ${resource.type.toLowerCase()}`}>
         {resource.type === 'IMAGE' && <>{image || resource.url ? <AntImage className="chat-resource-image" src={image?.url ?? resource.url ?? undefined} alt="AI 生成图片" preview={{ mask: '点击放大' }} /> : <Spin size="small" />}<Button size="small" disabled={!image && !resource.url} icon={<Download size={15} />} onClick={() => void download()}>{'下载'}</Button></>}
         {resource.type === 'DOCUMENT' && <>
-            <div className="chat-resource-header"><span><FileTextIcon size={17} />{documentTitle}</span><span className="chat-resource-actions"><Button size="small" icon={<Save size={15} />} onClick={() => onSaveToKnowledge({ sourceType: 'DOCUMENT', sourceId: resource.id, defaultName: documentTitle })}>{t('存入知识库')}</Button><Button size="small" disabled={documentContent === undefined} icon={<Eye size={15} />} onClick={() => documentContent !== undefined && onPreviewDocument({ id: resource.id, title: documentTitle, content: documentContent })}>{'查看内容'}</Button>{documentFormat ? <Button size="small" disabled={documentContent === undefined} icon={<Download size={15} />} onClick={() => void download()}>{`下载 ${documentFormat.toUpperCase()}`}</Button> : documentExportable ? <Dropdown trigger={['click']} menu={{ items: [{ key: 'docx', label: 'DOCX' }, { key: 'pdf', label: 'PDF' }, { key: 'pptx', label: 'PPTX' }], onClick: ({ key }) => void exportAs(key as 'docx' | 'pdf' | 'pptx') }}><Button size="small" icon={<Download size={15} />}>{'导出文档'}</Button></Dropdown> : <Button size="small" disabled={documentContent === undefined} icon={<Download size={15} />} onClick={() => void download()}>{'下载 Markdown'}</Button>}</span></div>
+            <div className="chat-resource-header"><span><FileTextIcon size={17} />{documentTitle}</span><span className="chat-resource-actions"><Tooltip title={onSaveToKnowledge ? undefined : t('无存入知识库权限')}><span><Button size="small" disabled={!onSaveToKnowledge} icon={<Save size={15} />} onClick={() => onSaveToKnowledge?.({ sourceType: 'DOCUMENT', sourceId: resource.id, defaultName: documentTitle })}>{t('存入知识库')}</Button></span></Tooltip><Button size="small" disabled={documentContent === undefined} icon={<Eye size={15} />} onClick={() => documentContent !== undefined && onPreviewDocument({ id: resource.id, title: documentTitle, content: documentContent })}>{'查看内容'}</Button>{documentFormat ? <Button size="small" disabled={documentContent === undefined} icon={<Download size={15} />} onClick={() => void download()}>{`下载 ${documentFormat.toUpperCase()}`}</Button> : documentExportable ? <Dropdown trigger={['click']} menu={{ items: [{ key: 'docx', label: 'DOCX' }, { key: 'pdf', label: 'PDF' }, { key: 'pptx', label: 'PPTX' }], onClick: ({ key }) => void exportAs(key as 'docx' | 'pdf' | 'pptx') }}><Button size="small" icon={<Download size={15} />}>{'导出文档'}</Button></Dropdown> : <Button size="small" disabled={documentContent === undefined} icon={<Download size={15} />} onClick={() => void download()}>{'下载 Markdown'}</Button>}</span></div>
         </>}
     </div>;
 }
@@ -797,7 +797,7 @@ function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element 
                         {item.role === 'assistant' && <i className="assistant-avatar"><CeesLogo /></i>}
                         <div className="chat-message-body">
                             <div className="chat-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownRenderComponents}>{item.content}</ReactMarkdown></div>
-                            {item.resources?.map((resource) => <ChatResourceCard key={`${resource.type}-${resource.id}`} resource={resource} onPreviewDocument={setPreviewDocument} onSaveToKnowledge={canSaveToKnowledge ? setSaveTarget : () => undefined} />)}
+                            {item.resources?.map((resource) => <ChatResourceCard key={`${resource.type}-${resource.id}`} resource={resource} onPreviewDocument={setPreviewDocument} onSaveToKnowledge={canSaveToKnowledge ? setSaveTarget : undefined} />)}
                             {item.sources?.length ? <div className="chat-sources">{item.sources.map((source) => <ChatSourceCard key={source.id} source={source} />)}</div> : null}
                             {item.citations?.length ? <div className="chat-sources">{groupCitations(item.citations).map((citation) => <KnowledgeCitationCard key={citation.id} citation={citation} onDeleted={handleCitationDeleted} />)}</div> : null}
                             <div className="chat-message-actions">
