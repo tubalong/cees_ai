@@ -29,6 +29,8 @@ export interface AiInvocationAttributes {
   promptLength?: number;
   /** 文档组合等工具调用的指令长度指标。 */
   instructionLength?: number;
+  /** 推荐问题生成返回的问题条数指标。 */
+  questionCount?: number;
   outcome?: 'completed' | 'error' | 'cancelled';
   errorCode?: string;
 }
@@ -39,6 +41,7 @@ export type AiInvocationOperation =
   | 'chat.stream'
   | 'chat.compact'
   | 'chat.tool_turn'
+  | 'chat.related_questions'
   | 'image.generate'
   | 'document.compose';
 
