@@ -10,6 +10,9 @@
 - 已落地：增加 `ConnectorHost` 和通用 Electron IPC/Preload API，统一列表、状态、连接、解绑、工具发现、执行、失败刷新和状态事件。
 - 已保留：`window.cees.connectors.dingtalk` 与旧钉钉 IPC/状态事件继续兼容，现有页面无需同步修改。
 - 待实现：远程 MCP Transport 和混合执行方式。
+- 已落地：增加通用 `LocalCliTransport`，统一固定命令、参数数组、超时、输出上限、环境变量、JSON 解析和结构化错误；DWS 日常命令已迁移使用。
+- 待实现：通用 Electron IPC。
+- 待实现：远程 MCP Transport 和混合执行方式。
 - 待实现：连接器进入 Assistant 原生 Tool Loop，以及写操作的二次确认机制。
 
 ## 2. 目标
@@ -85,6 +88,10 @@ Manifest 描述连接器的静态能力，包括：
 
 1. 增加 `ConnectorAdapter` 并将钉钉包装为首个 Adapter。
 2. 增加 `ConnectorRegistry`，由注册中心管理连接器清单。
+3. 增加通用 Electron IPC 和 Manifest 驱动的连接器市场。
+4. 接入企业微信 CLI，验证通用抽象。
+5. 按真实需求增加 Remote MCP Transport。
+6. 最后将本地连接器调用接入 Assistant 原生 Tool Loop。
 3. 将连接器市场改为 Manifest 驱动，并逐步迁移页面使用通用 Preload API。
 4. 接入企业微信 CLI，验证通用抽象。
 5. 按真实需求增加 Remote MCP Transport。
