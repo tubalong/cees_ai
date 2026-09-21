@@ -222,6 +222,11 @@ class ChatRequest(BaseModel):
     conversation_summary: constr(min_length=1, max_length=131072) | None = Field(
         None, description='Summary of history preceding the supplied recent messages.'
     )
+    user_memories: list[constr(min_length=1, max_length=1000)] | None = Field(
+        None,
+        description='Long-term user memories, each a self-contained statement about the user. Injected as a dedicated system block before the conversation summary; absent or null means no memories are injected. At most 30 entries.',
+        max_length=30,
+    )
     messages: list[ChatMessage] = Field(..., max_length=128, min_length=1)
     max_output_tokens: conint(ge=1, le=32768) | None = None
 
@@ -340,6 +345,11 @@ class ToolTurnRequest(BaseModel):
     mode: ChatMode | None = 'standard'
     instructions: constr(min_length=1, max_length=32768) | None = None
     conversation_summary: constr(min_length=1, max_length=131072) | None = None
+    user_memories: list[constr(min_length=1, max_length=1000)] | None = Field(
+        None,
+        description='Long-term user memories, each a self-contained statement about the user. Injected as a dedicated system block before the conversation summary; absent or null means no memories are injected. At most 30 entries.',
+        max_length=30,
+    )
     messages: list[ToolTurnMessage] = Field(..., max_length=128, min_length=1)
     tools: list[ChatToolDefinition] = Field(..., max_length=32)
     max_output_tokens: conint(ge=1, le=32768) | None = None

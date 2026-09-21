@@ -2233,6 +2233,19 @@
             "maxLength": 131072,
             "description": "Summary of history preceding the supplied recent messages."
           },
+          "user_memories": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "maxItems": 30,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1000
+            },
+            "description": "Long-term user memories, each a self-contained statement about the user. Injected as a dedicated system block before the conversation summary; absent or null means no memories are injected. At most 30 entries."
+          },
           "messages": {
             "type": "array",
             "minItems": 1,
@@ -2660,6 +2673,19 @@
             ],
             "minLength": 1,
             "maxLength": 131072
+          },
+          "user_memories": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "maxItems": 30,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1000
+            },
+            "description": "Long-term user memories, each a self-contained statement about the user. Injected as a dedicated system block before the conversation summary; absent or null means no memories are injected. At most 30 entries."
           },
           "messages": {
             "type": "array",

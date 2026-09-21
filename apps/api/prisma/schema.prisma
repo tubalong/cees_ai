@@ -335,6 +335,14 @@ enum ConversationMessageRole {
   TOOL
 }
 
+/// 跨会话用户级长期记忆的类型；仅记录用户本人的偏好、事实、决定与习惯。
+enum MemoryType {
+  PREFERENCE
+  FACT
+  DECISION
+  HABIT
+}
+
 /// Assistant 轮次状态机；由 NestJS TurnRunner 驱动。
 enum AssistantTurnStatus {
   RECEIVED
@@ -2118,6 +2126,26 @@ model ConversationSummary {
 
   @@index([tenantId, conversationId, createdAt])
   @@map("conversation_summaries")
+}
+
+/// 跨会话用户级长期记忆；归属租户内成员身份，仅本人可见、可查可删，AI 仅提议、NestJS 写入。
+model UserMemory {
+  id                   String     @id @default(uuid()) @db.Uuid
+  tenantId             String     @map("tenant_id") @db.Uuid
+  /// 归属成员身份而非全局用户：同一自然人在不同租户的记忆互相隔离，防止跨租户泄漏。
+  membershipId         String     @map("membership_id") @db.Uuid
+  type                 MemoryType
+  content              String     @db.Text
+  /// 来源会话与轮次，用于审计追溯；用户手动新增时为 null。
+  sourceConversationId String?    @map("source_conversation_id") @db.Uuid
+  sourceTurnId         String?    @map("source_turn_id") @db.Uuid
+  createdAt            DateTime   @default(now()) @map("created_at")
+  updatedAt            DateTime   @updatedAt @map("updated_at")
+  deletedAt            DateTime?  @map("deleted_at")
+  version              Int        @default(1)
+
+  @@index([tenantId, membershipId, deletedAt])
+  @@map("user_memories")
 }
 
 /// 一轮完整 Assistant 运行；幂等键按会话去重，requestHash 防止同键不同内容重放。

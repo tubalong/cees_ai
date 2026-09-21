@@ -178,6 +178,10 @@ export type ChatRequest = {
      * Summary of history preceding the supplied recent messages.
      */
     conversation_summary?: string | null;
+    /**
+     * Long-term user memories, each a self-contained statement about the user. Injected as a dedicated system block before the conversation summary; absent or null means no memories are injected. At most 30 entries.
+     */
+    user_memories?: Array<string> | null;
     messages: Array<ChatMessage>;
     max_output_tokens?: number | null;
 };
@@ -297,6 +301,10 @@ export type ToolTurnRequest = {
     mode?: ChatMode;
     instructions?: string | null;
     conversation_summary?: string | null;
+    /**
+     * Long-term user memories, each a self-contained statement about the user. Injected as a dedicated system block before the conversation summary; absent or null means no memories are injected. At most 30 entries.
+     */
+    user_memories?: Array<string> | null;
     messages: Array<ToolTurnMessage>;
     tools: Array<ChatToolDefinition>;
     max_output_tokens?: number | null;
