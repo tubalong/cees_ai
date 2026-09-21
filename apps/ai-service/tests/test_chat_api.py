@@ -212,6 +212,106 @@ def test_chat_stream_omits_related_questions_without_block() -> None:
     assert "related_questions" not in completed
 
 
+def test_chat_stream_extracts_memory_candidates_from_object_block() -> None:
+    client, _ = build_chat_client(
+        stream_outcomes=[
+            [
+                ProviderStreamChunk(text="好的，我会注意。"),
+                ProviderStreamChunk(
+                    text=(
+                        '<follow_up_questions>{"questions": ["需要我再简化吗？"], '
+                        '"memories": [{"type": "PREFERENCE", "content": "用户偏好简洁的周报格式"}]}'
+                        "</follow_up_questions>"
+                    ),
+                ),
+                ProviderStreamChunk(
+                    token_usage=TokenUsageData(
+                        input_tokens=10,
+                        output_tokens=5,
+                        total_tokens=15,
+                    ),
+                    finish_reason="stop",
+                ),
+            ]
+        ]
+    )
+
+    with client:
+        response = client.post(
+            "/internal/v1/chat/stream",
+            headers={"X-AI-Internal-Token": "secret"},
+            json=chat_payload(),
+        )
+
+    assert response.status_code == 200
+    events = parse_sse_events(response.text)
+    deltas = [data["text"] for name, data in events if name == "content_delta"]
+    assert "".join(deltas) == "好的，我会注意。"
+    completed = events[-1][1]
+    assert completed["related_questions"] == ["需要我再简化吗？"]
+    assert completed["memory_candidates"] == [
+        {"type": "PREFERENCE", "content": "用户偏好简洁的周报格式", "action": "create"}
+    ]
+
+
+def test_chat_compact_returns_memory_candidates_from_block() -> None:
+    client, _ = build_chat_client(
+        outcomes=[
+            result(
+                "Project: CEES AI."
+                '<user_memories>[{"type": "DECISION", "content": "用户决定下周发布"}]'
+                "</user_memories>"
+            )
+        ]
+    )
+    payload = {
+        "request_id": "req-chat-compact-memory",
+        "tenant_id": "tenant-1",
+        "user_id": "user-1",
+        "conversation_id": "conversation-1",
+        "messages": [
+            {"id": "message-1", "role": "user", "content": text_parts("Project is CEES AI.")},
+        ],
+    }
+
+    with client:
+        response = client.post(
+            "/internal/v1/chat/compact",
+            headers={"X-AI-Internal-Token": "secret"},
+            json=payload,
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["summary"] == "Project: CEES AI."
+    assert body["memory_candidates"] == [
+        {"type": "DECISION", "content": "用户决定下周发布", "action": "create", "replaces": None}
+    ]
+
+
+def test_chat_compact_returns_empty_memory_candidates_without_block() -> None:
+    client, _ = build_chat_client(outcomes=[result("Project: CEES AI.")])
+    payload = {
+        "request_id": "req-chat-compact-empty-memory",
+        "tenant_id": "tenant-1",
+        "user_id": "user-1",
+        "conversation_id": "conversation-1",
+        "messages": [
+            {"id": "message-1", "role": "user", "content": text_parts("Project is CEES AI.")},
+        ],
+    }
+
+    with client:
+        response = client.post(
+            "/internal/v1/chat/compact",
+            headers={"X-AI-Internal-Token": "secret"},
+            json=payload,
+        )
+
+    assert response.status_code == 200
+    assert response.json()["memory_candidates"] == []
+
+
 def test_chat_compact_returns_reusable_summary() -> None:
     client, _ = build_chat_client(outcomes=[result("Project: CEES AI.")])
     payload = {

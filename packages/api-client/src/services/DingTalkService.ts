@@ -11,6 +11,7 @@ import type { DingTalkMappingResponseEnvelope } from '../models/DingTalkMappingR
 import type { DingTalkSyncJobListResponseEnvelope } from '../models/DingTalkSyncJobListResponseEnvelope';
 import type { DingTalkSyncJobResponseEnvelope } from '../models/DingTalkSyncJobResponseEnvelope';
 import type { DingTalkUserListResponseEnvelope } from '../models/DingTalkUserListResponseEnvelope';
+import type { ImportDingTalkVisibleOrganizationSnapshotRequest } from '../models/ImportDingTalkVisibleOrganizationSnapshotRequest';
 import type { PreviewDingTalkMappingRequest } from '../models/PreviewDingTalkMappingRequest';
 import type { UpdateDingTalkIntegrationRequest } from '../models/UpdateDingTalkIntegrationRequest';
 import type { CancelablePromise } from '../core/CancelablePromise';
@@ -113,6 +114,32 @@ export class DingTalkService {
                 404: `当前租户尚未绑定钉钉企业`,
                 409: `当前集成已有同步任务运行中`,
                 502: `钉钉开放平台同步失败`,
+            },
+        });
+    }
+    /**
+     * 导入当前授权账号通过 DWS/MCP 获取的可见组织快照
+     * 仅 CEES 当前租户的 tenant_admin 可调用。服务端不检查授权账号是否为钉钉管理员，
+     * 只将快照视为当前钉钉账号可见范围并执行幂等合并；未出现在快照中的既有镜像不会被标记删除或离职。
+     *
+     * @returns DingTalkSyncJobResponseEnvelope 可见组织快照已合并
+     * @throws ApiError
+     */
+    public static importDingTalkVisibleOrganizationSnapshot({
+        requestBody,
+    }: {
+        requestBody: ImportDingTalkVisibleOrganizationSnapshotRequest,
+    }): CancelablePromise<DingTalkSyncJobResponseEnvelope> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/dingtalk/organization/snapshot',
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                400: `快照字段、部门层级或人员引用无效`,
+                401: `登录状态无效或已过期`,
+                403: `当前用户不是 CEES 租户管理员或缺少 dingtalk.organization.sync 权限`,
+                409: `当前已有同步任务或快照所属钉钉企业与当前绑定冲突`,
             },
         });
     }

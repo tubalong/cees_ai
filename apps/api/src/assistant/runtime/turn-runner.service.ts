@@ -19,12 +19,14 @@ import type {
   ToolCall as UpstreamToolCall,
   ToolTurnRequest,
   ToolTurnStreamEvent,
+  UserMemoryCandidate,
 } from '@cees/ai-service-client';
 import { AiServiceGateway, AiServiceInvocationError } from '../../ai-orchestration/ai-service-gateway.service';
 import { PrismaService } from '../../database/prisma.service';
 import { TenantContext } from '../../tenant/tenant-context';
 import { describeAssistantError } from '../assistant.errors';
 import {
+  ConnectorContextInput,
   isTerminalTurnStatus,
   PublicTurn,
   PublicTurnCapabilities,
@@ -36,6 +38,7 @@ import { EventService } from '../conversation/event.service';
 import { ToolPolicyError, ToolPolicyService } from '../tools/tool-policy.service';
 import { ToolRegistryService } from '../tools/tool-registry';
 import { KNOWLEDGE_SEARCH_TOOL_NAME, WEB_SEARCH_TOOL_NAME } from '../tools/tool.types';
+import { UserMemoryService } from '../../user-memory/user-memory.service';
 import { ContextBuilderService } from './context-builder.service';
 import { IntentCapabilityService, type AutoEnabledCapability } from './intent-capability.service';
 import { AssistantMessageContentService } from './message-content.service';
@@ -81,6 +84,7 @@ export class TurnRunnerService implements OnModuleDestroy {
     private readonly state: TurnStateService,
     private readonly messageContent: AssistantMessageContentService,
     private readonly intentCapability: IntentCapabilityService,
+    private readonly userMemory: UserMemoryService,
   ) { }
 
   onModuleDestroy(): void {
@@ -98,6 +102,7 @@ export class TurnRunnerService implements OnModuleDestroy {
     content?: string | null;
     imageFileIds?: string[];
     documentFileIds?: string[];
+    connectorContexts?: ConnectorContextInput[];
     /** 未显式指定时使用会话的默认模式。 */
     mode?: PublicTurnMode;
     /** 本轮是否允许检索知识库；省略时默认关闭。 */
@@ -121,6 +126,7 @@ export class TurnRunnerService implements OnModuleDestroy {
       requestId: context.requestId,
     });
     const documentFileIds = input.documentFileIds ?? [];
+    const connectorContexts = normalizeConnectorContexts(input.connectorContexts);
     if (!input.content?.trim() && imageFileIds.length === 0 && documentFileIds.length === 0) {
       throw new BadRequestException({
         code: 'MESSAGE_CONTENT_EMPTY',
@@ -133,6 +139,7 @@ export class TurnRunnerService implements OnModuleDestroy {
       input.content ?? '',
       imageFileIds,
       documentFileIds,
+      connectorContexts,
       input.knowledgeBaseEnabled ?? false,
       input.webSearchEnabled ?? false,
     );
@@ -166,6 +173,7 @@ export class TurnRunnerService implements OnModuleDestroy {
       content: input.content,
       imageFileIds,
       documentFileIds,
+      connectorContexts,
       mode,
       knowledgeBaseEnabled: input.knowledgeBaseEnabled ?? false,
       executionOwner: this.executionOwner,
@@ -348,6 +356,7 @@ export class TurnRunnerService implements OnModuleDestroy {
           latencyMs: event.latency_ms,
           finishReason: event.finish_reason ?? null,
           relatedQuestions: event.related_questions ?? null,
+          memoryCandidates: event.memory_candidates ?? null,
         });
         return;
       }
@@ -416,6 +425,7 @@ export class TurnRunnerService implements OnModuleDestroy {
         mode: input.mode === 'ultra' ? 'ultra' : 'standard',
         instructions: buildCapabilityGuidance(input.capabilities) ?? null,
         conversation_summary: messages.summary ?? null,
+        user_memories: messages.userMemories.length > 0 ? messages.userMemories : null,
         messages: messages.items,
         tools: input.allowedTools,
       };
@@ -437,6 +447,7 @@ export class TurnRunnerService implements OnModuleDestroy {
         latencyMs: number;
         finishReason: string | null;
         relatedQuestions: string[] | null;
+        memoryCandidates: UserMemoryCandidate[] | null;
       } | null = null;
       let terminalError: { code: string; message: string; retryable: boolean } | null = null;
 
@@ -464,6 +475,8 @@ export class TurnRunnerService implements OnModuleDestroy {
               latencyMs: event.latency_ms,
               finishReason: event.finish_reason ?? null,
               relatedQuestions: suggestedCalls.length === 0 ? event.related_questions ?? null : null,
+              // 记忆候选与追问同理：只有最终回答轮（无工具调用）的 completed 才携带。
+              memoryCandidates: suggestedCalls.length === 0 ? event.memory_candidates ?? null : null,
             };
             break streamEvents;
           case 'error':
@@ -749,6 +762,7 @@ export class TurnRunnerService implements OnModuleDestroy {
       latencyMs: number;
       finishReason: string | null;
       relatedQuestions: string[] | null;
+      memoryCandidates: UserMemoryCandidate[] | null;
     },
   ): Promise<void> {
     const completed = await this.state.completeTurn({
@@ -770,6 +784,15 @@ export class TurnRunnerService implements OnModuleDestroy {
       await this.appendPublicEvent(turnId, conversation.tenantId, {
         type: 'related_questions',
         questions: completion.relatedQuestions,
+      });
+    }
+    // 记忆候选由 ai-service 随回答输出；NestJS 校验后落库，失败不影响本轮结果。
+    if (completion.memoryCandidates?.length) {
+      await this.userMemory.applyCandidates(completion.memoryCandidates, {
+        conversationId: conversation.id,
+        turnId,
+      }).catch((error) => {
+        this.logger.error(`failed to apply memory candidates for turn ${turnId}: ${String(error)}`);
       });
     }
   }
@@ -957,6 +980,7 @@ function hashTurnRequest(
   content: string,
   imageFileIds: readonly string[] = [],
   documentFileIds: readonly string[] = [],
+  connectorContexts: readonly ConnectorContextInput[] = [],
   knowledgeBaseEnabled = false,
   webSearchEnabled = false,
 ): string {
@@ -967,10 +991,50 @@ function hashTurnRequest(
       content,
       imageFileIds,
       documentFileIds,
+      connectorContexts,
       knowledgeBaseEnabled,
       webSearchEnabled,
     }))
     .digest('hex');
+}
+
+function normalizeConnectorContexts(input: readonly ConnectorContextInput[] | undefined): ConnectorContextInput[] {
+  if (!input?.length) return [];
+  const serialized = JSON.stringify(input);
+  if (Buffer.byteLength(serialized, 'utf8') > 64 * 1024) {
+    throw new BadRequestException({
+      code: 'CONNECTOR_CONTEXT_TOO_LARGE',
+      message: '本轮连接器上下文超过 64KB，请缩小查询范围后重试',
+    });
+  }
+  assertNoConnectorSecrets(input);
+  return input.map((context) => ({
+    provider: context.provider,
+    toolId: context.toolId,
+    toolName: context.toolName,
+    fetchedAt: context.fetchedAt,
+    data: context.data,
+  }));
+}
+
+function assertNoConnectorSecrets(value: unknown, depth = 0): void {
+  if (depth > 12) {
+    throw new BadRequestException({ code: 'CONNECTOR_CONTEXT_INVALID', message: '连接器上下文嵌套层级过深' });
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item) => assertNoConnectorSecrets(item, depth + 1));
+    return;
+  }
+  if (!value || typeof value !== 'object') return;
+  for (const [key, item] of Object.entries(value)) {
+    if (/(?:token|secret|cookie|authorization|credential|password)/i.test(key)) {
+      throw new BadRequestException({
+        code: 'CONNECTOR_CONTEXT_SECRET_REJECTED',
+        message: '连接器上下文不得包含 Token、Cookie、密码或其他授权凭据',
+      });
+    }
+    assertNoConnectorSecrets(item, depth + 1);
+  }
 }
 
 /**

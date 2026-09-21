@@ -15,6 +15,7 @@ import { ContextBuilderService } from './context-builder.service';
 import { IntentCapabilityService } from './intent-capability.service';
 import { TurnRunnerService } from './turn-runner.service';
 import { TurnStateService } from './turn-state.service';
+import { UserMemoryService } from '../../user-memory/user-memory.service';
 
 describe('TurnRunnerService', () => {
     it('creates a multimodal turn, sends parts to ai-service and persists a terminal answer', async () => {
@@ -87,6 +88,44 @@ describe('TurnRunnerService', () => {
         })).rejects.toMatchObject({
             response: { code: 'MESSAGE_CONTENT_EMPTY' },
         });
+        expect(harness.state.createTurn).not.toHaveBeenCalled();
+    });
+
+    it('rejects connector contexts that contain credentials', async () => {
+        const harness = createHarness();
+
+        await expect(harness.service.startTurn({
+            conversationId: CONVERSATION_ID,
+            idempotencyKey: 'key-connector-secret',
+            content: '查看我的钉钉信息',
+            mode: 'standard',
+            connectorContexts: [{
+                provider: 'DINGTALK',
+                toolId: 'dws_read_0123456789abcdef',
+                toolName: 'contact.user.get_self',
+                fetchedAt: '2026-09-20T00:00:00.000Z',
+                data: { accessToken: 'must-not-pass' },
+            }],
+        })).rejects.toMatchObject({ response: { code: 'CONNECTOR_CONTEXT_SECRET_REJECTED' } });
+        expect(harness.state.createTurn).not.toHaveBeenCalled();
+    });
+
+    it('rejects oversized connector contexts before creating a turn', async () => {
+        const harness = createHarness();
+
+        await expect(harness.service.startTurn({
+            conversationId: CONVERSATION_ID,
+            idempotencyKey: 'key-connector-large',
+            content: '查看我的钉钉信息',
+            mode: 'standard',
+            connectorContexts: [{
+                provider: 'DINGTALK',
+                toolId: 'dws_read_0123456789abcdef',
+                toolName: 'contact.user.get_self',
+                fetchedAt: '2026-09-20T00:00:00.000Z',
+                data: { value: 'x'.repeat(70 * 1024) },
+            }],
+        })).rejects.toMatchObject({ response: { code: 'CONNECTOR_CONTEXT_TOO_LARGE' } });
         expect(harness.state.createTurn).not.toHaveBeenCalled();
     });
 
@@ -205,6 +244,57 @@ describe('TurnRunnerService', () => {
         });
     });
 
+    it('forwards active user memories into the tool turn request', async () => {
+        const harness = createHarness({ allowedTools: [chatTool('knowledge_search')] });
+        harness.contextBuilder.buildToolTurnMessages.mockResolvedValue({
+            summary: null,
+            items: [{ role: 'user', content: [{ type: 'text', text: '你好' }] }],
+            userMemories: ['用户偏好简洁回答'],
+        });
+
+        await harness.service.startTurn({
+            conversationId: CONVERSATION_ID,
+            idempotencyKey: 'key-memories',
+            content: '内部文档里怎么写的？',
+            mode: 'standard',
+            knowledgeBaseEnabled: true,
+        });
+        await consumeAll(await harness.service.subscribeTurn({
+            conversationId: CONVERSATION_ID,
+            turnId: TURN_ID,
+            afterSeq: 0,
+        }));
+
+        expect(harness.gateway.streamToolTurn).toHaveBeenCalledWith(
+            expect.objectContaining({ user_memories: ['用户偏好简洁回答'] }),
+            expect.anything(),
+            expect.any(AbortSignal),
+        );
+    });
+
+    it('passes null user_memories when no active memories exist', async () => {
+        const harness = createHarness({ allowedTools: [chatTool('knowledge_search')] });
+
+        await harness.service.startTurn({
+            conversationId: CONVERSATION_ID,
+            idempotencyKey: 'key-no-memories',
+            content: '内部文档里怎么写的？',
+            mode: 'standard',
+            knowledgeBaseEnabled: true,
+        });
+        await consumeAll(await harness.service.subscribeTurn({
+            conversationId: CONVERSATION_ID,
+            turnId: TURN_ID,
+            afterSeq: 0,
+        }));
+
+        expect(harness.gateway.streamToolTurn).toHaveBeenCalledWith(
+            expect.objectContaining({ user_memories: null }),
+            expect.anything(),
+            expect.any(AbortSignal),
+        );
+    });
+
     it('reuses an idempotent turn only when the multimodal request hash matches', async () => {
         const harness = createHarness();
         const request = {
@@ -241,10 +331,12 @@ describe('TurnRunnerService', () => {
         harness.contextBuilder.buildToolTurnMessages
             .mockResolvedValueOnce({
                 summary: null,
+                userMemories: [],
                 items: [{ role: 'user', content: [{ type: 'text', text: 'hello' }] }],
             })
             .mockResolvedValueOnce({
                 summary: null,
+                userMemories: [],
                 items: [
                     { role: 'user', content: [{ type: 'text', text: 'hello' }] },
                     {
@@ -334,10 +426,12 @@ describe('TurnRunnerService', () => {
         harness.contextBuilder.buildToolTurnMessages
             .mockResolvedValueOnce({
                 summary: null,
+                userMemories: [],
                 items: [{ role: 'user', content: [{ type: 'text', text: '帮我画一只猫' }] }],
             })
             .mockResolvedValueOnce({
                 summary: null,
+                userMemories: [],
                 items: [
                     { role: 'user', content: [{ type: 'text', text: '帮我画一只猫' }] },
                     {
@@ -399,10 +493,12 @@ describe('TurnRunnerService', () => {
         harness.contextBuilder.buildToolTurnMessages
             .mockResolvedValueOnce({
                 summary: null,
+                userMemories: [],
                 items: [{ role: 'user', content: [{ type: 'text', text: '搜索 CEES' }] }],
             })
             .mockResolvedValueOnce({
                 summary: null,
+                userMemories: [],
                 items: [
                     { role: 'user', content: [{ type: 'text', text: '搜索 CEES' }] },
                     {
@@ -736,6 +832,103 @@ describe('TurnRunnerService', () => {
             expect.objectContaining({ relatedQuestions: ['需要调整风格吗？'] }),
         );
     });
+
+    it('persists memory candidates carried on the completed event', async () => {
+        const harness = createHarness();
+        harness.gateway.streamChat.mockImplementation(async () => (async function* stream() {
+            yield {
+                type: 'completed',
+                latency_ms: 1,
+                finish_reason: 'stop',
+                memory_candidates: [{ type: 'PREFERENCE', content: '用户偏好简洁回答' }],
+            } as ChatStreamEvent;
+        })());
+
+        await harness.service.startTurn({
+            conversationId: CONVERSATION_ID,
+            idempotencyKey: 'key-memory-ok',
+            content: '你好',
+        });
+        await consumeAll(await harness.service.subscribeTurn({
+            conversationId: CONVERSATION_ID,
+            turnId: TURN_ID,
+            afterSeq: 0,
+            lingerMs: 200,
+        }));
+
+        expect(harness.userMemory.applyCandidates).toHaveBeenCalledWith(
+            [{ type: 'PREFERENCE', content: '用户偏好简洁回答' }],
+            { conversationId: CONVERSATION_ID, turnId: TURN_ID },
+        );
+    });
+
+    it('skips memory candidate persistence when the completed event carries none', async () => {
+        const harness = createHarness();
+
+        await harness.service.startTurn({
+            conversationId: CONVERSATION_ID,
+            idempotencyKey: 'key-memory-none',
+            content: '你好',
+        });
+        await consumeAll(await harness.service.subscribeTurn({
+            conversationId: CONVERSATION_ID,
+            turnId: TURN_ID,
+            afterSeq: 0,
+            lingerMs: 200,
+        }));
+
+        expect(harness.userMemory.applyCandidates).not.toHaveBeenCalled();
+    });
+
+    it('drops memory candidates from tool-calling rounds but keeps them from the final answer round', async () => {
+        const harness = createHarness({
+            allowedTools: [chatTool('generate_image')],
+            toolTurnStreams: [
+                () => (async function* stream() {
+                    yield toolTurnStartedEvent();
+                    yield {
+                        type: 'tool_calls',
+                        tool_calls: [{ id: 'call_1', name: 'generate_image', arguments: { prompt: '一只猫' } }],
+                    } as ToolTurnStreamEvent;
+                    // 工具轮次不应携带记忆候选；即使上游带出也必须丢弃。
+                    yield {
+                        type: 'completed',
+                        latency_ms: 1,
+                        finish_reason: 'tool_calls',
+                        memory_candidates: [{ type: 'FACT', content: '这轮不该出现' }],
+                    } as ToolTurnStreamEvent;
+                })(),
+                () => (async function* stream() {
+                    yield toolTurnStartedEvent();
+                    yield { type: 'content_delta', text: '图片已经生成好了！' } as ToolTurnStreamEvent;
+                    yield {
+                        type: 'completed',
+                        latency_ms: 1,
+                        finish_reason: 'stop',
+                        memory_candidates: [{ type: 'PREFERENCE', content: '用户喜欢猫咪主题' }],
+                    } as ToolTurnStreamEvent;
+                })(),
+            ],
+        });
+
+        await harness.service.startTurn({
+            conversationId: CONVERSATION_ID,
+            idempotencyKey: 'key-memory-tool',
+            content: '帮我画一只猫',
+        });
+        await consumeAll(await harness.service.subscribeTurn({
+            conversationId: CONVERSATION_ID,
+            turnId: TURN_ID,
+            afterSeq: 0,
+            lingerMs: 200,
+        }));
+
+        expect(harness.userMemory.applyCandidates).toHaveBeenCalledTimes(1);
+        expect(harness.userMemory.applyCandidates).toHaveBeenCalledWith(
+            [{ type: 'PREFERENCE', content: '用户喜欢猫咪主题' }],
+            { conversationId: CONVERSATION_ID, turnId: TURN_ID },
+        );
+    });
 });
 
 const TENANT_ID = '10000000-0000-0000-0000-000000000001';
@@ -867,11 +1060,15 @@ function createHarness(options: {
         }),
         buildToolTurnMessages: jest.fn().mockResolvedValue({
             summary: null,
+            userMemories: [],
             items: [{ role: 'user', content: [{ type: 'text', text: '你好' }] }],
         }),
     };
     const messageContent = {
         validateImageFileIds: jest.fn((fileIds?: string[]) => Promise.resolve(fileIds ?? [])),
+    };
+    const userMemory = {
+        applyCandidates: jest.fn().mockResolvedValue(undefined),
     };
     const gateway = {
         streamChat: jest.fn(async (_input: unknown, _tracking: unknown, signal?: AbortSignal) => completedStream(signal)),
@@ -1004,6 +1201,7 @@ function createHarness(options: {
         state as unknown as TurnStateService,
         messageContent as unknown as AssistantMessageContentService,
         new IntentCapabilityService(),
+        userMemory as unknown as UserMemoryService,
     );
     return {
         service,
@@ -1013,6 +1211,7 @@ function createHarness(options: {
         state,
         toolPolicy,
         messageContent,
+        userMemory,
         events,
     };
 }
@@ -1132,12 +1331,13 @@ function hashTurnRequestForTest(
     content: string,
     imageFileIds: string[] = [],
     documentFileIds: string[] = [],
+    connectorContexts: unknown[] = [],
     knowledgeBaseEnabled = false,
     webSearchEnabled = false,
 ): string {
     const { createHash } = require('node:crypto') as typeof import('node:crypto');
     return createHash('sha256')
-        .update(JSON.stringify({ conversationId, mode, content, imageFileIds, documentFileIds, knowledgeBaseEnabled, webSearchEnabled }))
+        .update(JSON.stringify({ conversationId, mode, content, imageFileIds, documentFileIds, connectorContexts, knowledgeBaseEnabled, webSearchEnabled }))
         .digest('hex');
 }
 

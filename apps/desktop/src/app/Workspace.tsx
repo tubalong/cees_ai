@@ -15,16 +15,17 @@ import ReactMarkdown, { type Components } from 'react-markdown';
 import { useLocation, useNavigate } from 'react-router-dom';
 import remarkGfm from 'remark-gfm';
 import {
-    cancelTurn, createConversation, createTurn, deleteConversation, exportDocument, getConversation, getDashboardOverview, getDashboardTodos, getDashboardUpcomingMeetings, getDocument, getImage, replayTurnEvents, updateConversation, uploadAttachmentFile,
+    cancelTurn, createConversation, createTurn, deleteConversation, exportDocument, getConversation, getDashboardOverview, getDashboardTodos, getDashboardUpcomingMeetings, getDocument, getImage, planDingTalkConnectorQueries, replayTurnEvents, updateConversation, uploadAttachmentFile,
     getUnreadNotificationCount, hasStoredSession, listConversations, listDocuments, listTenantMembers, logout,
     createKnowledgeDocument, deleteKnowledgeDocument, listWritableKnowledgeBases,
     type Conversation, type ConversationMessage, type DashboardOverview, type DashboardTodoItem, type DashboardUpcomingMeeting, type ImageAccess,
-    type TurnStreamEvent,
+    type ConnectorContext, type TurnStreamEvent,
     type KnowledgeBaseSummary, type KnowledgeSourceType,
     type ManagedDocumentSummary, type MeResult, type TenantMember,
 } from '../core/api';
 import MeetingManagement from '../features/meetings/MeetingManagement';
 import DingTalkOrganizationPage from '../features/dingtalk/DingTalkOrganizationPage';
+import ConnectorMarketplacePage from '../features/connectors/ConnectorMarketplacePage';
 import NotificationCenter from '../features/notifications/NotificationCenter';
 import OrganizationManagement from '../features/organization/OrganizationManagement';
 import ProjectManagement from '../features/projects/ProjectManagement';
@@ -87,11 +88,11 @@ const markdownRenderComponents: Components = {
     img: ({ alt }) => <span className="chat-inline-image-fallback">{(alt ?? '').trim() || '图片'}</span>,
 };
 
-/** 始终置顶的独立入口：首页、AI 助手、应用中心 */
+/** 始终置顶的独立入口：首页、AI 助手、连接器 */
 const pinnedNavItems: NavItem[] = [
     { path: '/', label: '首页', icon: <HomeOutlined /> },
     { path: '/assistant', label: 'AI 助手', icon: <MessageOutlined /> },
-    { path: '/applications', label: '应用中心', icon: <AppstoreOutlined /> },
+    { path: '/connectors', label: '连接器', icon: <AppstoreOutlined /> },
 ];
 
 /** 其余功能按业务域归类到可折叠的父级管理中 */
@@ -170,7 +171,6 @@ const navPermissionByPath: Record<string, string> = {
 };
 
 const navAnyPermissionByPath: Record<string, string[]> = {
-    '/dingtalk': ['dingtalk.integration.read', 'dingtalk.organization.read', 'dingtalk.organization.mapping.preview'],
     '/hr': ['hr.profile.read', 'hr.leave.read', 'hr.attendance.read', 'hr.overtime.read', 'hr.employee_change.read', 'hr.report.read'],
     '/finance': ['finance.expense.read', 'finance.expense.request', 'finance.expense.approve', 'finance.expense.manage_all'],
     '/legal': ['legal.contract.read', 'legal.contract.create', 'legal.contract.update', 'legal.contract.delete', 'legal.contract.manage_all'],
@@ -591,6 +591,7 @@ function readDeletedCitationIds(conversationId: string): Set<string> {
 function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element {
     const { t } = useI18n();
     const { message } = AntdApp.useApp();
+    const navigate = useNavigate();
     const canSaveToKnowledge = permissions.includes('knowledge_base.read');
     const [input, setInput] = useState('');
     const [selectedPrompt, setSelectedPrompt] = useState<string>();
@@ -617,7 +618,16 @@ function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element 
     const [saveTarget, setSaveTarget] = useState<SaveTarget>();
     const [renameTarget, setRenameTarget] = useState<Conversation>();
     const [renameValue, setRenameValue] = useState('');
+    const [dingtalkConnected, setDingtalkConnected] = useState(false);
     useEffect(() => { void listConversations().then((result) => { setConversations(result.items); if (result.items[0]) void selectConversation(result.items[0]); }).catch((error) => message.error(error instanceof Error ? error.message : '加载会话失败')); }, []);
+    useEffect(() => {
+        const connector = window.cees?.connectors?.dingtalk;
+        if (!connector) return;
+        void connector.status()
+            .then((status) => setDingtalkConnected(status.state === 'READY'))
+            .catch(() => setDingtalkConnected(false));
+        return connector.onStatusChanged((status) => setDingtalkConnected(status.state === 'READY'));
+    }, []);
     useEffect(() => () => abortController.current?.abort(), []);
     useEffect(() => {
         const questionId = pendingQuestionFocus.current;
@@ -724,18 +734,44 @@ function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element 
         const options = [attachment && !attachment.isImage && `参考附件：${attachment.name}`].filter(Boolean);
         const content = [selectedPrompt, ...options, text].filter(Boolean).join('\n') || (imageFileIds.length ? t('请分析这张图片') : '');
         if ((!content && !imageFileIds.length && !fileIds.length) || sending) return;
-        setInput('');
-        setSelectedPrompt(undefined);
-        setAttachment(undefined);
-        setAutoEnabledCapabilities([]);
         setSending(true);
         const version = ++requestVersion.current;
         const controller = new AbortController();
         abortController.current = controller;
-        const userMessage: LocalChatMessage = { id: `m-${Date.now()}`, role: 'user', content };
-        pendingQuestionFocus.current = userMessage.id;
-        setMessages((items) => [...items, userMessage]);
         try {
+            let connectorContexts: ConnectorContext[] = [];
+            const dingtalkConnector = window.cees?.connectors?.dingtalk;
+            if (dingtalkConnector) {
+                const mentionsDingTalk = /钉钉|dingtalk|dws/i.test(content);
+                let connectorRequired = false;
+                try {
+                    const status = await dingtalkConnector.status();
+                    if (status.state === 'READY') {
+                        const tools = await dingtalkConnector.tools();
+                        if (tools.length > 0) {
+                            const plan = await planDingTalkConnectorQueries(content, tools);
+                            connectorRequired = plan.calls.length > 0;
+                            connectorContexts = await dingtalkConnector.execute(plan.calls);
+                        }
+                    } else if (mentionsDingTalk) {
+                        if (status.state === 'PROFILE_REQUIRED') {
+                            throw new Error('当前钉钉连接已登录多个组织，请先在连接器页面选择当前组织');
+                        }
+                        throw new Error(status.error || '请先在连接器页面安装并授权钉钉连接器');
+                    }
+                } catch (error) {
+                    const latestStatus = await dingtalkConnector.status().catch(() => undefined);
+                    setDingtalkConnected(latestStatus?.state === 'READY');
+                    if (mentionsDingTalk || connectorRequired) throw error;
+                }
+            }
+            setInput('');
+            setSelectedPrompt(undefined);
+            setAttachment(undefined);
+            setAutoEnabledCapabilities([]);
+            const userMessage: LocalChatMessage = { id: `m-${Date.now()}`, role: 'user', content };
+            pendingQuestionFocus.current = userMessage.id;
+            setMessages((items) => [...items, userMessage]);
             const conversationId = activeConversationId ?? (await createConversation()).id;
             setActiveConversationId(conversationId);
             if (!conversations.some((item) => item.id === conversationId)) setConversations((items) => [{ id: conversationId, title: t('新对话'), mode, visibility: 'PRIVATE', version: 1, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }, ...items]);
@@ -768,7 +804,7 @@ function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element 
                 if (!terminal) throw new Error(t('连接已断开，请稍后重试'));
             };
             try {
-                await createTurn(conversationId, { content, mode, imageFileIds, fileIds, knowledgeBaseEnabled: knowledgeBase, webSearchEnabled: networkSearch }, crypto.randomUUID(), handle, controller.signal);
+                await createTurn(conversationId, { content, mode, imageFileIds, fileIds, connectorContexts: connectorContexts.length ? connectorContexts : undefined, knowledgeBaseEnabled: knowledgeBase, webSearchEnabled: networkSearch }, crypto.randomUUID(), handle, controller.signal);
             } catch (error) {
                 if (!turnId || controller.signal.aborted || terminal) throw error;
                 await replay();
@@ -776,7 +812,18 @@ function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element 
             if (!terminal && turnId && !controller.signal.aborted) await replay();
             if (version === requestVersion.current) setActiveTurn(undefined);
         } catch (error) {
-            if (!controller.signal.aborted && version === requestVersion.current) message.error(error instanceof Error ? error.message : t('AI 请求失败，请稍后重试'));
+            if (!controller.signal.aborted && version === requestVersion.current) {
+                const errorMessage = error instanceof Error ? error.message : t('AI 请求失败，请稍后重试');
+                if (errorMessage.includes('连接器页面')) {
+                    Modal.confirm({
+                        title: t('需要连接钉钉'),
+                        content: errorMessage,
+                        okText: t('前往连接器'),
+                        cancelText: t('取消'),
+                        onOk: () => navigate('/connectors'),
+                    });
+                } else message.error(errorMessage);
+            }
         } finally {
             if (version === requestVersion.current) { setSending(false); abortController.current = undefined; }
         }
@@ -830,6 +877,7 @@ function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element 
                             <input ref={fileInput} type="file" hidden accept="image/*,.pdf,.doc,.docx,.txt,.md" onChange={(event) => { const file = event.target.files?.[0]; if (!file) return; void uploadAttachmentFile(file).then((id) => setAttachment({ name: file.name, id, isImage: file.type.startsWith('image/') })).catch((error) => message.error(error instanceof Error ? error.message : '附件上传失败')); event.target.value = ''; }} />
                             <Button type="text" className={`composer-option ${networkSearch ? 'is-selected' : ''}`} icon={<Globe2 size={15} />} onClick={() => setNetworkSearch((value) => !value)}>联网搜索</Button>
                             <Button type="text" className={`composer-option ${knowledgeBase ? 'is-selected' : ''}`} icon={<BookOpen size={15} />} onClick={() => setKnowledgeBase((value) => !value)}>知识库</Button>
+                            {dingtalkConnected ? <Tag color="success">{t('钉钉已连接')}</Tag> : null}
                             <Select className="composer-mode" size="small" value={mode} onChange={setMode} options={[{ label: '快速模式', value: 'standard' }, { label: '深度模式', value: 'ultra' }]} />
                             <Button type="primary" className="composer-send" icon={<Send size={16} />} loading={sending} onClick={() => void sendMessage()}>发送</Button>
                         </div>
@@ -929,7 +977,7 @@ function CurrentPage({ authContext, members, documents, membersLoading, document
     if (location.pathname === '/projects') return <ProjectManagement authContext={authContext} onSessionExpired={onSessionExpired} />;
     if (location.pathname === '/meetings') return <MeetingManagement authContext={authContext} onSessionExpired={onSessionExpired} />;
     if (location.pathname === '/reports') return <WorkReportPage authContext={authContext} onSessionExpired={onSessionExpired} />;
-    if (location.pathname === '/applications') return <ApplicationsPage />;
+    if (location.pathname === '/connectors' || location.pathname === '/applications') return <ConnectorMarketplacePage />;
     if (location.pathname === '/architecture') return <OrganizationManagement authContext={authContext} fallbackMembers={members} membersLoading={membersLoading} onSessionExpired={onSessionExpired} />;
     if (location.pathname === '/assignment') return <AssignmentPolicyManagement authContext={authContext} onSessionExpired={onSessionExpired} />;
     if (location.pathname === '/hr') return <HrManagement authContext={authContext} onSessionExpired={onSessionExpired} />;

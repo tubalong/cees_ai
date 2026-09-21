@@ -181,22 +181,23 @@ export class ConversationService {
   async updateTitle(
     conversationId: string,
     title: string,
-    version: number,
+    _version: number | undefined,
   ): Promise<PublicConversation> {
     const context = this.tenantContext.require();
     const normalizedTitle = normalizeRequiredTitle(title);
     const conversation = await this.prisma.$transaction(async (transaction) => {
       await lockConversationForUpdate(transaction, context.tenantId, conversationId);
       const current = await this.requireMemberConversation(conversationId, transaction);
-      assertVersion(current.version, version);
 
+      // 标题更新不再校验客户端传入的 version：每次发起轮次都会递增会话版本，
+      // 前端持有的版本必然过期，导致标题修改频繁命中 CONVERSATION_VERSION_CONFLICT。
+      // 标题是低风险字段且已持有会话行锁，直接覆盖写入；版本号仍照常递增。
       const updated = await transaction.conversation.updateMany({
         where: {
           id: conversationId,
           tenantId: context.tenantId,
           ownerMembershipId: context.membershipId,
           deletedAt: null,
-          version,
         },
         data: { title: normalizedTitle, version: { increment: 1 } },
       });
@@ -214,7 +215,7 @@ export class ConversationService {
           requestId: context.requestId,
           metadata: {
             before: { title: current.title, version: current.version },
-            after: { title: normalizedTitle, version: version + 1 },
+            after: { title: normalizedTitle, version: current.version + 1 },
           },
         },
       });

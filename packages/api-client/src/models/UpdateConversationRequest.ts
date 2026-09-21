@@ -8,8 +8,8 @@ export type UpdateConversationRequest = {
      */
     title: string;
     /**
-     * 当前会话版本，用于防止并发覆盖
+     * 历史兼容字段，不再参与校验；服务端忽略该字段（每次发起轮次都会递增会话版本，旧客户端持有的版本必然过期）
      */
-    version: number;
+    version?: number;
 };
 

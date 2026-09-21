@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CEES AI API
-  version: 0.33.0
+  version: 0.36.0
   description: 以本文件为唯一事实源的公开 API 契约。资源与操作按 docs/api 约定补充。
 
 servers:
@@ -23,6 +23,55 @@ paths:
                 properties:
                   status:
                     type: string
+
+  /assistant/connectors/dingtalk/plan:
+    post:
+      summary: Plan read-only DingTalk DWS queries for the current question
+      description: |
+        Desktop dynamically discovers read-only tools from the locally installed DWS Schema. The API only asks the model
+        to select tools and arguments; it never stores DWS credentials or executes local commands. Before execution, Desktop
+        must reload the leaf Schema and verify effect=read, confirmation=not_required, and availability=available.
+      operationId: planDingTalkConnectorQueries
+      tags: [Conversation]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DingTalkConnectorPlanRequest'
+      responses:
+        '200':
+          description: Up to three local read-only calls; calls is empty when DingTalk data is unnecessary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DingTalkConnectorPlanResponseEnvelope'
+        '400':
+          description: Invalid query or tool catalog
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '401':
+          description: Authentication or tenant membership is invalid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '502':
+          description: AI provider returned an invalid plan
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '503':
+          description: AI service or model is temporarily unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
 
   /conversations:
     post:
@@ -667,6 +716,136 @@ paths:
                 $ref: "#/components/schemas/ErrorResponseEnvelope"
         "409":
           description: 个人资料版本冲突
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /user-memories:
+    get:
+      summary: 查询当前成员的用户级记忆列表
+      description: |
+        返回当前成员在该租户内的全部未删除记忆，按创建时间升序（即注入对话上下文的顺序），至多 30 条。
+        记忆只属于成员本人：AI 仅提议记忆内容，写入与删除一律以本人操作为准。
+      operationId: listUserMemories
+      tags:
+        - User
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 记忆列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserMemoryListResponseEnvelope"
+        "401":
+          description: 登录状态或租户成员身份无效
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /user-memories/{memoryId}:
+    patch:
+      summary: 修改当前成员的一条用户级记忆
+      description: 使用版本进行乐观并发控制；版本不匹配时返回 409。content 与 type 至少提供一个。
+      operationId: updateUserMemory
+      tags:
+        - User
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: memoryId
+          in: path
+          required: true
+          description: 记忆 ID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateUserMemoryRequest"
+      responses:
+        "200":
+          description: 修改后的记忆
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserMemoryResponseEnvelope"
+        "400":
+          description: 请求字段校验失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "401":
+          description: 登录状态或租户成员身份无效
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "404":
+          description: 记忆不存在或不属于当前成员
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "409":
+          description: 记忆版本冲突
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+    delete:
+      summary: 删除当前成员的一条用户级记忆
+      description: 软删除记忆，审计事实保留；版本不匹配时返回 409。
+      operationId: deleteUserMemory
+      tags:
+        - User
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: memoryId
+          in: path
+          required: true
+          description: 记忆 ID
+          schema:
+            type: string
+            format: uuid
+        - name: version
+          in: query
+          required: true
+          description: 当前记忆版本
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "204":
+          description: 记忆已软删除
+        "400":
+          description: 请求字段校验失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "401":
+          description: 登录状态或租户成员身份无效
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "404":
+          description: 记忆不存在或不属于当前成员
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "409":
+          description: 记忆版本冲突
           content:
             application/json:
               schema:
@@ -5166,6 +5345,31 @@ paths:
         '409': { description: 当前集成已有同步任务运行中 }
         '502': { description: 钉钉开放平台同步失败 }
 
+  /dingtalk/organization/snapshot:
+    post:
+      summary: 导入当前授权账号通过 DWS/MCP 获取的可见组织快照
+      description: |
+        仅 CEES 当前租户的 tenant_admin 可调用。服务端不检查授权账号是否为钉钉管理员，
+        只将快照视为当前钉钉账号可见范围并执行幂等合并；未出现在快照中的既有镜像不会被标记删除或离职。
+      operationId: importDingTalkVisibleOrganizationSnapshot
+      tags: [DingTalk]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ImportDingTalkVisibleOrganizationSnapshotRequest' }
+      responses:
+        '200':
+          description: 可见组织快照已合并
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DingTalkSyncJobResponseEnvelope' }
+        '400': { description: 快照字段、部门层级或人员引用无效 }
+        '401': { description: 登录状态无效或已过期 }
+        '403': { description: 当前用户不是 CEES 租户管理员或缺少 dingtalk.organization.sync 权限 }
+        '409': { description: 当前已有同步任务或快照所属钉钉企业与当前绑定冲突 }
+
   /dingtalk/organization/departments:
     get:
       summary: 查询钉钉部门镜像
@@ -9244,7 +9448,7 @@ components:
     UpdateConversationRequest:
       type: object
       additionalProperties: false
-      required: [title, version]
+      required: [title]
       properties:
         title:
           type: string
@@ -9254,7 +9458,7 @@ components:
         version:
           type: integer
           minimum: 1
-          description: 当前会话版本，用于防止并发覆盖
+          description: 历史兼容字段，不再参与校验；服务端忽略该字段（每次发起轮次都会递增会话版本，旧客户端持有的版本必然过期）
 
     ConversationVisibility:
       type: string
@@ -9485,6 +9689,119 @@ components:
           type: boolean
           default: false
           description: 本轮是否允许联网搜索；省略时默认关闭。关闭时 AI 不获得联网检索工具；若用户消息明确提到需要联网，服务端可为本轮自动临时启用并在 started 事件回传（见 TurnCapabilities.autoEnabled）
+        connectorContexts:
+          type: array
+          maxItems: 3
+          description: Desktop 从用户已授权的本地连接器读取的本轮只读上下文；不会作为业务事实或写操作权限依据
+          items:
+            $ref: '#/components/schemas/ConnectorContext'
+
+    ConnectorContext:
+      type: object
+      additionalProperties: false
+      required: [provider, toolId, toolName, fetchedAt, data]
+      properties:
+        provider:
+          type: string
+          enum: [DINGTALK]
+        toolId:
+          type: string
+          minLength: 1
+          maxLength: 80
+          pattern: '^dws_read_[a-f0-9]{16}$'
+          description: Stable local tool ID derived from the DWS canonical_path
+        toolName:
+          type: string
+          minLength: 1
+          maxLength: 240
+          description: DWS Schema canonical_path, retained for source display and audit context
+        fetchedAt:
+          type: string
+          format: date-time
+        data:
+          type: object
+          additionalProperties: true
+          description: 已脱敏的连接器结构化结果，不得包含 Token、Cookie、AppSecret 或授权凭据
+
+    DingTalkConnectorTool:
+      type: object
+      additionalProperties: false
+      required: [toolId, name, description, parameters]
+      properties:
+        toolId:
+          type: string
+          minLength: 1
+          maxLength: 80
+          pattern: '^dws_read_[a-f0-9]{16}$'
+        name:
+          type: string
+          minLength: 1
+          maxLength: 240
+          description: DWS canonical_path
+        description:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: Read-only tool purpose extracted from the current DWS Schema
+        parameters:
+          type: object
+          additionalProperties: true
+          description: JSON Schema used by the model to produce arguments; root must be an object
+
+    DingTalkConnectorPlanRequest:
+      type: object
+      additionalProperties: false
+      required: [query, tools]
+      properties:
+        query:
+          type: string
+          minLength: 1
+          maxLength: 10000
+        tools:
+          type: array
+          minItems: 1
+          maxItems: 1500
+          items:
+            $ref: '#/components/schemas/DingTalkConnectorTool'
+
+    DingTalkConnectorPlannedCall:
+      type: object
+      additionalProperties: false
+      required: [toolId, arguments]
+      properties:
+        toolId:
+          type: string
+          minLength: 1
+          maxLength: 80
+          pattern: '^dws_read_[a-f0-9]{16}$'
+        arguments:
+          type: object
+          additionalProperties: true
+
+    DingTalkConnectorPlanResult:
+      type: object
+      additionalProperties: false
+      required: [calls]
+      properties:
+        calls:
+          type: array
+          maxItems: 3
+          items:
+            $ref: '#/components/schemas/DingTalkConnectorPlannedCall'
+
+    DingTalkConnectorPlanResponseEnvelope:
+      type: object
+      additionalProperties: false
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: '#/components/schemas/DingTalkConnectorPlanResult'
+        requestId:
+          type: [string, 'null']
+          description: Public API request trace ID
 
     TurnStatus:
       type: string
@@ -13192,6 +13509,106 @@ components:
             - string
             - "null"
 
+    UserMemoryType:
+      type: string
+      enum:
+        - PREFERENCE
+        - FACT
+        - DECISION
+        - HABIT
+      description: 记忆类型；PREFERENCE 偏好、FACT 事实、DECISION 决定、HABIT 习惯。
+
+    UserMemory:
+      type: object
+      required:
+        - id
+        - type
+        - content
+        - version
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          $ref: "#/components/schemas/UserMemoryType"
+        content:
+          type: string
+          minLength: 1
+          maxLength: 1000
+          description: 记忆正文，一条自包含的关于用户本人的陈述
+        version:
+          type: integer
+          minimum: 1
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    UserMemoryList:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          maxItems: 30
+          items:
+            $ref: "#/components/schemas/UserMemory"
+
+    UpdateUserMemoryRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - version
+      properties:
+        content:
+          type: string
+          minLength: 1
+          maxLength: 1000
+          description: 记忆正文；与 type 至少提供一个
+        type:
+          $ref: "#/components/schemas/UserMemoryType"
+          description: 记忆类型；与 content 至少提供一个
+        version:
+          type: integer
+          minimum: 1
+
+    UserMemoryResponseEnvelope:
+      type: object
+      required:
+        - success
+        - data
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: "#/components/schemas/UserMemory"
+        requestId:
+          type:
+            - string
+            - "null"
+
+    UserMemoryListResponseEnvelope:
+      type: object
+      required:
+        - success
+        - data
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: "#/components/schemas/UserMemoryList"
+        requestId:
+          type:
+            - string
+            - "null"
+
     TenantResponseEnvelope:
       type: object
       required:
@@ -13778,6 +14195,18 @@ components:
       type: string
       enum: [ACTIVE, DISABLED, ERROR]
 
+    DingTalkIntegrationMode:
+      type: string
+      enum: [SELF_MANAGED_APP, DWS_LOCAL]
+
+    DingTalkSyncSource:
+      type: string
+      enum: [SELF_MANAGED_APP, DWS_MCP]
+
+    DingTalkSyncScope:
+      type: string
+      enum: [FULL_SCOPE, VISIBLE_SCOPE]
+
     DingTalkSyncJobStatus:
       type: string
       enum: [RUNNING, SUCCEEDED, FAILED]
@@ -13788,15 +14217,20 @@ components:
 
     DingTalkIntegration:
       type: object
-      required: [id, tenantId, corpId, appKey, status, lastVerifiedAt, lastSyncedAt, lastErrorCode, lastErrorMessage, version, createdAt, updatedAt]
+      required: [id, tenantId, mode, corpId, appKey, authorizedByMembershipId, authorizedExternalUserId, authorizedProfile, grantedCapabilities, status, lastVerifiedAt, lastSyncedAt, lastErrorCode, lastErrorMessage, version, createdAt, updatedAt]
       properties:
         id: { type: string, format: uuid }
         tenantId: { type: string, format: uuid }
-        corpId: { type: string }
-        appKey: { type: string }
-        status:
-          type: string
-          enum: [ACTIVE, DISABLED]
+        mode: { $ref: '#/components/schemas/DingTalkIntegrationMode' }
+        corpId: { type: [string, 'null'] }
+        appKey: { type: [string, 'null'] }
+        authorizedByMembershipId: { type: [string, 'null'], format: uuid }
+        authorizedExternalUserId: { type: [string, 'null'] }
+        authorizedProfile: { type: [string, 'null'] }
+        grantedCapabilities:
+          type: array
+          items: { type: string }
+        status: { $ref: '#/components/schemas/DingTalkIntegrationStatus' }
         lastVerifiedAt: { type: [string, 'null'], format: date-time }
         lastSyncedAt: { type: [string, 'null'], format: date-time }
         lastErrorCode: { type: [string, 'null'] }
@@ -13860,11 +14294,15 @@ components:
 
     DingTalkSyncJob:
       type: object
-      required: [id, integrationId, type, status, departmentCount, userCount, errorCode, errorMessage, startedAt, completedAt, createdAt]
+      required: [id, integrationId, type, source, scope, authorizedByMembershipId, authorizedExternalUserId, status, departmentCount, userCount, errorCode, errorMessage, startedAt, completedAt, createdAt]
       properties:
         id: { type: string, format: uuid }
         integrationId: { type: string, format: uuid }
         type: { $ref: '#/components/schemas/DingTalkSyncType' }
+        source: { $ref: '#/components/schemas/DingTalkSyncSource' }
+        scope: { $ref: '#/components/schemas/DingTalkSyncScope' }
+        authorizedByMembershipId: { type: [string, 'null'], format: uuid }
+        authorizedExternalUserId: { type: [string, 'null'] }
         status: { $ref: '#/components/schemas/DingTalkSyncJobStatus' }
         departmentCount: { type: integer, minimum: 0 }
         userCount: { type: integer, minimum: 0 }
@@ -13901,6 +14339,59 @@ components:
         appSecret: { type: string, minLength: 1, maxLength: 512, format: password }
         status: { $ref: '#/components/schemas/DingTalkIntegrationStatus' }
         version: { type: integer, minimum: 1 }
+
+    DingTalkVisibleDepartmentSnapshot:
+      type: object
+      additionalProperties: false
+      required: [externalDepartmentId, parentExternalDepartmentId, name, displayOrder]
+      properties:
+        externalDepartmentId: { type: string, minLength: 1, maxLength: 128 }
+        parentExternalDepartmentId: { type: [string, 'null'], maxLength: 128 }
+        name: { type: string, minLength: 1, maxLength: 128 }
+        displayOrder: { type: integer, minimum: 0 }
+
+    DingTalkVisibleUserSnapshot:
+      type: object
+      additionalProperties: false
+      required: [externalUserId, unionId, name, title, jobNumber, departmentExternalIds, active, admin, boss]
+      properties:
+        externalUserId: { type: string, minLength: 1, maxLength: 128 }
+        unionId: { type: [string, 'null'], maxLength: 128 }
+        name: { type: string, minLength: 1, maxLength: 128 }
+        title: { type: [string, 'null'], maxLength: 128 }
+        jobNumber: { type: [string, 'null'], maxLength: 128 }
+        departmentExternalIds:
+          type: array
+          maxItems: 100
+          items: { type: string, minLength: 1, maxLength: 128 }
+        active: { type: boolean, default: true }
+        admin: { type: boolean, default: false }
+        boss: { type: boolean, default: false }
+
+    ImportDingTalkVisibleOrganizationSnapshotRequest:
+      type: object
+      additionalProperties: false
+      required: [corpId, externalUserId, externalUserName, profile, fetchedAt, capabilities, departments, users]
+      properties:
+        corpId: { type: string, minLength: 1, maxLength: 128 }
+        externalUserId: { type: string, minLength: 1, maxLength: 128 }
+        externalUserName: { type: string, minLength: 1, maxLength: 128 }
+        profile: { type: string, minLength: 1, maxLength: 256 }
+        fetchedAt: { type: string, format: date-time }
+        capabilities:
+          type: array
+          maxItems: 100
+          uniqueItems: true
+          items: { type: string, minLength: 1, maxLength: 128 }
+        departments:
+          type: array
+          maxItems: 5000
+          items: { $ref: '#/components/schemas/DingTalkVisibleDepartmentSnapshot' }
+        users:
+          type: array
+          minItems: 1
+          maxItems: 20000
+          items: { $ref: '#/components/schemas/DingTalkVisibleUserSnapshot' }
 
     DingTalkIntegrationResponseEnvelope:
       type: object

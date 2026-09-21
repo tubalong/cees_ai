@@ -131,6 +131,7 @@ export class AssistantController {
         content: input.content,
         imageFileIds: input.imageFileIds,
         documentFileIds: input.fileIds,
+        connectorContexts: input.connectorContexts,
         mode: input.mode,
         knowledgeBaseEnabled: input.knowledgeBaseEnabled,
         webSearchEnabled: input.webSearchEnabled,

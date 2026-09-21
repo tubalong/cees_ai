@@ -1,6 +1,6 @@
 # Assistant / Conversation API
 
-> 公开契约版本：`0.24.0`  
+> 公开契约版本：`0.35.0`
 > 契约事实源：[`packages/contracts/openapi/openapi.yaml`](../../packages/contracts/openapi/openapi.yaml)  
 > 最后更新：2026-09-15
 
@@ -28,7 +28,7 @@ Assistant 是 NestJS 提供的服务端会话与 AI 编排入口。NestJS 负责
 - 错误使用统一错误包络；稳定业务错误码位于 `error.code`（具体 envelope 以 OpenAPI 为准）。
 - ID 使用 UUID；不要根据 User ID 推断 Membership ID。
 - 会话删除是软删除，消息、工具调用、事件和审计事实保留；有运行中轮次时删除返回 `409 CONVERSATION_ACTIVE_TURN`。
-- 标题更新和删除使用 `version` 乐观锁；版本不匹配返回 `409`。
+- 删除使用 `version` 乐观锁；版本不匹配返回 `409`。标题更新不校验版本：每次发起轮次都会递增会话版本，客户端持有的版本必然过期，因此服务端忽略请求中的 `version`（字段保留仅为兼容老客户端）。
 
 ## 3. 会话生命周期
 
@@ -99,10 +99,10 @@ PATCH /api/v1/conversations/{conversationId}
 Authorization: Bearer <access-token>
 Content-Type: application/json
 
-{ "title": "新的标题", "version": 3 }
+{ "title": "新的标题" }
 ```
 
-标题长度为 1～128 个字符。成功返回更新后的会话（版本变为 `4`）；版本冲突返回 `409 CONVERSATION_VERSION_CONFLICT`。
+标题长度为 1～128 个字符。成功返回更新后的会话（版本号递增 `1`）；请求中的 `version` 是历史兼容字段，服务端忽略其值，老客户端照常携带也不会报错。
 
 ### 3.5 删除会话
 
@@ -133,7 +133,14 @@ Accept: text/event-stream
   "imageFileIds": ["<uploaded-file-object-id>"],
   "mode": "standard",
   "knowledgeBaseEnabled": false,
-  "webSearchEnabled": false
+  "webSearchEnabled": false,
+  "connectorContexts": [{
+    "provider": "DINGTALK",
+    "toolId": "dws_read_0123456789abcdef",
+    "toolName": "attendance.record.get",
+    "fetchedAt": "2026-09-20T08:00:00.000Z",
+    "data": { "date": "2026-09-20", "result": { "records": [] } }
+  }]
 }
 ```
 
@@ -155,6 +162,54 @@ Accept: text/event-stream
 - 显式开关与意图识别结果取并集，构成**本轮有效能力**，写回 `started.capabilities` 与审计元数据。
 
 两个字段参与请求哈希：同一 `Idempotency-Key` 下改动开关视为不同请求，按 `409 IDEMPOTENCY_KEY_CONFLICT` 处理。
+
+### 4.1.2 本地连接器上下文
+
+`connectorContexts` 是可选的本轮只读参考数据，当前仅接受 `DINGTALK`。每项通过 `toolId` 标识本地 DWS 工具，通过 `toolName` 保存对应的 `canonical_path`；不再使用固定能力枚举。已连接状态下，Desktop 可让模型从当前 DWS Schema 暴露的全部安全只读查询中选择工具，模型返回空计划时不会读取或上传钉钉业务数据。
+
+- API 会将上下文和用户消息一起持久化，重连、重放和模型上下文构建都以数据库记录为准；客户端不提交 DWS Token、Cookie、AppSecret 或其他凭据。
+- 单轮所有连接器上下文最大 64KB；包含 `token`、`secret`、`cookie`、`authorization`、`credential` 或 `password` 等键名时拒绝请求。
+- 上下文进入模型时包在只读参考标记中，不能成为系统指令、权限依据或正式业务写入依据；连接器当前不支持通过对话修改 CEES 或钉钉数据。
+- 钉钉组织同步仍使用 `POST /api/v1/dingtalk/organization/snapshot`，需要 CEES 租户管理员确认，不通过 `connectorContexts` 绕过组织导入权限。
+
+### 4.1.3 规划本机钉钉只读查询
+
+```http
+POST /api/v1/assistant/connectors/dingtalk/plan
+Authorization: Bearer <access-token>
+Content-Type: application/json
+```
+
+Desktop 先从本机执行 `dws schema --all --compact --format json`，只提交明确满足 `effect=read`、`confirmation=not_required`、`availability=available` 的工具定义：
+
+```json
+{
+  "query": "查一下我今天的日程",
+  "tools": [{
+    "toolId": "dws_read_0123456789abcdef",
+    "name": "calendar.event.list",
+    "description": "查询当前账号可见日程",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": { "start": { "type": "string" } }
+    }
+  }]
+}
+```
+
+响应只包含工具 ID 和结构化参数：
+
+```json
+{
+  "calls": [{
+    "toolId": "dws_read_0123456789abcdef",
+    "arguments": { "start": "2026-09-20" }
+  }]
+}
+```
+
+API 不持有 DWS Token，也不执行本地命令。由于 ai-service 单次最多接收 32 个模型工具，完整目录超过 32 项时，API 会先让模型从完整只读目录中选出最多 32 个候选，再进行参数规划；因此不会按固定产品类型截断能力。Desktop 必须在执行前重新读取具体 leaf Schema，复核工具身份、安全属性和参数白名单；模型不能提交 shell、CLI 路径或原始 argv。单次最多规划 3 个查询，无需钉钉数据时 `calls` 为空。
 
 同一会话内重复提交相同 `Idempotency-Key` 且请求内容相同，会重新订阅原轮次事件，不会创建新轮次；同一键对应不同内容返回 `409 IDEMPOTENCY_KEY_CONFLICT`。幂等键长度为 1～128 个字符。
 
@@ -292,10 +347,13 @@ Assistant 不接受把任意公网 URL 直接写入消息。前端先走现有 F
 | 400 | `PAGINATION_CURSOR_INVALID` / `EVENT_SEQUENCE_INVALID` | 游标或事件序号非法 |
 | 403 | `IMAGE_REFERENCE_ACCESS_DENIED` | 无权使用被引用图片 |
 | 404 | `CONVERSATION_NOT_FOUND` / `TURN_NOT_FOUND` | 不存在或不属于当前成员 |
-| 409 | `CONVERSATION_VERSION_CONFLICT` | 会话版本冲突 |
+| 409 | `CONVERSATION_VERSION_CONFLICT` | 会话删除时版本冲突 |
 | 409 | `CONVERSATION_ACTIVE_TURN` | 会话仍有执行中的轮次 |
 | 409 | `TURN_NOT_CANCELLABLE` | 轮次已经结束 |
 | 409 | `IDEMPOTENCY_KEY_CONFLICT` | 幂等键对应不同请求内容 |
+| 404 | `USER_MEMORY_NOT_FOUND` | 记忆不存在或不属于当前成员 |
+| 409 | `USER_MEMORY_VERSION_CONFLICT` | 记忆修改/删除时版本冲突 |
+| 400 | `USER_MEMORY_CONTENT_INVALID` / `USER_MEMORY_UPDATE_EMPTY` | 记忆内容为空或未提供修改字段 |
 
 完整错误模型和响应状态码以 OpenAPI 为准。
 
@@ -307,3 +365,18 @@ Assistant 不接受把任意公网 URL 直接写入消息。前端先走现有 F
 - 收到 `tool_result.resource` 后按资源类型调用对应资源接口，不持久化签名 URL。
 - 将 `completed`/`error` 作为轮次终止信号；`related_questions` 在 `completed` 之后到达，不是终止信号；普通网络断开不是取消。
 - 不把 `ai-service` 内部地址、内部 Token 或模型名发送到客户端。
+
+## 9. 用户级记忆（User Memory）
+
+跨会话的用户级长期记忆，只归属当前成员本人：AI 在对话中仅**提议**记忆内容，写入、修改与删除一律以本人操作为准并记录审计。记忆只做用户级不做租户级（租户级由知识库承载）；每人至多 30 条，按创建时间升序返回（即注入对话上下文的顺序）。设计详见 [用户级记忆设计文档](../architecture/user-memory.md)。
+
+```http
+GET /api/v1/user-memories
+PATCH /api/v1/user-memories/{memoryId}
+DELETE /api/v1/user-memories/{memoryId}?version={version}
+Authorization: Bearer <access-token>
+```
+
+`PATCH` 请求体 `{ content?, type?, version }`：`content`（1–1000 字符）与 `type`（`PREFERENCE` / `FACT` / `DECISION` / `HABIT`）至少提供一个，`version` 用于乐观并发控制；不存在的记忆返回 `404 USER_MEMORY_NOT_FOUND`，版本不匹配返回 `409 USER_MEMORY_VERSION_CONFLICT`。`DELETE` 软删除记忆并保留审计事实，`version` 必填。列表接口返回全部未删除记忆（至多 30 条），不分页。
+
+本接口只覆盖「查看、修改、删除」；记忆的自动提炼与注入由服务端在对话链路内完成，不提供客户端写入接口。

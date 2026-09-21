@@ -44,6 +44,7 @@ const compactResponse: CompactChatResponse = {
   conversation_id: 'conversation-1',
   summary: '用户正在测试对话。',
   summarized_through_message_id: 'message-2',
+  memory_candidates: [],
   execution,
 };
 

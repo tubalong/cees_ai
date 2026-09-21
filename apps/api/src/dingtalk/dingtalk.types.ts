@@ -1,5 +1,8 @@
 import {
+    DingTalkIntegrationMode,
     DingTalkIntegrationStatus,
+    DingTalkSyncScope,
+    DingTalkSyncSource,
     DingTalkSyncJobStatus,
     DingTalkSyncType,
 } from '@prisma/client';
@@ -7,8 +10,13 @@ import {
 export interface DingTalkIntegrationResult {
     id: string;
     tenantId: string;
-    corpId: string;
-    appKey: string;
+    mode: DingTalkIntegrationMode;
+    corpId: string | null;
+    appKey: string | null;
+    authorizedByMembershipId: string | null;
+    authorizedExternalUserId: string | null;
+    authorizedProfile: string | null;
+    grantedCapabilities: string[];
     status: DingTalkIntegrationStatus;
     lastVerifiedAt: Date | null;
     lastSyncedAt: Date | null;
@@ -54,6 +62,10 @@ export interface DingTalkSyncJobResult {
     id: string;
     integrationId: string;
     type: DingTalkSyncType;
+    source: DingTalkSyncSource;
+    scope: DingTalkSyncScope;
+    authorizedByMembershipId: string | null;
+    authorizedExternalUserId: string | null;
     status: DingTalkSyncJobStatus;
     departmentCount: number;
     userCount: number;

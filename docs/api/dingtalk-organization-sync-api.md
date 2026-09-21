@@ -1,6 +1,8 @@
 # 钉钉组织架构与人员同步 API
 
-公开契约版本：`0.25.0`。完整定义以 `packages/contracts/openapi/openapi.yaml` 为准，修改契约后必须重新生成 `packages/api-client`。
+公开契约版本：`0.34.0`。完整定义以 `packages/contracts/openapi/openapi.yaml` 为准，修改契约后必须重新生成 `packages/api-client`。
+
+本 API 同时支持企业应用凭证 `SELF_MANAGED_APP/FULL_SCOPE` 和桌面端 DWS/MCP 快照 `DWS_MCP/VISIBLE_SCOPE`。DWS/MCP 导入不检查操作者是否为钉钉管理员，但正式提交快照、预览映射和应用映射均要求操作者是当前 CEES 租户管理员。
 
 ## 接口清单
 
@@ -11,6 +13,7 @@
 | `PATCH` | `/dingtalk/integration` | `dingtalk.integration.manage` | 修改 AppKey、AppSecret 或启停状态，必须传 `version` |
 | `POST` | `/dingtalk/integration/verify` | `dingtalk.integration.manage` | 重新验证凭证 |
 | `POST` | `/dingtalk/organization/sync` | `dingtalk.organization.sync` | 全量同步部门和人员 |
+| `POST` | `/dingtalk/organization/snapshot` | `dingtalk.organization.sync` + `tenant_admin` | 导入 DWS/MCP 当前授权账号可见组织快照 |
 | `GET` | `/dingtalk/organization/departments` | `dingtalk.organization.read` | 查询部门镜像 |
 | `GET` | `/dingtalk/organization/users` | `dingtalk.organization.read` | 查询人员镜像 |
 | GET | /dingtalk/sync-jobs | dingtalk.integration.read | 查询同步任务 |
@@ -52,7 +55,17 @@
 - 同步只保存钉钉外部镜像，不创建 CEES 登录账号；组织映射应用时可以按管理员确认结果创建待激活的 CEES 登录账号。
 - 不自动修改 CEES 账号、密码、角色、RBAC 权限和项目成员关系。
 - 部门和人员镜像中的 `departmentId`、`membershipId` 通过组织映射接口填充；自动匹配遵循同父级同名和姓名/部门规则，多候选必须由租户管理员确认。
-- 当前版本不提供考勤、请假、审批、钉钉文档、聊天消息、日程和 AI 派发接口。
+- 当前版本不提供考勤、请假、审批、钉钉文档、聊天消息、日程和 AI 派发接口。DWS/MCP 连接器整体架构见 [钉钉 DWS/MCP 连接器](../product/dingtalk-mcp-connector.md)。
+
+## DWS/MCP 可见组织快照
+
+```http
+POST /api/v1/dingtalk/organization/snapshot
+```
+
+请求体包含当前授权账号的 `corpId`、`externalUserId`、`profile`、能力列表、部门和人员快照。API 将其记录为 `source=DWS_MCP`、`scope=VISIBLE_SCOPE`，只对返回的部门和人员执行幂等 upsert；没有出现在本次快照中的既有镜像不会被标记删除或离职。
+
+接口只接受当前 CEES 租户管理员请求。服务端不检查钉钉 `admin/boss` 字段，也不会让 MCP 直接写入 CEES 正式部门或成员；正式写入仍通过映射预览和映射应用接口完成，并记录授权用户、来源 profile 和数量审计。
 
 ## 组织映射
 

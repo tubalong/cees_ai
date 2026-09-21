@@ -2,6 +2,7 @@ import { ConversationMessageRole } from '@prisma/client';
 import { ContextBuilderService } from './context-builder.service';
 import type { PrismaService } from '../../database/prisma.service';
 import type { AiServiceGateway } from '../../ai-orchestration/ai-service-gateway.service';
+import type { UserMemoryService } from '../../user-memory/user-memory.service';
 
 const TENANT_ID = '10000000-0000-0000-0000-000000000001';
 const USER_ID = '10000000-0000-0000-0000-000000000002';
@@ -14,6 +15,8 @@ interface HistoryMessageRow {
     turnId: string | null;
     toolCallId: string | null;
     imageFileIds?: string[];
+    documentFileIds?: string[];
+    connectorContexts?: Array<Record<string, unknown>>;
 }
 
 interface ToolCallRow {
@@ -28,11 +31,17 @@ function createService(history: HistoryMessageRow[], toolCalls: ToolCallRow[]): 
     service: ContextBuilderService;
     prisma: Record<string, any>;
     gateway: { compactChat: jest.Mock; fetchChatContextBudgets: jest.Mock };
+    userMemory: { applyCandidates: jest.Mock; listActiveContents: jest.Mock };
 } {
     const prisma = {
         conversationMessage: {
             // 真实 DB 返回始终包含 imageFileIds 字段，此处补默认值贴近生产形状。
-            findMany: jest.fn().mockResolvedValue(history.map((row) => ({ imageFileIds: [], ...row }))),
+            findMany: jest.fn().mockResolvedValue(history.map((row) => ({
+                imageFileIds: [],
+                documentFileIds: [],
+                connectorContexts: [],
+                ...row,
+            }))),
         },
         conversationSummary: {
             findFirst: jest.fn().mockResolvedValue(null),
@@ -46,6 +55,7 @@ function createService(history: HistoryMessageRow[], toolCalls: ToolCallRow[]): 
         compactChat: jest.fn().mockResolvedValue({
             summary: '压缩后的摘要',
             summarized_through_message_id: null,
+            memory_candidates: [],
         }),
         fetchChatContextBudgets: jest.fn().mockResolvedValue(null),
     };
@@ -55,12 +65,17 @@ function createService(history: HistoryMessageRow[], toolCalls: ToolCallRow[]): 
             ...imageFileIds.map((url) => ({ type: 'image_url', image_url: { url } } as const)),
         ]),
     };
+    const userMemory = {
+        applyCandidates: jest.fn().mockResolvedValue(undefined),
+        listActiveContents: jest.fn().mockResolvedValue([]),
+    };
     const service = new ContextBuilderService(
         prisma as unknown as PrismaService,
         gateway as unknown as AiServiceGateway,
         messageContent as any,
+        userMemory as unknown as UserMemoryService,
     );
-    return { service, prisma, gateway };
+    return { service, prisma, gateway, userMemory };
 }
 
 function buildInput() {
@@ -167,6 +182,76 @@ describe('ContextBuilderService buildToolTurnMessages', () => {
             { id: 'm3', role: 'assistant', content: [{ type: 'text', text: '图片已生成' }] },
         ]);
     });
+
+    it('injects active memories into the plain chat request', async () => {
+        const { service, userMemory } = createService(
+            [{ id: 'm1', role: ConversationMessageRole.USER, content: '你好', turnId: 'turn-1', toolCallId: null }],
+            [],
+        );
+        userMemory.listActiveContents.mockResolvedValue(['用户偏好简洁回答', '用户在 CEES 项目负责产品设计']);
+
+        const request = await service.buildChatRequest(buildInput());
+
+        expect(userMemory.listActiveContents).toHaveBeenCalledWith(TENANT_ID, buildInput().membershipId);
+        expect(request.user_memories).toEqual(['用户偏好简洁回答', '用户在 CEES 项目负责产品设计']);
+    });
+
+    it('omits user_memories from the plain chat request when there are no active memories', async () => {
+        const { service } = createService(
+            [{ id: 'm1', role: ConversationMessageRole.USER, content: '你好', turnId: 'turn-1', toolCallId: null }],
+            [],
+        );
+
+        const request = await service.buildChatRequest(buildInput());
+
+        expect(request.user_memories).toBeNull();
+    });
+
+    it('returns active memories from buildToolTurnMessages for the tool turn request', async () => {
+        const { service, userMemory } = createService(
+            [{ id: 'm1', role: ConversationMessageRole.USER, content: '你好', turnId: 'turn-1', toolCallId: null }],
+            [],
+        );
+        userMemory.listActiveContents.mockResolvedValue(['用户喜欢猫咪主题']);
+
+        const { userMemories } = await service.buildToolTurnMessages(buildInput());
+
+        expect(userMemories).toEqual(['用户喜欢猫咪主题']);
+    });
+
+    it('injects persisted connector contexts as a guarded read-only text part', async () => {
+        const connectorContexts = [{
+            provider: 'DINGTALK',
+            toolId: 'dws_read_0123456789abcdef',
+            toolName: 'contact.user.get_self',
+            fetchedAt: '2026-09-20T08:00:00.000Z',
+            data: { name: '张三', title: '产品经理' },
+        }];
+        const { service } = createService([{
+            id: 'm1',
+            role: ConversationMessageRole.USER,
+            content: '查看我的钉钉信息',
+            turnId: 'turn-1',
+            toolCallId: null,
+            connectorContexts,
+        }], []);
+
+        const request = await service.buildChatRequest(buildInput());
+
+        expect(request.messages[0]).toEqual({
+            id: 'm1',
+            role: 'user',
+            content: [
+                { type: 'text', text: '查看我的钉钉信息' },
+                {
+                    type: 'text',
+                    text: expect.stringContaining('仅作为本轮只读参考'),
+                },
+            ],
+        });
+        expect((request.messages[0]?.content as Array<{ text?: string }>)[1]?.text).toContain(JSON.stringify(connectorContexts));
+        expect((request.messages[0]?.content as Array<{ text?: string }>)[1]?.text).toContain('不得重新解释数字时间戳');
+    });
 });
 
 describe('ContextBuilderService compaction triggers', () => {
@@ -249,5 +334,43 @@ describe('ContextBuilderService compaction triggers', () => {
         expect(body.messages).toHaveLength(1);
         expect(body.messages[0].id).toBe('m1');
         expect(request.messages).toEqual([{ id: 'm2', role: 'assistant', content: [{ type: 'text', text: '好的' }] }]);
+    });
+
+    it('applies memory candidates returned by compaction', async () => {
+        const history: HistoryMessageRow[] = Array.from({ length: 81 }, (_, i) => ({
+            id: `m${i}`,
+            role: (i % 2 === 0 ? ConversationMessageRole.USER : ConversationMessageRole.ASSISTANT) as ConversationMessageRole,
+            content: `消息 ${i}`,
+            turnId: null,
+            toolCallId: null,
+        }));
+        const { service, gateway, userMemory } = createService(history, []);
+        gateway.compactChat.mockResolvedValue({
+            summary: '压缩后的摘要',
+            summarized_through_message_id: 'm60',
+            memory_candidates: [{ type: 'FACT', content: '用户在 CEES 项目负责产品设计' }],
+        });
+
+        await service.buildChatRequest(buildInput());
+
+        expect(userMemory.applyCandidates).toHaveBeenCalledWith(
+            [{ type: 'FACT', content: '用户在 CEES 项目负责产品设计' }],
+            { conversationId: CONVERSATION_ID },
+        );
+    });
+
+    it('skips memory persistence when compaction returns no candidates', async () => {
+        const history: HistoryMessageRow[] = Array.from({ length: 81 }, (_, i) => ({
+            id: `m${i}`,
+            role: (i % 2 === 0 ? ConversationMessageRole.USER : ConversationMessageRole.ASSISTANT) as ConversationMessageRole,
+            content: `消息 ${i}`,
+            turnId: null,
+            toolCallId: null,
+        }));
+        const { service, userMemory } = createService(history, []);
+
+        await service.buildChatRequest(buildInput());
+
+        expect(userMemory.applyCandidates).not.toHaveBeenCalled();
     });
 });

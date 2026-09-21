@@ -463,6 +463,7 @@ describe('KnowledgeDocumentService.saveFromSource', () => {
         prisma.knowledgeBaseMember.findUnique.mockResolvedValue({ permission: 'EDITOR' });
         prisma.knowledgeDocument.findFirst
             .mockResolvedValueOnce(null)
+            .mockResolvedValueOnce(null)
             .mockResolvedValueOnce(documentRecord({ status: 'PENDING' }));
         prisma.conversationMessage.findFirst.mockResolvedValue(messageRecord());
         createMaterializedFileSpy.mockResolvedValue(NEW_FILE_OBJECT_ID);
@@ -607,6 +608,7 @@ describe('KnowledgeDocumentService.saveFromSource', () => {
         prisma.knowledgeBaseMember.findUnique.mockResolvedValue({ permission: 'EDITOR' });
         prisma.knowledgeDocument.findFirst
             .mockResolvedValueOnce(null)
+            .mockResolvedValueOnce(null)
             .mockResolvedValueOnce(documentRecord({ status: 'PENDING' }));
         prisma.managedDocument.findFirst.mockResolvedValue(managedDocumentRecord());
         prisma.membershipRole.findMany.mockResolvedValue([]);
@@ -699,6 +701,65 @@ describe('KnowledgeDocumentService.saveFromSource', () => {
         expect(result).toEqual(expect.objectContaining({ id: DOCUMENT_ID, status: 'PENDING', versionNumber: 2 }));
     });
 
+    it('restores a soft-deleted anchored document and appends a new version', async () => {
+        const prisma = createPrismaMock();
+        prisma.knowledgeBase.findFirst.mockResolvedValue(knowledgeBaseRecord());
+        prisma.knowledgeBaseMember.findUnique.mockResolvedValue({ permission: 'EDITOR' });
+        prisma.knowledgeDocument.findFirst
+            .mockResolvedValueOnce(null)
+            .mockResolvedValueOnce({ id: DOCUMENT_ID, knowledgeBaseId: KNOWLEDGE_BASE_ID, currentVersionId: VERSION_ID })
+            .mockResolvedValueOnce(documentRecord({
+                status: 'PENDING',
+                fileObjectId: NEW_FILE_OBJECT_ID,
+                currentVersionId: NEW_VERSION_ID,
+            }));
+        prisma.knowledgeDocument.updateMany.mockResolvedValue({ count: 1 });
+        prisma.documentVersion.findMany.mockResolvedValue([{ id: VERSION_ID }]);
+        prisma.conversationMessage.findFirst.mockResolvedValue(messageRecord());
+        createMaterializedFileSpy.mockResolvedValue(NEW_FILE_OBJECT_ID);
+        prisma.documentVersion.findFirst
+            .mockResolvedValueOnce({ versionNumber: 1 })
+            .mockResolvedValueOnce({
+                versionNumber: 2,
+                visibilityScope: 'TENANT',
+                departmentId: null,
+                projectId: null,
+            });
+        prisma.documentVersion.create.mockResolvedValue({ id: NEW_VERSION_ID });
+        prisma.knowledgeDocument.update.mockResolvedValue(undefined);
+        deleteVersionIndexSpy.mockResolvedValue({
+            request_id: 'request-id',
+            deleted_chunks: 0,
+            document_version_id: VERSION_ID,
+            index_version: 'knowledge-index-v1',
+        });
+        const service = createService(prisma);
+
+        const result = await service.saveFromSource(actor, {
+            knowledgeBaseId: KNOWLEDGE_BASE_ID,
+            sourceType: 'MESSAGE',
+            sourceId: MESSAGE_ID,
+            visibilityScope: 'TENANT',
+        });
+
+        expect(prisma.knowledgeDocument.updateMany).toHaveBeenCalledWith({
+            where: { id: DOCUMENT_ID, tenantId: TENANT_ID, deletedAt: { not: null } },
+            data: { deletedAt: null, updatedBy: USER_ID, version: { increment: 1 } },
+        });
+        expect(prisma.knowledgeDocument.create).not.toHaveBeenCalled();
+        expect(prisma.auditLog.create).toHaveBeenCalledWith({
+            data: expect.objectContaining({ action: 'KNOWLEDGE_DOCUMENT_RESTORED' }),
+        });
+        expect(prisma.documentVersion.create).toHaveBeenCalledWith({
+            data: expect.objectContaining({ documentId: DOCUMENT_ID, versionNumber: 2 }),
+            select: { id: true },
+        });
+        // 恢复后幂等清理全部既有版本索引（处理中删除的索引任务在恢复后可能写入旧版本向量），
+        // appendSourceVersion 追加新版本后也会清理上一版本，因此至少调用两次。
+        expect(deleteVersionIndexSpy).toHaveBeenCalledWith(TENANT_ID, USER_ID, VERSION_ID);
+        expect(result).toEqual(expect.objectContaining({ id: DOCUMENT_ID, versionNumber: 2 }));
+    });
+
     it('rejects saving the same source to another knowledge base', async () => {
         const prisma = createPrismaMock();
         prisma.knowledgeBase.findFirst.mockResolvedValue(knowledgeBaseRecord());
@@ -726,6 +787,7 @@ describe('KnowledgeDocumentService.saveFromSource', () => {
         prisma.knowledgeBase.findFirst.mockResolvedValue(knowledgeBaseRecord());
         prisma.knowledgeBaseMember.findUnique.mockResolvedValue({ permission: 'EDITOR' });
         prisma.knowledgeDocument.findFirst
+            .mockResolvedValueOnce(null)
             .mockResolvedValueOnce(null)
             .mockResolvedValueOnce({ id: DOCUMENT_ID, knowledgeBaseId: KNOWLEDGE_BASE_ID, currentVersionId: VERSION_ID })
             .mockResolvedValueOnce(documentRecord({

@@ -335,6 +335,14 @@ enum ConversationMessageRole {
   TOOL
 }
 
+/// 跨会话用户级长期记忆的类型；仅记录用户本人的偏好、事实、决定与习惯。
+enum MemoryType {
+  PREFERENCE
+  FACT
+  DECISION
+  HABIT
+}
+
 /// Assistant 轮次状态机；由 NestJS TurnRunner 驱动。
 enum AssistantTurnStatus {
   RECEIVED
@@ -397,6 +405,11 @@ enum DingTalkIntegrationStatus {
   ERROR
 }
 
+enum DingTalkIntegrationMode {
+  SELF_MANAGED_APP
+  DWS_LOCAL
+}
+
 enum DingTalkSyncJobStatus {
   RUNNING
   SUCCEEDED
@@ -405,6 +418,16 @@ enum DingTalkSyncJobStatus {
 
 enum DingTalkSyncType {
   FULL_ORGANIZATION
+}
+
+enum DingTalkSyncSource {
+  SELF_MANAGED_APP
+  DWS_MCP
+}
+
+enum DingTalkSyncScope {
+  FULL_SCOPE
+  VISIBLE_SCOPE
 }
 
 model Tenant {
@@ -1616,9 +1639,14 @@ model DingTalkIntegration {
   id                  String                    @id @default(uuid()) @db.Uuid
   tenantId            String                    @unique @map("tenant_id") @db.Uuid
   tenant              Tenant                    @relation(fields: [tenantId], references: [id])
-  corpId              String                    @unique @map("corp_id")
-  appKey              String                    @map("app_key")
-  appSecretCiphertext String                    @map("app_secret_ciphertext")
+  mode                DingTalkIntegrationMode   @default(SELF_MANAGED_APP)
+  corpId              String?                   @map("corp_id")
+  appKey              String?                   @map("app_key")
+  appSecretCiphertext String?                   @map("app_secret_ciphertext")
+  authorizedByMembershipId String?              @map("authorized_by_membership_id") @db.Uuid
+  authorizedExternalUserId String?              @map("authorized_external_user_id")
+  authorizedProfile   String?                   @map("authorized_profile")
+  grantedCapabilities Json?                     @map("granted_capabilities")
   status              DingTalkIntegrationStatus @default(ACTIVE)
   lastVerifiedAt      DateTime?                 @map("last_verified_at")
   lastSyncedAt        DateTime?                 @map("last_synced_at")
@@ -1634,6 +1662,7 @@ model DingTalkIntegration {
   version             Int                       @default(1)
 
   @@index([tenantId, status])
+  @@index([corpId])
   @@map("dingtalk_integrations")
 }
 
@@ -1696,6 +1725,10 @@ model DingTalkSyncJob {
   integrationId   String                @map("integration_id") @db.Uuid
   integration     DingTalkIntegration   @relation(fields: [integrationId], references: [id], onDelete: Cascade)
   type            DingTalkSyncType      @default(FULL_ORGANIZATION)
+  source          DingTalkSyncSource    @default(SELF_MANAGED_APP)
+  scope           DingTalkSyncScope     @default(FULL_SCOPE)
+  authorizedByMembershipId String?      @map("authorized_by_membership_id") @db.Uuid
+  authorizedExternalUserId String?      @map("authorized_external_user_id")
   status          DingTalkSyncJobStatus @default(RUNNING)
   departmentCount Int                   @default(0) @map("department_count")
   userCount       Int                   @default(0) @map("user_count")
@@ -2069,6 +2102,8 @@ model ConversationMessage {
   imageFileIds   String[]                @default([]) @map("image_file_ids")
   /// 稳定的文档文件引用；模型请求前由 Assistant 抽取文本注入上下文。
   documentFileIds String[]               @default([]) @map("document_file_ids")
+  /// Desktop 从本地已授权连接器读取的本轮只读上下文；不作为业务事实或权限依据。
+  connectorContexts Json                 @default("[]") @map("connector_contexts")
   /// TOOL 消息对应的工具调用 ID；其他角色为空，工具阶段启用。
   toolCallId     String?                 @unique @map("tool_call_id") @db.Uuid
   toolCall       ToolCall?               @relation("ToolCallMessage", fields: [toolCallId], references: [id])
@@ -2091,6 +2126,26 @@ model ConversationSummary {
 
   @@index([tenantId, conversationId, createdAt])
   @@map("conversation_summaries")
+}
+
+/// 跨会话用户级长期记忆；归属租户内成员身份，仅本人可见、可查可删，AI 仅提议、NestJS 写入。
+model UserMemory {
+  id                   String     @id @default(uuid()) @db.Uuid
+  tenantId             String     @map("tenant_id") @db.Uuid
+  /// 归属成员身份而非全局用户：同一自然人在不同租户的记忆互相隔离，防止跨租户泄漏。
+  membershipId         String     @map("membership_id") @db.Uuid
+  type                 MemoryType
+  content              String     @db.Text
+  /// 来源会话与轮次，用于审计追溯；用户手动新增时为 null。
+  sourceConversationId String?    @map("source_conversation_id") @db.Uuid
+  sourceTurnId         String?    @map("source_turn_id") @db.Uuid
+  createdAt            DateTime   @default(now()) @map("created_at")
+  updatedAt            DateTime   @updatedAt @map("updated_at")
+  deletedAt            DateTime?  @map("deleted_at")
+  version              Int        @default(1)
+
+  @@index([tenantId, membershipId, deletedAt])
+  @@map("user_memories")
 }
 
 /// 一轮完整 Assistant 运行；幂等键按会话去重，requestHash 防止同键不同内容重放。

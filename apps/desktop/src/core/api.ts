@@ -1,5 +1,5 @@
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000/api/';
-// export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://192.168.5.29:3000/api/';
+// export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000/api/';
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://192.168.5.29:3000/api/';
 // http://192.168.5.29:3000/api/
 // http://132.232.159.186:3000/api/
 const ACCESS_TOKEN_KEY = 'cees.accessToken';
@@ -954,12 +954,20 @@ export async function deleteTenantRole(roleId: string, version: number): Promise
 
 export type DingTalkIntegrationStatus = 'ACTIVE' | 'DISABLED' | 'ERROR';
 export type DingTalkSyncJobStatus = 'RUNNING' | 'SUCCEEDED' | 'FAILED';
+export type DingTalkIntegrationMode = 'SELF_MANAGED_APP' | 'DWS_LOCAL';
+export type DingTalkSyncSource = 'SELF_MANAGED_APP' | 'DWS_MCP';
+export type DingTalkSyncScope = 'FULL_SCOPE' | 'VISIBLE_SCOPE';
 
 export interface DingTalkIntegration {
     id: string;
     tenantId: string;
-    corpId: string;
-    appKey: string;
+    mode: DingTalkIntegrationMode;
+    corpId: string | null;
+    appKey: string | null;
+    authorizedByMembershipId: string | null;
+    authorizedExternalUserId: string | null;
+    authorizedProfile: string | null;
+    grantedCapabilities: string[];
     status: DingTalkIntegrationStatus;
     lastVerifiedAt: string | null;
     lastSyncedAt: string | null;
@@ -1018,6 +1026,10 @@ export interface DingTalkSyncJob {
     id: string;
     integrationId: string;
     type: string;
+    source: DingTalkSyncSource;
+    scope: DingTalkSyncScope;
+    authorizedByMembershipId: string | null;
+    authorizedExternalUserId: string | null;
     status: DingTalkSyncJobStatus;
     departmentCount: number;
     userCount: number;
@@ -1072,6 +1084,41 @@ export async function verifyDingTalkIntegration(): Promise<DingTalkIntegration> 
 
 export async function syncDingTalkOrganization(): Promise<DingTalkSyncJob> {
     return authorizedRequest<DingTalkSyncJob>('v1/dingtalk/organization/sync', { method: 'POST' });
+}
+
+export interface DingTalkVisibleOrganizationSnapshotInput {
+    corpId: string;
+    externalUserId: string;
+    externalUserName: string;
+    profile: string;
+    fetchedAt: string;
+    capabilities: string[];
+    departments: Array<{
+        externalDepartmentId: string;
+        parentExternalDepartmentId: string | null;
+        name: string;
+        displayOrder: number;
+    }>;
+    users: Array<{
+        externalUserId: string;
+        unionId: string | null;
+        name: string;
+        title: string | null;
+        jobNumber: string | null;
+        departmentExternalIds: string[];
+        active: boolean;
+        admin: boolean;
+        boss: boolean;
+    }>;
+}
+
+export async function importDingTalkVisibleOrganizationSnapshot(
+    input: DingTalkVisibleOrganizationSnapshotInput,
+): Promise<DingTalkSyncJob> {
+    return authorizedRequest<DingTalkSyncJob>('v1/dingtalk/organization/snapshot', {
+        method: 'POST',
+        body: JSON.stringify(input),
+    });
 }
 
 export async function listDingTalkDepartments(input: DingTalkCursorParams = {}): Promise<{ items: DingTalkDepartment[]; nextCursor: string | null }> {
@@ -1400,6 +1447,29 @@ export async function getImage(imageId: string): Promise<ImageAccess> { return a
 export async function updateConversation(conversationId: string, title: string, version: number): Promise<Conversation> { return authorizedRequest<Conversation>(`v1/conversations/${encodeURIComponent(conversationId)}`, { method: 'PATCH', body: JSON.stringify({ title, version }) }); }
 export async function deleteConversation(conversationId: string, version: number): Promise<void> { await authorizedRequest<unknown>(`v1/conversations/${encodeURIComponent(conversationId)}?version=${encodeURIComponent(String(version))}`, { method: 'DELETE' }); }
 
+export interface ConnectorContext {
+    provider: 'DINGTALK';
+    toolId: string;
+    toolName: string;
+    fetchedAt: string;
+    data: Record<string, unknown>;
+}
+
+export interface DingTalkConnectorTool {
+    toolId: string;
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+}
+
+export interface DingTalkConnectorPlan {
+    calls: Array<{ toolId: string; arguments: Record<string, unknown> }>;
+}
+
+export async function planDingTalkConnectorQueries(query: string, tools: DingTalkConnectorTool[]): Promise<DingTalkConnectorPlan> {
+    return authorizedRequest<DingTalkConnectorPlan>('v1/assistant/connectors/dingtalk/plan', { method: 'POST', body: JSON.stringify({ query, tools }) });
+}
+
 async function streamSse(path: string, init: RequestInit, onEvent: (event: TurnStreamEvent) => void, retry = true): Promise<void> {
     const accessToken = getStoredValue(ACCESS_TOKEN_KEY);
     if (!accessToken) throw new Error('登录状态已失效，请重新登录');
@@ -1412,7 +1482,7 @@ async function streamSse(path: string, init: RequestInit, onEvent: (event: TurnS
     try { while (true) { const { value, done } = await reader.read(); if (done) { consume(decoder.decode()); if (buffer.trim()) throw new Error('事件流意外中断'); break; } consume(decoder.decode(value, { stream: true })); } } finally { reader.releaseLock(); }
 }
 
-export function createTurn(conversationId: string, input: { content: string; mode: ChatMode; imageFileIds?: string[]; fileIds?: string[]; knowledgeBaseEnabled?: boolean; webSearchEnabled?: boolean }, idempotencyKey: string, onEvent: (event: TurnStreamEvent) => void, signal?: AbortSignal): Promise<void> { return streamSse(`v1/conversations/${encodeURIComponent(conversationId)}/turns`, { method: 'POST', body: JSON.stringify({ content: input.content, mode: input.mode, ...(input.imageFileIds?.length ? { imageFileIds: input.imageFileIds } : {}), ...(input.fileIds?.length ? { fileIds: input.fileIds } : {}), ...(input.knowledgeBaseEnabled ? { knowledgeBaseEnabled: true } : {}), ...(input.webSearchEnabled ? { webSearchEnabled: true } : {}) }), signal, headers: { 'Idempotency-Key': idempotencyKey } }, onEvent); }
+export function createTurn(conversationId: string, input: { content: string; mode: ChatMode; imageFileIds?: string[]; fileIds?: string[]; connectorContexts?: ConnectorContext[]; knowledgeBaseEnabled?: boolean; webSearchEnabled?: boolean }, idempotencyKey: string, onEvent: (event: TurnStreamEvent) => void, signal?: AbortSignal): Promise<void> { return streamSse(`v1/conversations/${encodeURIComponent(conversationId)}/turns`, { method: 'POST', body: JSON.stringify({ content: input.content, mode: input.mode, ...(input.imageFileIds?.length ? { imageFileIds: input.imageFileIds } : {}), ...(input.fileIds?.length ? { fileIds: input.fileIds } : {}), ...(input.connectorContexts?.length ? { connectorContexts: input.connectorContexts } : {}), ...(input.knowledgeBaseEnabled ? { knowledgeBaseEnabled: true } : {}), ...(input.webSearchEnabled ? { webSearchEnabled: true } : {}) }), signal, headers: { 'Idempotency-Key': idempotencyKey } }, onEvent); }
 export function replayTurnEvents(conversationId: string, turnId: string, afterSeq: number, onEvent: (event: TurnStreamEvent) => void, signal?: AbortSignal): Promise<void> { return streamSse(`v1/conversations/${encodeURIComponent(conversationId)}/turns/${encodeURIComponent(turnId)}/events?afterSeq=${afterSeq}`, { method: 'GET', signal }, onEvent); }
 export async function cancelTurn(conversationId: string, turnId: string): Promise<Turn> { return authorizedRequest<Turn>(`v1/conversations/${encodeURIComponent(conversationId)}/turns/${encodeURIComponent(turnId)}/cancel`, { method: 'POST' }); }
 

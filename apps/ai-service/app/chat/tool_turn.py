@@ -3,10 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from app.api.generated.models import ChatContextStrategy, ToolTurnRequest
 from app.api.generated.models import ToolCall as ApiToolCall
-from app.api.generated.models import ToolTurnRequest
 from app.api.message_content import message_content_to_internal
-from app.chat.context import BASE_SYSTEM_PROMPT, estimate_message_tokens
+from app.chat.context import (
+    BASE_SYSTEM_PROMPT,
+    build_user_memories_message,
+    estimate_message_tokens,
+)
 from app.chat.follow_up import FOLLOW_UP_INSTRUCTION
 from app.core.config import ChatMode
 from app.core.errors import AIServiceError
@@ -22,6 +26,7 @@ class PreparedToolTurn:
     received_message_count: int
     included_message_count: int
     estimated_input_tokens: int
+    context_strategy: ChatContextStrategy
 
 
 class ToolTurnOrchestrator:
@@ -38,6 +43,8 @@ class ToolTurnOrchestrator:
         if request.instructions:
             fixed_messages.append(ChatMessage(role="system", content=request.instructions))
         fixed_messages.append(ChatMessage(role="system", content=FOLLOW_UP_INSTRUCTION))
+        if request.user_memories:
+            fixed_messages.append(build_user_memories_message(request.user_memories))
         if request.conversation_summary:
             fixed_messages.append(
                 ChatMessage(
@@ -57,6 +64,14 @@ class ToolTurnOrchestrator:
         if estimated_input_tokens < 1:
             estimated_input_tokens = 1
 
+        # 工具轮次不截断消息：NestJS 侧要么传全量历史，要么传摘要 + 增量消息，
+        # 因此策略只需区分是否携带摘要，不会出现 recent_only。
+        context_strategy = (
+            ChatContextStrategy.summary_plus_recent
+            if request.conversation_summary
+            else ChatContextStrategy.full
+        )
+
         return PreparedToolTurn(
             mode=ChatMode(request.mode or ChatMode.standard),
             messages=messages,
@@ -65,6 +80,7 @@ class ToolTurnOrchestrator:
             received_message_count=len(request.messages),
             included_message_count=len(messages),
             estimated_input_tokens=estimated_input_tokens,
+            context_strategy=context_strategy,
         )
 
 

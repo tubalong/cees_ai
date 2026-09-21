@@ -62,6 +62,10 @@ GET  /api/v1/images/{imageId}
 GET   /api/v1/users/me/profile
 PATCH /api/v1/users/me/profile
 
+GET    /api/v1/user-memories
+PATCH  /api/v1/user-memories/{memoryId}
+DELETE /api/v1/user-memories/{memoryId}?version={version}
+
 GET    /api/v1/tenants/current
 PATCH  /api/v1/tenants/current
 GET    /api/v1/tenants/current/departments
@@ -233,6 +237,7 @@ GET    /api/v1/projects/{projectId}/tasks/{taskId}/activities
 - Role 使用稳定且租户内唯一的 `code`、展示名称 `name`、描述和系统角色标识；
 - `tenant_admin` 被标记为系统角色，不能通过公开 API 修改、替换权限或删除；
 - Role 修改、权限替换和删除使用 `version` 做乐观锁控制；
+- 新建自定义角色默认授予 `image.read`、`document.read`、`knowledge_base.read`、`ai.image.generate`、`ai.document.generate` 五项权限（2026-09-20 起默认集合，含文档库/知识库基础读取，AI 对话工具集对每个账号默认可用）；存量角色由迁移 `20260920055850_role_default_knowledge_base_read` 统一补齐 `knowledge_base.read`；
 - TenantMember 返回的角色对象包含 `code` 字段。
 
 ## 审计

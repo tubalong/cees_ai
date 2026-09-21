@@ -43,6 +43,9 @@ describe('RbacService', () => {
         prisma.permission.findMany.mockResolvedValue([
             permissionRecord(PERMISSION_ID, 'image.read', '查看图片'),
             permissionRecord(SECOND_PERMISSION_ID, 'document.read', '读取文档'),
+            permissionRecord(THIRD_PERMISSION_ID, 'knowledge_base.read', '使用知识库功能'),
+            permissionRecord(FOURTH_PERMISSION_ID, 'ai.image.generate', '调用 AI 生成图片'),
+            permissionRecord(FIFTH_PERMISSION_ID, 'ai.document.generate', '调用 AI 生成文档'),
         ]);
         prisma.role.findFirst.mockResolvedValue(roleRecord());
         const service = createService(prisma);
@@ -68,6 +71,9 @@ describe('RbacService', () => {
             data: [
                 { tenantId: TENANT_ID, roleId: ROLE_ID, permissionId: PERMISSION_ID },
                 { tenantId: TENANT_ID, roleId: ROLE_ID, permissionId: SECOND_PERMISSION_ID },
+                { tenantId: TENANT_ID, roleId: ROLE_ID, permissionId: THIRD_PERMISSION_ID },
+                { tenantId: TENANT_ID, roleId: ROLE_ID, permissionId: FOURTH_PERMISSION_ID },
+                { tenantId: TENANT_ID, roleId: ROLE_ID, permissionId: FIFTH_PERMISSION_ID },
             ],
         });
         expect(prisma.auditLog.create).toHaveBeenCalledWith({
@@ -188,6 +194,9 @@ const ROLE_ID = '20000000-0000-0000-0000-000000000001';
 const SECOND_ROLE_ID = '20000000-0000-0000-0000-000000000002';
 const PERMISSION_ID = '30000000-0000-0000-0000-000000000001';
 const SECOND_PERMISSION_ID = '30000000-0000-0000-0000-000000000002';
+const THIRD_PERMISSION_ID = '30000000-0000-0000-0000-000000000003';
+const FOURTH_PERMISSION_ID = '30000000-0000-0000-0000-000000000004';
+const FIFTH_PERMISSION_ID = '30000000-0000-0000-0000-000000000005';
 
 function createService(prisma: Record<string, any>): RbacService {
     const tenantContext = {

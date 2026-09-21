@@ -21,6 +21,7 @@ import './features/roles/role.css';
 import './app/preferences.css';
 import './features/platform/platform-tenant.css';
 import './features/dingtalk/dingtalk.css';
+import './features/connectors/connectors.css';
 
 const queryClient = new QueryClient();
 

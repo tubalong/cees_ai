@@ -14,7 +14,7 @@ interface RoleFormValues extends CreateRoleInput {
 }
 
 /** 与后端 rbac.permission-catalog.DEFAULT_ROLE_PERMISSION_CODES 保持一致。 */
-const DEFAULT_ROLE_PERMISSION_CODES = ['image.read', 'document.read', 'ai.image.generate', 'ai.document.generate'];
+const DEFAULT_ROLE_PERMISSION_CODES = ['image.read', 'document.read', 'knowledge_base.read', 'ai.image.generate', 'ai.document.generate'];
 
 const dataScopeOptions: Array<{ label: string; value: DataScope }> = [
     { label: '仅本人', value: 'SELF' },
