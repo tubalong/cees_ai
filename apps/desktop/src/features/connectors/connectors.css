@@ -163,6 +163,36 @@
     font-size: 12px;
 }
 
+.connector-version-panel {
+    display: grid;
+    gap: 10px;
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px solid var(--line);
+}
+
+.connector-version-summary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.connector-version-summary strong {
+    color: var(--text);
+}
+
+.connector-version-message {
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+.connector-version-message.is-error {
+    color: #d84a3f;
+}
+
 .connector-install-dialog {
     display: grid;
     grid-template-columns: 58px minmax(0, 1fr);

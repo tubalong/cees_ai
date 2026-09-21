@@ -313,10 +313,14 @@ async function fetchUsers(userIds: string[]): Promise<DingTalkDwsSnapshot['users
     return users;
 }
 
-export async function runDwsJson(args: string[], timeout: number): Promise<unknown> {
+export async function runDwsJson(
+    args: string[],
+    timeout: number,
+    envOverrides: NodeJS.ProcessEnv = {},
+): Promise<unknown> {
     for (let attempt = 0; attempt < 2; attempt += 1) {
         try {
-            return parseJsonOutput(await runDws(args, timeout));
+            return parseJsonOutput(await runDws(args, timeout, envOverrides));
         } catch (error) {
             const delayMs = dwsRetryDelayMilliseconds(error);
             if (attempt > 0 || delayMs === null) throw error;
@@ -333,7 +337,11 @@ export async function readDingTalkDwsSchema(cliPath?: string): Promise<unknown> 
     return runDwsJson(args, 60_000);
 }
 
-async function runDws(args: string[], timeout: number): Promise<string> {
+export async function runDws(
+    args: string[],
+    timeout: number,
+    envOverrides: NodeJS.ProcessEnv = {},
+): Promise<string> {
     const executable = resolveDwsExecutable();
     const command = executable.source === 'MANAGED'
         ? executable.command
@@ -347,6 +355,10 @@ async function runDws(args: string[], timeout: number): Promise<string> {
             timeout,
             windowsHide: true,
             maxBuffer: 16 * 1024 * 1024,
+            env: {
+                ...process.env,
+                ...envOverrides,
+            },
         });
         return result.stdout;
     } catch (error) {

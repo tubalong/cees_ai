@@ -3,9 +3,55 @@ const assert = require('node:assert/strict');
 
 const {
     buildDwsArguments,
+    compareDwsVersions,
+    normalizeDwsVersion,
+    parseDingTalkUpgradeCheck,
     parseDingTalkReadTools,
     sanitizeConnectorData,
 } = require('../dist-electron/dingtalk-connector.js');
+
+test('规范化并比较 DWS 语义版本', () => {
+    assert.equal(normalizeDwsVersion('dws version v1.0.62'), 'v1.0.62');
+    assert.equal(normalizeDwsVersion('1.2.3-beta.2'), 'v1.2.3-beta.2');
+    assert.equal(normalizeDwsVersion('not-a-version'), null);
+    assert.equal(compareDwsVersions('v1.0.62', 'v1.0.63'), -1);
+    assert.equal(compareDwsVersions('v1.0.63', 'v1.0.62'), 1);
+    assert.equal(compareDwsVersions('v1.0.63', 'v1.0.63-beta.1'), 1);
+});
+
+test('只接受官方升级检查返回的正式稳定版本', () => {
+    const parsed = parseDingTalkUpgradeCheck({
+        current_version: 'v1.0.62',
+        latest_version: 'v1.0.63',
+        needs_upgrade: true,
+        track: 'release',
+        prerelease: false,
+        release_date: '2026-09-20',
+        release_url: 'https://github.com/DingTalk-Real-AI/dingtalk-workspace-cli/releases/tag/v1.0.63',
+        changelog: ['修复升级流程', 1, ''],
+    });
+    assert.deepEqual(parsed, {
+        currentVersion: 'v1.0.62',
+        latestVersion: 'v1.0.63',
+        needsUpgrade: true,
+        releaseDate: '2026-09-20',
+        releaseUrl: 'https://github.com/DingTalk-Real-AI/dingtalk-workspace-cli/releases/tag/v1.0.63',
+        changelog: ['修复升级流程'],
+    });
+
+    assert.throws(() => parseDingTalkUpgradeCheck({
+        current_version: 'v1.0.62', latest_version: 'v1.0.63', track: 'beta', prerelease: false,
+    }), /只允许使用 DWS 正式稳定版本/);
+    assert.throws(() => parseDingTalkUpgradeCheck({
+        current_version: 'v1.0.62', latest_version: 'v1.0.63', track: 'release', prerelease: true,
+    }), /只允许使用 DWS 正式稳定版本/);
+    assert.throws(() => parseDingTalkUpgradeCheck({
+        current_version: 'v1.0.62', latest_version: 'v1.0', track: 'release', prerelease: false,
+    }), /未返回有效的正式版本/);
+    assert.throws(() => parseDingTalkUpgradeCheck({
+        current_version: 'v1.0.62', latest_version: 'v1.0.63-beta.1', track: 'release', prerelease: false,
+    }), /未返回有效的正式版本/);
+});
 
 test('从 DWS Schema 动态发现所有明确安全的只读工具', () => {
     const tools = parseDingTalkReadTools({

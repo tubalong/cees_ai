@@ -2,7 +2,8 @@
 
 ## 1. 状态
 
-- 已落地：连接器市场提供钉钉卡片和右上角 `+` 入口；Windows Desktop 可固定下载并校验官方 DWS `v1.0.62`，安装到当前用户的 CEES 数据目录，然后自动发起授权。
+- 已落地：连接器市场提供钉钉卡片和右上角 `+` 入口；Windows Desktop 首次安装以官方 DWS `v1.0.62` 为安全基线，校验安装脚本后写入当前用户的 CEES 数据目录，然后自动发起授权。
+- 已落地：连接器市场可检查官方稳定版本、由用户确认升级、展示最近一次版本操作并手动回滚；升级后的版本或 Schema 健康检查失败时自动回滚。
 - 已落地：DWS 安装时设置 `DWS_NO_SKILLS=1`，当前不安装 Skills，也不实现 Experts；连接器市场只展示实际可用的钉钉连接器。
 - 已落地：已连接状态下，Desktop 会把当前 DWS Schema 明确标记为安全只读的查询工具交给 AI 规划；模型不需要钉钉数据时返回空计划，普通问题不会执行 DWS 业务查询。
 - 已落地：不再硬编码“个人信息 / 可见组织 / 本人考勤”三类能力；当前 DWS 版本新增任何符合 `effect=read`、`confirmation=not_required`、`availability=available` 的查询工具后，CEES 无需增加能力枚举即可使用。
@@ -68,7 +69,7 @@ Desktop: 重新读取具体 leaf Schema
 ```text
 点击钉钉卡片 +
   -> 展示安装、授权和数据边界
-  -> 下载固定版本官方 install.ps1
+  -> 下载首次安装基线版本的官方 install.ps1
   -> SHA-256 校验安装脚本
   -> 安装到 <userData>/connectors/dingtalk/bin
   -> dws auth login 打开钉钉授权
@@ -77,7 +78,19 @@ Desktop: 重新读取具体 leaf Schema
 
 当前只支持 Windows 自动安装。Linux/macOS 可继续使用系统 PATH 中已有的 `dws`，但不会由 CEES 自动下载安装。
 
-### 3.1.1 本地连接状态与恢复
+### 3.1.1 版本检查、升级与回滚
+
+- 首次安装基线固定为 `v1.0.62`；安装完成后，用户可以在连接器市场显式检查并升级到 DWS 官方最新稳定版本。
+- CEES 强制使用 `https://api.github.com` 和 `DingTalk-Real-AI/dingtalk-workspace-cli`，不接受进程环境变量把检查、升级或回滚重定向到其他源。
+- 只接受 `track=release` 且非 prerelease 的标准三段版本；不开放 beta、预发布版本或任意版本输入。
+- 只有 Windows 下安装在 CEES 用户目录中的受管 `dws.exe` 支持自动升级和回滚；系统 PATH 中的 DWS 只能检查版本，由用户自行维护。
+- 升级必须由用户显式确认，并固定传入 `--skip-skills` 和 `DWS_NO_SKILLS=1`，不会因升级自动安装 Skills 或启用 Experts。
+- 官方升级器负责下载、SHA-256 校验、升级前备份和二进制替换。CEES 不重复实现下载器或覆盖官方备份机制。
+- 升级完成后，CEES 依次检查 `dws --version` 与 `dws schema --all --compact --format json`；实际版本必须与目标版本完全一致，Schema 必须可读取。
+- 健康检查失败时立即调用官方 `dws upgrade --rollback -y` 自动回滚；连接器市场也仅在存在 CEES 升级流程产生的备份时开放手动回滚。
+- 非敏感版本状态保存到 `<userData>/connectors/dingtalk/release-state.json`，只包含版本、检查时间、发布摘要、回滚可用性和最近操作结果，不保存 Token 或其他凭据。
+
+### 3.1.2 本地连接状态与恢复
 
 | 状态 | 含义 | 恢复动作 |
 | --- | --- | --- |
@@ -166,6 +179,8 @@ scope = VISIBLE_SCOPE
 - AI 只返回本地稳定工具 ID 与结构化参数；Desktop 不接受模型提供的 shell、CLI 路径或原始 argv。
 - 每次执行前重新读取具体 leaf Schema，拒绝 Schema 漂移、写工具、需要确认的工具、不可用工具和未声明参数。
 - Windows 对话查询只使用安装在 CEES 用户目录中的受管 `dws.exe`，不通过 `cmd.exe` 执行模型参数。
+- DWS 版本检查、升级和回滚固定使用官方 GitHub API 与官方仓库；允许继承 GitHub 认证 Token 以提高限额，但 Token 不写入状态、日志或 Renderer 响应。
+- 自动升级仅允许最新正式稳定版本，必须由用户确认，并始终跳过 Skills 安装。
 - API 不接受外部提交的 `tenantId`、`membershipId` 作为权限依据，始终使用 JWT 和租户上下文。
 - 快照导入必须再次检查 `tenant_admin`，不能依赖前端按钮隐藏。
 - Token、AppSecret、MCP 凭证不得进入 AI Prompt、审计 metadata 或普通 API 响应。
@@ -185,6 +200,11 @@ scope = VISIBLE_SCOPE
 | 多组织或多账号没有唯一当前 Profile | 状态切换为 `PROFILE_REQUIRED`，列出稳定 Profile 供用户明确选择 |
 | DWS 明确返回可重试错误 | 只读 JSON 查询按返回等待时间最多重试一次；等待超过 5 秒则直接失败 |
 | DWS 未声明错误可重试 | 不猜测、不盲目重试，状态切换为 `ERROR` 并允许用户重新检查 |
+| 官方稳定版本检查失败 | 保留已安装版本和上次检查信息，展示脱敏错误，不自动升级 |
+| 系统 PATH 中的 DWS 请求升级 | 只允许检查版本，提示用户通过自己的安装渠道维护 |
+| 升级后版本或 Schema 健康检查失败 | 自动调用官方回滚；成功后记录 `ROLLED_BACK` 并提示原始升级错误 |
+| 升级失败且自动回滚失败 | 保留手动回滚入口并记录 `FAILED`，不得把连接器标记为升级成功 |
+| 用户执行手动回滚 | 仅回滚到 CEES 最近一次升级前版本，回滚后再次执行版本和 Schema 健康检查 |
 | DWS Schema 没有安全只读工具 | 本轮不执行连接器查询，正式对话继续使用其他上下文 |
 | AI 返回目录外工具或未声明参数 | Desktop/API 拒绝计划，不执行本地命令 |
 | 执行前 leaf Schema 安全属性变化 | 拒绝执行并提示重试，不沿用旧目录 |

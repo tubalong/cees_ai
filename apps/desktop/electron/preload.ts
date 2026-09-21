@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, webFrame } from 'electron';
 import type { DingTalkDwsSnapshot, DingTalkDwsStatus } from './dingtalk-dws';
-import type { DingTalkConnectorContext, DingTalkConnectorPlannedCall, DingTalkConnectorTool } from './dingtalk-connector';
+import type { DingTalkConnectorContext, DingTalkConnectorPlannedCall, DingTalkConnectorReleaseStatus, DingTalkConnectorTool } from './dingtalk-connector';
 
 contextBridge.exposeInMainWorld('cees', {
     platform: process.platform,
@@ -20,7 +20,10 @@ contextBridge.exposeInMainWorld('cees', {
             selectProfile: (profile: string): Promise<DingTalkDwsStatus> => ipcRenderer.invoke('cees:dingtalk-dws-select-profile', profile),
             tools: (): Promise<DingTalkConnectorTool[]> => ipcRenderer.invoke('cees:dingtalk-connector-tools'),
             execute: (calls: DingTalkConnectorPlannedCall[]): Promise<DingTalkConnectorContext[]> => ipcRenderer.invoke('cees:dingtalk-connector-execute', calls),
-            release: (): Promise<{ version: string; license: string }> => ipcRenderer.invoke('cees:dingtalk-connector-release'),
+            release: (): Promise<DingTalkConnectorReleaseStatus> => ipcRenderer.invoke('cees:dingtalk-connector-release'),
+            checkForUpdates: (): Promise<DingTalkConnectorReleaseStatus> => ipcRenderer.invoke('cees:dingtalk-connector-update-check'),
+            upgrade: (targetVersion?: string): Promise<DingTalkConnectorReleaseStatus> => ipcRenderer.invoke('cees:dingtalk-connector-upgrade', targetVersion),
+            rollback: (): Promise<DingTalkConnectorReleaseStatus> => ipcRenderer.invoke('cees:dingtalk-connector-rollback'),
             onStatusChanged: (listener: (status: DingTalkDwsStatus) => void): (() => void) => {
                 const handler = (_event: Electron.IpcRendererEvent, status: DingTalkDwsStatus): void => listener(status);
                 ipcRenderer.on('cees:dingtalk-connector-status-changed', handler);
