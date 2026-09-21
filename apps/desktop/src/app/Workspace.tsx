@@ -363,6 +363,11 @@ interface ChatResource {
     format?: 'docx' | 'pdf' | 'pptx';
 }
 
+/** 资源在「流式追加」与「历史回放」两条路径上共用的去重键，同时作为列表渲染 key，避免同一资源重复渲染。 */
+function chatResourceKey(resource: ChatResource): string {
+    return `${resource.type}-${resource.id}`;
+}
+
 interface ChatSource {
     id: string;
     title: string;
@@ -744,20 +749,24 @@ function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element 
         const deletedCitationIds = readDeletedCitationIds(conversation.id);
         // 服务端把资源、来源、引用按轮次落库在 TOOL 消息上，这里按 turnId 归组，
         // 再挂回同一轮次的 assistant 回答，避免历史来源/引用串到当前问题。
-        const resourcesByTurn = new Map<string, ChatResource[]>();
+        const resourcesByTurn = new Map<string, Map<string, ChatResource>>();
         const sourcesByTurn = new Map<string, ChatSource[]>();
         const citationsByTurn = new Map<string, ChatCitation[]>();
         for (const item of detail.messages) {
             if (!item.turnId) continue;
             const resources = item.resources?.map((resource): ChatResource => ({ id: resource.id || resource.resourceId || '', type: resource.type, url: resource.url ?? resource.resourceUrl })) ?? [];
-            if (resources.length) resourcesByTurn.set(item.turnId, [...(resourcesByTurn.get(item.turnId) ?? []), ...resources]);
+            if (resources.length) {
+                const resourcesForTurn = resourcesByTurn.get(item.turnId) ?? new Map<string, ChatResource>();
+                resources.forEach((resource) => resourcesForTurn.set(chatResourceKey(resource), resource));
+                resourcesByTurn.set(item.turnId, resourcesForTurn);
+            }
             if (item.sources?.length) sourcesByTurn.set(item.turnId, [...(sourcesByTurn.get(item.turnId) ?? []), ...item.sources]);
             if (item.citations?.length) citationsByTurn.set(item.turnId, [...(citationsByTurn.get(item.turnId) ?? []), ...item.citations.map((citation): ChatCitation => ({ ...citation, deleted: deletedCitationIds.has(citation.id) }))]);
         }
         const restored: LocalChatMessage[] = detail.messages.filter((item) => item.role !== 'TOOL').map((item) => {
             const message: LocalChatMessage = { id: item.id, role: item.role === 'USER' ? 'user' : 'assistant', content: item.content, persisted: true };
             if (item.role === 'ASSISTANT' && item.turnId) {
-                message.resources = resourcesByTurn.get(item.turnId);
+                message.resources = [...(resourcesByTurn.get(item.turnId)?.values() ?? [])];
                 message.sources = sourcesByTurn.get(item.turnId);
                 message.citations = citationsByTurn.get(item.turnId);
             }
@@ -814,8 +823,8 @@ function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element 
             const conversationId = activeConversationId ?? (await createConversation()).id;
             setActiveConversationId(conversationId);
             if (!conversations.some((item) => item.id === conversationId)) setConversations((items) => [{ id: conversationId, title: t('新对话'), mode, visibility: 'PRIVATE', version: 1, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }, ...items]);
-            let turnId = ''; let seq = 0; let answer = ''; let terminal = false; const streamingMessageId = `streaming-${Date.now()}`; const resources: ChatResource[] = []; const sources: ChatSource[] = []; const citations: ChatCitation[] = []; const toolTypes = new Map<string, ChatResource['type']>(); const toolFormats = new Map<string, ChatResource['format']>();
-            const updateStreamingMessage = (): void => setMessages((items) => [...items.filter((item) => item.id !== streamingMessageId), { id: streamingMessageId, role: 'assistant', content: answer, resources: [...resources], sources: [...sources], citations: [...citations] }]);
+            let turnId = ''; let seq = 0; let answer = ''; let terminal = false; const streamingMessageId = `streaming-${Date.now()}`; const resources = new Map<string, ChatResource>(); const sources: ChatSource[] = []; const citations: ChatCitation[] = []; const toolTypes = new Map<string, ChatResource['type']>(); const toolFormats = new Map<string, ChatResource['format']>();
+            const updateStreamingMessage = (): void => setMessages((items) => [...items.filter((item) => item.id !== streamingMessageId), { id: streamingMessageId, role: 'assistant', content: answer, resources: [...resources.values()], sources: [...sources], citations: [...citations] }]);
             const handle = (event: TurnStreamEvent): void => {
                 if (event.seq <= seq) return;
                 seq = event.seq;
@@ -833,7 +842,7 @@ function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element 
                     if (event.citations?.length) { citations.push(...event.citations); updateStreamingMessage(); }
                     const resourceId = event.resource?.id ?? event.resourceId;
                     const resourceType = event.resource?.type ?? toolTypes.get(event.toolCallId);
-                    if (resourceId && resourceType) { resources.push({ id: resourceId, type: resourceType, url: event.resourceUrl, format: toolFormats.get(event.toolCallId) }); if (resourceType === 'IMAGE') setImageGenerating(false); updateStreamingMessage(); }
+                    if (resourceId && resourceType) { const resource = { id: resourceId, type: resourceType, url: event.resourceUrl, format: toolFormats.get(event.toolCallId) }; resources.set(chatResourceKey(resource), resource); if (resourceType === 'IMAGE') setImageGenerating(false); updateStreamingMessage(); }
                 }
                 if (event.type === 'error') { terminal = true; setImageGenerating(false); throw new Error(event.error.message); }
                 if (event.type === 'completed') {
@@ -896,7 +905,7 @@ function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element 
                         {item.role === 'assistant' && <i className="assistant-avatar"><CeesLogo /></i>}
                         <div className="chat-message-body">
                             <div className="chat-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownRenderComponents}>{item.content}</ReactMarkdown></div>
-                            {item.resources?.map((resource) => <ChatResourceCard key={`${resource.type}-${resource.id}`} resource={resource} onPreviewDocument={setPreviewDocument} onSaveToKnowledge={canSaveToKnowledge ? setSaveTarget : undefined} />)}
+                            {item.resources?.map((resource) => <ChatResourceCard key={chatResourceKey(resource)} resource={resource} onPreviewDocument={setPreviewDocument} onSaveToKnowledge={canSaveToKnowledge ? setSaveTarget : undefined} />)}
                             {item.sources?.length ? <div className="chat-sources">{item.sources.map((source) => <ChatSourceCard key={source.id} source={source} />)}</div> : null}
                             {item.citations?.length ? <div className="chat-sources">{groupCitations(item.citations).map((citation) => <KnowledgeCitationCard key={citation.id} citation={citation} onDeleted={handleCitationDeleted} />)}</div> : null}
                             <div className="chat-message-actions">
