@@ -1,6 +1,6 @@
 # 用户级记忆（User Memory）
 
-> 状态：设计草案，尚未实现。最后更新：2026-09-21。
+> 状态：分块实施中——块 1（数据模型与契约）已落地，块 2-5 待实施。最后更新：2026-09-21。
 
 ## 1. 目标与边界
 
@@ -120,43 +120,55 @@ LLM 只出"新增/覆盖/丢弃"的建议，真正改库由 NestJS 完成，符�
 - **脱敏**（prompt + 代码兜底）：见 4.2 第 5 点；
 - **只记说过的**（prompt 规定）：见 4.2 第 4 点。
 
-## 5. 数据模型（草案）
+## 5. 数据模型（块 1 已落地）
 
-由 NestJS 通过 Prisma 迁移演进，最终字段以迁移文件为准：
+NestJS 事实源已通过 Prisma 迁移 `20260921021045_add_user_memory` 落地，最终模型：
 
 ```prisma
+enum MemoryType {
+  PREFERENCE
+  FACT
+  DECISION
+  HABIT
+}
+
 model UserMemory {
-  id                   String   @id @default(uuid())
-  tenantId             String   // 租户隔离
-  membershipId         String   // 归属：租户内身份，非全局用户（跨租户泄漏红线）
-  type                 MemoryType // PREFERENCE / FACT / DECISION / HABIT
-  content              String   // 记忆正文
-  sourceConversationId String?  // 来源会话（审计追溯）
-  sourceTurnId         String?  // 来源轮次（审计追溯）
-  version              Int      @default(1) // 同主题覆盖时递增
-  deletedAt            DateTime? // 软删除
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+  id                   String     @id @default(uuid()) @db.Uuid
+  tenantId             String     @map("tenant_id") @db.Uuid
+  /// 归属成员身份而非全局用户：同一自然人在不同租户的记忆互相隔离。
+  membershipId         String     @map("membership_id") @db.Uuid
+  type                 MemoryType
+  content              String     @db.Text
+  sourceConversationId String?    @map("source_conversation_id") @db.Uuid
+  sourceTurnId         String?    @map("source_turn_id") @db.Uuid
+  createdAt            DateTime   @default(now()) @map("created_at")
+  updatedAt            DateTime   @updatedAt @map("updated_at")
+  deletedAt            DateTime?  @map("deleted_at")
+  version              Int        @default(1)
+
+  @@index([tenantId, membershipId, deletedAt])
+  @@map("user_memories")
 }
 ```
 
 要点：
 
 - 无向量字段：用户级记忆每人 30 条封顶，全量注入，无需向量检索；
-- 同一 subject 通过"相同主题覆盖"收敛为一条，避免同主题多条目并存。
+- 同一 subject 通过"相同主题覆盖"收敛为一条，避免同主题多条目并存；
+- `membershipId` 为纯标量无 relation（与 `Conversation.ownerMembershipId` 风格一致），归属校验由应用层结合租户上下文完成。
 
 ## 6. 注入
 
 - 方式：**全量注入**。每次组装上下文时，将该用户该租户的全部 `ACTIVE` 记忆作为独立 system 块注入（如"以下是关于你的长期记忆：…"）。
 - 位置：与 `conversation_summary` 分开，语义不同——摘要=本会话历史，记忆=跨会话长期事实。
-- 契约：`ChatRequest` / `ToolTurnRequest` 需新增记忆字段（契约优先，改 `packages/contracts` 后重新生成客户端）。
+- 契约：`ChatRequest` / `ToolTurnRequest` 已新增 `user_memories` 字段（`type: [array, "null"]`，至多 30 条、每条至多 1000 字符，缺省/null 表示不注入），Python models 与 TS 客户端已重新生成（块 1 落地）。
 - 冲突处理：用户级记忆与知识库检索结果冲突时，**以记忆为准**（记忆是用户本人最新表述）。
 
 ## 7. 分块实施计划（草案）
 
 按项目"大型功能分块渐进实施"约定，每块独立可验证、独立提交，全部完成后一个 PR：
 
-1. **契约 + 数据模型**：`packages/contracts` 新增记忆字段；Prisma 新增 `UserMemory` 模型与迁移；
+1. **契约 + 数据模型**（块 1，已完成）：`packages/contracts` 新增 `user_memories` 字段；Prisma 新增 `UserMemory` 模型与迁移 `20260921021045_add_user_memory`；
 2. **NestJS 记忆 CRUD**：记忆列表/修改/删除 API + "我的记忆"面板数据接口 + 审计；
 3. **ai-service 提炼**：压缩时顺带输出记忆候选 + 用户明确倾向时随回答输出（复用 related_questions 链路），NestJS 合并落库；
 4. **注入**：ContextBuilderService 加载记忆并随上下文传参，ai-service 组装注入块；
