@@ -1,5 +1,5 @@
 import { BookOutlined, FileTextOutlined, FolderOutlined, StarOutlined } from '@ant-design/icons';
-import { App as AntdApp, Button, Empty, Input, Modal, Spin, Tag } from 'antd';
+import { App as AntdApp, Button, Empty, Input, Modal, Select, Spin, Tag } from 'antd';
 import { Download, Plus } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import {
@@ -16,6 +16,7 @@ function DocumentEditorModal({ documentId, onClose }: { documentId?: string; onC
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
     const [exporting, setExporting] = useState<'docx' | 'pdf' | 'pptx'>();
+    const [template, setTemplate] = useState<'business-standard' | 'editorial-modern' | 'executive-dark'>('editorial-modern');
 
     useEffect(() => {
         if (!documentId) return;
@@ -44,7 +45,7 @@ function DocumentEditorModal({ documentId, onClose }: { documentId?: string; onC
         if (!document) return;
         setExporting(format);
         try {
-            await exportDocument(document.id, format, document.title);
+            await exportDocument(document.id, format, document.title, template);
         } catch (error) {
             message.error(error instanceof Error ? error.message : t('导出失败'));
         } finally {
@@ -56,6 +57,16 @@ function DocumentEditorModal({ documentId, onClose }: { documentId?: string; onC
         {loading ? <div className="data-loading"><Spin /></div> : <>
             <Input.TextArea value={content} onChange={(event) => setContent(event.target.value)} rows={16} style={{ fontFamily: 'Menlo, Consolas, monospace' }} />
             <div className="document-editor-actions">
+                <Select
+                    value={template}
+                    onChange={setTemplate}
+                    popupMatchSelectWidth={false}
+                    options={[
+                        { value: 'editorial-modern', label: t('现代图文') },
+                        { value: 'business-standard', label: t('稳重商务') },
+                        { value: 'executive-dark', label: t('深色高管') },
+                    ]}
+                />
                 {(['docx', 'pdf', 'pptx'] as const).map((format) => <Button key={format} icon={<Download size={15} />} loading={exporting === format} onClick={() => void exportAs(format)}>{format.toUpperCase()}</Button>)}
                 <Button type="primary" loading={saving} onClick={() => void save()}>{t('保存')}</Button>
             </div>

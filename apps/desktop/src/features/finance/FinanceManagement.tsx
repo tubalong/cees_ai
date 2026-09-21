@@ -15,6 +15,7 @@ import {
     type FinanceExpenseReportFilters, type FinanceExpenseStatus, type FinancePaymentMethod, type MeResult,
 } from '../../core/api';
 import './finance.css';
+import FinanceLedgerPanel from './FinanceLedgerPanel';
 
 type ReportFormValues = {
     title: string; description?: string; currency: string;
@@ -179,6 +180,10 @@ export default function FinanceManagement({ authContext, onSessionExpired }: { a
                     projectSpend={projectSpendQuery.data} projectSpendLoading={projectSpendQuery.isLoading}
                     onProjectChange={setProjectSpendProjectId} />,
             },
+            ...(permissions.has('finance.ledger.read') || permissions.has('finance.ledger.manage') ? [{
+                key: 'ledger', label: '收支台账',
+                children: <FinanceLedgerPanel canManage={permissions.has('finance.ledger.manage')} onImported={refresh} />,
+            }] : []),
         ]} tabBarExtraContent={permissions.has('finance.expense.request')
             ? <Button type="primary" icon={<PlusOutlined />} onClick={openCreateReport}>新建报销</Button> : undefined} />
 
@@ -290,8 +295,10 @@ function PaymentPanel({ reports, loading, memberMap, canPay, onDetail, onPay }: 
     const pending = reports.filter((report) => report.status === 'APPROVED');
     const paid = reports.filter((report) => report.status === 'PAID');
     return <Tabs size="small" items={[
-        { key: 'pending', label: `待付款 (${pending.length})`, children: <ReportTable reports={pending} loading={loading} memberMap={memberMap} onDetail={onDetail} renderActions={(report) => canPay
-            ? <Button size="small" type="primary" onClick={() => onPay(report)}>确认付款</Button> : <></>} /> },
+        {
+            key: 'pending', label: `待付款 (${pending.length})`, children: <ReportTable reports={pending} loading={loading} memberMap={memberMap} onDetail={onDetail} renderActions={(report) => canPay
+                ? <Button size="small" type="primary" onClick={() => onPay(report)}>确认付款</Button> : <></>} />
+        },
         { key: 'paid', label: `已付款 (${paid.length})`, children: <ReportTable reports={paid} loading={loading} memberMap={memberMap} onDetail={onDetail} /> },
     ]} />;
 }
@@ -306,10 +313,12 @@ function CategoryPanel({ categories, loading, canManage, onEdit, onWork }: {
             { title: '编码', dataIndex: 'code', width: 150 }, { title: '名称', dataIndex: 'name', width: 180 },
             { title: '说明', dataIndex: 'description' },
             { title: '状态', dataIndex: 'enabled', width: 100, render: (value: boolean) => <Tag color={value ? 'green' : 'default'}>{value ? '启用' : '停用'}</Tag> },
-            ...(canManage ? [{ title: '操作', key: 'actions', width: 180, render: (_: unknown, category: FinanceExpenseCategory) => <Space>
-                <Button size="small" onClick={() => onEdit(category)}>编辑</Button>
-                <Popconfirm title="只有未使用类别可以删除，确认继续？" onConfirm={() => onWork(() => deleteFinanceExpenseCategory(category.id, category.version))}><Button size="small" danger>删除</Button></Popconfirm>
-            </Space> }] : []),
+            ...(canManage ? [{
+                title: '操作', key: 'actions', width: 180, render: (_: unknown, category: FinanceExpenseCategory) => <Space>
+                    <Button size="small" onClick={() => onEdit(category)}>编辑</Button>
+                    <Popconfirm title="只有未使用类别可以删除，确认继续？" onConfirm={() => onWork(() => deleteFinanceExpenseCategory(category.id, category.version))}><Button size="small" danger>删除</Button></Popconfirm>
+                </Space>
+            }] : []),
         ]} />
     </>;
 }

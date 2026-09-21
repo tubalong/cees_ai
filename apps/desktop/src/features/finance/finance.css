@@ -1,10 +1,24 @@
+.finance-ledger-panel {
+    display: grid;
+    gap: 14px;
+}
+
+.finance-ledger-panel .ant-upload-wrapper .ant-upload-drag {
+    margin-top: 16px;
+    border-radius: 8px;
+}
+
+.finance-ledger-panel .ant-alert {
+    margin-bottom: 16px;
+}
+
 .finance-page {
     height: calc(100vh - 120px);
     overflow: auto;
 }
 
 .finance-heading,
-.finance-heading > div,
+.finance-heading>div,
 .finance-items-title,
 .finance-attachments,
 .finance-table-toolbar {
@@ -17,7 +31,7 @@
     margin-bottom: 14px;
 }
 
-.finance-heading > div {
+.finance-heading>div {
     gap: 10px;
 }
 
