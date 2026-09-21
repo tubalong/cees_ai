@@ -721,6 +721,136 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponseEnvelope"
 
+  /user-memories:
+    get:
+      summary: 查询当前成员的用户级记忆列表
+      description: |
+        返回当前成员在该租户内的全部未删除记忆，按创建时间升序（即注入对话上下文的顺序），至多 30 条。
+        记忆只属于成员本人：AI 仅提议记忆内容，写入与删除一律以本人操作为准。
+      operationId: listUserMemories
+      tags:
+        - User
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 记忆列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserMemoryListResponseEnvelope"
+        "401":
+          description: 登录状态或租户成员身份无效
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /user-memories/{memoryId}:
+    patch:
+      summary: 修改当前成员的一条用户级记忆
+      description: 使用版本进行乐观并发控制；版本不匹配时返回 409。content 与 type 至少提供一个。
+      operationId: updateUserMemory
+      tags:
+        - User
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: memoryId
+          in: path
+          required: true
+          description: 记忆 ID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateUserMemoryRequest"
+      responses:
+        "200":
+          description: 修改后的记忆
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserMemoryResponseEnvelope"
+        "400":
+          description: 请求字段校验失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "401":
+          description: 登录状态或租户成员身份无效
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "404":
+          description: 记忆不存在或不属于当前成员
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "409":
+          description: 记忆版本冲突
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+    delete:
+      summary: 删除当前成员的一条用户级记忆
+      description: 软删除记忆，审计事实保留；版本不匹配时返回 409。
+      operationId: deleteUserMemory
+      tags:
+        - User
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: memoryId
+          in: path
+          required: true
+          description: 记忆 ID
+          schema:
+            type: string
+            format: uuid
+        - name: version
+          in: query
+          required: true
+          description: 当前记忆版本
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "204":
+          description: 记忆已软删除
+        "400":
+          description: 请求字段校验失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "401":
+          description: 登录状态或租户成员身份无效
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "404":
+          description: 记忆不存在或不属于当前成员
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "409":
+          description: 记忆版本冲突
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
   /tenants/current:
     get:
       summary: 获取当前租户
@@ -13374,6 +13504,106 @@ components:
           const: true
         data:
           $ref: "#/components/schemas/UserProfile"
+        requestId:
+          type:
+            - string
+            - "null"
+
+    UserMemoryType:
+      type: string
+      enum:
+        - PREFERENCE
+        - FACT
+        - DECISION
+        - HABIT
+      description: 记忆类型；PREFERENCE 偏好、FACT 事实、DECISION 决定、HABIT 习惯。
+
+    UserMemory:
+      type: object
+      required:
+        - id
+        - type
+        - content
+        - version
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          $ref: "#/components/schemas/UserMemoryType"
+        content:
+          type: string
+          minLength: 1
+          maxLength: 1000
+          description: 记忆正文，一条自包含的关于用户本人的陈述
+        version:
+          type: integer
+          minimum: 1
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    UserMemoryList:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          maxItems: 30
+          items:
+            $ref: "#/components/schemas/UserMemory"
+
+    UpdateUserMemoryRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - version
+      properties:
+        content:
+          type: string
+          minLength: 1
+          maxLength: 1000
+          description: 记忆正文；与 type 至少提供一个
+        type:
+          $ref: "#/components/schemas/UserMemoryType"
+          description: 记忆类型；与 content 至少提供一个
+        version:
+          type: integer
+          minimum: 1
+
+    UserMemoryResponseEnvelope:
+      type: object
+      required:
+        - success
+        - data
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: "#/components/schemas/UserMemory"
+        requestId:
+          type:
+            - string
+            - "null"
+
+    UserMemoryListResponseEnvelope:
+      type: object
+      required:
+        - success
+        - data
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: "#/components/schemas/UserMemoryList"
         requestId:
           type:
             - string

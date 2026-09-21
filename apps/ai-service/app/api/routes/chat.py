@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import AsyncIterator
+from typing import Any
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
@@ -31,6 +32,7 @@ from app.api.generated.models import (
     ToolTurnRequest,
     ToolTurnToolCallsEvent,
     UsageEvent,
+    UserMemoryCandidate,
 )
 from app.api.generated.models import (
     ToolCall as ApiToolCall,
@@ -52,6 +54,14 @@ from app.llm.router import LLMRouter, RoutingResult
 from app.llm.types import TokenUsageData
 
 logger = logging.getLogger(__name__)
+
+
+def _memory_candidate_models(candidates: list[dict[str, Any]]) -> list[UserMemoryCandidate]:
+    """构造记忆候选模型；过滤 None 字段，避免响应序列化输出 null。"""
+    return [
+        UserMemoryCandidate(**{key: value for key, value in candidate.items() if value is not None})
+        for candidate in candidates
+    ]
 
 router = APIRouter(
     prefix="/internal/v1/chat",
@@ -125,6 +135,7 @@ async def compact_chat(payload: CompactChatRequest, request: Request) -> Compact
         conversation_id=payload.conversation_id,
         summary=compaction.summary,
         summarized_through_message_id=compaction.summarized_through_message_id,
+        memory_candidates=_memory_candidate_models(compaction.memory_candidates),
         execution=_execution_metadata(compaction.routing),
     )
 
@@ -241,6 +252,7 @@ async def _tool_turn_stream_events(
     follow_up = FollowUpStreamFilter()
     token_usage: TokenUsageData | None = None
     finish_reason: str | None = None
+    has_tool_calls = False
     try:
         async for chunk in routed.chunks:
             if chunk.text:
@@ -248,6 +260,7 @@ async def _tool_turn_stream_events(
                 if visible:
                     yield _encode_sse(ContentDeltaEvent(type="content_delta", text=visible))
             if chunk.tool_calls:
+                has_tool_calls = True
                 yield _encode_sse(
                     ToolTurnToolCallsEvent(
                         type="tool_calls",
@@ -314,7 +327,7 @@ async def _tool_turn_stream_events(
     tail = follow_up.finish()
     if tail:
         yield _encode_sse(ContentDeltaEvent(type="content_delta", text=tail))
-    questions = follow_up.result()
+    questions, memory_candidates = follow_up.result()
     if token_usage is not None:
         yield _encode_sse(
             UsageEvent(
@@ -334,6 +347,10 @@ async def _tool_turn_stream_events(
     }
     if questions:
         completion["related_questions"] = questions
+    # 调用了工具的轮次文本只是“调用工具前的预告”，不是最终回答，按指令模型也不会
+    # 输出建议块；纯回答轮（最终回答）才携带记忆候选。
+    if memory_candidates and not has_tool_calls:
+        completion["memory_candidates"] = _memory_candidate_models(memory_candidates)
     yield _encode_sse(ChatStreamCompletedEvent(**completion))
     logger.info(
         "tool turn stream completed",
@@ -479,7 +496,7 @@ async def _chat_stream_events(
     tail = follow_up.finish()
     if tail:
         yield _encode_sse(ContentDeltaEvent(type="content_delta", text=tail))
-    questions = follow_up.result()
+    questions, memory_candidates = follow_up.result()
     if token_usage is not None:
         yield _encode_sse(
             UsageEvent(
@@ -499,6 +516,8 @@ async def _chat_stream_events(
     }
     if questions:
         completion["related_questions"] = questions
+    if memory_candidates:
+        completion["memory_candidates"] = _memory_candidate_models(memory_candidates)
     yield _encode_sse(ChatStreamCompletedEvent(**completion))
     logger.info(
         "chat stream completed",

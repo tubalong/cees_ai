@@ -178,6 +178,10 @@ export type ChatRequest = {
      * Summary of history preceding the supplied recent messages.
      */
     conversation_summary?: string | null;
+    /**
+     * Long-term user memories, each a self-contained statement about the user. Injected as a dedicated system block before the conversation summary; absent or null means no memories are injected. At most 30 entries.
+     */
+    user_memories?: Array<string> | null;
     messages: Array<ChatMessage>;
     max_output_tokens?: number | null;
 };
@@ -205,11 +209,36 @@ export type CompactChatRequest = {
     messages: Array<ChatMessage>;
 };
 
+/**
+ * Memory type. PREFERENCE personal preference, FACT personal fact, DECISION a decision the user made, HABIT a working habit.
+ */
+export type UserMemoryType = 'PREFERENCE' | 'FACT' | 'DECISION' | 'HABIT';
+
+export type UserMemoryCandidate = {
+    type: UserMemoryType;
+    /**
+     * A self-contained statement about the user, quoted from the conversation; no inference, no team-level information, no sensitive data.
+     */
+    content: string;
+    /**
+     * create adds a new memory; update corrects an existing one and must be paired with `replaces`.
+     */
+    action?: 'create' | 'update';
+    /**
+     * When action is update: a key phrase copied verbatim from the existing memory being replaced. Only meaningful when the existing memories are injected in the context.
+     */
+    replaces?: string | null;
+};
+
 export type CompactChatResponse = {
     request_id: string;
     conversation_id: string;
     summary: string;
     summarized_through_message_id?: string | null;
+    /**
+     * Long-term memory candidates extracted alongside the summary; empty when nothing is worth remembering.
+     */
+    memory_candidates: Array<UserMemoryCandidate>;
     execution: ExecutionMetadata;
 };
 
@@ -240,6 +269,10 @@ export type ChatStreamCompletedEvent = {
      * Short follow-up questions derived from the final reply; each at most 30 characters. Only present on the completed event of the stream that produced the final user-facing answer; absent when the reply contained no follow-up suggestions.
      */
     related_questions?: Array<string>;
+    /**
+     * Long-term memory candidates derived from the final reply. Only present on the completed event of the stream that produced the final user-facing answer; absent when the user expressed nothing worth remembering or the turn called tools.
+     */
+    memory_candidates?: Array<UserMemoryCandidate>;
 };
 
 export type ChatStreamEvent = ({
@@ -297,6 +330,10 @@ export type ToolTurnRequest = {
     mode?: ChatMode;
     instructions?: string | null;
     conversation_summary?: string | null;
+    /**
+     * Long-term user memories, each a self-contained statement about the user. Injected as a dedicated system block before the conversation summary; absent or null means no memories are injected. At most 30 entries.
+     */
+    user_memories?: Array<string> | null;
     messages: Array<ToolTurnMessage>;
     tools: Array<ChatToolDefinition>;
     max_output_tokens?: number | null;

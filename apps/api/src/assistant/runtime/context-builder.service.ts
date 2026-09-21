@@ -1,10 +1,11 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConversationMessageRole, type Prisma } from '@prisma/client';
 import type { ChatMessage, ChatMode, ChatRequest, MessageContentPart, ToolTurnMessage } from '@cees/ai-service-client';
 import { PrismaService } from '../../database/prisma.service';
 import { AiServiceGateway, type ChatContextBudgets } from '../../ai-orchestration/ai-service-gateway.service';
 import type { PublicTurnMode } from '../assistant.types';
 import { AssistantMessageContentService } from './message-content.service';
+import { UserMemoryService } from '../../user-memory/user-memory.service';
 
 /** 历史消息达到该数量时触发自动压缩，压缩后上下文为摘要 + 最近 RETAIN_RECENT_COUNT 条。 */
 const COMPACTION_THRESHOLD = 80;
@@ -70,16 +71,22 @@ interface ToolCallHistoryRow {
  */
 @Injectable()
 export class ContextBuilderService {
+  private readonly logger = new Logger(ContextBuilderService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly gateway: AiServiceGateway,
     private readonly messageContent: AssistantMessageContentService,
+    private readonly userMemory: UserMemoryService,
   ) { }
 
   /** 纯文本轮次：过滤 TOOL 消息，组装普通 ChatRequest。 */
   async buildChatRequest(input: BuildChatRequestInput): Promise<ChatRequest> {
     const { conversation, userId, requestId } = input;
-    const { summary, history } = await this.loadHistoryWithCompaction(input, false);
+    const [{ summary, history }, userMemories] = await Promise.all([
+      this.loadHistoryWithCompaction(input, false),
+      this.userMemory.listActiveContents(conversation.tenantId, input.membershipId),
+    ]);
 
     return {
       request_id: requestId,
@@ -88,6 +95,7 @@ export class ContextBuilderService {
       conversation_id: conversation.id,
       mode: (input.mode === 'ultra' ? 'ultra' : 'standard') satisfies ChatMode,
       conversation_summary: summary,
+      user_memories: userMemories.length > 0 ? userMemories : null,
       messages: await Promise.all(history.map((message) => this.toChatMessage(message, input))),
     };
   }
@@ -102,9 +110,14 @@ export class ContextBuilderService {
   async buildToolTurnMessages(input: BuildChatRequestInput): Promise<{
     summary: string | null;
     items: ToolTurnMessage[];
+    /** 注入用：全部 ACTIVE 记忆内容（升序），由 turn-runner 传入 ToolTurnRequest。 */
+    userMemories: string[];
   }> {
     const { conversation } = input;
-    const { summary, history } = await this.loadHistoryWithCompaction(input, true);
+    const [{ summary, history }, userMemories] = await Promise.all([
+      this.loadHistoryWithCompaction(input, true),
+      this.userMemory.listActiveContents(conversation.tenantId, input.membershipId),
+    ]);
 
     const retainedToolCallIds = history
       .map((message) => message.toolCallId)
@@ -180,7 +193,7 @@ export class ContextBuilderService {
       items.push({ role: 'assistant', content: await this.toParts(message, input) });
     }
 
-    return { summary, items };
+    return { summary, items, userMemories };
   }
 
   /**
@@ -238,6 +251,16 @@ export class ContextBuilderService {
       { membershipId, turnId },
     );
     summary = compacted.summary;
+    // 压缩顺带提炼的记忆候选：校验通过即落库；失败只记录，不阻断压缩与上下文组装。
+    if (compacted.memory_candidates.length > 0) {
+      await this.userMemory.applyCandidates(compacted.memory_candidates, {
+        conversationId: conversation.id,
+      }).catch((error) => {
+        this.logger.error(
+          `failed to apply memory candidates for conversation ${conversation.id}: ${String(error)}`,
+        );
+      });
+    }
     const textBoundary = toCompact[toCompact.length - 1];
     const persistedBoundary = textBoundary?.turnId
       ? [...history].reverse().find((message) => message.turnId === textBoundary.turnId) ?? textBoundary

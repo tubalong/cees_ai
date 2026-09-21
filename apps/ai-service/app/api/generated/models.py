@@ -222,6 +222,11 @@ class ChatRequest(BaseModel):
     conversation_summary: constr(min_length=1, max_length=131072) | None = Field(
         None, description='Summary of history preceding the supplied recent messages.'
     )
+    user_memories: list[constr(min_length=1, max_length=1000)] | None = Field(
+        None,
+        description='Long-term user memories, each a self-contained statement about the user. Injected as a dedicated system block before the conversation summary; absent or null means no memories are injected. At most 30 entries.',
+        max_length=30,
+    )
     messages: list[ChatMessage] = Field(..., max_length=128, min_length=1)
     max_output_tokens: conint(ge=1, le=32768) | None = None
 
@@ -244,6 +249,37 @@ class CompactChatRequest(BaseModel):
     conversation_id: constr(min_length=1, max_length=128)
     previous_summary: constr(min_length=1, max_length=131072) | None = None
     messages: list[ChatMessage] = Field(..., max_length=128, min_length=1)
+
+
+class UserMemoryType(StrEnum):
+    PREFERENCE = 'PREFERENCE'
+    FACT = 'FACT'
+    DECISION = 'DECISION'
+    HABIT = 'HABIT'
+
+
+class Action(StrEnum):
+    create = 'create'
+    update = 'update'
+
+
+class UserMemoryCandidate(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: UserMemoryType
+    content: constr(min_length=1, max_length=1000) = Field(
+        ...,
+        description='A self-contained statement about the user, quoted from the conversation; no inference, no team-level information, no sensitive data.',
+    )
+    action: Action | None = Field(
+        'create',
+        description='create adds a new memory; update corrects an existing one and must be paired with `replaces`.',
+    )
+    replaces: constr(min_length=1, max_length=1000) | None = Field(
+        None,
+        description='When action is update: a key phrase copied verbatim from the existing memory being replaced. Only meaningful when the existing memories are injected in the context.',
+    )
 
 
 class ChatStreamStartedEvent(BaseModel):
@@ -284,6 +320,12 @@ class ChatStreamCompletedEvent(BaseModel):
     related_questions: list[constr(min_length=1, max_length=30)] | None = Field(
         None,
         description='Short follow-up questions derived from the final reply; each at most 30 characters. Only present on the completed event of the stream that produced the final user-facing answer; absent when the reply contained no follow-up suggestions.',
+        max_length=3,
+        min_length=1,
+    )
+    memory_candidates: list[UserMemoryCandidate] | None = Field(
+        None,
+        description='Long-term memory candidates derived from the final reply. Only present on the completed event of the stream that produced the final user-facing answer; absent when the user expressed nothing worth remembering or the turn called tools.',
         max_length=3,
         min_length=1,
     )
@@ -340,6 +382,11 @@ class ToolTurnRequest(BaseModel):
     mode: ChatMode | None = 'standard'
     instructions: constr(min_length=1, max_length=32768) | None = None
     conversation_summary: constr(min_length=1, max_length=131072) | None = None
+    user_memories: list[constr(min_length=1, max_length=1000)] | None = Field(
+        None,
+        description='Long-term user memories, each a self-contained statement about the user. Injected as a dedicated system block before the conversation summary; absent or null means no memories are injected. At most 30 entries.',
+        max_length=30,
+    )
     messages: list[ToolTurnMessage] = Field(..., max_length=128, min_length=1)
     tools: list[ChatToolDefinition] = Field(..., max_length=32)
     max_output_tokens: conint(ge=1, le=32768) | None = None
@@ -1174,6 +1221,11 @@ class CompactChatResponse(BaseModel):
     conversation_id: str
     summary: constr(min_length=1)
     summarized_through_message_id: str | None = None
+    memory_candidates: list[UserMemoryCandidate] = Field(
+        ...,
+        description='Long-term memory candidates extracted alongside the summary; empty when nothing is worth remembering.',
+        max_length=3,
+    )
     execution: ExecutionMetadata
 
 

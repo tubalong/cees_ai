@@ -1,18 +1,26 @@
 from __future__ import annotations
 
+import json
+import re
 from dataclasses import dataclass
+from typing import Any
 
 from app.api.generated.models import CompactChatRequest
 from app.chat.context import build_compaction_context
+from app.chat.follow_up import parse_memory_candidate
 from app.core.config import OutputMode
 from app.core.errors import AIServiceError
 from app.llm.router import LLMRouter, RoutingResult
+
+MEMORY_BLOCK_OPEN = "<user_memories>"
+MEMORY_BLOCK_CLOSE = "</user_memories>"
 
 
 @dataclass(frozen=True)
 class ChatCompaction:
     summary: str
     summarized_through_message_id: str | None
+    memory_candidates: list[dict[str, Any]]
     routing: RoutingResult
 
 
@@ -54,7 +62,16 @@ class ChatCompactor:
                 execution=routing,
             )
         output = routing.provider_result.output
-        if not isinstance(output, str) or not output.strip():
+        if not isinstance(output, str):
+            raise AIServiceError(
+                "CHAT_SUMMARY_INVALID",
+                "The provider did not return a valid conversation summary",
+                status_code=502,
+                request_id=request.request_id,
+                execution=routing,
+            )
+        summary, memory_candidates = _split_compaction_output(output)
+        if not summary.strip():
             raise AIServiceError(
                 "CHAT_SUMMARY_INVALID",
                 "The provider did not return a valid conversation summary",
@@ -63,7 +80,37 @@ class ChatCompactor:
                 execution=routing,
             )
         return ChatCompaction(
-            summary=output.strip(),
+            summary=summary.strip(),
             summarized_through_message_id=context.summarized_through_message_id,
+            memory_candidates=memory_candidates,
             routing=routing,
         )
+
+
+def _split_compaction_output(
+    output: str,
+) -> tuple[str, list[dict[str, Any]]]:
+    """剥离压缩输出中的记忆块，返回 (摘要文本, 记忆候选)；无块或解析失败时候选为空。"""
+    match = re.search(
+        re.escape(MEMORY_BLOCK_OPEN) + r"(.*?)" + re.escape(MEMORY_BLOCK_CLOSE),
+        output,
+        flags=re.DOTALL,
+    )
+    if not match:
+        return output, []
+    summary = output[: match.start()] + output[match.end():]
+    try:
+        parsed = json.loads(match.group(1).strip())
+    except ValueError:
+        return summary, []
+    if not isinstance(parsed, list):
+        return summary, []
+    candidates: list[dict[str, Any]] = []
+    for item in parsed:
+        if not isinstance(item, dict):
+            continue
+        candidate = parse_memory_candidate(item)
+        if candidate is None:
+            continue
+        candidates.append(candidate)
+    return summary, candidates[:3]
