@@ -4,7 +4,9 @@
 
 - 已落地：提取通用连接器 Manifest、状态、工具、计划调用与上下文类型。
 - 已落地：钉钉 DWS 通过兼容类型使用通用连接器核心，现有 IPC、页面和执行行为不变。
-- 待实现：`ConnectorAdapter`、`ConnectorRegistry` 和通用 Electron IPC。
+- 已落地：增加 `ConnectorAdapter`、`ConnectorRegistry`，钉钉成为第一个通过注册中心获取的适配器。
+- 已落地：现有钉钉专用 IPC 保持不变，但其实现统一委托给 `DingTalkConnectorAdapter`。
+- 待实现：通用 Electron IPC。
 - 待实现：通用 `LocalCliTransport`、远程 MCP Transport 和混合执行方式。
 - 待实现：连接器进入 Assistant 原生 Tool Loop，以及写操作的二次确认机制。
 
