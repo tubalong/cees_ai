@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
+    decodeDwsOutput,
     dingTalkLogoutArguments,
     dwsRetryDelayMilliseconds,
     isAuthenticatedPayload,
@@ -11,6 +12,13 @@ const {
     parseJsonOutput,
     selectCurrentProfile,
 } = require('../dist-electron/dingtalk-dws.js');
+
+test('DWS 输出优先按 UTF-8 解码并在 Windows 回退系统中文编码', () => {
+    assert.equal(decodeDwsOutput(Buffer.from('钉钉授权失败', 'utf8')), '钉钉授权失败');
+    if (process.platform === 'win32') {
+        assert.equal(decodeDwsOutput(Buffer.from([0xd6, 0xd0, 0xce, 0xc4])), '中文');
+    }
+});
 
 test('解绑只清除 DWS 本地登录态且不触发卸载', () => {
     assert.deepEqual(dingTalkLogoutArguments(), ['auth', 'logout', '-y']);

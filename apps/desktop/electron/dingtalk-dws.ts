@@ -369,7 +369,7 @@ export async function runDws(
         : process.platform === 'win32' ? ['/d', '/s', '/c', 'dws', ...args] : args;
     try {
         const result = await execFileAsync(command, commandArgs, {
-            encoding: 'utf8',
+            encoding: null,
             timeout,
             windowsHide: true,
             maxBuffer: 16 * 1024 * 1024,
@@ -378,7 +378,7 @@ export async function runDws(
                 ...envOverrides,
             },
         });
-        return result.stdout;
+        return decodeDwsOutput(result.stdout);
     } catch (error) {
         throw new DingTalkDwsCommandError(safeError(error), parseDwsFailureDetails(error));
     }
@@ -502,8 +502,8 @@ function classifyDwsIssue(error: unknown): {
 
 export function parseDwsFailureDetails(error: unknown): DwsFailureDetails {
     if (error instanceof DingTalkDwsCommandError) return error.details;
-    const raw = isRecord(error) && typeof error.stderr === 'string'
-        ? error.stderr
+    const raw = isRecord(error) && (typeof error.stderr === 'string' || Buffer.isBuffer(error.stderr))
+        ? decodeDwsOutput(error.stderr)
         : error instanceof Error ? error.message : typeof error === 'string' ? error : '';
     const payload = tryParseJsonFragment(raw);
     const record = isRecord(payload) && isRecord(payload.error) ? payload.error : isRecord(payload) ? payload : {};
@@ -662,7 +662,7 @@ function booleanField(record: Record<string, unknown>, ...keys: string[]): boole
 
 function safeError(error: unknown): string {
     if (isRecord(error)) {
-        const stderr = typeof error.stderr === 'string' ? error.stderr.trim() : '';
+        const stderr = typeof error.stderr === 'string' || Buffer.isBuffer(error.stderr) ? decodeDwsOutput(error.stderr).trim() : '';
         const message = typeof error.message === 'string' ? error.message.trim() : '';
         const value = stderr || message;
         if (value) {
@@ -673,4 +673,14 @@ function safeError(error: unknown): string {
         }
     }
     return error instanceof Error ? error.message.slice(0, 500) : 'DWS 调用失败';
+}
+
+export function decodeDwsOutput(output: string | Buffer): string {
+    if (typeof output === 'string') return output;
+    try {
+        return new TextDecoder('utf-8', { fatal: true }).decode(output);
+    } catch {
+        if (process.platform === 'win32') return new TextDecoder('gb18030').decode(output);
+        return output.toString('utf8');
+    }
 }
