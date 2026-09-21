@@ -8,11 +8,14 @@ import {
 } from './dingtalk-dws';
 import {
     configureDingTalkConnector,
+    checkDingTalkConnectorUpdate,
     getDingTalkConnectorRelease,
     installAndAuthorizeDingTalkConnector,
     discoverDingTalkReadTools,
     executeDingTalkReadCalls,
     resetDingTalkConnectorTools,
+    rollbackDingTalkConnector,
+    upgradeDingTalkConnector,
 } from './dingtalk-connector';
 
 function publishDingTalkStatus(status: Awaited<ReturnType<typeof getDingTalkDwsStatus>>): void {
@@ -110,6 +113,28 @@ app.whenReady().then(() => {
         }
     });
     ipcMain.handle('cees:dingtalk-connector-release', () => getDingTalkConnectorRelease());
+    ipcMain.handle('cees:dingtalk-connector-update-check', () => checkDingTalkConnectorUpdate());
+    ipcMain.handle('cees:dingtalk-connector-upgrade', async (_event, targetVersion: unknown) => {
+        if (targetVersion !== undefined && typeof targetVersion !== 'string') throw new Error('DWS 目标版本无效');
+        try {
+            const result = await upgradeDingTalkConnector(targetVersion);
+            publishDingTalkStatus(result.status);
+            return result.release;
+        } catch (error) {
+            await refreshDingTalkStatus();
+            throw error;
+        }
+    });
+    ipcMain.handle('cees:dingtalk-connector-rollback', async () => {
+        try {
+            const result = await rollbackDingTalkConnector();
+            publishDingTalkStatus(result.status);
+            return result.release;
+        } catch (error) {
+            await refreshDingTalkStatus();
+            throw error;
+        }
+    });
     createWindow();
 });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });

@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import {
@@ -8,6 +8,7 @@ import {
     getDingTalkDwsStatus,
     loginDingTalkDws,
     readDingTalkDwsSchema,
+    runDws,
     runDwsJson,
     type DingTalkDwsStatus,
 } from './dingtalk-dws';
@@ -16,6 +17,12 @@ const execFileAsync = promisify(execFile);
 const DWS_VERSION = 'v1.0.62';
 const DWS_INSTALLER_URL = `https://raw.githubusercontent.com/DingTalk-Real-AI/dingtalk-workspace-cli/${DWS_VERSION}/scripts/install.ps1`;
 const DWS_INSTALLER_SHA256 = 'bebc585dfe53d7c77cb10096c3ae9e9311a766b57dcd4c4556c50e7251721955';
+const DWS_STABLE_VERSION_PATTERN = /^v\d+\.\d+\.\d+$/;
+const DWS_OFFICIAL_RELEASE_ENV: NodeJS.ProcessEnv = {
+    DWS_UPGRADE_URL: 'https://api.github.com',
+    DWS_UPGRADE_REPOSITORY: 'DingTalk-Real-AI/dingtalk-workspace-cli',
+    DWS_NO_SKILLS: '1',
+};
 const MAX_CONTEXT_BYTES = 56 * 1024;
 const MAX_TOOL_COUNT = 1500;
 const MAX_CALLS = 3;
@@ -25,6 +32,7 @@ const CONTROL_PARAMETERS = new Set(['help', 'format', 'output', 'jq', 'fields', 
 
 let installRoot: string | null = null;
 let installPromise: Promise<DingTalkDwsStatus> | null = null;
+let releaseOperationPromise: Promise<DingTalkConnectorReleaseResult> | null = null;
 
 export interface DingTalkConnectorContext {
     provider: 'DINGTALK';
@@ -44,6 +52,51 @@ export interface DingTalkConnectorTool {
 export interface DingTalkConnectorPlannedCall {
     toolId: string;
     arguments: Record<string, unknown>;
+}
+
+export interface DingTalkConnectorReleaseStatus {
+    version: string;
+    license: string;
+    channel: 'stable';
+    installedVersion: string | null;
+    latestVersion: string | null;
+    updateAvailable: boolean;
+    checkSupported: boolean;
+    upgradeSupported: boolean;
+    rollbackAvailable: boolean;
+    rollbackVersion: string | null;
+    checkedAt: string | null;
+    releaseDate: string | null;
+    releaseUrl: string | null;
+    changelog: string[];
+    error: string | null;
+    lastOperation: DingTalkConnectorReleaseOperation | null;
+}
+
+export interface DingTalkConnectorReleaseResult {
+    release: DingTalkConnectorReleaseStatus;
+    status: DingTalkDwsStatus;
+}
+
+export interface DingTalkConnectorReleaseOperation {
+    type: 'UPGRADE' | 'ROLLBACK';
+    status: 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'ROLLED_BACK';
+    fromVersion: string | null;
+    targetVersion: string | null;
+    startedAt: string;
+    completedAt: string | null;
+    message: string | null;
+}
+
+interface PersistedDingTalkReleaseState {
+    latestVersion?: string;
+    checkedAt?: string;
+    releaseDate?: string;
+    releaseUrl?: string;
+    changelog?: string[];
+    rollbackAvailable?: boolean;
+    rollbackVersion?: string;
+    lastOperation?: DingTalkConnectorReleaseOperation;
 }
 
 export interface DiscoveredDwsTool extends DingTalkConnectorTool {
@@ -84,8 +137,323 @@ export function configureDingTalkConnector(userDataPath: string): void {
     configureDingTalkDwsExecutable(path.join(installRoot, 'bin', 'dws.exe'));
 }
 
-export function getDingTalkConnectorRelease(): { version: string; license: string } {
-    return { version: DWS_VERSION, license: 'Apache-2.0' };
+export async function getDingTalkConnectorRelease(): Promise<DingTalkConnectorReleaseStatus> {
+    const [status, state] = await Promise.all([getDingTalkDwsStatus(), readReleaseState()]);
+    return buildReleaseStatus(status, state);
+}
+
+export async function checkDingTalkConnectorUpdate(): Promise<DingTalkConnectorReleaseStatus> {
+    const status = await requireInstalledDws();
+    try {
+        const payload = await runDwsJson(
+            ['upgrade', '--check', '--format', 'json'],
+            60_000,
+            DWS_OFFICIAL_RELEASE_ENV,
+        );
+        const check = parseDingTalkUpgradeCheck(payload);
+        const state = await readReleaseState();
+        const nextState: PersistedDingTalkReleaseState = {
+            ...state,
+            latestVersion: check.latestVersion,
+            checkedAt: new Date().toISOString(),
+            releaseDate: check.releaseDate ?? undefined,
+            releaseUrl: check.releaseUrl ?? undefined,
+            changelog: check.changelog,
+        };
+        await writeReleaseState(nextState);
+        return buildReleaseStatus(status, nextState);
+    } catch (error) {
+        const state = await readReleaseState();
+        return buildReleaseStatus(status, state, safeOperationError(error));
+    }
+}
+
+export async function upgradeDingTalkConnector(targetVersion?: string): Promise<DingTalkConnectorReleaseResult> {
+    return runReleaseOperation(async () => {
+        const before = await requireManagedDws();
+        const fromVersion = normalizeDwsVersion(before.version);
+        if (!fromVersion) throw new Error('无法识别当前 DWS 版本');
+        const checked = await checkDingTalkConnectorUpdate();
+        if (checked.error) throw new Error(checked.error);
+        const target = targetVersion?.trim() || checked.latestVersion;
+        if (!target || !DWS_STABLE_VERSION_PATTERN.test(target)) throw new Error('没有可用的 DWS 正式版本');
+        if (target !== checked.latestVersion) throw new Error('只能升级到刚刚检查到的最新稳定版本');
+        if (compareDwsVersions(fromVersion, target) >= 0) throw new Error(`当前已是最新稳定版本 ${fromVersion}`);
+
+        const startedAt = new Date().toISOString();
+        let state = await readReleaseState();
+        state = {
+            ...state,
+            lastOperation: releaseOperation('UPGRADE', 'RUNNING', fromVersion, target, startedAt),
+        };
+        await writeReleaseState(state);
+        try {
+            await runDws(
+                ['upgrade', '--version', target, '--skip-skills', '-y'],
+                10 * 60_000,
+                DWS_OFFICIAL_RELEASE_ENV,
+            );
+            const status = await verifyManagedDwsHealth(target);
+            const nextState: PersistedDingTalkReleaseState = {
+                ...state,
+                rollbackAvailable: true,
+                rollbackVersion: fromVersion,
+                lastOperation: releaseOperation('UPGRADE', 'SUCCEEDED', fromVersion, target, startedAt, '升级和健康检查已完成'),
+            };
+            await writeReleaseState(nextState);
+            resetDingTalkConnectorTools();
+            return { release: buildReleaseStatus(status, nextState), status };
+        } catch (upgradeError) {
+            const upgradeMessage = safeOperationError(upgradeError);
+            try {
+                await runDws(
+                    ['upgrade', '--rollback', '-y'],
+                    5 * 60_000,
+                    DWS_OFFICIAL_RELEASE_ENV,
+                );
+                await verifyManagedDwsHealth(fromVersion);
+            } catch (rollbackError) {
+                const failedState: PersistedDingTalkReleaseState = {
+                    ...state,
+                    rollbackAvailable: true,
+                    rollbackVersion: fromVersion,
+                    lastOperation: releaseOperation('UPGRADE', 'FAILED', fromVersion, target, startedAt, `升级失败且自动回滚失败：${safeOperationError(rollbackError)}`),
+                };
+                await writeReleaseState(failedState);
+                throw new Error(`DWS 升级失败且自动回滚失败，请手动回滚：${upgradeMessage}`);
+            }
+            const rollbackState: PersistedDingTalkReleaseState = {
+                ...state,
+                rollbackAvailable: false,
+                rollbackVersion: undefined,
+                lastOperation: releaseOperation('UPGRADE', 'ROLLED_BACK', fromVersion, target, startedAt, `升级失败，已自动回滚：${upgradeMessage}`),
+            };
+            await writeReleaseState(rollbackState);
+            resetDingTalkConnectorTools();
+            throw new Error(`DWS 升级失败，已自动回滚到 ${fromVersion}：${upgradeMessage}`);
+        }
+    });
+}
+
+export async function rollbackDingTalkConnector(): Promise<DingTalkConnectorReleaseResult> {
+    return runReleaseOperation(async () => {
+        const before = await requireManagedDws();
+        const currentVersion = normalizeDwsVersion(before.version);
+        const state = await readReleaseState();
+        const targetVersion = state.rollbackVersion ?? null;
+        if (!state.rollbackAvailable || !targetVersion) throw new Error('当前没有由 CEES 升级流程创建的可用回滚版本');
+        const startedAt = new Date().toISOString();
+        const runningState: PersistedDingTalkReleaseState = {
+            ...state,
+            lastOperation: releaseOperation('ROLLBACK', 'RUNNING', currentVersion, targetVersion, startedAt),
+        };
+        await writeReleaseState(runningState);
+        try {
+            await runDws(
+                ['upgrade', '--rollback', '-y'],
+                5 * 60_000,
+                DWS_OFFICIAL_RELEASE_ENV,
+            );
+            const status = await verifyManagedDwsHealth(targetVersion);
+            const nextState: PersistedDingTalkReleaseState = {
+                ...runningState,
+                rollbackAvailable: false,
+                rollbackVersion: undefined,
+                lastOperation: releaseOperation('ROLLBACK', 'SUCCEEDED', currentVersion, targetVersion, startedAt, '已回滚并通过健康检查'),
+            };
+            await writeReleaseState(nextState);
+            resetDingTalkConnectorTools();
+            return { release: buildReleaseStatus(status, nextState), status };
+        } catch (error) {
+            const failedState: PersistedDingTalkReleaseState = {
+                ...runningState,
+                rollbackAvailable: true,
+                rollbackVersion: targetVersion,
+                lastOperation: releaseOperation('ROLLBACK', 'FAILED', currentVersion, targetVersion, startedAt, safeOperationError(error)),
+            };
+            await writeReleaseState(failedState);
+            throw error;
+        }
+    });
+}
+
+export function parseDingTalkUpgradeCheck(payload: unknown): {
+    currentVersion: string;
+    latestVersion: string;
+    needsUpgrade: boolean;
+    releaseDate: string | null;
+    releaseUrl: string | null;
+    changelog: string[];
+} {
+    if (!isRecord(payload)) throw new Error('DWS 更新检查返回格式无效');
+    const currentVersion = normalizeDwsVersion(payload.current_version);
+    const latestRaw = typeof payload.latest_version === 'string' ? payload.latest_version.trim() : '';
+    const latestVersion = /^v?\d+\.\d+\.\d+$/.test(latestRaw)
+        ? normalizeDwsVersion(latestRaw)
+        : null;
+    if (!currentVersion || !latestVersion || !DWS_STABLE_VERSION_PATTERN.test(latestVersion)) {
+        throw new Error('DWS 更新检查未返回有效的正式版本');
+    }
+    if (payload.prerelease === true || payload.track && payload.track !== 'release') {
+        throw new Error('CEES 只允许使用 DWS 正式稳定版本');
+    }
+    return {
+        currentVersion,
+        latestVersion,
+        needsUpgrade: payload.needs_upgrade === true,
+        releaseDate: typeof payload.release_date === 'string' && payload.release_date.trim() ? payload.release_date.trim() : null,
+        releaseUrl: typeof payload.release_url === 'string' && /^https:\/\/github\.com\/DingTalk-Real-AI\/dingtalk-workspace-cli\/releases\//.test(payload.release_url)
+            ? payload.release_url
+            : null,
+        changelog: Array.isArray(payload.changelog)
+            ? payload.changelog.filter((item): item is string => typeof item === 'string' && Boolean(item.trim())).slice(0, 10).map((item) => item.slice(0, 500))
+            : [],
+    };
+}
+
+export function normalizeDwsVersion(value: unknown): string | null {
+    if (typeof value !== 'string') return null;
+    const match = value.match(/v?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)/);
+    return match ? `v${match[1]}` : null;
+}
+
+export function compareDwsVersions(left: string, right: string): number {
+    const leftVersion = parseVersionParts(left);
+    const rightVersion = parseVersionParts(right);
+    for (let index = 0; index < 3; index += 1) {
+        if (leftVersion.parts[index] !== rightVersion.parts[index]) {
+            return leftVersion.parts[index]! < rightVersion.parts[index]! ? -1 : 1;
+        }
+    }
+    if (!leftVersion.prerelease && !rightVersion.prerelease) return 0;
+    if (!leftVersion.prerelease) return 1;
+    if (!rightVersion.prerelease) return -1;
+    return leftVersion.prerelease.localeCompare(rightVersion.prerelease, 'en', { numeric: true });
+}
+
+function parseVersionParts(version: string): { parts: [number, number, number]; prerelease: string } {
+    const normalized = normalizeDwsVersion(version);
+    if (!normalized) throw new Error(`DWS 版本格式无效：${version}`);
+    const [core, prerelease = ''] = normalized.slice(1).split('-', 2);
+    const parts = core!.split('.').map(Number);
+    return { parts: [parts[0]!, parts[1]!, parts[2]!], prerelease };
+}
+
+function buildReleaseStatus(
+    status: DingTalkDwsStatus,
+    state: PersistedDingTalkReleaseState,
+    error: string | null = null,
+): DingTalkConnectorReleaseStatus {
+    const installedVersion = normalizeDwsVersion(status.version);
+    const latestVersion = normalizeDwsVersion(state.latestVersion);
+    const managed = process.platform === 'win32' && status.source === 'MANAGED';
+    return {
+        version: DWS_VERSION,
+        license: 'Apache-2.0',
+        channel: 'stable',
+        installedVersion,
+        latestVersion,
+        updateAvailable: Boolean(installedVersion && latestVersion && compareDwsVersions(installedVersion, latestVersion) < 0),
+        checkSupported: status.installed,
+        upgradeSupported: managed,
+        rollbackAvailable: managed && state.rollbackAvailable === true && Boolean(state.rollbackVersion),
+        rollbackVersion: normalizeDwsVersion(state.rollbackVersion),
+        checkedAt: state.checkedAt ?? null,
+        releaseDate: state.releaseDate ?? null,
+        releaseUrl: state.releaseUrl ?? null,
+        changelog: Array.isArray(state.changelog) ? state.changelog.slice(0, 10) : [],
+        error,
+        lastOperation: state.lastOperation ?? null,
+    };
+}
+
+async function requireInstalledDws(): Promise<DingTalkDwsStatus> {
+    const status = await getDingTalkDwsStatus();
+    if (!status.installed) throw new Error('请先安装 DWS 再检查更新');
+    return status;
+}
+
+async function requireManagedDws(): Promise<DingTalkDwsStatus> {
+    const status = await requireInstalledDws();
+    if (process.platform !== 'win32' || status.source !== 'MANAGED') {
+        throw new Error('CEES 只能升级由连接器管理的 Windows DWS');
+    }
+    return status;
+}
+
+async function verifyManagedDwsHealth(expectedVersion: string): Promise<DingTalkDwsStatus> {
+    const versionOutput = await runDws(['--version'], 30_000);
+    const actualVersion = normalizeDwsVersion(versionOutput);
+    if (actualVersion !== expectedVersion) {
+        throw new Error(`升级后版本不匹配，期望 ${expectedVersion}，实际 ${actualVersion ?? '未知'}`);
+    }
+    const schema = await readDingTalkDwsSchema();
+    if (!isRecord(schema)) throw new Error('升级后 DWS Schema 健康检查失败');
+    return getDingTalkDwsStatus();
+}
+
+async function runReleaseOperation(
+    operation: () => Promise<DingTalkConnectorReleaseResult>,
+): Promise<DingTalkConnectorReleaseResult> {
+    if (releaseOperationPromise) return releaseOperationPromise;
+    releaseOperationPromise = operation();
+    try {
+        return await releaseOperationPromise;
+    } finally {
+        releaseOperationPromise = null;
+    }
+}
+
+function releaseOperation(
+    type: DingTalkConnectorReleaseOperation['type'],
+    status: DingTalkConnectorReleaseOperation['status'],
+    fromVersion: string | null,
+    targetVersion: string | null,
+    startedAt: string,
+    message: string | null = null,
+): DingTalkConnectorReleaseOperation {
+    return {
+        type,
+        status,
+        fromVersion,
+        targetVersion,
+        startedAt,
+        completedAt: status === 'RUNNING' ? null : new Date().toISOString(),
+        message,
+    };
+}
+
+async function readReleaseState(): Promise<PersistedDingTalkReleaseState> {
+    if (!installRoot) return {};
+    try {
+        const raw = await readFile(path.join(installRoot, 'release-state.json'), 'utf8');
+        const parsed = JSON.parse(raw) as unknown;
+        return isRecord(parsed) ? parsed as PersistedDingTalkReleaseState : {};
+    } catch {
+        return {};
+    }
+}
+
+async function writeReleaseState(state: PersistedDingTalkReleaseState): Promise<void> {
+    if (!installRoot) throw new Error('DWS 连接器安装目录尚未初始化');
+    await mkdir(installRoot, { recursive: true });
+    const statePath = path.join(installRoot, 'release-state.json');
+    const tempPath = path.join(installRoot, `release-state-${randomUUID()}.json`);
+    try {
+        await writeFile(tempPath, JSON.stringify(state, null, 2), { encoding: 'utf8', flag: 'wx' });
+        await rm(statePath, { force: true });
+        await rename(tempPath, statePath);
+    } finally {
+        await rm(tempPath, { force: true });
+    }
+}
+
+function safeOperationError(error: unknown): string {
+    const message = error instanceof Error ? error.message : String(error ?? 'DWS 版本操作失败');
+    return message
+        .replace(/(?:access|refresh)?[_-]?token["']?\s*[:=]\s*["']?[^\s,"'}]+/gi, 'token=[REDACTED]')
+        .replace(/authorization\s*[:=]\s*bearer\s+\S+/gi, 'authorization=[REDACTED]')
+        .slice(0, 1000);
 }
 
 export async function installAndAuthorizeDingTalkConnector(): Promise<DingTalkDwsStatus> {

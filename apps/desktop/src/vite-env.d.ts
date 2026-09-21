@@ -43,7 +43,10 @@ interface Window {
                 selectProfile: (profile: string) => Promise<DingTalkConnectorStatus>;
                 tools: () => Promise<DingTalkConnectorTool[]>;
                 execute: (calls: DingTalkConnectorPlannedCall[]) => Promise<DingTalkConnectorContext[]>;
-                release: () => Promise<{ version: string; license: string }>;
+                release: () => Promise<DingTalkConnectorReleaseStatus>;
+                checkForUpdates: () => Promise<DingTalkConnectorReleaseStatus>;
+                upgrade: (targetVersion?: string) => Promise<DingTalkConnectorReleaseStatus>;
+                rollback: () => Promise<DingTalkConnectorReleaseStatus>;
                 onStatusChanged: (listener: (status: DingTalkConnectorStatus) => void) => () => void;
             };
         };
@@ -80,6 +83,33 @@ interface DingTalkDwsProfile {
     externalUserName: string | null;
     current: boolean;
     organizationCurrent: boolean;
+}
+
+interface DingTalkConnectorReleaseStatus {
+    version: string;
+    license: string;
+    channel: 'stable';
+    installedVersion: string | null;
+    latestVersion: string | null;
+    updateAvailable: boolean;
+    checkSupported: boolean;
+    upgradeSupported: boolean;
+    rollbackAvailable: boolean;
+    rollbackVersion: string | null;
+    checkedAt: string | null;
+    releaseDate: string | null;
+    releaseUrl: string | null;
+    changelog: string[];
+    error: string | null;
+    lastOperation: {
+        type: 'UPGRADE' | 'ROLLBACK';
+        status: 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'ROLLED_BACK';
+        fromVersion: string | null;
+        targetVersion: string | null;
+        startedAt: string;
+        completedAt: string | null;
+        message: string | null;
+    } | null;
 }
 
 interface DingTalkConnectorContext {

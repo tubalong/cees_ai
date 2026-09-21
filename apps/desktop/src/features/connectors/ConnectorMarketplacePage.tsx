@@ -1,5 +1,5 @@
 import { CheckCircleFilled, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
-import { App as AntdApp, Button, Modal, Select, Spin, Tag } from 'antd';
+import { App as AntdApp, Button, Modal, Select, Space, Spin, Tag } from 'antd';
 import { useEffect, useState } from 'react';
 import { useI18n } from '../../core/i18n';
 
@@ -22,13 +22,35 @@ const EMPTY_STATUS: DingTalkConnectorStatus = {
     error: null,
 };
 
+const EMPTY_RELEASE: DingTalkConnectorReleaseStatus = {
+    version: 'v1.0.62',
+    license: 'Apache-2.0',
+    channel: 'stable',
+    installedVersion: null,
+    latestVersion: null,
+    updateAvailable: false,
+    checkSupported: false,
+    upgradeSupported: false,
+    rollbackAvailable: false,
+    rollbackVersion: null,
+    checkedAt: null,
+    releaseDate: null,
+    releaseUrl: null,
+    changelog: [],
+    error: null,
+    lastOperation: null,
+};
+
 export default function ConnectorMarketplacePage(): JSX.Element {
     const { t } = useI18n();
-    const { message } = AntdApp.useApp();
+    const { message, modal } = AntdApp.useApp();
     const [status, setStatus] = useState<DingTalkConnectorStatus>(EMPTY_STATUS);
-    const [release, setRelease] = useState({ version: 'v1.0.62', license: 'Apache-2.0' });
+    const [release, setRelease] = useState<DingTalkConnectorReleaseStatus>(EMPTY_RELEASE);
     const [loading, setLoading] = useState(true);
     const [connecting, setConnecting] = useState(false);
+    const [checkingUpdate, setCheckingUpdate] = useState(false);
+    const [upgrading, setUpgrading] = useState(false);
+    const [rollingBack, setRollingBack] = useState(false);
     const [dialogOpen, setDialogOpen] = useState(false);
     const [selectedProfile, setSelectedProfile] = useState<string>();
 
@@ -84,6 +106,74 @@ export default function ConnectorMarketplacePage(): JSX.Element {
         await refresh();
     };
 
+    const checkForUpdates = async (): Promise<void> => {
+        const connector = window.cees?.connectors?.dingtalk;
+        if (!connector) return;
+        setCheckingUpdate(true);
+        try {
+            const nextRelease = await connector.checkForUpdates();
+            setRelease(nextRelease);
+            if (nextRelease.error) message.warning(nextRelease.error);
+            else if (nextRelease.updateAvailable) message.success(t('发现 DWS 新版本 {version}', { version: nextRelease.latestVersion ?? '' }));
+            else message.success(t('当前已是最新稳定版本'));
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : t('检查 DWS 更新失败'));
+        } finally {
+            setCheckingUpdate(false);
+        }
+    };
+
+    const confirmUpgrade = (): void => {
+        if (!release.latestVersion) return;
+        modal.confirm({
+            title: t('升级 DWS 到 {version}', { version: release.latestVersion }),
+            content: t('CEES 将调用 DWS 官方升级器，跳过技能更新。升级前会创建备份，升级后执行版本和 Schema 健康检查；检查失败时自动回滚。'),
+            okText: t('确认升级'),
+            cancelText: t('取消'),
+            onOk: async () => {
+                const connector = window.cees?.connectors?.dingtalk;
+                if (!connector) return;
+                setUpgrading(true);
+                try {
+                    const nextRelease = await connector.upgrade(release.latestVersion ?? undefined);
+                    setRelease(nextRelease);
+                    message.success(t('DWS 已升级到 {version}', { version: nextRelease.installedVersion ?? release.latestVersion ?? '' }));
+                } catch (error) {
+                    message.error(error instanceof Error ? error.message : t('DWS 升级失败'));
+                    await refresh();
+                } finally {
+                    setUpgrading(false);
+                }
+            },
+        });
+    };
+
+    const confirmRollback = (): void => {
+        if (!release.rollbackVersion) return;
+        modal.confirm({
+            title: t('回滚 DWS 到 {version}', { version: release.rollbackVersion }),
+            content: t('回滚会替换当前 DWS 二进制，并在完成后重新执行版本和 Schema 健康检查。'),
+            okText: t('确认回滚'),
+            okButtonProps: { danger: true },
+            cancelText: t('取消'),
+            onOk: async () => {
+                const connector = window.cees?.connectors?.dingtalk;
+                if (!connector) return;
+                setRollingBack(true);
+                try {
+                    const nextRelease = await connector.rollback();
+                    setRelease(nextRelease);
+                    message.success(t('DWS 已回滚到 {version}', { version: nextRelease.installedVersion ?? release.rollbackVersion ?? '' }));
+                } catch (error) {
+                    message.error(error instanceof Error ? error.message : t('DWS 回滚失败'));
+                    await refresh();
+                } finally {
+                    setRollingBack(false);
+                }
+            },
+        });
+    };
+
     const connected = status.installed && status.authenticated;
     const statusText = status.state === 'READY'
         ? t('已连接')
@@ -128,6 +218,20 @@ export default function ConnectorMarketplacePage(): JSX.Element {
                     </div>
                     {status.error && !connected ? <div className="connector-card-error">{status.error}</div> : null}
                     {status.state === 'ERROR' ? <Button size="small" onClick={() => void retry()}>{t('重试检查')}</Button> : null}
+                    <div className="connector-version-panel">
+                        <div className="connector-version-summary">
+                            <span>{t('DWS 版本')}</span>
+                            <strong>{release.installedVersion || status.version || t('未安装')}</strong>
+                            {release.updateAvailable && release.latestVersion ? <Tag color="blue">{t('可升级至 {version}', { version: release.latestVersion })}</Tag> : null}
+                        </div>
+                        <Space wrap size={8}>
+                            <Button size="small" disabled={!release.checkSupported} loading={checkingUpdate} onClick={() => void checkForUpdates()}>{t('检查更新')}</Button>
+                            {release.updateAvailable && <Button size="small" type="primary" disabled={!release.upgradeSupported} loading={upgrading} onClick={confirmUpgrade}>{t('升级')}</Button>}
+                            {release.rollbackAvailable && <Button size="small" danger loading={rollingBack} onClick={confirmRollback}>{t('回滚')}</Button>}
+                        </Space>
+                        {release.error ? <div className="connector-version-message is-error">{release.error}</div> : null}
+                        {release.lastOperation?.message ? <div className={`connector-version-message ${release.lastOperation.status === 'FAILED' ? 'is-error' : ''}`}>{release.lastOperation.message}</div> : null}
+                    </div>
                 </article>
             </div>
         </section>
