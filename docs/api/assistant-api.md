@@ -351,6 +351,9 @@ Assistant 不接受把任意公网 URL 直接写入消息。前端先走现有 F
 | 409 | `CONVERSATION_ACTIVE_TURN` | 会话仍有执行中的轮次 |
 | 409 | `TURN_NOT_CANCELLABLE` | 轮次已经结束 |
 | 409 | `IDEMPOTENCY_KEY_CONFLICT` | 幂等键对应不同请求内容 |
+| 404 | `USER_MEMORY_NOT_FOUND` | 记忆不存在或不属于当前成员 |
+| 409 | `USER_MEMORY_VERSION_CONFLICT` | 记忆修改/删除时版本冲突 |
+| 400 | `USER_MEMORY_CONTENT_INVALID` / `USER_MEMORY_UPDATE_EMPTY` | 记忆内容为空或未提供修改字段 |
 
 完整错误模型和响应状态码以 OpenAPI 为准。
 
@@ -362,3 +365,18 @@ Assistant 不接受把任意公网 URL 直接写入消息。前端先走现有 F
 - 收到 `tool_result.resource` 后按资源类型调用对应资源接口，不持久化签名 URL。
 - 将 `completed`/`error` 作为轮次终止信号；`related_questions` 在 `completed` 之后到达，不是终止信号；普通网络断开不是取消。
 - 不把 `ai-service` 内部地址、内部 Token 或模型名发送到客户端。
+
+## 9. 用户级记忆（User Memory）
+
+跨会话的用户级长期记忆，只归属当前成员本人：AI 在对话中仅**提议**记忆内容，写入、修改与删除一律以本人操作为准并记录审计。记忆只做用户级不做租户级（租户级由知识库承载）；每人至多 30 条，按创建时间升序返回（即注入对话上下文的顺序）。设计详见 [用户级记忆设计文档](../architecture/user-memory.md)。
+
+```http
+GET /api/v1/user-memories
+PATCH /api/v1/user-memories/{memoryId}
+DELETE /api/v1/user-memories/{memoryId}?version={version}
+Authorization: Bearer <access-token>
+```
+
+`PATCH` 请求体 `{ content?, type?, version }`：`content`（1–1000 字符）与 `type`（`PREFERENCE` / `FACT` / `DECISION` / `HABIT`）至少提供一个，`version` 用于乐观并发控制；不存在的记忆返回 `404 USER_MEMORY_NOT_FOUND`，版本不匹配返回 `409 USER_MEMORY_VERSION_CONFLICT`。`DELETE` 软删除记忆并保留审计事实，`version` 必填。列表接口返回全部未删除记忆（至多 30 条），不分页。
+
+本接口只覆盖「查看、修改、删除」；记忆的自动提炼与注入由服务端在对话链路内完成，不提供客户端写入接口。

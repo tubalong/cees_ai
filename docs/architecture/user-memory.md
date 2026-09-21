@@ -1,6 +1,6 @@
 # 用户级记忆（User Memory）
 
-> 状态：分块实施中——块 1（数据模型与契约）已落地，块 2-5 待实施。最后更新：2026-09-21。
+> 状态：分块实施中——块 1-2（数据模型与契约、NestJS 记忆 CRUD）已落地，块 3-5 待实施。最后更新：2026-09-21。
 
 ## 1. 目标与边界
 
@@ -164,12 +164,12 @@ model UserMemory {
 - 契约：`ChatRequest` / `ToolTurnRequest` 已新增 `user_memories` 字段（`type: [array, "null"]`，至多 30 条、每条至多 1000 字符，缺省/null 表示不注入），Python models 与 TS 客户端已重新生成（块 1 落地）。
 - 冲突处理：用户级记忆与知识库检索结果冲突时，**以记忆为准**（记忆是用户本人最新表述）。
 
-## 7. 分块实施计划（草案）
+## 7. 分块实施计划
 
 按项目"大型功能分块渐进实施"约定，每块独立可验证、独立提交，全部完成后一个 PR：
 
 1. **契约 + 数据模型**（块 1，已完成）：`packages/contracts` 新增 `user_memories` 字段；Prisma 新增 `UserMemory` 模型与迁移 `20260921021045_add_user_memory`；
-2. **NestJS 记忆 CRUD**：记忆列表/修改/删除 API + "我的记忆"面板数据接口 + 审计；
+2. **NestJS 记忆 CRUD**（块 2，已完成）：公开契约新增 `GET /user-memories`、`PATCH /user-memories/{memoryId}`、`DELETE /user-memories/{memoryId}?version=`，NestJS `UserMemoryModule` 实现列表/修改/删除，乐观锁 + 审计（`USER_MEMORY_UPDATED` / `USER_MEMORY_DELETED`）；
 3. **ai-service 提炼**：压缩时顺带输出记忆候选 + 用户明确倾向时随回答输出（复用 related_questions 链路），NestJS 合并落库；
 4. **注入**：ContextBuilderService 加载记忆并随上下文传参，ai-service 组装注入块；
 5. **桌面端面板**：对话页"我的记忆"入口、列表、编辑/删除交互。

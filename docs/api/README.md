@@ -62,6 +62,10 @@ GET  /api/v1/images/{imageId}
 GET   /api/v1/users/me/profile
 PATCH /api/v1/users/me/profile
 
+GET    /api/v1/user-memories
+PATCH  /api/v1/user-memories/{memoryId}
+DELETE /api/v1/user-memories/{memoryId}?version={version}
+
 GET    /api/v1/tenants/current
 PATCH  /api/v1/tenants/current
 GET    /api/v1/tenants/current/departments
