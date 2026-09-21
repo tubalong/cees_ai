@@ -292,23 +292,32 @@ async function fetchUsers(userIds: string[]): Promise<DingTalkDwsSnapshot['users
         const ids = userIds.slice(index, index + 30);
         ids.forEach(assertSafeIdentifier);
         const payload = await runDwsJson(['contact', 'user', 'get', '--ids', ids.join(','), '--format', 'json'], 60_000);
-        for (const raw of collectRecords(payload)) {
-            const record = isRecord(raw.orgEmployeeModel) ? raw.orgEmployeeModel : raw;
-            const externalUserId = externalId(record.userId ?? record.userid ?? record.staffId ?? record.externalUserId);
-            const name = stringField(record, 'orgUserName', 'name', 'userName');
-            if (!externalUserId || !name || users.some((user) => user.externalUserId === externalUserId)) continue;
-            users.push({
-                externalUserId,
-                unionId: stringField(record, 'unionId', 'unionid'),
-                name,
-                title: stringField(record, 'title', 'position'),
-                jobNumber: stringField(record, 'jobNumber', 'job_number', 'jobNo'),
-                departmentExternalIds: extractDepartmentIds(record),
-                active: booleanField(record, 'active', 'isActive') ?? true,
-                admin: booleanField(record, 'admin', 'isAdmin') ?? false,
-                boss: booleanField(record, 'boss', 'isBoss') ?? false,
-            });
+        for (const user of parseDingTalkUserRecords(payload)) {
+            if (users.some((item) => item.externalUserId === user.externalUserId)) continue;
+            users.push(user);
         }
+    }
+    return users;
+}
+
+export function parseDingTalkUserRecords(payload: unknown): DingTalkDwsSnapshot['users'] {
+    const users: DingTalkDwsSnapshot['users'] = [];
+    for (const raw of collectRecords(payload)) {
+        const record = isRecord(raw.orgEmployeeModel) ? raw.orgEmployeeModel : raw;
+        const externalUserId = externalId(record.orgUserId ?? record.userId ?? record.userid ?? record.staffId ?? record.externalUserId);
+        const name = stringField(record, 'orgUserName', 'name', 'userName');
+        if (!externalUserId || !name || users.some((user) => user.externalUserId === externalUserId)) continue;
+        users.push({
+            externalUserId,
+            unionId: stringField(record, 'unionId', 'unionid'),
+            name,
+            title: stringField(record, 'orgTitle', 'title', 'position'),
+            jobNumber: stringField(record, 'jobNumber', 'job_number', 'jobNo'),
+            departmentExternalIds: extractDepartmentIds(record),
+            active: booleanField(record, 'active', 'isActive') ?? true,
+            admin: booleanField(raw, 'admin', 'isAdmin') ?? booleanField(record, 'admin', 'isAdmin') ?? false,
+            boss: booleanField(raw, 'boss', 'isBoss') ?? booleanField(record, 'boss', 'isBoss') ?? false,
+        });
     }
     return users;
 }
