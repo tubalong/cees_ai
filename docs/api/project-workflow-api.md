@@ -29,6 +29,7 @@
 - `PATCH /api/v1/projects/{projectId}/milestones/{milestoneId}`
 - `POST /api/v1/projects/{projectId}/milestones/{milestoneId}/start`
 - `POST /api/v1/projects/{projectId}/milestones/{milestoneId}/acceptance`
+- `POST /api/v1/projects/{projectId}/milestones/{milestoneId}/return`
 - `POST /api/v1/projects/{projectId}/milestones/{milestoneId}/complete`
 - `POST /api/v1/projects/{projectId}/milestones/{milestoneId}/cancel`
 - `POST /api/v1/projects/{projectId}/milestones/{milestoneId}/reopen`

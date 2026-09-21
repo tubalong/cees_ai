@@ -7631,6 +7631,21 @@ paths:
       responses:
         '200': { description: 验收中的里程碑, content: { application/json: { schema: { $ref: '#/components/schemas/ProjectMilestone' } } } }
 
+  /projects/{projectId}/milestones/{milestoneId}/return:
+    post:
+      summary: 将项目里程碑退回进行中
+      operationId: returnProjectMilestoneToProgress
+      tags: [ProjectWorkflow]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: projectId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: milestoneId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ReopenProjectMilestoneRequest' } } }
+      responses:
+        '200': { description: 已退回进行中的里程碑, content: { application/json: { schema: { $ref: '#/components/schemas/ProjectMilestone' } } } }
+
   /projects/{projectId}/milestones/{milestoneId}/complete:
     post:
       summary: 确认项目里程碑完成

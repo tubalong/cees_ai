@@ -112,7 +112,7 @@ export default function ProjectDetailPage({ projectId, authContext, onSessionExp
     const activities = activitiesQuery.data ?? [];
     const hasRepository = repositories.length > 0;
     const readOnly = project ? isReadOnlyProject(project.status) : false;
-    const canManage = permissions.has('project.manage_all') || project?.currentMemberRole === 'OWNER' || project?.currentMemberRole === 'MANAGER';
+    const canManage = permissions.has('project.update') && (permissions.has('project.manage_all') || project?.currentMemberRole === 'OWNER' || project?.currentMemberRole === 'MANAGER');
     const completedTaskCount = allTasks.filter((task) => task.status === 'DONE').length;
     const inProgressTaskCount = allTasks.filter((task) => task.status === 'IN_PROGRESS').length;
     const progress = allTasks.length > 0 ? Math.round((completedTaskCount / allTasks.length) * 100) : project ? projectStageProgress[project.status] : 0;

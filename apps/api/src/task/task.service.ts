@@ -762,6 +762,14 @@ export class TaskService {
             create: { tenantId: context.tenantId, workReportId: reportId, taskId: task.id, createdBy: context.userId },
             update: {},
         });
+        await transaction.auditLog.create({
+            data: auditData(context, existing ? 'WORK_REPORT_AUTO_UPDATED_FROM_TASK' : 'WORK_REPORT_AUTO_CREATED_FROM_TASK', 'WORK_REPORT', reportId, {
+                projectId: project.id,
+                taskId: task.id,
+                authorMembershipId: owner.membershipId,
+                reportDate: dateKey,
+            }),
+        });
         await transaction.projectActivity.create({
             data: {
                 tenantId: context.tenantId,

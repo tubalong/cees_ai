@@ -345,6 +345,31 @@ export class ProjectWorkflowService {
         });
     }
     /**
+     * 将项目里程碑退回进行中
+     * @returns ProjectMilestone 已退回进行中的里程碑
+     * @throws ApiError
+     */
+    public static returnProjectMilestoneToProgress({
+        projectId,
+        milestoneId,
+        requestBody,
+    }: {
+        projectId: string,
+        milestoneId: string,
+        requestBody: ReopenProjectMilestoneRequest,
+    }): CancelablePromise<ProjectMilestone> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/projects/{projectId}/milestones/{milestoneId}/return',
+            path: {
+                'projectId': projectId,
+                'milestoneId': milestoneId,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+        });
+    }
+    /**
      * 确认项目里程碑完成
      * @returns ProjectMilestone 已完成的里程碑
      * @throws ApiError
