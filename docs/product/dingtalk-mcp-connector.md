@@ -10,6 +10,9 @@
 - 已落地：API 接收 DWS/MCP 组织快照，并按 `VISIBLE_SCOPE` 幂等合并钉钉部门和人员镜像。
 - 已落地：组织快照导入、映射预览和映射应用只允许当前 CEES 租户管理员执行；不检查操作者是否为钉钉管理员。
 - 已落地：`VISIBLE_SCOPE` 不会因为本次快照缺少数据而标记既有部门删除或人员离职。
+- 已落地：Desktop 使用统一连接状态 `NOT_INSTALLED/AUTH_REQUIRED/PROFILE_REQUIRED/READY/ERROR`，连接器市场、对话页和钉钉管理页通过 Electron 状态事件保持同步。
+- 已落地：多组织或同组织多账号没有唯一当前 Profile 时，必须由用户显式选择稳定 `corpId:userId` Profile；不会默认选择第一项或最近账号。
+- 已落地：DWS 明确返回 `retryable=true` 的只读 JSON 查询最多自动重试一次；等待超过 5 秒、未声明 `retryable` 或需要用户处理的错误不会自动重试。
 - 已保留：企业内部应用 `corpId/appKey/appSecret` 连接模式，作为私有部署、服务端定时任务和 DWS 不可用时的兼容路径。
 - 暂缓：服务端无人值守 OAuth、后台定时同步，以及所有需要确认或会产生写入的 DWS 工具。
 
@@ -73,6 +76,20 @@ Desktop: 重新读取具体 leaf Schema
 ```
 
 当前只支持 Windows 自动安装。Linux/macOS 可继续使用系统 PATH 中已有的 `dws`，但不会由 CEES 自动下载安装。
+
+### 3.1.1 本地连接状态与恢复
+
+| 状态 | 含义 | 恢复动作 |
+| --- | --- | --- |
+| `NOT_INSTALLED` | 未找到可执行的 DWS | Windows 一键安装；其他系统提示手动安装 |
+| `AUTH_REQUIRED` | 未登录、Token 失效或刷新失败 | 用户重新发起钉钉授权 |
+| `PROFILE_REQUIRED` | 已有多个账号或组织，但没有唯一当前 Profile | 用户显式选择组织账号后执行 `profile switch` |
+| `READY` | 安装、授权和当前 Profile 均有效 | 可以发现工具、执行只读查询和读取可见组织 |
+| `ERROR` | 超时、临时不可用或无法归类的本地错误 | 用户重试状态检查；不自动改身份或切换组织 |
+
+Electron 主进程是本地状态事实源。授权、Profile 切换以及本地查询失败后，主进程重新检查状态并广播给全部 Desktop 页面；Renderer 不根据错误文案自行推断连接状态。
+
+自动恢复只适用于 DWS 结构化错误中明确声明 `retryable=true` 的只读 JSON 调用，最多重试一次并复用原参数。`retry_after_seconds` 大于 5 秒时立即返回错误，由用户稍后重试；授权、Profile 选择和任何写操作都不自动重试。
 
 ### 3.2 SELF_MANAGED_APP
 
@@ -164,6 +181,10 @@ scope = VISIBLE_SCOPE
 | --- | --- |
 | dws 未安装 | Desktop 提示安装连接器，不调用 API |
 | dws 未登录 | Desktop 提示授权登录 |
+| Token 失效或刷新失败 | 状态切换为 `AUTH_REQUIRED`，清理已发现工具缓存并提示重新授权 |
+| 多组织或多账号没有唯一当前 Profile | 状态切换为 `PROFILE_REQUIRED`，列出稳定 Profile 供用户明确选择 |
+| DWS 明确返回可重试错误 | 只读 JSON 查询按返回等待时间最多重试一次；等待超过 5 秒则直接失败 |
+| DWS 未声明错误可重试 | 不猜测、不盲目重试，状态切换为 `ERROR` 并允许用户重新检查 |
 | DWS Schema 没有安全只读工具 | 本轮不执行连接器查询，正式对话继续使用其他上下文 |
 | AI 返回目录外工具或未声明参数 | Desktop/API 拒绝计划，不执行本地命令 |
 | 执行前 leaf Schema 安全属性变化 | 拒绝执行并提示重试，不沿用旧目录 |

@@ -7,32 +7,9 @@ interface Window {
         setZoomFactor: (factor: number) => void;
         openDevTools: () => void;
         dingtalkDws?: {
-            status: () => Promise<{
-                installed: boolean;
-                authenticated: boolean;
-                source: 'MANAGED' | 'SYSTEM' | null;
-                installSupported: boolean;
-                version: string | null;
-                profile: string | null;
-                corpId: string | null;
-                corpName: string | null;
-                externalUserId: string | null;
-                externalUserName: string | null;
-                error: string | null;
-            }>;
-            login: () => Promise<{
-                installed: boolean;
-                authenticated: boolean;
-                source: 'MANAGED' | 'SYSTEM' | null;
-                installSupported: boolean;
-                version: string | null;
-                profile: string | null;
-                corpId: string | null;
-                corpName: string | null;
-                externalUserId: string | null;
-                externalUserName: string | null;
-                error: string | null;
-            }>;
+            status: () => Promise<DingTalkConnectorStatus>;
+            login: () => Promise<DingTalkConnectorStatus>;
+            selectProfile: (profile: string) => Promise<DingTalkConnectorStatus>;
             fetchOrganization: () => Promise<{
                 corpId: string;
                 externalUserId: string;
@@ -63,15 +40,18 @@ interface Window {
             dingtalk: {
                 status: () => Promise<DingTalkConnectorStatus>;
                 connect: () => Promise<DingTalkConnectorStatus>;
+                selectProfile: (profile: string) => Promise<DingTalkConnectorStatus>;
                 tools: () => Promise<DingTalkConnectorTool[]>;
                 execute: (calls: DingTalkConnectorPlannedCall[]) => Promise<DingTalkConnectorContext[]>;
                 release: () => Promise<{ version: string; license: string }>;
+                onStatusChanged: (listener: (status: DingTalkConnectorStatus) => void) => () => void;
             };
         };
     };
 }
 
 interface DingTalkConnectorStatus {
+    state: DingTalkConnectorState;
     installed: boolean;
     authenticated: boolean;
     source: 'MANAGED' | 'SYSTEM' | null;
@@ -82,7 +62,24 @@ interface DingTalkConnectorStatus {
     corpName: string | null;
     externalUserId: string | null;
     externalUserName: string | null;
+    profiles: DingTalkDwsProfile[];
+    checkedAt: string;
+    issueCode: string | null;
+    recoveryAction: DingTalkConnectorRecoveryAction;
     error: string | null;
+}
+
+type DingTalkConnectorState = 'NOT_INSTALLED' | 'AUTH_REQUIRED' | 'PROFILE_REQUIRED' | 'READY' | 'ERROR';
+type DingTalkConnectorRecoveryAction = 'INSTALL' | 'MANUAL_INSTALL' | 'AUTHORIZE' | 'SELECT_PROFILE' | 'RETRY' | 'NONE';
+
+interface DingTalkDwsProfile {
+    profile: string;
+    corpId: string | null;
+    corpName: string | null;
+    externalUserId: string | null;
+    externalUserName: string | null;
+    current: boolean;
+    organizationCurrent: boolean;
 }
 
 interface DingTalkConnectorContext {

@@ -8,11 +8,40 @@ const MAX_DEPARTMENTS = 5000;
 const MAX_USERS = 20000;
 let managedExecutablePath: string | null = null;
 
+export type DingTalkConnectorState = 'NOT_INSTALLED' | 'AUTH_REQUIRED' | 'PROFILE_REQUIRED' | 'READY' | 'ERROR';
+export type DingTalkConnectorRecoveryAction = 'INSTALL' | 'MANUAL_INSTALL' | 'AUTHORIZE' | 'SELECT_PROFILE' | 'RETRY' | 'NONE';
+
+export interface DingTalkDwsProfile {
+    profile: string;
+    corpId: string | null;
+    corpName: string | null;
+    externalUserId: string | null;
+    externalUserName: string | null;
+    current: boolean;
+    organizationCurrent: boolean;
+}
+
+export interface DwsFailureDetails {
+    category: string | null;
+    reason: string | null;
+    retryable: boolean | null;
+    retryAfterSeconds: number | null;
+    hint: string | null;
+}
+
+class DingTalkDwsCommandError extends Error {
+    constructor(message: string, readonly details: DwsFailureDetails) {
+        super(message);
+        this.name = 'DingTalkDwsCommandError';
+    }
+}
+
 export function configureDingTalkDwsExecutable(executablePath: string): void {
     managedExecutablePath = executablePath;
 }
 
 export interface DingTalkDwsStatus {
+    state: DingTalkConnectorState;
     installed: boolean;
     authenticated: boolean;
     source: 'MANAGED' | 'SYSTEM' | null;
@@ -23,6 +52,10 @@ export interface DingTalkDwsStatus {
     corpName: string | null;
     externalUserId: string | null;
     externalUserName: string | null;
+    profiles: DingTalkDwsProfile[];
+    checkedAt: string;
+    issueCode: string | null;
+    recoveryAction: DingTalkConnectorRecoveryAction;
     error: string | null;
 }
 
@@ -66,11 +99,24 @@ export interface DingTalkDwsSchemaTool {
 }
 
 export async function getDingTalkDwsStatus(): Promise<DingTalkDwsStatus> {
+    const checkedAt = new Date().toISOString();
     let version: string;
     try {
         version = (await runDws(['--version'], 15_000)).trim();
     } catch (error) {
+        if (!isDwsMissingError(error)) {
+            const issue = classifyDwsIssue(error);
+            return disconnectedStatus({
+                state: issue.state,
+                version: null,
+                checkedAt,
+                issueCode: issue.code,
+                recoveryAction: issue.recoveryAction,
+                error: safeError(error),
+            });
+        }
         return {
+            state: 'NOT_INSTALLED',
             installed: false,
             authenticated: false,
             source: null,
@@ -81,17 +127,43 @@ export async function getDingTalkDwsStatus(): Promise<DingTalkDwsStatus> {
             corpName: null,
             externalUserId: null,
             externalUserName: null,
+            profiles: [],
+            checkedAt,
+            issueCode: 'DWS_NOT_INSTALLED',
+            recoveryAction: process.platform === 'win32' ? 'INSTALL' : 'MANUAL_INSTALL',
             error: safeError(error),
         };
     }
     try {
         const authStatus = await runDwsJson(['auth', 'status', '--format', 'json'], 30_000);
         if (!isAuthenticatedPayload(authStatus)) {
-            throw new Error('DWS 当前账号未完成授权');
+            return disconnectedStatus({
+                state: 'AUTH_REQUIRED',
+                version,
+                checkedAt,
+                issueCode: 'DWS_AUTH_REQUIRED',
+                recoveryAction: 'AUTHORIZE',
+                error: authStatusMessage(authStatus) ?? 'DWS 当前账号未完成授权',
+            });
         }
         const profiles = await runDwsJson(['profile', 'list', '--format', 'json'], 30_000);
-        const profile = selectCurrentProfile(profiles);
+        const availableProfiles = listDingTalkDwsProfiles(profiles);
+        let profile: Record<string, unknown>;
+        try {
+            profile = selectCurrentProfile(profiles);
+        } catch (error) {
+            return disconnectedStatus({
+                state: 'PROFILE_REQUIRED',
+                version,
+                checkedAt,
+                profiles: availableProfiles,
+                issueCode: 'DWS_PROFILE_REQUIRED',
+                recoveryAction: 'SELECT_PROFILE',
+                error: safeError(error),
+            });
+        }
         return {
+            state: 'READY',
             installed: true,
             authenticated: true,
             source: resolveDwsExecutable().source,
@@ -102,27 +174,40 @@ export async function getDingTalkDwsStatus(): Promise<DingTalkDwsStatus> {
             corpName: stringField(profile, 'corpName', 'orgName', 'organizationName'),
             externalUserId: externalId(profile.userId ?? profile.staffId ?? profile.externalUserId),
             externalUserName: stringField(profile, 'userName', 'name'),
+            profiles: availableProfiles,
+            checkedAt,
+            issueCode: null,
+            recoveryAction: 'NONE',
             error: null,
         };
     } catch (error) {
-        return {
-            installed: true,
-            authenticated: false,
-            source: resolveDwsExecutable().source,
-            installSupported: process.platform === 'win32',
+        const issue = classifyDwsIssue(error);
+        return disconnectedStatus({
+            state: issue.state,
             version,
-            profile: null,
-            corpId: null,
-            corpName: null,
-            externalUserId: null,
-            externalUserName: null,
+            checkedAt,
+            issueCode: issue.code,
+            recoveryAction: issue.recoveryAction,
             error: safeError(error),
-        };
+        });
     }
 }
 
 export async function loginDingTalkDws(): Promise<DingTalkDwsStatus> {
     await runDws(['auth', 'login'], 5 * 60_000);
+    return getDingTalkDwsStatus();
+}
+
+export async function selectDingTalkDwsProfile(profile: string): Promise<DingTalkDwsStatus> {
+    const normalized = profile.trim();
+    if (!normalized) throw new Error('请选择钉钉组织账号');
+    assertSafeIdentifier(normalized);
+    const profilesPayload = await runDwsJson(['profile', 'list', '--format', 'json'], 30_000);
+    const profiles = listDingTalkDwsProfiles(profilesPayload);
+    if (!profiles.some((item) => item.profile === normalized)) {
+        throw new Error('选择的钉钉组织账号已不存在，请刷新后重试');
+    }
+    await runDws(['profile', 'switch', normalized], 30_000);
     return getDingTalkDwsStatus();
 }
 
@@ -229,7 +314,16 @@ async function fetchUsers(userIds: string[]): Promise<DingTalkDwsSnapshot['users
 }
 
 export async function runDwsJson(args: string[], timeout: number): Promise<unknown> {
-    return parseJsonOutput(await runDws(args, timeout));
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+            return parseJsonOutput(await runDws(args, timeout));
+        } catch (error) {
+            const delayMs = dwsRetryDelayMilliseconds(error);
+            if (attempt > 0 || delayMs === null) throw error;
+            await delay(delayMs);
+        }
+    }
+    throw new Error('DWS 查询重试失败');
 }
 
 export async function readDingTalkDwsSchema(cliPath?: string): Promise<unknown> {
@@ -256,7 +350,7 @@ async function runDws(args: string[], timeout: number): Promise<string> {
         });
         return result.stdout;
     } catch (error) {
-        throw new Error(safeError(error));
+        throw new DingTalkDwsCommandError(safeError(error), parseDwsFailureDetails(error));
     }
 }
 
@@ -308,6 +402,135 @@ export function selectCurrentProfile(payload: unknown): Record<string, unknown> 
     throw new Error(profiles.length === 0 ? 'DWS 未返回已登录组织' : 'DWS 存在多个组织，请先选择当前组织');
 }
 
+export function listDingTalkDwsProfiles(payload: unknown): DingTalkDwsProfile[] {
+    const profiles = collectRecords(payload).filter((record) => stringField(record, 'profile'));
+    const result = new Map<string, DingTalkDwsProfile>();
+    for (const record of profiles) {
+        const profile = stringField(record, 'profile');
+        if (!profile || result.has(profile)) continue;
+        result.set(profile, {
+            profile,
+            corpId: externalId(record.corpId ?? record.orgId ?? record.organizationId),
+            corpName: stringField(record, 'corpName', 'orgName', 'organizationName'),
+            externalUserId: externalId(record.userId ?? record.staffId ?? record.externalUserId),
+            externalUserName: stringField(record, 'userName', 'name'),
+            current: record.isCurrent === true || record.current === true,
+            organizationCurrent: record.isOrgCurrent === true,
+        });
+    }
+    return [...result.values()];
+}
+
+function disconnectedStatus(input: {
+    state: Exclude<DingTalkConnectorState, 'NOT_INSTALLED' | 'READY'>;
+    version: string | null;
+    checkedAt: string;
+    profiles?: DingTalkDwsProfile[];
+    issueCode: string;
+    recoveryAction: Exclude<DingTalkConnectorRecoveryAction, 'INSTALL' | 'MANUAL_INSTALL' | 'NONE'>;
+    error: string;
+}): DingTalkDwsStatus {
+    return {
+        state: input.state,
+        installed: true,
+        authenticated: false,
+        source: resolveDwsExecutable().source,
+        installSupported: process.platform === 'win32',
+        version: input.version,
+        profile: null,
+        corpId: null,
+        corpName: null,
+        externalUserId: null,
+        externalUserName: null,
+        profiles: input.profiles ?? [],
+        checkedAt: input.checkedAt,
+        issueCode: input.issueCode,
+        recoveryAction: input.recoveryAction,
+        error: input.error,
+    };
+}
+
+function classifyDwsIssue(error: unknown): {
+    state: 'AUTH_REQUIRED' | 'PROFILE_REQUIRED' | 'ERROR';
+    code: string;
+    recoveryAction: 'AUTHORIZE' | 'SELECT_PROFILE' | 'RETRY';
+} {
+    const details = dwsFailureDetails(error);
+    const message = safeError(error).toLowerCase();
+    if (details.category === 'auth' || details.reason === 'auth_refresh_failed'
+        || /未授权|未完成授权|logged[_ -]?out|expired|auth[_ -]?refresh[_ -]?failed|unauthenticated/.test(message)) {
+        return { state: 'AUTH_REQUIRED', code: 'DWS_AUTH_REQUIRED', recoveryAction: 'AUTHORIZE' };
+    }
+    if (/多个.*组织|multiple.*profile|选择.*组织|profile.*(required|ambiguous)/.test(message)) {
+        return { state: 'PROFILE_REQUIRED', code: 'DWS_PROFILE_REQUIRED', recoveryAction: 'SELECT_PROFILE' };
+    }
+    if (/timed out|timeout|etimedout/.test(message)) {
+        return { state: 'ERROR', code: 'DWS_TIMEOUT', recoveryAction: 'RETRY' };
+    }
+    return { state: 'ERROR', code: 'DWS_UNAVAILABLE', recoveryAction: 'RETRY' };
+}
+
+export function parseDwsFailureDetails(error: unknown): DwsFailureDetails {
+    if (error instanceof DingTalkDwsCommandError) return error.details;
+    const raw = isRecord(error) && typeof error.stderr === 'string'
+        ? error.stderr
+        : error instanceof Error ? error.message : typeof error === 'string' ? error : '';
+    const payload = tryParseJsonFragment(raw);
+    const record = isRecord(payload) && isRecord(payload.error) ? payload.error : isRecord(payload) ? payload : {};
+    const retryAfter = record.retry_after_seconds ?? record.retryAfterSeconds;
+    return {
+        category: stringField(record, 'category'),
+        reason: stringField(record, 'reason'),
+        retryable: typeof record.retryable === 'boolean' ? record.retryable : null,
+        retryAfterSeconds: typeof retryAfter === 'number' && Number.isFinite(retryAfter) && retryAfter >= 0 ? retryAfter : null,
+        hint: stringField(record, 'hint'),
+    };
+}
+
+function dwsFailureDetails(error: unknown): DwsFailureDetails {
+    return error instanceof DingTalkDwsCommandError ? error.details : parseDwsFailureDetails(error);
+}
+
+export function dwsRetryDelayMilliseconds(error: unknown): number | null {
+    const details = dwsFailureDetails(error);
+    if (details.retryable !== true) return null;
+    const delayMs = details.retryAfterSeconds === null ? 250 : details.retryAfterSeconds * 1000;
+    return delayMs <= 5000 ? delayMs : null;
+}
+
+function tryParseJsonFragment(value: string): unknown {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const candidates = [trimmed, ...trimmed.split(/\r?\n/).reverse()];
+    const objectStart = trimmed.indexOf('{');
+    if (objectStart >= 0) candidates.push(trimmed.slice(objectStart));
+    for (const candidate of candidates) {
+        try {
+            return JSON.parse(candidate) as unknown;
+        } catch {
+            continue;
+        }
+    }
+    return null;
+}
+
+function isDwsMissingError(error: unknown): boolean {
+    const message = safeError(error).toLowerCase();
+    return /enoent|not recognized|not found|找不到|无法找到|no such file/.test(message);
+}
+
+function delay(milliseconds: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function authStatusMessage(payload: unknown): string | null {
+    for (const record of collectRecords(payload)) {
+        const hint = stringField(record, 'hint', 'message', 'reason');
+        if (hint) return hint.slice(0, 500);
+    }
+    return null;
+}
+
 function selectSelfRecord(payload: unknown): Record<string, unknown> {
     const records = collectRecords(payload);
     const wrapped = records.find((record) => isRecord(record.orgEmployeeModel));
@@ -337,6 +560,11 @@ function collectRecords(value: unknown): Record<string, unknown>[] {
 export function isAuthenticatedPayload(payload: unknown): boolean {
     const records = collectRecords(payload);
     if (records.length === 0) return false;
+    if (records.some((record) => record.category === 'auth'
+        || record.reason === 'auth_refresh_failed'
+        || record.authenticated === false
+        || record.isAuthenticated === false
+        || record.loggedIn === false)) return false;
     const explicit = records.find((record) =>
         typeof record.authenticated === 'boolean'
         || typeof record.isAuthenticated === 'boolean'
@@ -344,8 +572,7 @@ export function isAuthenticatedPayload(payload: unknown): boolean {
         || typeof record.status === 'string',
     );
     if (!explicit) return true;
-    if (explicit.authenticated === false || explicit.isAuthenticated === false || explicit.loggedIn === false) return false;
-    if (typeof explicit.status === 'string' && ['unauthenticated', 'logged_out', 'expired', '未授权'].includes(explicit.status.toLowerCase())) {
+    if (typeof explicit.status === 'string' && ['unauthenticated', 'logged_out', 'expired', 'failed', 'error', '未授权'].includes(explicit.status.toLowerCase())) {
         return false;
     }
     return true;

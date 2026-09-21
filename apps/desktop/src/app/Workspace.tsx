@@ -621,9 +621,12 @@ function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element 
     const [dingtalkConnected, setDingtalkConnected] = useState(false);
     useEffect(() => { void listConversations().then((result) => { setConversations(result.items); if (result.items[0]) void selectConversation(result.items[0]); }).catch((error) => message.error(error instanceof Error ? error.message : '加载会话失败')); }, []);
     useEffect(() => {
-        void window.cees?.connectors?.dingtalk.status()
-            .then((status) => setDingtalkConnected(status.authenticated))
+        const connector = window.cees?.connectors?.dingtalk;
+        if (!connector) return;
+        void connector.status()
+            .then((status) => setDingtalkConnected(status.state === 'READY'))
             .catch(() => setDingtalkConnected(false));
+        return connector.onStatusChanged((status) => setDingtalkConnected(status.state === 'READY'));
     }, []);
     useEffect(() => () => abortController.current?.abort(), []);
     useEffect(() => {
@@ -739,15 +742,27 @@ function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element 
             let connectorContexts: ConnectorContext[] = [];
             const dingtalkConnector = window.cees?.connectors?.dingtalk;
             if (dingtalkConnector) {
-                const status = await dingtalkConnector.status();
-                if (status.authenticated) {
-                    const tools = await dingtalkConnector.tools();
-                    if (tools.length > 0) {
-                        const plan = await planDingTalkConnectorQueries(content, tools);
-                        connectorContexts = await dingtalkConnector.execute(plan.calls);
+                const mentionsDingTalk = /钉钉|dingtalk|dws/i.test(content);
+                let connectorRequired = false;
+                try {
+                    const status = await dingtalkConnector.status();
+                    if (status.state === 'READY') {
+                        const tools = await dingtalkConnector.tools();
+                        if (tools.length > 0) {
+                            const plan = await planDingTalkConnectorQueries(content, tools);
+                            connectorRequired = plan.calls.length > 0;
+                            connectorContexts = await dingtalkConnector.execute(plan.calls);
+                        }
+                    } else if (mentionsDingTalk) {
+                        if (status.state === 'PROFILE_REQUIRED') {
+                            throw new Error('当前钉钉连接已登录多个组织，请先在连接器页面选择当前组织');
+                        }
+                        throw new Error(status.error || '请先在连接器页面安装并授权钉钉连接器');
                     }
-                } else if (/钉钉|dingtalk|dws/i.test(content)) {
-                    throw new Error('请先在连接器页面安装并授权钉钉连接器');
+                } catch (error) {
+                    const latestStatus = await dingtalkConnector.status().catch(() => undefined);
+                    setDingtalkConnected(latestStatus?.state === 'READY');
+                    if (mentionsDingTalk || connectorRequired) throw error;
                 }
             }
             setInput('');

@@ -2,7 +2,10 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
+    dwsRetryDelayMilliseconds,
     isAuthenticatedPayload,
+    listDingTalkDwsProfiles,
+    parseDwsFailureDetails,
     parseJsonOutput,
     selectCurrentProfile,
 } = require('../dist-electron/dingtalk-dws.js');
@@ -47,5 +50,36 @@ test('同一组织多账号时可以选择组织内默认账号', () => {
 test('授权状态显式失败时不视为已登录', () => {
     assert.equal(isAuthenticatedPayload({ data: { authenticated: false } }), false);
     assert.equal(isAuthenticatedPayload({ status: 'expired' }), false);
+    assert.equal(isAuthenticatedPayload({ error: { category: 'auth', reason: 'auth_refresh_failed' } }), false);
     assert.equal(isAuthenticatedPayload({ data: { authenticated: true } }), true);
+});
+
+test('Profile 列表保留稳定选择器并去重', () => {
+    const profiles = listDingTalkDwsProfiles({
+        data: [
+            { profile: 'corp-a:user-a', corpId: 'corp-a', corpName: '甲公司', userId: 'user-a', userName: '张三', isCurrent: true },
+            { profile: 'corp-a:user-a', corpId: 'corp-a', userId: 'user-a' },
+            { profile: 'corp-b:user-b', corpId: 'corp-b', corpName: '乙公司', userId: 'user-b', userName: '李四', isOrgCurrent: true },
+        ],
+    });
+    assert.deepEqual(profiles, [
+        { profile: 'corp-a:user-a', corpId: 'corp-a', corpName: '甲公司', externalUserId: 'user-a', externalUserName: '张三', current: true, organizationCurrent: false },
+        { profile: 'corp-b:user-b', corpId: 'corp-b', corpName: '乙公司', externalUserId: 'user-b', externalUserName: '李四', current: false, organizationCurrent: true },
+    ]);
+});
+
+test('结构化 DWS 错误只按显式 retryable 和等待时间恢复', () => {
+    assert.deepEqual(parseDwsFailureDetails({
+        stderr: JSON.stringify({ error: { category: 'api', reason: 'rate_limited', retryable: true, retry_after_seconds: 2, hint: '稍后重试' } }),
+    }), {
+        category: 'api',
+        reason: 'rate_limited',
+        retryable: true,
+        retryAfterSeconds: 2,
+        hint: '稍后重试',
+    });
+    assert.equal(parseDwsFailureDetails(new Error('network failed')).retryable, null);
+    assert.equal(dwsRetryDelayMilliseconds({ stderr: JSON.stringify({ error: { retryable: true, retry_after_seconds: 2 } }) }), 2000);
+    assert.equal(dwsRetryDelayMilliseconds({ stderr: JSON.stringify({ error: { retryable: true, retry_after_seconds: 6 } }) }), null);
+    assert.equal(dwsRetryDelayMilliseconds(new Error('network failed')), null);
 });
