@@ -31,7 +31,7 @@ function createService(history: HistoryMessageRow[], toolCalls: ToolCallRow[]): 
     service: ContextBuilderService;
     prisma: Record<string, any>;
     gateway: { compactChat: jest.Mock; fetchChatContextBudgets: jest.Mock };
-    userMemory: { applyCandidates: jest.Mock };
+    userMemory: { applyCandidates: jest.Mock; listActiveContents: jest.Mock };
 } {
     const prisma = {
         conversationMessage: {
@@ -67,6 +67,7 @@ function createService(history: HistoryMessageRow[], toolCalls: ToolCallRow[]): 
     };
     const userMemory = {
         applyCandidates: jest.fn().mockResolvedValue(undefined),
+        listActiveContents: jest.fn().mockResolvedValue([]),
     };
     const service = new ContextBuilderService(
         prisma as unknown as PrismaService,
@@ -180,6 +181,42 @@ describe('ContextBuilderService buildToolTurnMessages', () => {
             { id: 'm1', role: 'user', content: [{ type: 'text', text: '你好' }] },
             { id: 'm3', role: 'assistant', content: [{ type: 'text', text: '图片已生成' }] },
         ]);
+    });
+
+    it('injects active memories into the plain chat request', async () => {
+        const { service, userMemory } = createService(
+            [{ id: 'm1', role: ConversationMessageRole.USER, content: '你好', turnId: 'turn-1', toolCallId: null }],
+            [],
+        );
+        userMemory.listActiveContents.mockResolvedValue(['用户偏好简洁回答', '用户在 CEES 项目负责产品设计']);
+
+        const request = await service.buildChatRequest(buildInput());
+
+        expect(userMemory.listActiveContents).toHaveBeenCalledWith(TENANT_ID, buildInput().membershipId);
+        expect(request.user_memories).toEqual(['用户偏好简洁回答', '用户在 CEES 项目负责产品设计']);
+    });
+
+    it('omits user_memories from the plain chat request when there are no active memories', async () => {
+        const { service } = createService(
+            [{ id: 'm1', role: ConversationMessageRole.USER, content: '你好', turnId: 'turn-1', toolCallId: null }],
+            [],
+        );
+
+        const request = await service.buildChatRequest(buildInput());
+
+        expect(request.user_memories).toBeNull();
+    });
+
+    it('returns active memories from buildToolTurnMessages for the tool turn request', async () => {
+        const { service, userMemory } = createService(
+            [{ id: 'm1', role: ConversationMessageRole.USER, content: '你好', turnId: 'turn-1', toolCallId: null }],
+            [],
+        );
+        userMemory.listActiveContents.mockResolvedValue(['用户喜欢猫咪主题']);
+
+        const { userMemories } = await service.buildToolTurnMessages(buildInput());
+
+        expect(userMemories).toEqual(['用户喜欢猫咪主题']);
     });
 
     it('injects persisted connector contexts as a guarded read-only text part', async () => {

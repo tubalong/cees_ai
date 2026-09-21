@@ -425,6 +425,7 @@ export class TurnRunnerService implements OnModuleDestroy {
         mode: input.mode === 'ultra' ? 'ultra' : 'standard',
         instructions: buildCapabilityGuidance(input.capabilities) ?? null,
         conversation_summary: messages.summary ?? null,
+        user_memories: messages.userMemories.length > 0 ? messages.userMemories : null,
         messages: messages.items,
         tools: input.allowedTools,
       };

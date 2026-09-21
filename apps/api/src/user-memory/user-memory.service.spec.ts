@@ -24,6 +24,24 @@ describe('UserMemoryService', () => {
         });
     });
 
+    it('returns raw contents of active memories for context injection', async () => {
+        const prisma = createPrismaMock();
+        prisma.userMemory.findMany.mockResolvedValue([
+            memoryRecord(),
+            memoryRecord({ content: '习惯使用夜间模式' }),
+        ]);
+        const service = createService(prisma);
+
+        const result = await service.listActiveContents(TENANT_ID, MEMBERSHIP_ID);
+
+        expect(result).toEqual(['偏好简洁的代码风格', '习惯使用夜间模式']);
+        expect(prisma.userMemory.findMany).toHaveBeenCalledWith({
+            where: { tenantId: TENANT_ID, membershipId: MEMBERSHIP_ID, deletedAt: null },
+            select: { content: true },
+            orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        });
+    });
+
     it('updates memory content with optimistic locking and writes audit', async () => {
         const prisma = createPrismaMock();
         prisma.userMemory.findFirst.mockResolvedValue(memoryRecord());

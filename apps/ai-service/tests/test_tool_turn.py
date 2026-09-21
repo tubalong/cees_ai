@@ -90,6 +90,41 @@ def test_tool_turn_prepare_sets_context_strategy_from_summary() -> None:
     assert with_summary.context_strategy.value == "summary_plus_recent"
 
 
+def test_tool_turn_prepare_injects_user_memories_before_summary() -> None:
+    payload = tool_turn_payload(conversation_summary="Earlier summary.")
+    payload["user_memories"] = ["用户偏好简洁回答"]
+    request = ToolTurnRequest.model_validate(payload)
+
+    prepared = ToolTurnOrchestrator().prepare(request)
+
+    system_contents = [
+        message.content for message in prepared.messages if message.role == "system"
+    ]
+    memories_block = next(
+        content
+        for content in system_contents
+        if isinstance(content, str) and content.startswith("Long-term memories")
+    )
+    summary_block = next(
+        content
+        for content in system_contents
+        if isinstance(content, str) and content.startswith("Previous conversation summary")
+    )
+    assert system_contents.index(memories_block) == system_contents.index(summary_block) - 1
+    assert "- 用户偏好简洁回答" in memories_block
+
+
+def test_tool_turn_prepare_omits_memories_block_without_user_memories() -> None:
+    prepared = ToolTurnOrchestrator().prepare(
+        ToolTurnRequest.model_validate(tool_turn_payload())
+    )
+
+    assert not any(
+        isinstance(message.content, str) and message.content.startswith("Long-term memories")
+        for message in prepared.messages
+    )
+
+
 def test_tool_turn_prepare_rejects_unknown_tool_message_reference() -> None:
     request = ToolTurnRequest.model_validate(
         tool_turn_payload(

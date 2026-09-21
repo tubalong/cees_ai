@@ -75,6 +75,19 @@ export class UserMemoryService {
         return memories.map(toUserMemoryResult);
     }
 
+    /**
+     * 注入用：按租户与成员读取全部 ACTIVE 记忆内容（创建时间升序）。
+     * 上下文组装（context-builder）传入显式归属参数，不经 TenantContext。
+     */
+    async listActiveContents(tenantId: string, membershipId: string): Promise<string[]> {
+        const memories = await this.prisma.userMemory.findMany({
+            where: { tenantId, membershipId, deletedAt: null },
+            select: { content: true },
+            orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        });
+        return memories.map((memory) => memory.content);
+    }
+
     async update(memoryId: string, input: UpdateUserMemoryDto): Promise<UserMemoryResult> {
         const context = this.tenantContext.require();
         const changes = resolveChanges(input);

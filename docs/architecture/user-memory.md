@@ -1,6 +1,6 @@
 # 用户级记忆（User Memory）
 
-> 状态：分块实施中——块 1-3（数据模型与契约、NestJS 记忆 CRUD、ai-service 提炼与 NestJS 合并落库）已落地，块 4-5 待实施。最后更新：2026-09-21。
+> 状态：分块实施中——块 1-4（数据模型与契约、NestJS 记忆 CRUD、ai-service 提炼与 NestJS 合并落库、注入）已落地，块 5 待实施。最后更新：2026-09-21。
 
 ## 1. 目标与边界
 
@@ -169,6 +169,10 @@ model UserMemory {
 - 位置：与 `conversation_summary` 分开，语义不同——摘要=本会话历史，记忆=跨会话长期事实。
 - 契约：`ChatRequest` / `ToolTurnRequest` 已新增 `user_memories` 字段（`type: [array, "null"]`，至多 30 条、每条至多 1000 字符，缺省/null 表示不注入），Python models 与 TS 客户端已重新生成（块 1 落地）。
 - 冲突处理：用户级记忆与知识库检索结果冲突时，**以记忆为准**（记忆是用户本人最新表述）。
+- 落地要点（块 4 已实现）：
+  - NestJS `UserMemoryService.listActiveContents` 按 `createdAt` 升序读取该租户该成员全部未删除记忆内容，纯文本轮与工具轮组装上下文时都加载（工具轮每轮重建前重读）；
+  - 无记忆时传 `null`，ai-service 不追加注入块；
+  - ai-service 将 `user_memories` 组装为独立 system 块（`Long-term memories … background facts`），排在 `FOLLOW_UP_INSTRUCTION` 之后、`conversation_summary` 之前，并计入上下文大小校验与 token 预算。
 
 ## 7. 分块实施计划
 
@@ -177,7 +181,7 @@ model UserMemory {
 1. **契约 + 数据模型**（块 1，已完成）：`packages/contracts` 新增 `user_memories` 字段；Prisma 新增 `UserMemory` 模型与迁移 `20260921021045_add_user_memory`；
 2. **NestJS 记忆 CRUD**（块 2，已完成）：公开契约新增 `GET /user-memories`、`PATCH /user-memories/{memoryId}`、`DELETE /user-memories/{memoryId}?version=`，NestJS `UserMemoryModule` 实现列表/修改/删除，乐观锁 + 审计（`USER_MEMORY_UPDATED` / `USER_MEMORY_DELETED`）；
 3. **ai-service 提炼**（块 3，已完成）：压缩时顺带输出记忆候选 + 用户明确倾向时随回答输出（复用 related_questions 链路），NestJS 合并落库（见 4.3 落地要点）；
-4. **注入**：ContextBuilderService 加载记忆并随上下文传参，ai-service 组装注入块；
+4. **注入**（块 4，已完成）：ContextBuilderService 加载记忆并随上下文传参，ai-service 组装注入块（见 §6 落地要点）；
 5. **桌面端面板**：对话页"我的记忆"入口、列表、编辑/删除交互。
 
 ## 8. 决策记录

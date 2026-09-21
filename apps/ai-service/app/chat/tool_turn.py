@@ -6,7 +6,11 @@ from typing import Any
 from app.api.generated.models import ChatContextStrategy, ToolTurnRequest
 from app.api.generated.models import ToolCall as ApiToolCall
 from app.api.message_content import message_content_to_internal
-from app.chat.context import BASE_SYSTEM_PROMPT, estimate_message_tokens
+from app.chat.context import (
+    BASE_SYSTEM_PROMPT,
+    build_user_memories_message,
+    estimate_message_tokens,
+)
 from app.chat.follow_up import FOLLOW_UP_INSTRUCTION
 from app.core.config import ChatMode
 from app.core.errors import AIServiceError
@@ -39,6 +43,8 @@ class ToolTurnOrchestrator:
         if request.instructions:
             fixed_messages.append(ChatMessage(role="system", content=request.instructions))
         fixed_messages.append(ChatMessage(role="system", content=FOLLOW_UP_INSTRUCTION))
+        if request.user_memories:
+            fixed_messages.append(build_user_memories_message(request.user_memories))
         if request.conversation_summary:
             fixed_messages.append(
                 ChatMessage(

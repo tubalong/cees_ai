@@ -244,6 +244,57 @@ describe('TurnRunnerService', () => {
         });
     });
 
+    it('forwards active user memories into the tool turn request', async () => {
+        const harness = createHarness({ allowedTools: [chatTool('knowledge_search')] });
+        harness.contextBuilder.buildToolTurnMessages.mockResolvedValue({
+            summary: null,
+            items: [{ role: 'user', content: [{ type: 'text', text: '你好' }] }],
+            userMemories: ['用户偏好简洁回答'],
+        });
+
+        await harness.service.startTurn({
+            conversationId: CONVERSATION_ID,
+            idempotencyKey: 'key-memories',
+            content: '内部文档里怎么写的？',
+            mode: 'standard',
+            knowledgeBaseEnabled: true,
+        });
+        await consumeAll(await harness.service.subscribeTurn({
+            conversationId: CONVERSATION_ID,
+            turnId: TURN_ID,
+            afterSeq: 0,
+        }));
+
+        expect(harness.gateway.streamToolTurn).toHaveBeenCalledWith(
+            expect.objectContaining({ user_memories: ['用户偏好简洁回答'] }),
+            expect.anything(),
+            expect.any(AbortSignal),
+        );
+    });
+
+    it('passes null user_memories when no active memories exist', async () => {
+        const harness = createHarness({ allowedTools: [chatTool('knowledge_search')] });
+
+        await harness.service.startTurn({
+            conversationId: CONVERSATION_ID,
+            idempotencyKey: 'key-no-memories',
+            content: '内部文档里怎么写的？',
+            mode: 'standard',
+            knowledgeBaseEnabled: true,
+        });
+        await consumeAll(await harness.service.subscribeTurn({
+            conversationId: CONVERSATION_ID,
+            turnId: TURN_ID,
+            afterSeq: 0,
+        }));
+
+        expect(harness.gateway.streamToolTurn).toHaveBeenCalledWith(
+            expect.objectContaining({ user_memories: null }),
+            expect.anything(),
+            expect.any(AbortSignal),
+        );
+    });
+
     it('reuses an idempotent turn only when the multimodal request hash matches', async () => {
         const harness = createHarness();
         const request = {
@@ -280,10 +331,12 @@ describe('TurnRunnerService', () => {
         harness.contextBuilder.buildToolTurnMessages
             .mockResolvedValueOnce({
                 summary: null,
+                userMemories: [],
                 items: [{ role: 'user', content: [{ type: 'text', text: 'hello' }] }],
             })
             .mockResolvedValueOnce({
                 summary: null,
+                userMemories: [],
                 items: [
                     { role: 'user', content: [{ type: 'text', text: 'hello' }] },
                     {
@@ -373,10 +426,12 @@ describe('TurnRunnerService', () => {
         harness.contextBuilder.buildToolTurnMessages
             .mockResolvedValueOnce({
                 summary: null,
+                userMemories: [],
                 items: [{ role: 'user', content: [{ type: 'text', text: '帮我画一只猫' }] }],
             })
             .mockResolvedValueOnce({
                 summary: null,
+                userMemories: [],
                 items: [
                     { role: 'user', content: [{ type: 'text', text: '帮我画一只猫' }] },
                     {
@@ -438,10 +493,12 @@ describe('TurnRunnerService', () => {
         harness.contextBuilder.buildToolTurnMessages
             .mockResolvedValueOnce({
                 summary: null,
+                userMemories: [],
                 items: [{ role: 'user', content: [{ type: 'text', text: '搜索 CEES' }] }],
             })
             .mockResolvedValueOnce({
                 summary: null,
+                userMemories: [],
                 items: [
                     { role: 'user', content: [{ type: 'text', text: '搜索 CEES' }] },
                     {
@@ -1003,6 +1060,7 @@ function createHarness(options: {
         }),
         buildToolTurnMessages: jest.fn().mockResolvedValue({
             summary: null,
+            userMemories: [],
             items: [{ role: 'user', content: [{ type: 'text', text: '你好' }] }],
         }),
     };

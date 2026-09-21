@@ -83,7 +83,10 @@ export class ContextBuilderService {
   /** 纯文本轮次：过滤 TOOL 消息，组装普通 ChatRequest。 */
   async buildChatRequest(input: BuildChatRequestInput): Promise<ChatRequest> {
     const { conversation, userId, requestId } = input;
-    const { summary, history } = await this.loadHistoryWithCompaction(input, false);
+    const [{ summary, history }, userMemories] = await Promise.all([
+      this.loadHistoryWithCompaction(input, false),
+      this.userMemory.listActiveContents(conversation.tenantId, input.membershipId),
+    ]);
 
     return {
       request_id: requestId,
@@ -92,6 +95,7 @@ export class ContextBuilderService {
       conversation_id: conversation.id,
       mode: (input.mode === 'ultra' ? 'ultra' : 'standard') satisfies ChatMode,
       conversation_summary: summary,
+      user_memories: userMemories.length > 0 ? userMemories : null,
       messages: await Promise.all(history.map((message) => this.toChatMessage(message, input))),
     };
   }
@@ -106,9 +110,14 @@ export class ContextBuilderService {
   async buildToolTurnMessages(input: BuildChatRequestInput): Promise<{
     summary: string | null;
     items: ToolTurnMessage[];
+    /** 注入用：全部 ACTIVE 记忆内容（升序），由 turn-runner 传入 ToolTurnRequest。 */
+    userMemories: string[];
   }> {
     const { conversation } = input;
-    const { summary, history } = await this.loadHistoryWithCompaction(input, true);
+    const [{ summary, history }, userMemories] = await Promise.all([
+      this.loadHistoryWithCompaction(input, true),
+      this.userMemory.listActiveContents(conversation.tenantId, input.membershipId),
+    ]);
 
     const retainedToolCallIds = history
       .map((message) => message.toolCallId)
@@ -184,7 +193,7 @@ export class ContextBuilderService {
       items.push({ role: 'assistant', content: await this.toParts(message, input) });
     }
 
-    return { summary, items };
+    return { summary, items, userMemories };
   }
 
   /**

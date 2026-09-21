@@ -51,6 +51,62 @@ def test_builds_full_context_with_instructions_and_history() -> None:
     assert built.messages[1].content == "Answer concisely."
 
 
+def test_builds_memories_block_when_user_memories_provided() -> None:
+    request = ChatRequest.model_validate(
+        {
+            "request_id": "req-context-memories",
+            "tenant_id": "tenant-1",
+            "user_id": "user-1",
+            "conversation_id": "conversation-1",
+            "conversation_summary": "The user is discussing CEES AI.",
+            "user_memories": ["用户偏好简洁回答", "用户在 CEES 项目负责产品设计"],
+            "messages": [
+                {"role": "user", "content": text_parts("What is the project name?")},
+            ],
+        }
+    )
+
+    built = build_chat_context(request, policy(budget=4096))
+
+    system_contents = [
+        message.content for message in built.messages if message.role == "system"
+    ]
+    memories_block = next(
+        content
+        for content in system_contents
+        if isinstance(content, str) and content.startswith("Long-term memories")
+    )
+    summary_block = next(
+        content
+        for content in system_contents
+        if isinstance(content, str) and content.startswith("Previous conversation summary")
+    )
+    assert system_contents.index(memories_block) == system_contents.index(summary_block) - 1
+    assert "- 用户偏好简洁回答" in memories_block
+    assert "- 用户在 CEES 项目负责产品设计" in memories_block
+
+
+def test_omits_memories_block_without_user_memories() -> None:
+    request = ChatRequest.model_validate(
+        {
+            "request_id": "req-context-no-memories",
+            "tenant_id": "tenant-1",
+            "user_id": "user-1",
+            "conversation_id": "conversation-1",
+            "messages": [
+                {"role": "user", "content": text_parts("What is the project name?")},
+            ],
+        }
+    )
+
+    built = build_chat_context(request, policy(budget=4096))
+
+    assert not any(
+        isinstance(message.content, str) and message.content.startswith("Long-term memories")
+        for message in built.messages
+    )
+
+
 def test_uses_summary_and_recent_suffix_when_history_exceeds_budget() -> None:
     request = ChatRequest.model_validate(
         {
