@@ -7,7 +7,8 @@
 - 已落地：增加 `ConnectorAdapter`、`ConnectorRegistry`，钉钉成为第一个通过注册中心获取的适配器。
 - 已落地：现有钉钉专用 IPC 保持不变，但其实现统一委托给 `DingTalkConnectorAdapter`。
 - 已落地：增加通用 `LocalCliTransport`，统一固定命令、参数数组、超时、输出上限、环境变量、JSON 解析和结构化错误；DWS 日常命令已迁移使用。
-- 待实现：通用 Electron IPC。
+- 已落地：增加 `ConnectorHost` 和通用 Electron IPC/Preload API，统一列表、状态、连接、解绑、工具发现、执行、失败刷新和状态事件。
+- 已保留：`window.cees.connectors.dingtalk` 与旧钉钉 IPC/状态事件继续兼容，现有页面无需同步修改。
 - 待实现：远程 MCP Transport 和混合执行方式。
 - 待实现：连接器进入 Assistant 原生 Tool Loop，以及写操作的二次确认机制。
 
@@ -35,16 +36,19 @@ ConnectorPlannedCall
 ConnectorContext
 ```
 
-钉钉仍然使用既有专用 IPC 和 DWS 执行流程：
+Renderer 已可使用通用 IPC，旧钉钉接口作为兼容别名继续存在：
 
 ```text
 Renderer
-    -> Electron IPC
-        -> dingtalk-connector
-            -> dws
+    -> 通用 Connector Preload API
+        -> ConnectorHost
+            -> ConnectorRegistry
+                -> DingTalkConnectorAdapter
+                    -> LocalCliTransport
+                        -> dws
 ```
 
-本阶段不修改公开 OpenAPI、不修改 Prisma、不新增企业微信或腾讯会议连接器，也不改变对话前执行 DWS 并通过 `connectorContexts` 注入结果的现有流程。
+通用 IPC 当前包括 `list/status/connect/disconnect/tools/execute` 和统一状态事件。Profile 选择、版本升级与回滚仍属于钉钉扩展能力，暂不强制所有连接器实现。本阶段不修改公开 OpenAPI、不修改 Prisma、不新增企业微信或腾讯会议连接器，也不改变对话前执行 DWS 并通过 `connectorContexts` 注入结果的现有流程。
 
 ## 4. Manifest
 
@@ -81,7 +85,7 @@ Manifest 描述连接器的静态能力，包括：
 
 1. 增加 `ConnectorAdapter` 并将钉钉包装为首个 Adapter。
 2. 增加 `ConnectorRegistry`，由注册中心管理连接器清单。
-3. 增加通用 Electron IPC 和 Manifest 驱动的连接器市场。
+3. 将连接器市场改为 Manifest 驱动，并逐步迁移页面使用通用 Preload API。
 4. 接入企业微信 CLI，验证通用抽象。
 5. 按真实需求增加 Remote MCP Transport。
 6. 最后将本地连接器调用接入 Assistant 原生 Tool Loop。

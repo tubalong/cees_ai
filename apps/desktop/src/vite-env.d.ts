@@ -2,6 +2,7 @@
 
 import type {
     ConnectorContext,
+    ConnectorManifest,
     ConnectorPlannedCall,
     ConnectorRecoveryAction,
     ConnectorState,
@@ -47,6 +48,13 @@ interface Window {
             }>;
         };
         connectors?: {
+            list: () => Promise<ConnectorManifest[]>;
+            status: (connectorId: string) => Promise<ConnectorStatus>;
+            connect: (connectorId: string) => Promise<ConnectorStatus>;
+            disconnect: (connectorId: string) => Promise<ConnectorStatus>;
+            tools: (connectorId: string) => Promise<ConnectorTool[]>;
+            execute: (connectorId: string, calls: ConnectorPlannedCall[]) => Promise<ConnectorContext[]>;
+            onStatusChanged: (listener: (event: ConnectorStatusChangedEvent) => void) => () => void;
             dingtalk: {
                 status: () => Promise<DingTalkConnectorStatus>;
                 connect: () => Promise<DingTalkConnectorStatus>;
@@ -120,6 +128,11 @@ type DingTalkConnectorContext = ConnectorContext<'DINGTALK'>;
 type DingTalkConnectorTool = ConnectorTool;
 
 type DingTalkConnectorPlannedCall = ConnectorPlannedCall;
+
+interface ConnectorStatusChangedEvent {
+    connectorId: string;
+    status: ConnectorStatus;
+}
 }
 
 export {};
