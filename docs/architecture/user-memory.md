@@ -1,6 +1,6 @@
 # 用户级记忆（User Memory）
 
-> 状态：分块实施中——块 1-2（数据模型与契约、NestJS 记忆 CRUD）已落地，块 3-5 待实施。最后更新：2026-09-21。
+> 状态：分块实施中——块 1-3（数据模型与契约、NestJS 记忆 CRUD、ai-service 提炼与 NestJS 合并落库）已落地，块 4-5 待实施。最后更新：2026-09-21。
 
 ## 1. 目标与边界
 
@@ -108,6 +108,12 @@ prompt 规定"什么算值得记"，LLM 拿规则在具体对话上判断：
 
 LLM 只出"新增/覆盖/丢弃"的建议，真正改库由 NestJS 完成，符合"模型建议权、NestJS 审批执行权"规范。
 
+块 3 落地要点（已实现）：
+
+- ai-service 在两个时机输出 `memory_candidates`（内部契约 `UserMemoryCandidate`：`type` / `content` / `action=create|update` / `replaces`）：压缩响应的 `CompactChatResponse.memory_candidates`，以及最终回答轮 completed 事件的 `ChatStreamCompletedEvent.memory_candidates`；随回答链路复用 `<follow_up_questions>` 块的对象格式（`questions` + `memories` 字段，兼容旧数组格式），仅最终回答轮生效，工具调用轮次不输出；
+- NestJS `UserMemoryService.applyCandidates` 统一校验（类型、长度、敏感正则兜底、update 必须携带 `replaces`）后在事务内合并：`replaces` 命中旧记忆原文片段则覆盖（乐观锁版本递增），未命中降级新增，完全重复跳过；达到 30 条上限淘汰最久未使用条目；
+- 每次写入均记录审计事件（`USER_MEMORY_CREATED` / `USER_MEMORY_UPDATED` / `USER_MEMORY_EVICTED`，来源 `ai_suggestion`），落库失败只记录日志，不影响本轮回答与压缩。
+
 ### 4.4 可控性（代码流程层）
 
 - **自动生效 + 透明可见**：记忆提炼后自动进入 `ACTIVE`，同时在"我的记忆"面板完整列出，用户可查看、修改、删除任意条目。删除立即停止注入。
@@ -170,7 +176,7 @@ model UserMemory {
 
 1. **契约 + 数据模型**（块 1，已完成）：`packages/contracts` 新增 `user_memories` 字段；Prisma 新增 `UserMemory` 模型与迁移 `20260921021045_add_user_memory`；
 2. **NestJS 记忆 CRUD**（块 2，已完成）：公开契约新增 `GET /user-memories`、`PATCH /user-memories/{memoryId}`、`DELETE /user-memories/{memoryId}?version=`，NestJS `UserMemoryModule` 实现列表/修改/删除，乐观锁 + 审计（`USER_MEMORY_UPDATED` / `USER_MEMORY_DELETED`）；
-3. **ai-service 提炼**：压缩时顺带输出记忆候选 + 用户明确倾向时随回答输出（复用 related_questions 链路），NestJS 合并落库；
+3. **ai-service 提炼**（块 3，已完成）：压缩时顺带输出记忆候选 + 用户明确倾向时随回答输出（复用 related_questions 链路），NestJS 合并落库（见 4.3 落地要点）；
 4. **注入**：ContextBuilderService 加载记忆并随上下文传参，ai-service 组装注入块；
 5. **桌面端面板**：对话页"我的记忆"入口、列表、编辑/删除交互。
 

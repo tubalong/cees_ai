@@ -178,6 +178,190 @@ describe('UserMemoryService', () => {
             .rejects.toMatchObject({ response: { code: 'USER_MEMORY_NOT_FOUND' } });
         expect(prisma.userMemory.updateMany).not.toHaveBeenCalled();
     });
+
+    it('creates a memory from an AI candidate and writes an ai_suggestion audit', async () => {
+        const prisma = createPrismaMock();
+        prisma.userMemory.findMany.mockResolvedValue([]);
+        prisma.userMemory.create.mockResolvedValue(memoryRecord({ version: 1 }));
+        const service = createService(prisma);
+
+        await service.applyCandidates(
+            [{ type: MemoryType.PREFERENCE, content: ' 偏好简洁的代码风格 ' }],
+            { conversationId: 'conversation-1', turnId: 'turn-1' },
+        );
+
+        expect(prisma.userMemory.create).toHaveBeenCalledWith({
+            data: {
+                tenantId: TENANT_ID,
+                membershipId: MEMBERSHIP_ID,
+                type: MemoryType.PREFERENCE,
+                content: '偏好简洁的代码风格',
+                sourceConversationId: 'conversation-1',
+                sourceTurnId: 'turn-1',
+            },
+            select: expect.any(Object),
+        });
+        expect(prisma.auditLog.create).toHaveBeenCalledWith({
+            data: expect.objectContaining({
+                action: 'USER_MEMORY_CREATED',
+                metadata: expect.objectContaining({
+                    origin: 'ai_suggestion',
+                    sourceConversationId: 'conversation-1',
+                    sourceTurnId: 'turn-1',
+                }),
+            }),
+        });
+    });
+
+    it('skips candidates that duplicate an existing memory', async () => {
+        const prisma = createPrismaMock();
+        prisma.userMemory.findMany.mockResolvedValue([memoryRecord()]);
+        const service = createService(prisma);
+
+        await service.applyCandidates(
+            [{ type: MemoryType.PREFERENCE, content: '偏好简洁的代码风格' }],
+            { conversationId: 'conversation-1' },
+        );
+
+        expect(prisma.userMemory.create).not.toHaveBeenCalled();
+        expect(prisma.userMemory.updateMany).not.toHaveBeenCalled();
+        expect(prisma.auditLog.create).not.toHaveBeenCalled();
+    });
+
+    it('replaces an existing memory when update matches the replaces fragment', async () => {
+        const prisma = createPrismaMock();
+        prisma.userMemory.findMany.mockResolvedValue([memoryRecord()]);
+        prisma.userMemory.updateMany.mockResolvedValue({ count: 1 });
+        const service = createService(prisma);
+
+        await service.applyCandidates(
+            [{
+                type: MemoryType.PREFERENCE,
+                content: '偏好简洁且带注释的代码',
+                action: 'update',
+                replaces: '简洁的代码风格',
+            }],
+            { conversationId: 'conversation-1', turnId: 'turn-1' },
+        );
+
+        expect(prisma.userMemory.updateMany).toHaveBeenCalledWith({
+            where: {
+                id: MEMORY_ID,
+                tenantId: TENANT_ID,
+                membershipId: MEMBERSHIP_ID,
+                version: 1,
+                deletedAt: null,
+            },
+            data: {
+                type: MemoryType.PREFERENCE,
+                content: '偏好简洁且带注释的代码',
+                sourceConversationId: 'conversation-1',
+                sourceTurnId: 'turn-1',
+                version: { increment: 1 },
+            },
+        });
+        expect(prisma.auditLog.create).toHaveBeenCalledWith({
+            data: expect.objectContaining({
+                action: 'USER_MEMORY_UPDATED',
+                metadata: expect.objectContaining({
+                    origin: 'ai_suggestion',
+                    before: { type: 'PREFERENCE', content: '偏好简洁的代码风格', version: 1 },
+                }),
+            }),
+        });
+        expect(prisma.userMemory.create).not.toHaveBeenCalled();
+    });
+
+    it('falls back to create when the replaces fragment matches nothing', async () => {
+        const prisma = createPrismaMock();
+        prisma.userMemory.findMany.mockResolvedValue([memoryRecord()]);
+        prisma.userMemory.create.mockResolvedValue(memoryRecord({ id: MEMORY_ID_2 }));
+        const service = createService(prisma);
+
+        await service.applyCandidates(
+            [{
+                type: MemoryType.FACT,
+                content: '用户在杭州工作',
+                action: 'update',
+                replaces: '不存在的旧片段',
+            }],
+            { conversationId: 'conversation-1' },
+        );
+
+        expect(prisma.userMemory.create).toHaveBeenCalledWith({
+            data: expect.objectContaining({
+                type: MemoryType.FACT,
+                content: '用户在杭州工作',
+            }),
+            select: expect.any(Object),
+        });
+        expect(prisma.userMemory.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('drops candidates that contain sensitive content', async () => {
+        const prisma = createPrismaMock();
+        prisma.userMemory.findMany.mockResolvedValue([]);
+        const service = createService(prisma);
+
+        await service.applyCandidates(
+            [
+                { type: MemoryType.FACT, content: '我的密码是 abc123' },
+                { type: MemoryType.FACT, content: '手机号 13812345678 可联系' },
+                { type: MemoryType.FACT, content: '身份证 330102199001011234 已备案' },
+            ],
+            { conversationId: 'conversation-1' },
+        );
+
+        expect(prisma.userMemory.create).not.toHaveBeenCalled();
+        expect(prisma.auditLog.create).not.toHaveBeenCalled();
+    });
+
+    it('evicts the least recently updated memory when the limit is reached', async () => {
+        const prisma = createPrismaMock();
+        const oldest = memoryRecord({ updatedAt: new Date('2026-09-01T00:00:00.000Z') });
+        prisma.userMemory.findMany.mockResolvedValue([
+            oldest,
+            ...Array.from({ length: 29 }, (_unused, index) =>
+                memoryRecord({
+                    id: `70000000-0000-0000-0000-0000000001${String(index).padStart(2, '0')}`,
+                    content: `既有记忆 ${index}`,
+                    updatedAt: new Date(`2026-09-02T00:00:0${index % 10}.000Z`),
+                })),
+        ]);
+        prisma.userMemory.updateMany.mockResolvedValue({ count: 1 });
+        prisma.userMemory.create.mockResolvedValue(memoryRecord({ id: MEMORY_ID_2, content: '新记忆' }));
+        const service = createService(prisma);
+
+        await service.applyCandidates(
+            [{ type: MemoryType.HABIT, content: '新记忆' }],
+            { conversationId: 'conversation-1' },
+        );
+
+        expect(prisma.userMemory.updateMany).toHaveBeenCalledWith({
+            where: expect.objectContaining({ id: oldest.id, deletedAt: null }),
+            data: { deletedAt: expect.any(Date), version: { increment: 1 } },
+        });
+        expect(prisma.auditLog.create).toHaveBeenCalledWith({
+            data: expect.objectContaining({
+                action: 'USER_MEMORY_EVICTED',
+                resourceId: oldest.id,
+                metadata: { reason: 'capacity_limit', limit: 30 },
+            }),
+        });
+        expect(prisma.userMemory.create).toHaveBeenCalled();
+    });
+
+    it('does nothing when all candidates are invalid', async () => {
+        const prisma = createPrismaMock();
+        const service = createService(prisma);
+
+        await service.applyCandidates(
+            [{ type: MemoryType.FACT, content: '   ' }],
+            { conversationId: 'conversation-1' },
+        );
+
+        expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
 });
 
 const TENANT_ID = '10000000-0000-0000-0000-000000000001';
@@ -207,6 +391,7 @@ function createPrismaMock(): Record<string, any> {
             findFirst: jest.fn(),
             findUniqueOrThrow: jest.fn(),
             updateMany: jest.fn(),
+            create: jest.fn(),
         },
         auditLog: { create: jest.fn() },
         $transaction: jest.fn(),

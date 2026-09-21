@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from app.api.generated.models import ChatContextStrategy, ChatRequest, CompactChatRequest
+from app.chat.compactor import _split_compaction_output
 from app.chat.context import build_chat_context, build_compaction_context
 from app.core.config import ChatModePolicy, ModelRole
 from app.core.errors import AIServiceError
@@ -108,3 +111,49 @@ def test_compaction_preserves_last_message_identifier() -> None:
 
     assert built.summarized_through_message_id == "message-2"
     assert "Earlier summary." in built.messages[1].content
+
+
+def test_split_compaction_output_without_memory_block() -> None:
+    output = "用户讨论了项目进展，决定下周发布。"
+
+    summary, memories = _split_compaction_output(output)
+
+    assert summary == output
+    assert memories == []
+
+
+def test_split_compaction_output_strips_memory_block() -> None:
+    output = (
+        "用户讨论了项目进展。"
+        '<user_memories>[{"type": "DECISION", "content": "用户决定下周发布"}]</user_memories>'
+    )
+
+    summary, memories = _split_compaction_output(output)
+
+    assert summary == "用户讨论了项目进展。"
+    assert memories == [{"type": "DECISION", "content": "用户决定下周发布", "action": "create"}]
+
+
+def test_split_compaction_output_keeps_summary_when_memory_block_is_broken() -> None:
+    output = "用户讨论了项目进展。<user_memories>[{\"type\": \"FACT\"</user_memories>"
+
+    summary, memories = _split_compaction_output(output)
+
+    assert summary == "用户讨论了项目进展。"
+    assert memories == []
+
+
+def test_split_compaction_output_limits_to_three_and_drops_invalid() -> None:
+    entries = [
+        {"type": "FACT", "content": "事实 A"},
+        {"type": "FACT", "content": "事实 B"},
+        {"type": "FACT", "content": "事实 C"},
+        {"type": "FACT", "content": "事实 D"},
+        {"type": "TEAM", "content": "团队信息"},
+    ]
+    output = "正文。<user_memories>" + json.dumps(entries, ensure_ascii=False) + "</user_memories>"
+
+    summary, memories = _split_compaction_output(output)
+
+    assert summary == "正文。"
+    assert [memory["content"] for memory in memories] == ["事实 A", "事实 B", "事实 C"]

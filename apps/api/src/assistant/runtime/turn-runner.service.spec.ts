@@ -15,6 +15,7 @@ import { ContextBuilderService } from './context-builder.service';
 import { IntentCapabilityService } from './intent-capability.service';
 import { TurnRunnerService } from './turn-runner.service';
 import { TurnStateService } from './turn-state.service';
+import { UserMemoryService } from '../../user-memory/user-memory.service';
 
 describe('TurnRunnerService', () => {
     it('creates a multimodal turn, sends parts to ai-service and persists a terminal answer', async () => {
@@ -774,6 +775,103 @@ describe('TurnRunnerService', () => {
             expect.objectContaining({ relatedQuestions: ['需要调整风格吗？'] }),
         );
     });
+
+    it('persists memory candidates carried on the completed event', async () => {
+        const harness = createHarness();
+        harness.gateway.streamChat.mockImplementation(async () => (async function* stream() {
+            yield {
+                type: 'completed',
+                latency_ms: 1,
+                finish_reason: 'stop',
+                memory_candidates: [{ type: 'PREFERENCE', content: '用户偏好简洁回答' }],
+            } as ChatStreamEvent;
+        })());
+
+        await harness.service.startTurn({
+            conversationId: CONVERSATION_ID,
+            idempotencyKey: 'key-memory-ok',
+            content: '你好',
+        });
+        await consumeAll(await harness.service.subscribeTurn({
+            conversationId: CONVERSATION_ID,
+            turnId: TURN_ID,
+            afterSeq: 0,
+            lingerMs: 200,
+        }));
+
+        expect(harness.userMemory.applyCandidates).toHaveBeenCalledWith(
+            [{ type: 'PREFERENCE', content: '用户偏好简洁回答' }],
+            { conversationId: CONVERSATION_ID, turnId: TURN_ID },
+        );
+    });
+
+    it('skips memory candidate persistence when the completed event carries none', async () => {
+        const harness = createHarness();
+
+        await harness.service.startTurn({
+            conversationId: CONVERSATION_ID,
+            idempotencyKey: 'key-memory-none',
+            content: '你好',
+        });
+        await consumeAll(await harness.service.subscribeTurn({
+            conversationId: CONVERSATION_ID,
+            turnId: TURN_ID,
+            afterSeq: 0,
+            lingerMs: 200,
+        }));
+
+        expect(harness.userMemory.applyCandidates).not.toHaveBeenCalled();
+    });
+
+    it('drops memory candidates from tool-calling rounds but keeps them from the final answer round', async () => {
+        const harness = createHarness({
+            allowedTools: [chatTool('generate_image')],
+            toolTurnStreams: [
+                () => (async function* stream() {
+                    yield toolTurnStartedEvent();
+                    yield {
+                        type: 'tool_calls',
+                        tool_calls: [{ id: 'call_1', name: 'generate_image', arguments: { prompt: '一只猫' } }],
+                    } as ToolTurnStreamEvent;
+                    // 工具轮次不应携带记忆候选；即使上游带出也必须丢弃。
+                    yield {
+                        type: 'completed',
+                        latency_ms: 1,
+                        finish_reason: 'tool_calls',
+                        memory_candidates: [{ type: 'FACT', content: '这轮不该出现' }],
+                    } as ToolTurnStreamEvent;
+                })(),
+                () => (async function* stream() {
+                    yield toolTurnStartedEvent();
+                    yield { type: 'content_delta', text: '图片已经生成好了！' } as ToolTurnStreamEvent;
+                    yield {
+                        type: 'completed',
+                        latency_ms: 1,
+                        finish_reason: 'stop',
+                        memory_candidates: [{ type: 'PREFERENCE', content: '用户喜欢猫咪主题' }],
+                    } as ToolTurnStreamEvent;
+                })(),
+            ],
+        });
+
+        await harness.service.startTurn({
+            conversationId: CONVERSATION_ID,
+            idempotencyKey: 'key-memory-tool',
+            content: '帮我画一只猫',
+        });
+        await consumeAll(await harness.service.subscribeTurn({
+            conversationId: CONVERSATION_ID,
+            turnId: TURN_ID,
+            afterSeq: 0,
+            lingerMs: 200,
+        }));
+
+        expect(harness.userMemory.applyCandidates).toHaveBeenCalledTimes(1);
+        expect(harness.userMemory.applyCandidates).toHaveBeenCalledWith(
+            [{ type: 'PREFERENCE', content: '用户喜欢猫咪主题' }],
+            { conversationId: CONVERSATION_ID, turnId: TURN_ID },
+        );
+    });
 });
 
 const TENANT_ID = '10000000-0000-0000-0000-000000000001';
@@ -911,6 +1009,9 @@ function createHarness(options: {
     const messageContent = {
         validateImageFileIds: jest.fn((fileIds?: string[]) => Promise.resolve(fileIds ?? [])),
     };
+    const userMemory = {
+        applyCandidates: jest.fn().mockResolvedValue(undefined),
+    };
     const gateway = {
         streamChat: jest.fn(async (_input: unknown, _tracking: unknown, signal?: AbortSignal) => completedStream(signal)),
         streamToolTurn: jest.fn(async (_input: unknown, _tracking: unknown, signal?: AbortSignal) => {
@@ -1042,6 +1143,7 @@ function createHarness(options: {
         state as unknown as TurnStateService,
         messageContent as unknown as AssistantMessageContentService,
         new IntentCapabilityService(),
+        userMemory as unknown as UserMemoryService,
     );
     return {
         service,
@@ -1051,6 +1153,7 @@ function createHarness(options: {
         state,
         toolPolicy,
         messageContent,
+        userMemory,
         events,
     };
 }

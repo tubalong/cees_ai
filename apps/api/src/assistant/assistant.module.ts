@@ -4,6 +4,7 @@ import { DocumentModule } from '../document/document.module';
 import { ImageModule } from '../image/image.module';
 import { KnowledgeModule } from '../knowledge/knowledge.module';
 import { StorageModule } from '../storage/storage.module';
+import { UserMemoryModule } from '../user-memory/user-memory.module';
 import { WebSearchModule } from '../web-search/web-search.module';
 import { AssistantController } from './api/assistant.controller';
 import { AssistantConnectorController } from './api/assistant-connector.controller';
@@ -35,7 +36,7 @@ import { ListDocumentsTool } from './tools/executors/list-documents.tool';
  * 执行器在 onModuleInit 自注册，新增工具只需新增 provider。
  */
 @Module({
-  imports: [AiOrchestrationModule, DocumentModule, ImageModule, KnowledgeModule, StorageModule, WebSearchModule],
+  imports: [AiOrchestrationModule, DocumentModule, ImageModule, KnowledgeModule, StorageModule, UserMemoryModule, WebSearchModule],
   controllers: [AssistantController, AssistantConnectorController],
   providers: [
     ConversationService,

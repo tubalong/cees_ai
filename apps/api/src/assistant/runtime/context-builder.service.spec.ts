@@ -2,6 +2,7 @@ import { ConversationMessageRole } from '@prisma/client';
 import { ContextBuilderService } from './context-builder.service';
 import type { PrismaService } from '../../database/prisma.service';
 import type { AiServiceGateway } from '../../ai-orchestration/ai-service-gateway.service';
+import type { UserMemoryService } from '../../user-memory/user-memory.service';
 
 const TENANT_ID = '10000000-0000-0000-0000-000000000001';
 const USER_ID = '10000000-0000-0000-0000-000000000002';
@@ -30,6 +31,7 @@ function createService(history: HistoryMessageRow[], toolCalls: ToolCallRow[]): 
     service: ContextBuilderService;
     prisma: Record<string, any>;
     gateway: { compactChat: jest.Mock; fetchChatContextBudgets: jest.Mock };
+    userMemory: { applyCandidates: jest.Mock };
 } {
     const prisma = {
         conversationMessage: {
@@ -53,6 +55,7 @@ function createService(history: HistoryMessageRow[], toolCalls: ToolCallRow[]): 
         compactChat: jest.fn().mockResolvedValue({
             summary: '压缩后的摘要',
             summarized_through_message_id: null,
+            memory_candidates: [],
         }),
         fetchChatContextBudgets: jest.fn().mockResolvedValue(null),
     };
@@ -62,12 +65,16 @@ function createService(history: HistoryMessageRow[], toolCalls: ToolCallRow[]): 
             ...imageFileIds.map((url) => ({ type: 'image_url', image_url: { url } } as const)),
         ]),
     };
+    const userMemory = {
+        applyCandidates: jest.fn().mockResolvedValue(undefined),
+    };
     const service = new ContextBuilderService(
         prisma as unknown as PrismaService,
         gateway as unknown as AiServiceGateway,
         messageContent as any,
+        userMemory as unknown as UserMemoryService,
     );
-    return { service, prisma, gateway };
+    return { service, prisma, gateway, userMemory };
 }
 
 function buildInput() {
@@ -289,5 +296,43 @@ describe('ContextBuilderService compaction triggers', () => {
         expect(body.messages).toHaveLength(1);
         expect(body.messages[0].id).toBe('m1');
         expect(request.messages).toEqual([{ id: 'm2', role: 'assistant', content: [{ type: 'text', text: '好的' }] }]);
+    });
+
+    it('applies memory candidates returned by compaction', async () => {
+        const history: HistoryMessageRow[] = Array.from({ length: 81 }, (_, i) => ({
+            id: `m${i}`,
+            role: (i % 2 === 0 ? ConversationMessageRole.USER : ConversationMessageRole.ASSISTANT) as ConversationMessageRole,
+            content: `消息 ${i}`,
+            turnId: null,
+            toolCallId: null,
+        }));
+        const { service, gateway, userMemory } = createService(history, []);
+        gateway.compactChat.mockResolvedValue({
+            summary: '压缩后的摘要',
+            summarized_through_message_id: 'm60',
+            memory_candidates: [{ type: 'FACT', content: '用户在 CEES 项目负责产品设计' }],
+        });
+
+        await service.buildChatRequest(buildInput());
+
+        expect(userMemory.applyCandidates).toHaveBeenCalledWith(
+            [{ type: 'FACT', content: '用户在 CEES 项目负责产品设计' }],
+            { conversationId: CONVERSATION_ID },
+        );
+    });
+
+    it('skips memory persistence when compaction returns no candidates', async () => {
+        const history: HistoryMessageRow[] = Array.from({ length: 81 }, (_, i) => ({
+            id: `m${i}`,
+            role: (i % 2 === 0 ? ConversationMessageRole.USER : ConversationMessageRole.ASSISTANT) as ConversationMessageRole,
+            content: `消息 ${i}`,
+            turnId: null,
+            toolCallId: null,
+        }));
+        const { service, userMemory } = createService(history, []);
+
+        await service.buildChatRequest(buildInput());
+
+        expect(userMemory.applyCandidates).not.toHaveBeenCalled();
     });
 });

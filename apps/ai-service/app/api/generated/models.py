@@ -251,6 +251,37 @@ class CompactChatRequest(BaseModel):
     messages: list[ChatMessage] = Field(..., max_length=128, min_length=1)
 
 
+class UserMemoryType(StrEnum):
+    PREFERENCE = 'PREFERENCE'
+    FACT = 'FACT'
+    DECISION = 'DECISION'
+    HABIT = 'HABIT'
+
+
+class Action(StrEnum):
+    create = 'create'
+    update = 'update'
+
+
+class UserMemoryCandidate(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: UserMemoryType
+    content: constr(min_length=1, max_length=1000) = Field(
+        ...,
+        description='A self-contained statement about the user, quoted from the conversation; no inference, no team-level information, no sensitive data.',
+    )
+    action: Action | None = Field(
+        'create',
+        description='create adds a new memory; update corrects an existing one and must be paired with `replaces`.',
+    )
+    replaces: constr(min_length=1, max_length=1000) | None = Field(
+        None,
+        description='When action is update: a key phrase copied verbatim from the existing memory being replaced. Only meaningful when the existing memories are injected in the context.',
+    )
+
+
 class ChatStreamStartedEvent(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
@@ -289,6 +320,12 @@ class ChatStreamCompletedEvent(BaseModel):
     related_questions: list[constr(min_length=1, max_length=30)] | None = Field(
         None,
         description='Short follow-up questions derived from the final reply; each at most 30 characters. Only present on the completed event of the stream that produced the final user-facing answer; absent when the reply contained no follow-up suggestions.',
+        max_length=3,
+        min_length=1,
+    )
+    memory_candidates: list[UserMemoryCandidate] | None = Field(
+        None,
+        description='Long-term memory candidates derived from the final reply. Only present on the completed event of the stream that produced the final user-facing answer; absent when the user expressed nothing worth remembering or the turn called tools.',
         max_length=3,
         min_length=1,
     )
@@ -1184,6 +1221,11 @@ class CompactChatResponse(BaseModel):
     conversation_id: str
     summary: constr(min_length=1)
     summarized_through_message_id: str | None = None
+    memory_candidates: list[UserMemoryCandidate] = Field(
+        ...,
+        description='Long-term memory candidates extracted alongside the summary; empty when nothing is worth remembering.',
+        max_length=3,
+    )
     execution: ExecutionMetadata
 
 

@@ -19,6 +19,7 @@ import type {
   ToolCall as UpstreamToolCall,
   ToolTurnRequest,
   ToolTurnStreamEvent,
+  UserMemoryCandidate,
 } from '@cees/ai-service-client';
 import { AiServiceGateway, AiServiceInvocationError } from '../../ai-orchestration/ai-service-gateway.service';
 import { PrismaService } from '../../database/prisma.service';
@@ -37,6 +38,7 @@ import { EventService } from '../conversation/event.service';
 import { ToolPolicyError, ToolPolicyService } from '../tools/tool-policy.service';
 import { ToolRegistryService } from '../tools/tool-registry';
 import { KNOWLEDGE_SEARCH_TOOL_NAME, WEB_SEARCH_TOOL_NAME } from '../tools/tool.types';
+import { UserMemoryService } from '../../user-memory/user-memory.service';
 import { ContextBuilderService } from './context-builder.service';
 import { IntentCapabilityService, type AutoEnabledCapability } from './intent-capability.service';
 import { AssistantMessageContentService } from './message-content.service';
@@ -82,6 +84,7 @@ export class TurnRunnerService implements OnModuleDestroy {
     private readonly state: TurnStateService,
     private readonly messageContent: AssistantMessageContentService,
     private readonly intentCapability: IntentCapabilityService,
+    private readonly userMemory: UserMemoryService,
   ) { }
 
   onModuleDestroy(): void {
@@ -353,6 +356,7 @@ export class TurnRunnerService implements OnModuleDestroy {
           latencyMs: event.latency_ms,
           finishReason: event.finish_reason ?? null,
           relatedQuestions: event.related_questions ?? null,
+          memoryCandidates: event.memory_candidates ?? null,
         });
         return;
       }
@@ -442,6 +446,7 @@ export class TurnRunnerService implements OnModuleDestroy {
         latencyMs: number;
         finishReason: string | null;
         relatedQuestions: string[] | null;
+        memoryCandidates: UserMemoryCandidate[] | null;
       } | null = null;
       let terminalError: { code: string; message: string; retryable: boolean } | null = null;
 
@@ -469,6 +474,8 @@ export class TurnRunnerService implements OnModuleDestroy {
               latencyMs: event.latency_ms,
               finishReason: event.finish_reason ?? null,
               relatedQuestions: suggestedCalls.length === 0 ? event.related_questions ?? null : null,
+              // 记忆候选与追问同理：只有最终回答轮（无工具调用）的 completed 才携带。
+              memoryCandidates: suggestedCalls.length === 0 ? event.memory_candidates ?? null : null,
             };
             break streamEvents;
           case 'error':
@@ -754,6 +761,7 @@ export class TurnRunnerService implements OnModuleDestroy {
       latencyMs: number;
       finishReason: string | null;
       relatedQuestions: string[] | null;
+      memoryCandidates: UserMemoryCandidate[] | null;
     },
   ): Promise<void> {
     const completed = await this.state.completeTurn({
@@ -775,6 +783,15 @@ export class TurnRunnerService implements OnModuleDestroy {
       await this.appendPublicEvent(turnId, conversation.tenantId, {
         type: 'related_questions',
         questions: completion.relatedQuestions,
+      });
+    }
+    // 记忆候选由 ai-service 随回答输出；NestJS 校验后落库，失败不影响本轮结果。
+    if (completion.memoryCandidates?.length) {
+      await this.userMemory.applyCandidates(completion.memoryCandidates, {
+        conversationId: conversation.id,
+        turnId,
+      }).catch((error) => {
+        this.logger.error(`failed to apply memory candidates for turn ${turnId}: ${String(error)}`);
       });
     }
   }

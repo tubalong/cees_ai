@@ -2363,6 +2363,53 @@
           }
         }
       },
+      "UserMemoryType": {
+        "type": "string",
+        "enum": [
+          "PREFERENCE",
+          "FACT",
+          "DECISION",
+          "HABIT"
+        ],
+        "description": "Memory type. PREFERENCE personal preference, FACT personal fact, DECISION a decision the user made, HABIT a working habit."
+      },
+      "UserMemoryCandidate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "content"
+        ],
+        "properties": {
+          "type": {
+            "$ref": "#/components/schemas/UserMemoryType"
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000,
+            "description": "A self-contained statement about the user, quoted from the conversation; no inference, no team-level information, no sensitive data."
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "create",
+              "update"
+            ],
+            "default": "create",
+            "description": "create adds a new memory; update corrects an existing one and must be paired with `replaces`."
+          },
+          "replaces": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "maxLength": 1000,
+            "description": "When action is update: a key phrase copied verbatim from the existing memory being replaced. Only meaningful when the existing memories are injected in the context."
+          }
+        }
+      },
       "CompactChatResponse": {
         "type": "object",
         "additionalProperties": false,
@@ -2370,6 +2417,7 @@
           "request_id",
           "conversation_id",
           "summary",
+          "memory_candidates",
           "execution"
         ],
         "properties": {
@@ -2388,6 +2436,14 @@
               "string",
               "null"
             ]
+          },
+          "memory_candidates": {
+            "type": "array",
+            "maxItems": 3,
+            "items": {
+              "$ref": "#/components/schemas/UserMemoryCandidate"
+            },
+            "description": "Long-term memory candidates extracted alongside the summary; empty when nothing is worth remembering."
           },
           "execution": {
             "$ref": "#/components/schemas/ExecutionMetadata"
@@ -2483,6 +2539,15 @@
               "maxLength": 30
             },
             "description": "Short follow-up questions derived from the final reply; each at most 30 characters. Only present on the completed event of the stream that produced the final user-facing answer; absent when the reply contained no follow-up suggestions."
+          },
+          "memory_candidates": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 3,
+            "items": {
+              "$ref": "#/components/schemas/UserMemoryCandidate"
+            },
+            "description": "Long-term memory candidates derived from the final reply. Only present on the completed event of the stream that produced the final user-facing answer; absent when the user expressed nothing worth remembering or the turn called tools."
           }
         }
       },
