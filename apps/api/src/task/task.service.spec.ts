@@ -188,6 +188,53 @@ describe('TaskService', () => {
         });
     });
 
+    it('records completion time when a task enters done', async () => {
+        const prisma = createPrismaMock();
+        prisma.project.findFirst.mockResolvedValue(projectAccess());
+        prisma.task.findFirst.mockResolvedValue(taskRecord({ status: TaskStatus.IN_PROGRESS }));
+        prisma.task.updateMany.mockResolvedValue({ count: 1 });
+        const service = createService(prisma);
+
+        await service.transitionTask(PROJECT_ID, TASK_ID, {
+            status: TaskStatus.DONE,
+            version: 1,
+        });
+
+        expect(prisma.task.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+            data: expect.objectContaining({ status: TaskStatus.DONE, completedAt: expect.any(Date) }),
+        }));
+    });
+
+    it('clears completion time when a done task is reopened', async () => {
+        const prisma = createPrismaMock();
+        prisma.project.findFirst.mockResolvedValue(projectAccess());
+        prisma.task.findFirst.mockResolvedValue(taskRecord({ status: TaskStatus.DONE }));
+        prisma.task.updateMany.mockResolvedValue({ count: 1 });
+        const service = createService(prisma);
+
+        await service.transitionTask(PROJECT_ID, TASK_ID, {
+            status: TaskStatus.IN_PROGRESS,
+            version: 1,
+            reason: '重新处理遗漏项',
+        });
+
+        expect(prisma.task.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+            data: expect.objectContaining({ status: TaskStatus.IN_PROGRESS, completedAt: null }),
+        }));
+    });
+
+    it('requires a reason when a done task is reopened', async () => {
+        const prisma = createPrismaMock();
+        prisma.project.findFirst.mockResolvedValue(projectAccess());
+        prisma.task.findFirst.mockResolvedValue(taskRecord({ status: TaskStatus.DONE }));
+        const service = createService(prisma);
+
+        await expect(service.transitionTask(PROJECT_ID, TASK_ID, {
+            status: TaskStatus.IN_PROGRESS,
+            version: 1,
+        })).rejects.toMatchObject({ response: expect.objectContaining({ code: 'TASK_STATUS_REASON_REQUIRED' }) });
+    });
+
     it('rejects stale task versions during status transitions', async () => {
         const prisma = createPrismaMock();
         prisma.project.findFirst.mockResolvedValue(projectAccess());
