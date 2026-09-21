@@ -5,11 +5,13 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import {
     configureDingTalkDwsExecutable,
+    fetchDingTalkVisibleOrganization,
     getDingTalkDwsStatus,
     loginDingTalkDws,
     readDingTalkDwsSchema,
     runDws,
     runDwsJson,
+    type DingTalkDwsSnapshot,
     type DingTalkDwsStatus,
 } from './dingtalk-dws';
 
@@ -24,11 +26,15 @@ const DWS_OFFICIAL_RELEASE_ENV: NodeJS.ProcessEnv = {
     DWS_NO_SKILLS: '1',
 };
 const MAX_CONTEXT_BYTES = 56 * 1024;
+const MAX_VISIBLE_ORGANIZATION_CONTEXT_BYTES = 40 * 1024;
+const MAX_VISIBLE_ORGANIZATION_DEPARTMENT_BYTES = 16 * 1024;
 const MAX_TOOL_COUNT = 1500;
 const MAX_CALLS = 3;
 const TOOL_ID_PATTERN = /^dws_read_[a-f0-9]{16}$/;
 const UNSAFE_PARAMETER_PATTERN = /(?:token|secret|cookie|authorization|credential|password|app[-_]?key|app[-_]?secret)/i;
 const CONTROL_PARAMETERS = new Set(['help', 'format', 'output', 'jq', 'fields', 'dry-run', 'confirm', 'confirmed', 'force', 'yes']);
+const VISIBLE_ORGANIZATION_TOOL_ID = `dws_read_${createHash('sha256').update('cees.visible.organization').digest('hex').slice(0, 16)}`;
+const MY_ATTENDANCE_APPROVALS_TOOL_ID = `dws_read_${createHash('sha256').update('cees.my.attendance.approvals').digest('hex').slice(0, 16)}`;
 
 let installRoot: string | null = null;
 let installPromise: Promise<DingTalkDwsStatus> | null = null;
@@ -528,7 +534,7 @@ export async function discoverDingTalkReadTools(): Promise<DingTalkConnectorTool
     }
     if (status.state === 'PROFILE_REQUIRED') throw new Error('请先在连接器页面选择当前钉钉组织');
     if (status.state !== 'READY') throw new Error(status.error || '请先在连接器页面完成钉钉授权');
-    const tools = parseDingTalkReadTools(await readDingTalkDwsSchema());
+    const tools = buildDingTalkReadToolCatalog(await readDingTalkDwsSchema());
     discoveredTools = new Map(tools.map((tool) => [tool.toolId, tool]));
     return tools.map(({ toolId, name, description, parameters }) => ({ toolId, name, description, parameters }));
 }
@@ -541,6 +547,19 @@ export async function executeDingTalkReadCalls(calls: DingTalkConnectorPlannedCa
         if (!TOOL_ID_PATTERN.test(call.toolId) || !isRecord(call.arguments)) throw new Error('钉钉连接器调用计划无效');
         const tool = discoveredTools.get(call.toolId);
         if (!tool) throw new Error('钉钉 DWS 工具目录已变化，请重试');
+        if (call.toolId === VISIBLE_ORGANIZATION_TOOL_ID) {
+            const snapshot = await fetchDingTalkVisibleOrganization();
+            contexts.push(connectorContext(tool, buildVisibleOrganizationContextData(snapshot)));
+            continue;
+        }
+        if (call.toolId === MY_ATTENDANCE_APPROVALS_TOOL_ID) {
+            const status = await getDingTalkDwsStatus();
+            if (!status.externalUserId) throw new Error('DWS 当前 Profile 未返回用户 ID');
+            const args = buildPersonalAttendanceApprovalArguments(status.externalUserId, call.arguments);
+            const payload = await runDwsJson(args, 60_000);
+            contexts.push(connectorContext(tool, sanitizeConnectorData(payload)));
+            continue;
+        }
         const current = parseDingTalkReadTools(await readDingTalkDwsSchema(tool.cliPath))
             .find((item) => item.toolId === call.toolId && item.name === tool.name && item.cliPath === tool.cliPath);
         if (!current) throw new Error('钉钉 DWS 工具安全属性已变化，已拒绝执行');
@@ -594,6 +613,126 @@ export function parseDingTalkReadTools(payload: unknown): DiscoveredDwsTool[] {
         if (tools.length > MAX_TOOL_COUNT) throw new Error('DWS 只读工具数量超过安全上限');
     }
     return tools;
+}
+
+export function buildDingTalkReadToolCatalog(payload: unknown): DiscoveredDwsTool[] {
+    return [
+        ...parseDingTalkReadTools(payload),
+        createVisibleOrganizationTool(),
+        createPersonalAttendanceApprovalsTool(),
+    ];
+}
+
+function createVisibleOrganizationTool(): DiscoveredDwsTool {
+    return {
+        toolId: VISIBLE_ORGANIZATION_TOOL_ID,
+        name: 'cees.visible_organization',
+        cliPath: 'cees visible organization',
+        description: '读取当前钉钉账号可见的完整部门树和人员列表，包含递归部门、部门成员和人员详情',
+        parameters: { type: 'object', additionalProperties: false, properties: {} },
+        rawParameters: {},
+        positionals: [],
+    };
+}
+
+export function buildVisibleOrganizationContextData(snapshot: DingTalkDwsSnapshot): Record<string, unknown> {
+    const departments: DingTalkDwsSnapshot['departments'] = [];
+    const users: DingTalkDwsSnapshot['users'] = [];
+    const build = (complete: boolean, warnings: string[]): Record<string, unknown> => ({
+        scope: 'VISIBLE_SCOPE',
+        complete,
+        departmentCount: snapshot.departments.length,
+        userCount: snapshot.users.length,
+        returnedDepartmentCount: departments.length,
+        returnedUserCount: users.length,
+        departments,
+        users,
+        warnings,
+    });
+    for (const department of snapshot.departments) {
+        departments.push(department);
+        if (jsonBytes(build(false, [])) > MAX_VISIBLE_ORGANIZATION_DEPARTMENT_BYTES) {
+            departments.pop();
+            break;
+        }
+    }
+    for (const user of snapshot.users) {
+        users.push(user);
+        if (jsonBytes(build(false, [])) > MAX_VISIBLE_ORGANIZATION_CONTEXT_BYTES) {
+            users.pop();
+            break;
+        }
+    }
+    const complete = departments.length === snapshot.departments.length && users.length === snapshot.users.length;
+    return build(complete, complete ? [] : ['组织数据超过单轮连接器上下文上限，结果已截断']);
+}
+
+function jsonBytes(value: unknown): number {
+    return Buffer.byteLength(JSON.stringify(value), 'utf8');
+}
+
+function createPersonalAttendanceApprovalsTool(): DiscoveredDwsTool {
+    return {
+        toolId: MY_ATTENDANCE_APPROVALS_TOOL_ID,
+        name: 'cees.my_attendance_approvals',
+        cliPath: 'cees my attendance approvals',
+        description: '查询当前登录用户本人的请假、加班、出差外出和补卡审批记录；不需要提供用户 ID，日期省略时默认查询本月截至今天',
+        parameters: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+                start: { type: 'string', format: 'date', description: '开始日期 YYYY-MM-DD，默认本月第一天' },
+                end: { type: 'string', format: 'date', description: '结束日期 YYYY-MM-DD，默认今天' },
+                types: {
+                    type: 'array',
+                    items: { type: 'string', enum: ['leave', 'overtime', 'trip', 'patch'] },
+                    description: '审批类型，默认查询请假、加班、出差外出和补卡',
+                },
+            },
+        },
+        rawParameters: {},
+        positionals: [],
+    };
+}
+
+function buildPersonalAttendanceApprovalArguments(userId: string, input: Record<string, unknown>): string[] {
+    const allowed = new Set(['start', 'end', 'types']);
+    for (const name of Object.keys(input)) {
+        if (!allowed.has(name)) throw new Error(`钉钉 DWS 工具参数 ${name} 未在 Schema 中声明`);
+    }
+    const today = new Date();
+    const defaultEnd = formatLocalDate(today);
+    const defaultStart = `${defaultEnd.slice(0, 8)}01`;
+    const start = input.start === undefined ? defaultStart : requireDateArgument('start', input.start);
+    const end = input.end === undefined ? defaultEnd : requireDateArgument('end', input.end);
+    if (start > end) throw new Error('钉钉 DWS 工具参数 start 不能晚于 end');
+    const allowedTypes = new Set(['leave', 'overtime', 'trip', 'patch']);
+    const types = input.types === undefined ? [...allowedTypes] : input.types;
+    if (!Array.isArray(types) || types.length === 0 || types.some((value) => typeof value !== 'string' || !allowedTypes.has(value))) {
+        throw new Error('钉钉 DWS 工具参数 types 类型无效');
+    }
+    return [
+        'attendance', '+list-approve',
+        '--users', userId,
+        '--types', [...new Set(types)].join(','),
+        '--start', start,
+        '--end', end,
+        '--format', 'json',
+    ];
+}
+
+function requireDateArgument(name: string, value: unknown): string {
+    if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+        throw new Error(`钉钉 DWS 工具参数 ${name} 必须是 YYYY-MM-DD`);
+    }
+    return value;
+}
+
+function formatLocalDate(value: Date): string {
+    const year = value.getFullYear();
+    const month = String(value.getMonth() + 1).padStart(2, '0');
+    const day = String(value.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
 }
 
 export function sanitizeConnectorData(value: unknown, depth = 0): Record<string, unknown> {
@@ -763,7 +902,7 @@ function normalizeJsonType(value: unknown): 'string' | 'boolean' | 'integer' | '
 
 function isSafeCliPath(value: string): boolean {
     const parts = value.trim().split(/\s+/);
-    return parts.length > 0 && parts.every((part) => /^[A-Za-z0-9][A-Za-z0-9+._:-]*$/.test(part));
+    return parts.length > 0 && parts.every((part) => /^(?:[A-Za-z0-9][A-Za-z0-9+._:-]*|\+[A-Za-z0-9][A-Za-z0-9._:-]*)$/.test(part));
 }
 
 function stringValue(value: unknown): string | null {

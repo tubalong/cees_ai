@@ -6,6 +6,7 @@ const {
     isAuthenticatedPayload,
     listDingTalkDwsProfiles,
     parseDwsFailureDetails,
+    parseDingTalkUserRecords,
     parseJsonOutput,
     selectCurrentProfile,
 } = require('../dist-electron/dingtalk-dws.js');
@@ -82,4 +83,29 @@ test('结构化 DWS 错误只按显式 retryable 和等待时间恢复', () => {
     assert.equal(dwsRetryDelayMilliseconds({ stderr: JSON.stringify({ error: { retryable: true, retry_after_seconds: 2 } }) }), 2000);
     assert.equal(dwsRetryDelayMilliseconds({ stderr: JSON.stringify({ error: { retryable: true, retry_after_seconds: 6 } }) }), null);
     assert.equal(dwsRetryDelayMilliseconds(new Error('network failed')), null);
+});
+
+test('兼容 DWS orgEmployeeModel 的 orgUserId 和 orgUserName', () => {
+    assert.deepEqual(parseDingTalkUserRecords({
+        success: true,
+        result: [{
+            isAdmin: true,
+            orgEmployeeModel: {
+                orgUserId: 'user-1',
+                orgUserName: '张三',
+                orgTitle: '管理员',
+                depts: [{ deptId: 100, deptName: '总裁办' }],
+            },
+        }],
+    }), [{
+        externalUserId: 'user-1',
+        unionId: null,
+        name: '张三',
+        title: '管理员',
+        jobNumber: null,
+        departmentExternalIds: ['100'],
+        active: true,
+        admin: true,
+        boss: false,
+    }]);
 });

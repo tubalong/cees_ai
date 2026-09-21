@@ -84,6 +84,39 @@ describe('DingTalkConnectorPlannerService', () => {
     expect(streamToolTurn.mock.calls[0]![0].tools).toHaveLength(1);
     expect(streamToolTurn.mock.calls[1]![0].tools).toEqual([expect.objectContaining({ name: selected.toolId })]);
   });
+
+  it('大目录始终保留本人考勤和完整组织复合工具作为优先候选', async () => {
+    const priorityTools = [
+      { ...tools[0]!, toolId: 'dws_read_aaaaaaaaaaaaaaaa', name: 'attendance.shortcut_my_attendance' },
+      { ...tools[0]!, toolId: 'dws_read_bbbbbbbbbbbbbbbb', name: 'cees.visible_organization' },
+    ];
+    const otherTools = Array.from({ length: 31 }, (_, index) => ({
+      ...tools[0]!,
+      toolId: `dws_read_${index.toString(16).padStart(16, '0')}`,
+      name: `calendar.event.list_${index}`,
+    }));
+    const selected = otherTools[30]!;
+    const streamToolTurn = jest.fn()
+      .mockResolvedValueOnce(stream([
+        { type: 'tool_calls', tool_calls: [{ id: 'select-1', name: 'select_dws_read_tools', arguments: { toolIds: [selected.toolId] } }] },
+        { type: 'completed', latency_ms: 1, finish_reason: 'tool_calls' },
+      ]))
+      .mockResolvedValueOnce(stream([
+        { type: 'completed', latency_ms: 1, finish_reason: 'stop' },
+      ]));
+    const service = new DingTalkConnectorPlannerService(
+      { streamToolTurn } as unknown as AiServiceGateway,
+      { require: () => context } as unknown as TenantContext,
+    );
+
+    await expect(service.plan('查询钉钉数据', [...priorityTools, ...otherTools])).resolves.toEqual({ calls: [] });
+    expect(streamToolTurn.mock.calls[1]![0].tools).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: priorityTools[0]!.toolId }),
+      expect.objectContaining({ name: priorityTools[1]!.toolId }),
+      expect.objectContaining({ name: selected.toolId }),
+    ]));
+    expect(streamToolTurn.mock.calls[1]![0].tools).toHaveLength(3);
+  });
 });
 
 async function* stream(events: ToolTurnStreamEvent[]): AsyncGenerator<ToolTurnStreamEvent> {

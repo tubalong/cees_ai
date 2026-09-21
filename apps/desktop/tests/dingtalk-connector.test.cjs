@@ -3,6 +3,8 @@ const assert = require('node:assert/strict');
 
 const {
     buildDwsArguments,
+    buildDingTalkReadToolCatalog,
+    buildVisibleOrganizationContextData,
     compareDwsVersions,
     normalizeDwsVersion,
     parseDingTalkUpgradeCheck,
@@ -69,16 +71,70 @@ test('从 DWS Schema 动态发现所有明确安全的只读工具', () => {
                     format: { type: 'string' },
                 },
             },
+            {
+                canonical_path: 'attendance.shortcut_my_attendance',
+                cli_path: 'attendance +my-attendance',
+                agent_summary: '查询我的考勤',
+                effect: 'read',
+                confirmation: 'not_required',
+                availability: 'available',
+                parameters: {},
+            },
             { canonical_path: 'todo.create', primary_cli_path: 'todo create', effect: 'write', confirmation: 'user_required', availability: 'available', parameters: {} },
             { canonical_path: 'drive.list', primary_cli_path: 'drive list', effect: 'read', confirmation: 'user_required', availability: 'available', parameters: {} },
             { canonical_path: 'mail.list', primary_cli_path: 'mail list', effect: 'read', confirmation: 'not_required', availability: 'unavailable', parameters: {} },
             { canonical_path: 'dev.secret.get', primary_cli_path: 'dev secret get', effect: 'read', confirmation: 'not_required', availability: 'available', parameters: { appSecret: { type: 'string', required: true } } },
         ] }],
     });
-    assert.equal(tools.length, 1);
+    assert.equal(tools.length, 2);
     assert.equal(tools[0].name, 'calendar.event.list');
     assert.equal(tools[0].parameters.type, 'object');
     assert.deepEqual(tools[0].parameters.required, ['start']);
+    assert.equal(tools[1].cliPath, 'attendance +my-attendance');
+});
+
+test('工具目录包含完整可见组织和本人审批复合只读工具', () => {
+    const tools = buildDingTalkReadToolCatalog({ products: [] });
+    assert.deepEqual(tools.map((tool) => tool.name), [
+        'cees.visible_organization',
+        'cees.my_attendance_approvals',
+    ]);
+    assert.equal(tools[0].parameters.additionalProperties, false);
+    assert.equal(tools[1].parameters.properties.types.type, 'array');
+});
+
+test('完整组织上下文按字节预算截断并标记不完整', () => {
+    const data = buildVisibleOrganizationContextData({
+        corpId: 'corp-1',
+        externalUserId: 'user-1',
+        externalUserName: '张三',
+        profile: 'corp-1:user-1',
+        fetchedAt: '2026-09-21T00:00:00.000Z',
+        capabilities: ['contact.organization.visible.read'],
+        departments: Array.from({ length: 200 }, (_, index) => ({
+            externalDepartmentId: String(index + 1),
+            parentExternalDepartmentId: null,
+            name: `部门-${index}-${'长'.repeat(100)}`,
+            displayOrder: index,
+        })),
+        users: Array.from({ length: 500 }, (_, index) => ({
+            externalUserId: `user-${index}`,
+            unionId: null,
+            name: `员工-${index}-${'长'.repeat(100)}`,
+            title: null,
+            jobNumber: null,
+            departmentExternalIds: ['1'],
+            active: true,
+            admin: false,
+            boss: false,
+        })),
+    });
+    assert.equal(data.complete, false);
+    assert.equal(data.departmentCount, 200);
+    assert.equal(data.userCount, 500);
+    assert.ok(data.returnedDepartmentCount < 200 || data.returnedUserCount < 500);
+    assert.match(data.warnings[0], /已截断/);
+    assert.ok(Buffer.byteLength(JSON.stringify(data), 'utf8') <= 40 * 1024);
 });
 
 test('执行参数仅来自 Schema，固定使用 JSON 输出且不拼接 shell', () => {
