@@ -75,6 +75,10 @@ interface DwsPositional {
 
 let discoveredTools = new Map<string, DiscoveredDwsTool>();
 
+export function resetDingTalkConnectorTools(): void {
+    discoveredTools.clear();
+}
+
 export function configureDingTalkConnector(userDataPath: string): void {
     installRoot = path.join(userDataPath, 'connectors', 'dingtalk');
     configureDingTalkDwsExecutable(path.join(installRoot, 'bin', 'dws.exe'));
@@ -97,7 +101,9 @@ export async function installAndAuthorizeDingTalkConnector(): Promise<DingTalkDw
 async function installAndAuthorize(): Promise<DingTalkDwsStatus> {
     const current = await getDingTalkDwsStatus();
     if (!current.installed || (process.platform === 'win32' && current.source !== 'MANAGED')) await installDws();
-    return loginDingTalkDws();
+    const status = await loginDingTalkDws();
+    resetDingTalkConnectorTools();
+    return status;
 }
 
 async function installDws(): Promise<void> {
@@ -152,7 +158,8 @@ export async function discoverDingTalkReadTools(): Promise<DingTalkConnectorTool
     if (process.platform === 'win32' && status.source !== 'MANAGED') {
         throw new Error('请在连接器页面使用一键安装的受管 DWS 后重试');
     }
-    if (!status.authenticated) throw new Error('请先在连接器页面完成钉钉授权');
+    if (status.state === 'PROFILE_REQUIRED') throw new Error('请先在连接器页面选择当前钉钉组织');
+    if (status.state !== 'READY') throw new Error(status.error || '请先在连接器页面完成钉钉授权');
     const tools = parseDingTalkReadTools(await readDingTalkDwsSchema());
     discoveredTools = new Map(tools.map((tool) => [tool.toolId, tool]));
     return tools.map(({ toolId, name, description, parameters }) => ({ toolId, name, description, parameters }));

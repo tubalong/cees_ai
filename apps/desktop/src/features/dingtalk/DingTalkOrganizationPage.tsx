@@ -75,17 +75,7 @@ interface IntegrationFormValues {
     status: boolean;
 }
 
-interface DwsStatus {
-    installed: boolean;
-    authenticated: boolean;
-    version: string | null;
-    profile: string | null;
-    corpId: string | null;
-    corpName: string | null;
-    externalUserId: string | null;
-    externalUserName: string | null;
-    error: string | null;
-}
+type DwsStatus = DingTalkConnectorStatus;
 
 interface DwsSnapshot {
     corpId: string;
@@ -133,6 +123,7 @@ export default function DingTalkOrganizationPage({ authContext, onSessionExpired
     const [mappingResult, setMappingResult] = useState<{ credentials: DingTalkMappingCredential[] }>();
     const [dwsStatus, setDwsStatus] = useState<DwsStatus>();
     const [dwsSnapshot, setDwsSnapshot] = useState<DwsSnapshot>();
+    const [selectedDwsProfile, setSelectedDwsProfile] = useState<string>();
     const [integrationForm] = Form.useForm<IntegrationFormValues>();
     const permissions = new Set(authContext.permissions);
     const canReadIntegration = permissions.has('dingtalk.integration.read');
@@ -226,6 +217,10 @@ export default function DingTalkOrganizationPage({ authContext, onSessionExpired
     useEffect(() => {
         if (!window.cees?.dingtalkDws) return;
         void window.cees.dingtalkDws.status().then(setDwsStatus);
+        return window.cees.connectors?.dingtalk.onStatusChanged((status) => {
+            setDwsStatus(status);
+            if (status.state !== 'PROFILE_REQUIRED') setSelectedDwsProfile(undefined);
+        });
     }, []);
 
     const refreshDingTalkData = (): void => {
@@ -233,6 +228,7 @@ export default function DingTalkOrganizationPage({ authContext, onSessionExpired
         void queryClient.invalidateQueries({ queryKey: ['dingtalk-sync-jobs'] });
         void queryClient.invalidateQueries({ queryKey: ['dingtalk-departments'] });
         void queryClient.invalidateQueries({ queryKey: ['dingtalk-users'] });
+        void window.cees?.dingtalkDws?.status().then(setDwsStatus);
     };
 
     const integrationMutation = useMutation({
@@ -277,15 +273,31 @@ export default function DingTalkOrganizationPage({ authContext, onSessionExpired
 
     const dwsLoginMutation = useMutation({
         mutationFn: async (): Promise<DwsStatus> => {
-            if (!window.cees?.dingtalkDws) throw new Error(t('当前桌面运行环境不支持 DWS 连接器'));
-            return window.cees.dingtalkDws.login();
+            if (!window.cees?.connectors?.dingtalk) throw new Error(t('当前桌面运行环境不支持 DWS 连接器'));
+            return window.cees.connectors.dingtalk.connect();
         },
         onSuccess: (status) => {
             setDwsStatus(status);
             if (!status.authenticated) message.error(status.error ?? t('钉钉授权未完成'));
             else message.success(t('钉钉授权连接成功'));
         },
-        onError: (error) => message.error(error instanceof Error ? error.message : t('钉钉授权失败')),
+        onError: (error) => {
+            message.error(error instanceof Error ? error.message : t('钉钉授权失败'));
+            void window.cees?.dingtalkDws?.status().then(setDwsStatus);
+        },
+    });
+
+    const dwsProfileMutation = useMutation({
+        mutationFn: async (profile: string): Promise<DwsStatus> => {
+            if (!window.cees?.dingtalkDws) throw new Error(t('当前桌面运行环境不支持 DWS 连接器'));
+            return window.cees.dingtalkDws.selectProfile(profile);
+        },
+        onSuccess: (status) => {
+            setDwsStatus(status);
+            setSelectedDwsProfile(undefined);
+            message.success(t('已切换钉钉当前组织'));
+        },
+        onError: (error) => message.error(error instanceof Error ? error.message : t('切换钉钉组织失败')),
     });
 
     const dwsFetchMutation = useMutation({
@@ -305,7 +317,10 @@ export default function DingTalkOrganizationPage({ authContext, onSessionExpired
             } : current);
             message.success(t('已读取钉钉可见组织：{departments} 个部门、{users} 名人员', { departments: snapshot.departments.length, users: snapshot.users.length }));
         },
-        onError: (error) => message.error(error instanceof Error ? error.message : t('读取钉钉组织失败')),
+        onError: (error) => {
+            message.error(error instanceof Error ? error.message : t('读取钉钉组织失败'));
+            void window.cees?.dingtalkDws?.status().then(setDwsStatus);
+        },
     });
 
     const dwsImportMutation = useMutation({
@@ -410,10 +425,14 @@ export default function DingTalkOrganizationPage({ authContext, onSessionExpired
                 dwsStatus={dwsStatus}
                 dwsSnapshot={dwsSnapshot}
                 dwsLoginPending={dwsLoginMutation.isPending}
+                dwsProfilePending={dwsProfileMutation.isPending}
                 dwsFetchPending={dwsFetchMutation.isPending}
                 dwsImportPending={dwsImportMutation.isPending}
                 canImportDws={isTenantAdmin && canSyncOrganization}
                 onDwsLogin={() => dwsLoginMutation.mutate()}
+                selectedDwsProfile={selectedDwsProfile}
+                onDwsProfileChange={setSelectedDwsProfile}
+                onDwsProfileSelect={() => selectedDwsProfile && dwsProfileMutation.mutate(selectedDwsProfile)}
                 onDwsFetch={() => dwsFetchMutation.mutate()}
                 onDwsImport={() => dwsImportMutation.mutate()}
             />,
@@ -489,7 +508,7 @@ export default function DingTalkOrganizationPage({ authContext, onSessionExpired
     </div>;
 }
 
-function IntegrationPanel({ integration, loading, canManage, form, mutation, verifyMutation, onVerify, dwsStatus, dwsSnapshot, dwsLoginPending, dwsFetchPending, dwsImportPending, canImportDws, onDwsLogin, onDwsFetch, onDwsImport }: {
+function IntegrationPanel({ integration, loading, canManage, form, mutation, verifyMutation, onVerify, dwsStatus, dwsSnapshot, dwsLoginPending, dwsProfilePending, dwsFetchPending, dwsImportPending, canImportDws, onDwsLogin, selectedDwsProfile, onDwsProfileChange, onDwsProfileSelect, onDwsFetch, onDwsImport }: {
     integration: DingTalkIntegration | null;
     loading: boolean;
     canManage: boolean;
@@ -500,10 +519,14 @@ function IntegrationPanel({ integration, loading, canManage, form, mutation, ver
     dwsStatus?: DwsStatus;
     dwsSnapshot?: DwsSnapshot;
     dwsLoginPending: boolean;
+    dwsProfilePending: boolean;
     dwsFetchPending: boolean;
     dwsImportPending: boolean;
     canImportDws: boolean;
     onDwsLogin: () => void;
+    selectedDwsProfile?: string;
+    onDwsProfileChange: (profile: string) => void;
+    onDwsProfileSelect: () => void;
     onDwsFetch: () => void;
     onDwsImport: () => void;
 }): JSX.Element {
@@ -516,8 +539,21 @@ function IntegrationPanel({ integration, loading, canManage, form, mutation, ver
             <Button disabled={!dwsStatus?.authenticated} loading={dwsFetchPending} onClick={onDwsFetch}>{t('读取可见组织')}</Button>
             {canImportDws && <Button type="primary" ghost disabled={!dwsStatus?.authenticated} loading={dwsImportPending} onClick={onDwsImport}>{t('导入当前租户')}</Button>}
         </Space>
+        {dwsStatus?.state === 'PROFILE_REQUIRED' && <Space.Compact style={{ width: '100%', marginTop: 16 }}>
+            <Select
+                style={{ flex: 1 }}
+                placeholder={t('选择当前钉钉组织账号')}
+                value={selectedDwsProfile}
+                onChange={onDwsProfileChange}
+                options={dwsStatus.profiles.map((profile) => ({
+                    value: profile.profile,
+                    label: `${profile.corpName || profile.corpId || t('未知组织')} · ${profile.externalUserName || profile.externalUserId || t('未知用户')}`,
+                }))}
+            />
+            <Button type="primary" disabled={!selectedDwsProfile} loading={dwsProfilePending} onClick={onDwsProfileSelect}>{t('确认组织')}</Button>
+        </Space.Compact>}
         {dwsStatus && <Descriptions column={2} size="small" style={{ marginTop: 16 }}>
-            <Descriptions.Item label={t('DWS 状态')}>{dwsStatus.authenticated ? <Tag color="green">{t('已连接')}</Tag> : <Tag>{dwsStatus.installed ? t('未授权') : t('未安装')}</Tag>}</Descriptions.Item>
+            <Descriptions.Item label={t('DWS 状态')}>{dwsStatus.state === 'READY' ? <Tag color="green">{t('已连接')}</Tag> : dwsStatus.state === 'PROFILE_REQUIRED' ? <Tag color="gold">{t('待选择组织')}</Tag> : dwsStatus.state === 'ERROR' ? <Tag color="red">{t('连接异常')}</Tag> : <Tag>{dwsStatus.installed ? t('未授权') : t('未安装')}</Tag>}</Descriptions.Item>
             <Descriptions.Item label={t('当前组织')}>{dwsStatus.corpName ?? dwsStatus.corpId ?? '-'}</Descriptions.Item>
             <Descriptions.Item label={t('当前用户')}>{dwsStatus.externalUserName ?? dwsStatus.externalUserId ?? '-'}</Descriptions.Item>
             <Descriptions.Item label={t('Profile')}>{dwsStatus.profile ?? '-'}</Descriptions.Item>

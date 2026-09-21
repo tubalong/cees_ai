@@ -4,6 +4,7 @@ import {
     fetchDingTalkVisibleOrganization,
     getDingTalkDwsStatus,
     loginDingTalkDws,
+    selectDingTalkDwsProfile,
 } from './dingtalk-dws';
 import {
     configureDingTalkConnector,
@@ -11,7 +12,21 @@ import {
     installAndAuthorizeDingTalkConnector,
     discoverDingTalkReadTools,
     executeDingTalkReadCalls,
+    resetDingTalkConnectorTools,
 } from './dingtalk-connector';
+
+function publishDingTalkStatus(status: Awaited<ReturnType<typeof getDingTalkDwsStatus>>): void {
+    for (const window of BrowserWindow.getAllWindows()) {
+        window.webContents.send('cees:dingtalk-connector-status-changed', status);
+    }
+}
+
+async function refreshDingTalkStatus(): Promise<Awaited<ReturnType<typeof getDingTalkDwsStatus>>> {
+    const status = await getDingTalkDwsStatus();
+    if (status.state !== 'READY') resetDingTalkConnectorTools();
+    publishDingTalkStatus(status);
+    return status;
+}
 
 function createWindow(): void {
     const window = new BrowserWindow({
@@ -48,15 +63,51 @@ app.whenReady().then(() => {
     ipcMain.on('cees:open-devtools', (event) => {
         BrowserWindow.fromWebContents(event.sender)?.webContents.openDevTools({ mode: 'detach', activate: true });
     });
-    ipcMain.handle('cees:dingtalk-dws-status', () => getDingTalkDwsStatus());
-    ipcMain.handle('cees:dingtalk-dws-login', () => loginDingTalkDws());
-    ipcMain.handle('cees:dingtalk-dws-fetch-organization', () => fetchDingTalkVisibleOrganization());
-    ipcMain.handle('cees:dingtalk-connector-status', () => getDingTalkDwsStatus());
-    ipcMain.handle('cees:dingtalk-connector-connect', () => installAndAuthorizeDingTalkConnector());
-    ipcMain.handle('cees:dingtalk-connector-tools', () => discoverDingTalkReadTools());
-    ipcMain.handle('cees:dingtalk-connector-execute', (_event, calls: unknown) => {
+    ipcMain.handle('cees:dingtalk-dws-status', () => refreshDingTalkStatus());
+    ipcMain.handle('cees:dingtalk-dws-login', async () => {
+        const status = await loginDingTalkDws();
+        resetDingTalkConnectorTools();
+        publishDingTalkStatus(status);
+        return status;
+    });
+    ipcMain.handle('cees:dingtalk-dws-select-profile', async (_event, profile: unknown) => {
+        if (typeof profile !== 'string') throw new Error('钉钉组织账号选择无效');
+        const status = await selectDingTalkDwsProfile(profile);
+        resetDingTalkConnectorTools();
+        publishDingTalkStatus(status);
+        return status;
+    });
+    ipcMain.handle('cees:dingtalk-dws-fetch-organization', async () => {
+        try {
+            return await fetchDingTalkVisibleOrganization();
+        } catch (error) {
+            await refreshDingTalkStatus();
+            throw error;
+        }
+    });
+    ipcMain.handle('cees:dingtalk-connector-status', () => refreshDingTalkStatus());
+    ipcMain.handle('cees:dingtalk-connector-connect', async () => {
+        const status = await installAndAuthorizeDingTalkConnector();
+        publishDingTalkStatus(status);
+        return status;
+    });
+    ipcMain.handle('cees:dingtalk-connector-tools', async () => {
+        try {
+            return await discoverDingTalkReadTools();
+        } catch (error) {
+            await refreshDingTalkStatus();
+            throw error;
+        }
+    });
+    ipcMain.handle('cees:dingtalk-connector-execute', async (_event, calls: unknown) => {
         if (!Array.isArray(calls) || calls.length > 3) throw new Error('钉钉连接器调用计划无效');
-        return executeDingTalkReadCalls(calls as never);
+        try {
+            return await executeDingTalkReadCalls(calls as never);
+        } catch (error) {
+            resetDingTalkConnectorTools();
+            await refreshDingTalkStatus();
+            throw error;
+        }
     });
     ipcMain.handle('cees:dingtalk-connector-release', () => getDingTalkConnectorRelease());
     createWindow();

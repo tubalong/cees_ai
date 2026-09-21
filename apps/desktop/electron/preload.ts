@@ -10,15 +10,22 @@ contextBridge.exposeInMainWorld('cees', {
     dingtalkDws: {
         status: (): Promise<DingTalkDwsStatus> => ipcRenderer.invoke('cees:dingtalk-dws-status'),
         login: (): Promise<DingTalkDwsStatus> => ipcRenderer.invoke('cees:dingtalk-dws-login'),
+        selectProfile: (profile: string): Promise<DingTalkDwsStatus> => ipcRenderer.invoke('cees:dingtalk-dws-select-profile', profile),
         fetchOrganization: (): Promise<DingTalkDwsSnapshot> => ipcRenderer.invoke('cees:dingtalk-dws-fetch-organization'),
     },
     connectors: {
         dingtalk: {
             status: (): Promise<DingTalkDwsStatus> => ipcRenderer.invoke('cees:dingtalk-connector-status'),
             connect: (): Promise<DingTalkDwsStatus> => ipcRenderer.invoke('cees:dingtalk-connector-connect'),
+            selectProfile: (profile: string): Promise<DingTalkDwsStatus> => ipcRenderer.invoke('cees:dingtalk-dws-select-profile', profile),
             tools: (): Promise<DingTalkConnectorTool[]> => ipcRenderer.invoke('cees:dingtalk-connector-tools'),
             execute: (calls: DingTalkConnectorPlannedCall[]): Promise<DingTalkConnectorContext[]> => ipcRenderer.invoke('cees:dingtalk-connector-execute', calls),
             release: (): Promise<{ version: string; license: string }> => ipcRenderer.invoke('cees:dingtalk-connector-release'),
+            onStatusChanged: (listener: (status: DingTalkDwsStatus) => void): (() => void) => {
+                const handler = (_event: Electron.IpcRendererEvent, status: DingTalkDwsStatus): void => listener(status);
+                ipcRenderer.on('cees:dingtalk-connector-status-changed', handler);
+                return () => ipcRenderer.removeListener('cees:dingtalk-connector-status-changed', handler);
+            },
         },
     },
 });

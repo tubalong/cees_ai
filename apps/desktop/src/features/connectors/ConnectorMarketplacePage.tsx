@@ -1,9 +1,10 @@
 import { CheckCircleFilled, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
-import { App as AntdApp, Button, Modal, Spin, Tag } from 'antd';
+import { App as AntdApp, Button, Modal, Select, Spin, Tag } from 'antd';
 import { useEffect, useState } from 'react';
 import { useI18n } from '../../core/i18n';
 
 const EMPTY_STATUS: DingTalkConnectorStatus = {
+    state: 'NOT_INSTALLED',
     installed: false,
     authenticated: false,
     source: null,
@@ -14,6 +15,10 @@ const EMPTY_STATUS: DingTalkConnectorStatus = {
     corpName: null,
     externalUserId: null,
     externalUserName: null,
+    profiles: [],
+    checkedAt: '',
+    issueCode: null,
+    recoveryAction: 'INSTALL',
     error: null,
 };
 
@@ -25,6 +30,7 @@ export default function ConnectorMarketplacePage(): JSX.Element {
     const [loading, setLoading] = useState(true);
     const [connecting, setConnecting] = useState(false);
     const [dialogOpen, setDialogOpen] = useState(false);
+    const [selectedProfile, setSelectedProfile] = useState<string>();
 
     const refresh = async (): Promise<void> => {
         const connector = window.cees?.connectors?.dingtalk;
@@ -45,15 +51,25 @@ export default function ConnectorMarketplacePage(): JSX.Element {
         }
     };
 
-    useEffect(() => { void refresh(); }, []);
+    useEffect(() => {
+        void refresh();
+        const connector = window.cees?.connectors?.dingtalk;
+        return connector?.onStatusChanged((nextStatus) => {
+            setStatus(nextStatus);
+            if (nextStatus.state !== 'PROFILE_REQUIRED') setSelectedProfile(undefined);
+        });
+    }, []);
 
     const connect = async (): Promise<void> => {
         const connector = window.cees?.connectors?.dingtalk;
         if (!connector) return;
         setConnecting(true);
         try {
-            const nextStatus = await connector.connect();
+            const nextStatus = status.state === 'PROFILE_REQUIRED'
+                ? await connector.selectProfile(selectedProfile ?? '')
+                : await connector.connect();
             setStatus(nextStatus);
+            if (nextStatus.state === 'PROFILE_REQUIRED') return;
             setDialogOpen(false);
             if (nextStatus.authenticated) message.success(t('钉钉连接器已连接'));
             else message.warning(nextStatus.error || t('DWS 已安装，请继续完成钉钉授权'));
@@ -64,10 +80,20 @@ export default function ConnectorMarketplacePage(): JSX.Element {
         }
     };
 
+    const retry = async (): Promise<void> => {
+        await refresh();
+    };
+
     const connected = status.installed && status.authenticated;
-    const statusText = connected
+    const statusText = status.state === 'READY'
         ? t('已连接')
-        : status.installed ? t('已安装，待授权') : t('未安装');
+        : status.state === 'PROFILE_REQUIRED'
+            ? t('需要选择组织')
+            : status.state === 'AUTH_REQUIRED'
+                ? t('待授权')
+                : status.state === 'ERROR'
+                    ? t('连接异常')
+                    : status.installed ? t('已安装') : t('未安装');
 
     return <div className="workspace-page connector-marketplace-page">
         <header className="connector-marketplace-header">
@@ -92,7 +118,7 @@ export default function ConnectorMarketplacePage(): JSX.Element {
                     <div className="connector-logo" aria-hidden="true">钉</div>
                     <div className="connector-card-copy">
                         <div className="connector-card-title"><h3>{t('钉钉')}</h3><span className={`connector-status ${connected ? 'is-connected' : ''}`}>{statusText}</span></div>
-                        <p>{t('读取当前用户可见的通讯录、组织架构和本人考勤，并在对话中作为只读上下文使用。')}</p>
+                        <p>{t('动态读取当前账号授权范围内的 DWS 安全只读能力，并在对话中作为只读上下文使用。')}</p>
                     </div>
                     <div className="connector-card-meta">
                         {loading ? <Spin size="small" /> : <>
@@ -101,17 +127,18 @@ export default function ConnectorMarketplacePage(): JSX.Element {
                         </>}
                     </div>
                     {status.error && !connected ? <div className="connector-card-error">{status.error}</div> : null}
+                    {status.state === 'ERROR' ? <Button size="small" onClick={() => void retry()}>{t('重试检查')}</Button> : null}
                 </article>
             </div>
         </section>
 
         <Modal
             open={dialogOpen}
-            title={connected ? t('重新授权钉钉连接器') : t('安装并连接钉钉')}
-            okText={connected ? t('重新授权') : t('安装并授权')}
+            title={status.state === 'PROFILE_REQUIRED' ? t('选择当前钉钉组织') : connected ? t('重新授权钉钉连接器') : t('安装并连接钉钉')}
+            okText={status.state === 'PROFILE_REQUIRED' ? t('使用此组织') : connected ? t('重新授权') : t('安装并授权')}
             cancelText={t('取消')}
             confirmLoading={connecting}
-            okButtonProps={{ disabled: !status.installSupported && !status.installed }}
+            okButtonProps={{ disabled: status.state === 'PROFILE_REQUIRED' ? !selectedProfile : !status.installSupported && !status.installed }}
             onOk={() => void connect()}
             onCancel={() => !connecting && setDialogOpen(false)}
             maskClosable={!connecting}
@@ -120,14 +147,28 @@ export default function ConnectorMarketplacePage(): JSX.Element {
             <div className="connector-install-dialog">
                 <div className="connector-install-logo">钉</div>
                 <div>
-                    <p>{t('CEES 将下载并校验钉钉官方 DWS，然后安装到当前用户的 CEES 数据目录。安装完成后会自动打开钉钉授权流程。')}</p>
-                    <ul>
+                    {status.state === 'PROFILE_REQUIRED'
+                        ? <>
+                            <p>{t('当前账号已授权多个钉钉组织，请明确选择本次使用的组织。CEES 不会默认选择第一项。')}</p>
+                            <Select
+                                style={{ width: '100%', marginBottom: 12 }}
+                                placeholder={t('选择钉钉组织账号')}
+                                value={selectedProfile}
+                                onChange={setSelectedProfile}
+                                options={status.profiles.map((profile) => ({
+                                    value: profile.profile,
+                                    label: `${profile.corpName || profile.corpId || t('未知组织')} · ${profile.externalUserName || profile.externalUserId || t('未知用户')}`,
+                                }))}
+                            />
+                        </>
+                        : <p>{t('CEES 将下载并校验钉钉官方 DWS，然后安装到当前用户的 CEES 数据目录。安装完成后会自动打开钉钉授权流程。')}</p>}
+                    {status.state !== 'PROFILE_REQUIRED' && <ul>
                         <li>{t('固定版本：{version}', { version: release.version })}</li>
                         <li>{t('开源许可：{license}', { license: release.license })}</li>
                         <li>{t('当前版本仅在 Windows 支持自动安装')}</li>
                         <li>{t('授权凭据仅保存在本机，不会上传到 CEES API')}</li>
                         <li>{t('暂不安装 DWS 技能与专家能力')}</li>
-                    </ul>
+                    </ul>}
                     {!status.installSupported && !status.installed ? <p className="connector-install-warning">{t('当前系统不支持自动安装，请先手动安装 DWS。')}</p> : null}
                 </div>
             </div>
