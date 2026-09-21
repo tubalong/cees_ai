@@ -95,6 +95,10 @@ export class CreateTaskDto {
     @ArrayUnique()
     @IsUUID(undefined, { each: true })
     collaboratorMembershipIds: string[] = [];
+
+    @IsOptional()
+    @IsUUID()
+    decisionId?: string | null;
 }
 
 export class UpdateTaskDto {

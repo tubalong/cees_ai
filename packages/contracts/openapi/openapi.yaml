@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CEES AI API
-  version: 0.36.0
+  version: 0.37.0
   description: 以本文件为唯一事实源的公开 API 契约。资源与操作按 docs/api 约定补充。
 
 servers:
@@ -131,6 +131,19 @@ paths:
           description: 分页游标，上一页返回的 nextCursor
           schema:
             type: string
+        - name: contextType
+          in: query
+          required: false
+          description: 按上下文类型筛选
+          schema:
+            $ref: '#/components/schemas/ConversationContextType'
+        - name: projectId
+          in: query
+          required: false
+          description: 按项目上下文筛选
+          schema:
+            type: string
+            format: uuid
       responses:
         '200':
           description: 会话列表
@@ -4391,6 +4404,7 @@ paths:
         - { name: status, in: query, schema: { $ref: '#/components/schemas/WorkReportStatus' } }
         - { name: authorMembershipId, in: query, schema: { type: string, format: uuid } }
         - { name: reviewerMembershipId, in: query, schema: { type: string, format: uuid } }
+        - { name: projectId, in: query, schema: { type: string, format: uuid } }
         - { name: periodFrom, in: query, schema: { type: string, format: date } }
         - { name: periodTo, in: query, schema: { type: string, format: date } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
@@ -7342,6 +7356,272 @@ paths:
         '401': { description: 登录状态无效或已过期 }
         '403': { description: 缺少 tenant.update 权限 }
 
+
+  /projects/{projectId}/workflow-summary:
+    get:
+      summary: 查询项目工作流汇总
+      operationId: getProjectWorkflowSummary
+      tags: [ProjectWorkflow]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: projectId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: 项目工作流汇总, content: { application/json: { schema: { $ref: '#/components/schemas/ProjectWorkflowSummary' } } } }
+        '401': { description: 登录状态无效或已过期 }
+        '404': { description: 项目不存在或无权访问 }
+
+  /projects/{projectId}/activities:
+    get:
+      summary: 查询项目正式动态
+      operationId: listProjectActivities
+      tags: [ProjectWorkflow]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: projectId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
+      responses:
+        '200': { description: 项目动态列表, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/ProjectActivity' } } } } }
+
+  /projects/{projectId}/decisions:
+    get:
+      summary: 查询项目决策
+      operationId: listProjectDecisions
+      tags: [ProjectWorkflow]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: projectId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: 项目决策列表, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/ProjectDecision' } } } } }
+    post:
+      summary: 创建决策草稿
+      operationId: createProjectDecision
+      tags: [ProjectWorkflow]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: projectId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreateProjectDecisionRequest' } } }
+      responses:
+        '201': { description: 决策草稿已创建, content: { application/json: { schema: { $ref: '#/components/schemas/ProjectDecision' } } } }
+        '400': { description: 请求字段校验失败 }
+        '403': { description: 无权访问项目 }
+
+  /projects/{projectId}/decisions/{decisionId}:
+    parameters:
+      - { name: projectId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: decisionId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      summary: 查询项目决策详情
+      operationId: getProjectDecision
+      tags: [ProjectWorkflow]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: 项目决策详情, content: { application/json: { schema: { $ref: '#/components/schemas/ProjectDecision' } } } }
+    patch:
+      summary: 修改决策草稿
+      operationId: updateProjectDecision
+      tags: [ProjectWorkflow]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/UpdateProjectDecisionRequest' } } }
+      responses:
+        '200': { description: 修改后的项目决策, content: { application/json: { schema: { $ref: '#/components/schemas/ProjectDecision' } } } }
+    delete:
+      summary: 删除决策草稿
+      operationId: deleteProjectDecision
+      tags: [ProjectWorkflow]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: version, in: query, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        '204': { description: 决策草稿已删除 }
+
+  /projects/{projectId}/decisions/{decisionId}/publish:
+    post:
+      summary: 发布项目决策
+      operationId: publishProjectDecision
+      tags: [ProjectWorkflow]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: projectId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: decisionId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PublishProjectDecisionRequest' } } }
+      responses:
+        '200': { description: 已发布的决策, content: { application/json: { schema: { $ref: '#/components/schemas/ProjectDecision' } } } }
+
+  /projects/{projectId}/milestones:
+    get:
+      summary: 查询项目里程碑
+      operationId: listProjectMilestones
+      tags: [ProjectWorkflow]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: projectId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: 项目里程碑列表, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/ProjectMilestone' } } } } }
+    post:
+      summary: 创建项目里程碑
+      operationId: createProjectMilestone
+      tags: [ProjectWorkflow]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: projectId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreateProjectMilestoneRequest' } } }
+      responses:
+        '201': { description: 项目里程碑已创建, content: { application/json: { schema: { $ref: '#/components/schemas/ProjectMilestone' } } } }
+
+  /projects/{projectId}/milestones/{milestoneId}:
+    parameters:
+      - { name: projectId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: milestoneId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      summary: 查询项目里程碑详情
+      operationId: getProjectMilestone
+      tags: [ProjectWorkflow]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: 项目里程碑详情, content: { application/json: { schema: { $ref: '#/components/schemas/ProjectMilestone' } } } }
+    patch:
+      summary: 修改项目里程碑
+      operationId: updateProjectMilestone
+      tags: [ProjectWorkflow]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/UpdateProjectMilestoneRequest' } } }
+      responses:
+        '200': { description: 修改后的项目里程碑, content: { application/json: { schema: { $ref: '#/components/schemas/ProjectMilestone' } } } }
+
+  /projects/{projectId}/milestones/{milestoneId}/start:
+    post:
+      summary: 启动项目里程碑
+      operationId: startProjectMilestone
+      tags: [ProjectWorkflow]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: projectId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: milestoneId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ProjectWorkflowVersionRequest' } } }
+      responses:
+        '200': { description: 已启动的里程碑, content: { application/json: { schema: { $ref: '#/components/schemas/ProjectMilestone' } } } }
+
+  /projects/{projectId}/milestones/{milestoneId}/acceptance:
+    post:
+      summary: 将项目里程碑进入验收
+      operationId: startProjectMilestoneAcceptance
+      tags: [ProjectWorkflow]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: projectId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: milestoneId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ProjectWorkflowVersionRequest' } } }
+      responses:
+        '200': { description: 验收中的里程碑, content: { application/json: { schema: { $ref: '#/components/schemas/ProjectMilestone' } } } }
+
+  /projects/{projectId}/milestones/{milestoneId}/complete:
+    post:
+      summary: 确认项目里程碑完成
+      operationId: completeProjectMilestone
+      tags: [ProjectWorkflow]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: projectId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: milestoneId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CompleteProjectMilestoneRequest' } } }
+      responses:
+        '200': { description: 已完成的里程碑, content: { application/json: { schema: { $ref: '#/components/schemas/ProjectMilestone' } } } }
+
+  /projects/{projectId}/milestones/{milestoneId}/cancel:
+    post:
+      summary: 取消项目里程碑
+      operationId: cancelProjectMilestone
+      tags: [ProjectWorkflow]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: projectId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: milestoneId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CancelProjectMilestoneRequest' } } }
+      responses:
+        '200': { description: 已取消的里程碑, content: { application/json: { schema: { $ref: '#/components/schemas/ProjectMilestone' } } } }
+
+  /projects/{projectId}/milestones/{milestoneId}/reopen:
+    post:
+      summary: 重新打开项目里程碑
+      operationId: reopenProjectMilestone
+      tags: [ProjectWorkflow]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: projectId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: milestoneId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ReopenProjectMilestoneRequest' } } }
+      responses:
+        '200': { description: 重新打开的里程碑, content: { application/json: { schema: { $ref: '#/components/schemas/ProjectMilestone' } } } }
+
+  /projects/{projectId}/repositories:
+    get:
+      summary: 查询项目仓库
+      operationId: listProjectRepositories
+      tags: [ProjectWorkflow]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: projectId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: 项目仓库列表, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/ProjectRepository' } } } } }
+    post:
+      summary: 绑定项目仓库
+      operationId: createProjectRepository
+      tags: [ProjectWorkflow]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: projectId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreateProjectRepositoryRequest' } } }
+      responses:
+        '201': { description: 项目仓库已绑定, content: { application/json: { schema: { $ref: '#/components/schemas/ProjectRepository' } } } }
+
+  /projects/{projectId}/repositories/{repositoryId}:
+    patch:
+      summary: 修改项目仓库
+      operationId: updateProjectRepository
+      tags: [ProjectWorkflow]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: projectId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: repositoryId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/UpdateProjectRepositoryRequest' } } }
+      responses:
+        '200': { description: 修改后的项目仓库, content: { application/json: { schema: { $ref: '#/components/schemas/ProjectRepository' } } } }
+    delete:
+      summary: 解除项目仓库绑定
+      operationId: deleteProjectRepository
+      tags: [ProjectWorkflow]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: projectId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: repositoryId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: version, in: query, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        '204': { description: 项目仓库已解除绑定 }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -9444,6 +9724,15 @@ components:
           allOf:
             - $ref: '#/components/schemas/ChatMode'
           description: 会话默认对话执行模式；省略时使用 standard
+        contextType:
+          type: string
+          enum: [GENERAL, PROJECT]
+          default: GENERAL
+          description: GENERAL 为通用会话，PROJECT 为固定项目上下文会话
+        projectId:
+          type: [string, 'null']
+          format: uuid
+          description: PROJECT 会话必填；GENERAL 会话必须为空
 
     UpdateConversationRequest:
       type: object
@@ -9466,10 +9755,15 @@ components:
       default: PRIVATE
       description: 会话可见性；当前仅支持成员私有
 
+    ConversationContextType:
+      type: string
+      enum: [GENERAL, PROJECT]
+      description: 会话上下文类型；当前支持通用和项目两种
+
     Conversation:
       type: object
       additionalProperties: false
-      required: [id, title, visibility, createdAt, updatedAt, version]
+      required: [id, title, visibility, contextType, projectId, createdAt, updatedAt, version]
       properties:
         id:
           type: string
@@ -9481,6 +9775,12 @@ components:
           description: 会话标题；未自动生成前为空字符串
         visibility:
           $ref: '#/components/schemas/ConversationVisibility'
+        contextType:
+          $ref: '#/components/schemas/ConversationContextType'
+        projectId:
+          type: [string, 'null']
+          format: uuid
+          description: 项目上下文会话绑定的项目 ID
         mode:
           allOf:
             - $ref: '#/components/schemas/ChatMode'
@@ -10760,6 +11060,7 @@ components:
           uniqueItems: true
           default: []
           items: { type: string, format: uuid }
+        decisionId: { type: [string, 'null'], format: uuid, default: null, description: 任务来源决策；必须属于当前项目 }
 
     UpdateTaskRequest:
       type: object
@@ -10821,6 +11122,7 @@ components:
         - id
         - projectId
         - parentId
+        - decisionId
         - title
         - description
         - status
@@ -10838,6 +11140,7 @@ components:
         id: { type: string, format: uuid }
         projectId: { type: string, format: uuid }
         parentId: { type: [string, 'null'], format: uuid }
+        decisionId: { type: [string, 'null'], format: uuid }
         title: { type: string }
         description: { type: [string, 'null'] }
         status: { $ref: '#/components/schemas/TaskStatus' }
@@ -14460,3 +14763,268 @@ components:
           type:
             - string
             - "null"
+
+    ProjectDecisionStatus:
+      type: string
+      enum: [DRAFT, PUBLISHED, SUPERSEDED]
+
+    ProjectMilestoneStatus:
+      type: string
+      enum: [PLANNED, IN_PROGRESS, ACCEPTANCE, COMPLETED, CANCELLED]
+
+    ProjectRepositoryProvider:
+      type: string
+      enum: [GITHUB, GITLAB, GITEE, OTHER]
+
+    ProjectMemberIdentity:
+      type: object
+      additionalProperties: false
+      required: [membershipId, account, displayName]
+      properties:
+        membershipId: { type: string, format: uuid }
+        account: { type: string }
+        displayName: { type: string }
+
+    ProjectWorkflowVersionRequest:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        version: { type: integer, minimum: 1 }
+
+    CreateProjectDecisionRequest:
+      type: object
+      additionalProperties: false
+      required: [title, problem]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 200 }
+        problem: { type: string, minLength: 1, maxLength: 10000 }
+        background: { type: [string, 'null'], maxLength: 10000, default: null }
+        recommendation: { type: [string, 'null'], maxLength: 10000, default: null }
+        conclusion: { type: [string, 'null'], maxLength: 10000, default: null }
+        rationale: { type: [string, 'null'], maxLength: 10000, default: null }
+        risks: { type: array, maxItems: 50, items: { type: string, maxLength: 2000 }, default: [] }
+        nextActions: { type: array, maxItems: 50, items: { type: string, maxLength: 2000 }, default: [] }
+        participantMembershipIds: { type: array, maxItems: 100, items: { type: string, format: uuid }, default: [] }
+        sourceConversationId: { type: [string, 'null'], format: uuid, default: null }
+
+    UpdateProjectDecisionRequest:
+      allOf:
+        - $ref: '#/components/schemas/CreateProjectDecisionRequest'
+        - type: object
+          required: [version]
+          properties:
+            version: { type: integer, minimum: 1 }
+
+    PublishProjectDecisionRequest:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        version: { type: integer, minimum: 1 }
+        conclusion: { type: [string, 'null'], maxLength: 10000, default: null }
+
+    ProjectDecision:
+      type: object
+      additionalProperties: false
+      required: [id, projectId, title, problem, status, participantMembershipIds, participants, createdBy, createdAt, updatedAt, version]
+      properties:
+        id: { type: string, format: uuid }
+        projectId: { type: string, format: uuid }
+        title: { type: string }
+        problem: { type: string }
+        background: { type: [string, 'null'] }
+        recommendation: { type: [string, 'null'] }
+        conclusion: { type: [string, 'null'] }
+        rationale: { type: [string, 'null'] }
+        risks: { type: array, items: { type: string } }
+        nextActions: { type: array, items: { type: string } }
+        participantMembershipIds: { type: array, items: { type: string, format: uuid } }
+        participants: { type: array, items: { $ref: '#/components/schemas/ProjectMemberIdentity' } }
+        status: { $ref: '#/components/schemas/ProjectDecisionStatus' }
+        sourceConversationId: { type: [string, 'null'], format: uuid }
+        publishedAt: { type: [string, 'null'], format: date-time }
+        publishedBy: { anyOf: [{ $ref: '#/components/schemas/ProjectMemberIdentity' }, { type: 'null' }] }
+        createdBy: { $ref: '#/components/schemas/ProjectMemberIdentity' }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        version: { type: integer, minimum: 1 }
+
+    CreateProjectMilestoneRequest:
+      type: object
+      additionalProperties: false
+      required: [title, objective, targetDate, ownerMembershipId, acceptanceCriteria]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 200 }
+        objective: { type: string, minLength: 1, maxLength: 10000 }
+        targetDate: { type: string, format: date }
+        ownerMembershipId: { type: string, format: uuid }
+        acceptanceCriteria: { type: array, minItems: 1, maxItems: 50, items: { type: string, maxLength: 2000 } }
+        taskIds: { type: array, maxItems: 100, items: { type: string, format: uuid }, default: [] }
+        decisionIds: { type: array, maxItems: 100, items: { type: string, format: uuid }, default: [] }
+
+    UpdateProjectMilestoneRequest:
+      allOf:
+        - $ref: '#/components/schemas/CreateProjectMilestoneRequest'
+        - type: object
+          required: [version]
+          properties:
+            version: { type: integer, minimum: 1 }
+
+    CompleteProjectMilestoneRequest:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        version: { type: integer, minimum: 1 }
+        acceptanceNote: { type: [string, 'null'], maxLength: 5000, default: null }
+
+    CancelProjectMilestoneRequest:
+      type: object
+      additionalProperties: false
+      required: [version, reason]
+      properties:
+        version: { type: integer, minimum: 1 }
+        reason: { type: string, minLength: 1, maxLength: 2000 }
+
+    ReopenProjectMilestoneRequest:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        version: { type: integer, minimum: 1 }
+        reason: { type: [string, 'null'], maxLength: 2000, default: null }
+
+    ProjectMilestone:
+      type: object
+      additionalProperties: false
+      required: [id, projectId, title, objective, targetDate, owner, acceptanceCriteria, status, tasks, taskCount, completedTaskCount, openTaskCount, progressPercent, overdue, health, decisions, createdAt, updatedAt, version]
+      properties:
+        id: { type: string, format: uuid }
+        projectId: { type: string, format: uuid }
+        title: { type: string }
+        objective: { type: string }
+        targetDate: { type: string, format: date }
+        owner: { $ref: '#/components/schemas/ProjectMemberIdentity' }
+        acceptanceCriteria: { type: array, items: { type: string } }
+        acceptanceNote: { type: [string, 'null'] }
+        status: { $ref: '#/components/schemas/ProjectMilestoneStatus' }
+        startedAt: { type: [string, 'null'], format: date-time }
+        acceptanceStartedAt: { type: [string, 'null'], format: date-time }
+        completedAt: { type: [string, 'null'], format: date-time }
+        cancelledAt: { type: [string, 'null'], format: date-time }
+        cancellationReason: { type: [string, 'null'] }
+        tasks:
+          type: array
+          items:
+            type: object
+            required: [id, title, status, required]
+            properties:
+              id: { type: string, format: uuid }
+              title: { type: string }
+              status: { type: string }
+              required: { type: boolean }
+        taskCount: { type: integer, minimum: 0 }
+        completedTaskCount: { type: integer, minimum: 0 }
+        openTaskCount: { type: integer, minimum: 0 }
+        progressPercent: { type: integer, minimum: 0, maximum: 100 }
+        overdue: { type: boolean }
+        health: { type: string, enum: [NORMAL, AT_RISK, OVERDUE] }
+        decisions:
+          type: array
+          items:
+            type: object
+            required: [id, title, status]
+            properties:
+              id: { type: string, format: uuid }
+              title: { type: string }
+              status: { $ref: '#/components/schemas/ProjectDecisionStatus' }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        version: { type: integer, minimum: 1 }
+
+    CreateProjectRepositoryRequest:
+      type: object
+      additionalProperties: false
+      required: [url]
+      properties:
+        url: { type: string, minLength: 1, maxLength: 500 }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        defaultBranch: { type: string, minLength: 1, maxLength: 120, default: main }
+
+    UpdateProjectRepositoryRequest:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        url: { type: string, minLength: 1, maxLength: 500 }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        defaultBranch: { type: string, minLength: 1, maxLength: 120 }
+        enabled: { type: boolean }
+        version: { type: integer, minimum: 1 }
+
+    ProjectRepository:
+      type: object
+      additionalProperties: false
+      required: [id, projectId, provider, name, url, defaultBranch, enabled, createdAt, updatedAt, version]
+      properties:
+        id: { type: string, format: uuid }
+        projectId: { type: string, format: uuid }
+        provider: { $ref: '#/components/schemas/ProjectRepositoryProvider' }
+        name: { type: string }
+        url: { type: string }
+        defaultBranch: { type: string }
+        enabled: { type: boolean }
+        lastSyncedAt: { type: [string, 'null'], format: date-time }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        version: { type: integer, minimum: 1 }
+
+    ProjectActivity:
+      type: object
+      additionalProperties: false
+      required: [id, projectId, type, resourceType, summary, metadata, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        projectId: { type: string, format: uuid }
+        type: { type: string }
+        resourceType: { type: string }
+        resourceId: { type: [string, 'null'], format: uuid }
+        summary: { type: string }
+        metadata: { type: object, additionalProperties: true }
+        actor: { anyOf: [{ $ref: '#/components/schemas/ProjectMemberIdentity' }, { type: 'null' }] }
+        createdAt: { type: string, format: date-time }
+
+    ProjectWorkflowSummary:
+      type: object
+      additionalProperties: false
+      required: [decisions, milestones, repositories, activities]
+      properties:
+        decisions:
+          type: object
+          required: [total, draft, published, superseded]
+          properties:
+            total: { type: integer }
+            draft: { type: integer }
+            published: { type: integer }
+            superseded: { type: integer }
+        milestones:
+          type: object
+          required: [total, planned, inProgress, acceptance, completed, cancelled, overdue]
+          properties:
+            total: { type: integer }
+            planned: { type: integer }
+            inProgress: { type: integer }
+            acceptance: { type: integer }
+            completed: { type: integer }
+            cancelled: { type: integer }
+            overdue: { type: integer }
+        repositories:
+          type: object
+          required: [total, enabled]
+          properties:
+            total: { type: integer }
+            enabled: { type: integer }
+        activities:
+          type: array
+          items: { $ref: '#/components/schemas/ProjectActivity' }

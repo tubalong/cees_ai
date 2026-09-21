@@ -145,6 +145,7 @@ export class KnowledgeService {
                 tenantId: context.tenantId,
                 deletedAt: null,
                 id: visibleIds ? { in: visibleIds } : undefined,
+                projectId: query.projectId,
                 OR: keyword
                     ? [
                         { name: { contains: keyword, mode: 'insensitive' } },
@@ -695,11 +696,15 @@ export class KnowledgeService {
         permissions: string[];
         requestId: string;
         query: string;
+        projectId?: string | null;
     }): Promise<AssistantKnowledgeSearchResult> {
-        const knowledgeBaseIds = this.canReadAllKnowledgeBases(input.permissions)
+        const initialKnowledgeBaseIds = this.canReadAllKnowledgeBases(input.permissions)
             ? await this.listTenantKnowledgeBaseIds(input.tenantId)
             : await this.listMemberKnowledgeBaseIds(input.tenantId, input.userId);
-        if (knowledgeBaseIds.length === 0) {
+        const scopedKnowledgeBaseIds = input.projectId
+            ? (await this.prisma.knowledgeBase.findMany({ where: { tenantId: input.tenantId, projectId: input.projectId, visibilityScope: 'PROJECT', deletedAt: null, id: { in: initialKnowledgeBaseIds } }, select: { id: true } })).map((item) => item.id)
+            : initialKnowledgeBaseIds;
+        if (scopedKnowledgeBaseIds.length === 0) {
             return {
                 answer: '',
                 grounded: false,
@@ -713,9 +718,9 @@ export class KnowledgeService {
             this.resolveVisibleProjectIds(input.tenantId, input.membershipId),
         ]);
         const scope: KnowledgeRetrieveScope = {
-            knowledge_base_ids: knowledgeBaseIds,
+            knowledge_base_ids: scopedKnowledgeBaseIds,
             department_ids: departmentIds,
-            project_ids: projectIds,
+            project_ids: input.projectId ? [input.projectId] : projectIds,
         };
         let response: KnowledgeAnswerResponse;
         try {
@@ -729,7 +734,7 @@ export class KnowledgeService {
                 embedding_profile: null,
             });
         } catch (error) {
-            await this.writeAssistantQueryFailureAudit(input, knowledgeBaseIds, error);
+            await this.writeAssistantQueryFailureAudit(input, scopedKnowledgeBaseIds, error);
             throw error;
         }
         // ai-service 的 citation 不带文档标题与所属库，按 document_id 回查业务文档补齐。
@@ -737,7 +742,7 @@ export class KnowledgeService {
         // 当前用户可删除文档的库集合：manage_all 覆盖全部可检索库，否则按库内成员等级（EDITOR 及以上）。
         const deletableKnowledgeBaseIds = new Set(
             input.permissions.includes('knowledge_base.manage_all')
-                ? knowledgeBaseIds
+                ? scopedKnowledgeBaseIds
                 : (await this.prisma.knowledgeBaseMember.findMany({
                     where: {
                         tenantId: input.tenantId,
@@ -787,7 +792,7 @@ export class KnowledgeService {
                 },
             });
             await this.writeAudit(transaction, input, 'KNOWLEDGE_BASE_QUERIED', 'KNOWLEDGE_BASE', null, {
-                knowledgeBaseIds,
+                knowledgeBaseIds: scopedKnowledgeBaseIds,
                 grounded: response.grounded,
                 insufficientEvidence: response.insufficient_evidence,
                 citationCount: citations.length,
@@ -799,7 +804,7 @@ export class KnowledgeService {
             grounded: response.grounded,
             insufficientEvidence: response.insufficient_evidence,
             citations,
-            searchedKnowledgeBaseIds: knowledgeBaseIds,
+            searchedKnowledgeBaseIds: scopedKnowledgeBaseIds,
         };
     }
 
@@ -839,7 +844,7 @@ export class KnowledgeService {
             membershipId: string;
             requestId: string;
         },
-        knowledgeBaseIds: string[],
+        scopedKnowledgeBaseIds: string[],
         error: unknown,
     ): Promise<void> {
         await this.prisma.auditLog.create({
@@ -852,7 +857,7 @@ export class KnowledgeService {
                 resourceType: 'KNOWLEDGE_BASE',
                 requestId: input.requestId,
                 metadata: {
-                    knowledgeBaseIds,
+                    knowledgeBaseIds: scopedKnowledgeBaseIds,
                     errorCode: error instanceof AiServiceInvocationError ? error.code : 'UNKNOWN',
                 } as Prisma.InputJsonValue,
             },

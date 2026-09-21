@@ -80,7 +80,7 @@ function createService(history: HistoryMessageRow[], toolCalls: ToolCallRow[]): 
 
 function buildInput() {
     return {
-        conversation: { id: CONVERSATION_ID, tenantId: TENANT_ID },
+        conversation: { id: CONVERSATION_ID, tenantId: TENANT_ID, contextType: 'GENERAL' as const, projectId: null },
         turnId: 'turn-3',
         membershipId: '50000000-0000-0000-0000-000000000001',
         userId: USER_ID,

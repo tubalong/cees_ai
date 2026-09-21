@@ -9,6 +9,7 @@ export type TaskSummary = {
     id: string;
     projectId: string;
     parentId: string | null;
+    decisionId: string | null;
     title: string;
     description: string | null;
     status: TaskStatus;

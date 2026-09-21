@@ -68,6 +68,7 @@ export class KnowledgeSearchTool implements OnModuleInit {
             permissions: context.permissions,
             requestId: context.requestId,
             query: input.query as string,
+            projectId: context.projectId,
         });
 
         const citations: KnowledgeToolCitation[] = result.citations.map((citation) => ({

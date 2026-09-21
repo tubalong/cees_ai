@@ -295,3 +295,13 @@ Tenant + User + TenantMembership
 - 二进制文件不进入数据库，存放于私有腾讯云 COS；数据库只保存对象键、校验值、大小、内容类型和审计元数据。
 - ai-service 当前不直接连接业务数据库；正式数据读取、写入和 AI 调用审计统一由 NestJS 处理。
 - 未确认的业务实体不得提前加入 Prisma schema。
+
+## 项目工作流模型
+
+- `project_decisions` 保存正式决策与草稿、来源会话和发布信息；
+- `project_milestones` 保存阶段目标、目标日期、负责人、验收标准和生命周期时间；
+- `project_milestone_tasks`、`project_milestone_decisions` 保存里程碑关联；
+- `project_repositories` 保存项目仓库 URL、提供方、默认分支和启停状态；
+- `project_activity_events` 保存项目正式动态，不保存私有聊天正文；
+- `conversations.context_type`、`conversations.project_id` 保存项目工作台会话上下文；
+- 迁移为 `20260921090000_project_workflow`。详见 [项目工作流](../product/project-workflow.md)。

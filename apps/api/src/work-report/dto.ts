@@ -50,6 +50,7 @@ export class ListWorkReportsQueryDto {
     @IsOptional() @IsEnum(WorkReportStatus) status?: WorkReportStatus;
     @IsOptional() @IsUUID() authorMembershipId?: string;
     @IsOptional() @IsUUID() reviewerMembershipId?: string;
+    @IsOptional() @IsUUID() projectId?: string;
     @IsOptional() @IsDateString({ strict: true }) periodFrom?: string;
     @IsOptional() @IsDateString({ strict: true }) periodTo?: string;
     @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100) limit = 20;

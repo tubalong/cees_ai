@@ -6,4 +6,3 @@ export type CompleteProjectRequest = {
     completionSummary?: string | null;
     version: number;
 };
-

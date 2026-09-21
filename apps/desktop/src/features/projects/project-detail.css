@@ -527,3 +527,60 @@
         flex-direction: column;
     }
 }
+
+/* Project workflow panels */
+.project-workflow-panel { min-height: 420px; padding: 20px 22px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.project-panel-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.project-panel-heading h2, .project-panel-heading h3 { margin: 0; color: var(--text); }
+.project-panel-heading p { margin: 5px 0 0; color: var(--muted); font-size: 12px; }
+.project-workbench-layout { min-height: 620px; display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 16px; }
+.project-workbench-main, .project-workbench-history, .project-workflow-panel { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.project-workbench-main { min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
+.project-workbench-main > .project-panel-heading, .project-workbench-history { padding: 18px; }
+.project-workbench-history { min-width: 0; }
+.project-workbench-messages { flex: 1; min-height: 360px; overflow: auto; padding: 18px; background: #fafcff; }
+.project-chat-message { max-width: 86%; margin-bottom: 14px; padding: 12px 14px; border-radius: 12px; background: #fff; box-shadow: 0 1px 3px rgba(15, 23, 42, .06); }
+.project-chat-message.is-user { margin-left: auto; background: var(--primary-soft); }
+.project-chat-role { margin-bottom: 5px; color: var(--muted); font-size: 11px; }
+.project-chat-content { color: var(--text); font-size: 13px; line-height: 1.7; white-space: pre-wrap; }
+.project-workbench-composer { padding: 14px 18px 18px; border-top: 1px solid var(--line); }
+.project-workbench-composer-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 8px; color: var(--muted); font-size: 11px; }
+.project-workbench-quick, .project-inline-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
+.project-conversation-list { display: flex; flex-direction: column; gap: 6px; }
+.project-conversation-list button { display: flex; flex-direction: column; gap: 4px; padding: 10px 11px; color: var(--text); border: 1px solid transparent; border-radius: 9px; background: transparent; text-align: left; cursor: pointer; }
+.project-conversation-list button:hover, .project-conversation-list button.is-active { border-color: var(--primary-border); background: var(--primary-soft); }
+.project-conversation-list small { color: var(--muted); }
+.project-decision-list, .project-milestone-list, .project-report-list, .project-file-list, .project-repository-list, .project-expense-list { display: flex; flex-direction: column; gap: 12px; margin-top: 16px; }
+.project-decision-card, .project-milestone-item, .project-report-card, .project-file-row, .project-repository-card, .project-expense-row { padding: 16px; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+.project-decision-card p, .project-milestone-item p, .project-report-card p { margin: 8px 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.project-milestone-item.is-risk { border-color: color-mix(in srgb, #f59e0b 45%, var(--line)); background: #fffaf0; }
+.project-milestone-item.is-overdue { border-color: color-mix(in srgb, #ef4444 45%, var(--line)); background: #fff5f5; }
+.project-milestone-meta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 10px; color: var(--muted); font-size: 12px; }
+.project-kanban { display: grid; grid-template-columns: repeat(4, minmax(210px, 1fr)); gap: 14px; margin-top: 18px; overflow-x: auto; }
+.project-kanban-column { min-height: 360px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: #f8fafc; }
+.project-kanban-column header { display: flex; justify-content: space-between; margin-bottom: 10px; color: var(--text); }
+.project-kanban-card { width: 100%; display: flex; flex-direction: column; gap: 8px; margin-bottom: 9px; padding: 12px; border: 1px solid var(--line); border-radius: 9px; background: #fff; text-align: left; cursor: pointer; }
+.project-kanban-card:hover { border-color: var(--primary-border); box-shadow: 0 4px 12px rgba(53, 89, 199, .08); }
+.project-kanban-card small { color: var(--muted); }
+.project-report-card ul { margin: 8px 0 0; padding-left: 18px; color: var(--muted); font-size: 12px; }
+.project-report-card .is-warning { color: #b45309; }
+.project-file-row, .project-expense-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 12px; }
+.project-file-row small, .project-expense-row small { display: block; margin-top: 4px; color: var(--muted); }
+.project-upload-button { display: inline-flex; align-items: center; min-height: 32px; padding: 4px 14px; color: #fff; border-radius: 7px; background: var(--primary); cursor: pointer; }
+.project-repository-card { display: flex; align-items: center; gap: 14px; }
+.project-repository-card > div:not(.project-inline-actions) { flex: 1; min-width: 0; }
+.project-repository-card p { overflow: hidden; margin: 5px 0; text-overflow: ellipsis; white-space: nowrap; }
+.project-expense-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
+.project-expense-stats > div { display: flex; flex-direction: column; gap: 6px; padding: 14px; border-radius: 10px; background: #f8fafc; }
+.project-expense-stats span { color: var(--muted); font-size: 12px; }
+.project-expense-stats strong { color: var(--text); font-size: 20px; }
+.project-expense-item { display: grid; grid-template-columns: 1.2fr 1.6fr .8fr 1fr 1fr; gap: 8px; }
+@media (max-width: 1080px) { .project-workbench-layout { grid-template-columns: 1fr; } .project-workbench-history { order: 2; } .project-kanban { grid-template-columns: repeat(4, minmax(190px, 1fr)); } .project-expense-item { grid-template-columns: 1fr 1fr; } }
+.project-activity-card { min-height: 240px; }
+.project-activity-list { display: flex; flex-direction: column; margin-top: 12px; }
+.project-activity-item { display: flex; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--line); }
+.project-activity-item:last-child { border-bottom: 0; }
+.project-activity-dot { flex: 0 0 auto; width: 8px; height: 8px; margin-top: 5px; border-radius: 50%; background: var(--primary); box-shadow: 0 0 0 4px var(--primary-soft); }
+.project-activity-item strong { color: var(--text); font-size: 12px; }
+.project-activity-item p { margin: 3px 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.project-activity-item time { color: #9ca3af; font-size: 11px; }

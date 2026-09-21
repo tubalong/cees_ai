@@ -38,3 +38,5 @@
 - [人力资源管理](assignment-and-hr-finance-legal.md)
 - [Desktop 多语言支持](desktop-i18n.md)
 - [协作域客户端对接（项目/任务/会议/报告/通知/工作台/AI/批量导入/文件上传）](collaboration-domains.md)
+
+- [项目工作流与项目详情](project-workflow.md)：项目工作台、决策、看板、日报、里程碑、费用与仓库配置。

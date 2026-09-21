@@ -6,4 +6,3 @@ export type ProjectReasonRequest = {
     reason: string;
     version: number;
 };
-

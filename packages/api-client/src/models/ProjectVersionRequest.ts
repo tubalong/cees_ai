@@ -5,4 +5,3 @@
 export type ProjectVersionRequest = {
     version: number;
 };
-

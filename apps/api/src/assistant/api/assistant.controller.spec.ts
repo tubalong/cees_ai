@@ -7,13 +7,13 @@ describe('AssistantController', () => {
         const harness = createHarness();
 
         await harness.controller.createConversation({ title: ' 计划 ' });
-        expect(harness.conversationService.create).toHaveBeenCalledWith(' 计划 ', undefined);
+        expect(harness.conversationService.create).toHaveBeenCalledWith(' 计划 ', undefined, 'GENERAL', null);
 
         await harness.controller.createConversation({ title: ' 计划 ', mode: 'ultra' });
-        expect(harness.conversationService.create).toHaveBeenCalledWith(' 计划 ', 'ultra');
+        expect(harness.conversationService.create).toHaveBeenCalledWith(' 计划 ', 'ultra', 'GENERAL', null);
 
         await harness.controller.listConversations({ limit: 20, cursor: 'cursor-1' });
-        expect(harness.conversationService.list).toHaveBeenCalledWith(20, 'cursor-1');
+        expect(harness.conversationService.list).toHaveBeenCalledWith(20, 'cursor-1', {});
 
         await harness.controller.getConversation(CONVERSATION_ID);
         expect(harness.conversationService.getDetail).toHaveBeenCalledWith(CONVERSATION_ID);

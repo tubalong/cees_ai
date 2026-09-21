@@ -41,4 +41,3 @@ export type ProjectSummary = {
     updatedAt: string;
     version: number;
 };
-

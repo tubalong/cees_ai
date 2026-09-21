@@ -4,10 +4,10 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-    createTask, deleteProject, getProject, hasStoredSession, listDepartments, listProjectMembers, listTasks,
+    createTask, deleteProject, getProject, hasStoredSession, listDepartments, listProjectActivities, listProjectMembers, listProjectRepositories, listTasks,
     listTenantMembers, transitionProject, updateProject,
     type CreateTaskInput, type MeResult, type ProjectStatus, type ProjectSummary, type ProjectTransitionAction,
-    type TaskPriority, type TaskStatus, type TaskSummary,
+    type ProjectActivity, type TaskPriority, type TaskStatus, type TaskSummary,
 } from '../../core/api';
 import { useDateFormatter, useI18n } from '../../core/i18n';
 import ProjectFormModal, { type ProjectFormValues } from './ProjectFormModal';
@@ -15,6 +15,7 @@ import ProjectMembersPanel from './ProjectMembersPanel';
 import ProjectTasksPanel from './ProjectTasksPanel';
 import TaskDetailDrawer from './TaskDetailDrawer';
 import TransitionPromptModal from './TransitionPromptModal';
+import { ProjectDailyReportPanel, ProjectDecisionPanel, ProjectExpensePanel, ProjectFilesPanel, ProjectKanbanPanel, ProjectMilestonePanel, ProjectRepositoryPanel, ProjectRepositorySettingsPanel, ProjectWorkbenchPanel } from './ProjectWorkflowPanels';
 import { isReadOnlyProject, projectStatusLabels, projectTransitions, taskPriorityLabels } from './project-constants';
 import '../../styles/shared.css';
 import './project.css';
@@ -36,7 +37,7 @@ interface TaskFormValues {
     collaboratorMembershipIds: string[];
 }
 
-type ProjectDetailTab = 'overview' | 'tasks' | 'members' | 'milestones' | 'files' | 'activity' | 'settings';
+type ProjectDetailTab = 'overview' | 'workbench' | 'decisions' | 'kanban' | 'daily' | 'milestones' | 'members' | 'files' | 'expenses' | 'repository' | 'settings';
 
 const emptyTaskForm: TaskFormValues = {
     title: '', description: '', parentId: null, priority: 'MEDIUM', dueDate: '', ownerMembershipId: '', collaboratorMembershipIds: [],
@@ -92,6 +93,14 @@ export default function ProjectDetailPage({ projectId, authContext, onSessionExp
         queryKey: ['project-tasks-all', projectId],
         queryFn: () => listTasks(projectId),
     });
+    const repositoriesQuery = useQuery({
+        queryKey: ['project-repositories', projectId],
+        queryFn: () => listProjectRepositories(projectId),
+    });
+    const activitiesQuery = useQuery({
+        queryKey: ['project-activities', projectId],
+        queryFn: () => listProjectActivities(projectId, 20),
+    });
 
     const project = projectQuery.data;
     const departments = departmentsQuery.data?.items ?? [];
@@ -99,7 +108,11 @@ export default function ProjectDetailPage({ projectId, authContext, onSessionExp
     const projectMembers = projectMembersQuery.data?.items ?? [];
     const tasks = tasksQuery.data?.items ?? [];
     const allTasks = allTasksQuery.data?.items ?? [];
+    const repositories = repositoriesQuery.data ?? [];
+    const activities = activitiesQuery.data ?? [];
+    const hasRepository = repositories.length > 0;
     const readOnly = project ? isReadOnlyProject(project.status) : false;
+    const canManage = permissions.has('project.manage_all') || project?.currentMemberRole === 'OWNER' || project?.currentMemberRole === 'MANAGER';
     const completedTaskCount = allTasks.filter((task) => task.status === 'DONE').length;
     const inProgressTaskCount = allTasks.filter((task) => task.status === 'IN_PROGRESS').length;
     const progress = allTasks.length > 0 ? Math.round((completedTaskCount / allTasks.length) * 100) : project ? projectStageProgress[project.status] : 0;
@@ -121,6 +134,15 @@ export default function ProjectDetailPage({ projectId, authContext, onSessionExp
         void queryClient.invalidateQueries({ queryKey: ['project-tasks', projectId] });
         void queryClient.invalidateQueries({ queryKey: ['project-tasks-all', projectId] });
         refreshProject();
+    };
+
+    const refreshProjectWorkflow = (): void => {
+        refreshTasks();
+        void queryClient.invalidateQueries({ queryKey: ['project-activities', projectId] });
+        void queryClient.invalidateQueries({ queryKey: ['project-decisions', projectId] });
+        void queryClient.invalidateQueries({ queryKey: ['project-milestones', projectId] });
+        void queryClient.invalidateQueries({ queryKey: ['project-repositories', projectId] });
+        void queryClient.invalidateQueries({ queryKey: ['project-daily-reports', projectId] });
     };
 
     const openEditProject = (): void => {
@@ -235,6 +257,10 @@ export default function ProjectDetailPage({ projectId, authContext, onSessionExp
     const recentTasks = [...allTasks].sort((left, right) => new Date(right.updatedAt ?? right.createdAt ?? 0).getTime() - new Date(left.updatedAt ?? left.createdAt ?? 0).getTime()).slice(0, 5);
     const projectActions = projectTransitions[project.status].map((option) => ({ key: option.action, label: t(option.label) }));
     if (permissions.has('project.delete') && !readOnly && project.currentMemberRole === 'OWNER') projectActions.push({ key: 'delete' as ProjectTransitionAction, label: t('删除') });
+    useEffect(() => {
+        if (!repositoriesQuery.isLoading && tab === 'repository' && repositories.length === 0) setTab('settings');
+    }, [repositories.length, repositoriesQuery.isLoading, tab]);
+
     const ownerName = project.owner?.displayName ?? project.owner?.account ?? '-';
 
     return <div className="workspace-page project-detail-page">
@@ -265,25 +291,32 @@ export default function ProjectDetailPage({ projectId, authContext, onSessionExp
 
         <nav className="project-detail-tabs" aria-label={t('项目详情导航')}>
             {([
-                ['overview', '概览'], ['tasks', '任务'], ['members', '成员'], ['milestones', '里程碑'], ['files', '文件'], ['activity', '动态'], ['settings', '设置'],
+                ['overview', '概览'], ['workbench', '项目工作台'], ['decisions', '决策'], ['kanban', '看板'], ['daily', '日报'], ['milestones', '里程碑'], ['members', '成员'], ['files', '文件'], ['expenses', '费用'], ...(hasRepository ? [['repository', '项目仓库'] as [ProjectDetailTab, string]] : []), ['settings', '设置'],
             ] as Array<[ProjectDetailTab, string]>).map(([key, label]) => <button key={key} className={tab === key ? 'is-active' : ''} type="button" onClick={() => setTab(key)}>{t(label)}</button>)}
         </nav>
 
         {tab === 'overview' && <div className="project-overview-grid">
             <div className="project-overview-left">
                 <section className="project-detail-card project-description-card"><h2>{t('项目描述')}</h2><p>{project.description?.trim() || t('暂无项目说明')}</p></section>
-                <section className="project-detail-card project-recent-tasks-card"><div className="project-card-section-heading"><h2>{t('近期任务')}</h2><button type="button" onClick={() => setTab('tasks')}>{t('查看全部任务')} <span>→</span></button></div>{recentTasks.length ? <div className="project-recent-task-list">{recentTasks.map((task) => <button type="button" key={task.id} onClick={() => setTaskDetail(task)}><Tag color={task.priority === 'HIGH' || task.priority === 'URGENT' ? 'error' : task.priority === 'MEDIUM' ? 'warning' : 'success'}>{t(taskPriorityLabels[task.priority])}</Tag><strong>{task.title}</strong><span>{task.owner?.displayName ?? '-'}</span><time>{formatShortDate(task.dueDate ?? undefined, formatDate)}</time></button>)}</div> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('暂无任务')} />}</section>
+                <section className="project-detail-card project-recent-tasks-card"><div className="project-card-section-heading"><h2>{t('近期任务')}</h2><button type="button" onClick={() => setTab('kanban')}>{t('查看全部任务')} <span>→</span></button></div>{recentTasks.length ? <div className="project-recent-task-list">{recentTasks.map((task) => <button type="button" key={task.id} onClick={() => setTaskDetail(task)}><Tag color={task.priority === 'HIGH' || task.priority === 'URGENT' ? 'error' : task.priority === 'MEDIUM' ? 'warning' : 'success'}>{t(taskPriorityLabels[task.priority])}</Tag><strong>{task.title}</strong><span>{task.owner?.displayName ?? '-'}</span><time>{formatShortDate(task.dueDate ?? undefined, formatDate)}</time></button>)}</div> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('暂无任务')} />}</section>
             </div>
             <div className="project-overview-right">
                 <section className={`project-risk-panel ${riskTask ? 'has-risk' : 'is-clear'}`}><WarningOutlined /><div><h2>{riskTask ? t('项目进度预警') : t('项目进度正常')}</h2><p>{riskTask ? t('任务“{task}”需要关注，请及时检查执行进度。', { task: riskTask.title }) : t('当前没有已识别的进度风险。')}</p></div></section>
+                <section className="project-detail-card project-activity-card"><div className="project-card-section-heading"><h2>{t('项目动态')}</h2></div>{activities.length > 0 ? <div className="project-activity-list">{activities.slice(0, 8).map((activity: ProjectActivity) => <div className="project-activity-item" key={activity.id}><span className="project-activity-dot" /><div><strong>{activity.actor?.displayName ?? t('系统')}</strong><p>{activity.summary}</p><time>{formatDate(activity.createdAt)}</time></div></div>)}</div> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('暂无项目动态')} />}</section>
                 <section className="project-detail-card project-milestone-card"><h2>{t('里程碑时间线')}</h2><ProjectTimeline events={timeline} formatDate={formatDate} t={t} /></section>
             </div>
         </div>}
 
-        {tab === 'tasks' && <section className="project-detail-card project-tab-card"><ProjectTasksPanel readOnly={readOnly} tasks={tasks} tasksLoading={tasksQuery.isLoading} taskStatusFilter={taskStatusFilter} onTaskStatusFilter={setTaskStatusFilter} rootOnly={rootOnly} onToggleRootOnly={setRootOnly} canCreateTask={permissions.has('task.create')} onCreateTask={() => { setTaskForm(emptyTaskForm); setTaskCreateOpen(true); }} onTaskClick={setTaskDetail} /></section>}
+        {tab === 'workbench' && <ProjectWorkbenchPanel projectId={project.id} authContext={authContext} activeMembers={activeMembers} projectMembers={projectMembers} tasks={allTasks} permissions={permissions} canManage={canManage} readOnly={readOnly} onRefresh={() => void refreshProjectWorkflow()} onTaskClick={setTaskDetail} />}
+        {tab === 'decisions' && <ProjectDecisionPanel projectId={project.id} authContext={authContext} activeMembers={activeMembers} projectMembers={projectMembers} tasks={allTasks} permissions={permissions} canManage={canManage} readOnly={readOnly} onRefresh={() => void refreshProjectWorkflow()} onTaskClick={setTaskDetail} />}
+        {tab === 'kanban' && <ProjectKanbanPanel projectId={project.id} authContext={authContext} activeMembers={activeMembers} projectMembers={projectMembers} tasks={allTasks} permissions={permissions} canManage={canManage} readOnly={readOnly} onRefresh={() => void refreshProjectWorkflow()} onTaskClick={setTaskDetail} />}
+        {tab === 'daily' && <ProjectDailyReportPanel projectId={project.id} authContext={authContext} activeMembers={activeMembers} projectMembers={projectMembers} tasks={allTasks} permissions={permissions} canManage={canManage} readOnly={readOnly} onRefresh={() => void refreshProjectWorkflow()} onTaskClick={setTaskDetail} />}
+        {tab === 'milestones' && <ProjectMilestonePanel projectId={project.id} authContext={authContext} activeMembers={activeMembers} projectMembers={projectMembers} tasks={allTasks} permissions={permissions} canManage={canManage} readOnly={readOnly} onRefresh={() => void refreshProjectWorkflow()} onTaskClick={setTaskDetail} />}
         {tab === 'members' && <section className="project-detail-card project-tab-card"><ProjectMembersPanel projectId={project.id} permissions={permissions} readOnly={readOnly} myMembershipId={authContext.membership.id} activeMembers={activeMembers} projectMembers={projectMembers} projectVersion={project.version} onRefreshMembers={refreshMembers} /></section>}
-        {tab === 'milestones' && <section className="project-detail-card project-tab-card"><h2>{t('里程碑时间线')}</h2><ProjectTimeline events={timeline} formatDate={formatDate} t={t} /></section>}
-        {(tab === 'files' || tab === 'activity' || tab === 'settings') && <section className="surface-panel project-detail-placeholder"><Empty description={t('该模块暂未开放')} /></section>}
+        {tab === 'files' && <ProjectFilesPanel projectId={project.id} authContext={authContext} activeMembers={activeMembers} projectMembers={projectMembers} tasks={allTasks} permissions={permissions} canManage={canManage} readOnly={readOnly} onRefresh={() => void refreshProjectWorkflow()} onTaskClick={setTaskDetail} />}
+        {tab === 'expenses' && <ProjectExpensePanel projectId={project.id} authContext={authContext} activeMembers={activeMembers} projectMembers={projectMembers} tasks={allTasks} permissions={permissions} canManage={canManage} readOnly={readOnly} onRefresh={() => void refreshProjectWorkflow()} onTaskClick={setTaskDetail} />}
+        {tab === 'repository' && hasRepository && <ProjectRepositoryPanel projectId={project.id} authContext={authContext} activeMembers={activeMembers} projectMembers={projectMembers} tasks={allTasks} permissions={permissions} canManage={canManage} readOnly={readOnly} onRefresh={() => void repositoriesQuery.refetch()} onTaskClick={setTaskDetail} />}
+        {tab === 'settings' && <ProjectRepositorySettingsPanel projectId={project.id} authContext={authContext} activeMembers={activeMembers} projectMembers={projectMembers} tasks={allTasks} permissions={permissions} canManage={canManage} readOnly={readOnly} onRefresh={() => void repositoriesQuery.refetch()} onTaskClick={setTaskDetail} />}
 
         <ProjectFormModal open={projectModal.open} editing={projectModal.editing} permissions={permissions} currentMembershipId={authContext.membership.id} activeMembers={activeMembers} departments={departments} submitting={projectSubmitting} onSubmit={(values) => void submitProject(values)} onCancel={() => setProjectModal({ open: false })} />
         <Modal open={taskCreateOpen} title={t('新建任务')} okText={t('创建')} cancelText={t('取消')} onOk={() => void submitTask()} onCancel={() => setTaskCreateOpen(false)}>

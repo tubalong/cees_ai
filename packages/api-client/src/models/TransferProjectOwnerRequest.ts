@@ -6,4 +6,3 @@ export type TransferProjectOwnerRequest = {
     membershipId: string;
     version: number;
 };
-

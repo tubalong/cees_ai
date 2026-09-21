@@ -188,6 +188,62 @@ describe('TaskService', () => {
         });
     });
 
+    it('records completion time when a task enters done', async () => {
+        const prisma = createPrismaMock();
+        prisma.project.findFirst.mockResolvedValue(projectAccess());
+        prisma.task.findFirst.mockResolvedValue(taskRecord({ status: TaskStatus.IN_PROGRESS }));
+        prisma.task.updateMany.mockResolvedValue({ count: 1 });
+        const service = createService(prisma);
+
+        await service.transitionTask(PROJECT_ID, TASK_ID, {
+            status: TaskStatus.DONE,
+            version: 1,
+        });
+
+        expect(prisma.task.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+            data: expect.objectContaining({ status: TaskStatus.DONE, completedAt: expect.any(Date) }),
+        }));
+        expect(prisma.workReport.create).toHaveBeenCalledWith(expect.objectContaining({
+            data: expect.objectContaining({
+                authorMembershipId: CURRENT_MEMBERSHIP_ID,
+                reviewerMembershipId: OTHER_MEMBERSHIP_ID,
+                type: 'DAILY',
+                content: expect.objectContaining({ completedItems: ['完成：实现任务体系'] }),
+            }),
+        }));
+        expect(prisma.workReportTask.upsert).toHaveBeenCalled();
+    });
+
+    it('clears completion time when a done task is reopened', async () => {
+        const prisma = createPrismaMock();
+        prisma.project.findFirst.mockResolvedValue(projectAccess());
+        prisma.task.findFirst.mockResolvedValue(taskRecord({ status: TaskStatus.DONE }));
+        prisma.task.updateMany.mockResolvedValue({ count: 1 });
+        const service = createService(prisma);
+
+        await service.transitionTask(PROJECT_ID, TASK_ID, {
+            status: TaskStatus.IN_PROGRESS,
+            version: 1,
+            reason: '重新处理遗漏项',
+        });
+
+        expect(prisma.task.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+            data: expect.objectContaining({ status: TaskStatus.IN_PROGRESS, completedAt: null }),
+        }));
+    });
+
+    it('requires a reason when a done task is reopened', async () => {
+        const prisma = createPrismaMock();
+        prisma.project.findFirst.mockResolvedValue(projectAccess());
+        prisma.task.findFirst.mockResolvedValue(taskRecord({ status: TaskStatus.DONE }));
+        const service = createService(prisma);
+
+        await expect(service.transitionTask(PROJECT_ID, TASK_ID, {
+            status: TaskStatus.IN_PROGRESS,
+            version: 1,
+        })).rejects.toMatchObject({ response: expect.objectContaining({ code: 'TASK_STATUS_REASON_REQUIRED' }) });
+    });
+
     it('rejects stale task versions during status transitions', async () => {
         const prisma = createPrismaMock();
         prisma.project.findFirst.mockResolvedValue(projectAccess());
@@ -272,6 +328,10 @@ function createPrismaMock(): Record<string, any> {
         taskComment: { findMany: jest.fn(), findFirst: jest.fn(), create: jest.fn(), updateMany: jest.fn() },
         taskAttachment: { findMany: jest.fn(), findFirst: jest.fn(), create: jest.fn(), updateMany: jest.fn() },
         taskActivity: { findMany: jest.fn(), create: jest.fn() },
+        projectActivity: { create: jest.fn() },
+        workReport: { findFirst: jest.fn().mockResolvedValue(null), create: jest.fn().mockResolvedValue({ id: '90000000-0000-0000-0000-000000000001' }), update: jest.fn() },
+        workReportProject: { upsert: jest.fn() },
+        workReportTask: { upsert: jest.fn() },
         fileObject: { findFirst: jest.fn() },
         auditLog: { create: jest.fn() },
         $queryRaw: jest.fn().mockResolvedValue([{ id: PROJECT_ID }]),
@@ -285,6 +345,8 @@ function projectAccess(overrides: Record<string, unknown> = {}): Record<string, 
     return {
         id: PROJECT_ID,
         status: ProjectStatus.ACTIVE,
+        ownerMembershipId: OTHER_MEMBERSHIP_ID,
+        tenant: { timezone: 'Asia/Shanghai' },
         members: [{ role: ProjectMemberRole.OWNER }],
         ...overrides,
     };

@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { ConversationMessageRole, type Prisma } from '@prisma/client';
+import { ConversationMessageRole, TaskStatus, type Prisma } from '@prisma/client';
 import type { ChatMessage, ChatMode, ChatRequest, MessageContentPart, ToolTurnMessage } from '@cees/ai-service-client';
 import { PrismaService } from '../../database/prisma.service';
 import { AiServiceGateway, type ChatContextBudgets } from '../../ai-orchestration/ai-service-gateway.service';
@@ -34,7 +34,7 @@ const MESSAGE_OVERHEAD_TOKENS = 4;
 const IMAGE_TOKEN_ESTIMATE = 1024;
 
 export interface BuildChatRequestInput {
-  conversation: { id: string; tenantId: string };
+  conversation: { id: string; tenantId: string; contextType: 'GENERAL' | 'PROJECT'; projectId: string | null };
   turnId: string;
   membershipId: string;
   userId: string;
@@ -94,6 +94,7 @@ export class ContextBuilderService {
       user_id: userId,
       conversation_id: conversation.id,
       mode: (input.mode === 'ultra' ? 'ultra' : 'standard') satisfies ChatMode,
+      instructions: await this.buildProjectInstructions(conversation, input.membershipId),
       conversation_summary: summary,
       user_memories: userMemories.length > 0 ? userMemories : null,
       messages: await Promise.all(history.map((message) => this.toChatMessage(message, input))),
@@ -110,6 +111,7 @@ export class ContextBuilderService {
   async buildToolTurnMessages(input: BuildChatRequestInput): Promise<{
     summary: string | null;
     items: ToolTurnMessage[];
+    projectInstructions: string | null;
     /** 注入用：全部 ACTIVE 记忆内容（升序），由 turn-runner 传入 ToolTurnRequest。 */
     userMemories: string[];
   }> {
@@ -193,7 +195,37 @@ export class ContextBuilderService {
       items.push({ role: 'assistant', content: await this.toParts(message, input) });
     }
 
-    return { summary, items, userMemories };
+    return { summary, items, projectInstructions: await this.buildProjectInstructions(conversation, input.membershipId), userMemories };
+  }
+
+  private async buildProjectInstructions(conversation: { tenantId: string; contextType: 'GENERAL' | 'PROJECT'; projectId: string | null }, membershipId: string): Promise<string | null> {
+    if (conversation.contextType !== 'PROJECT' || !conversation.projectId) return null;
+    const [project, projectMember, taskCount, openTaskCount, decisionCount, milestoneCount, repositoryCount, fileCount, tasks, decisions, milestones, activities] = await Promise.all([
+      this.prisma.project.findFirst({ where: { id: conversation.projectId, tenantId: conversation.tenantId, deletedAt: null }, select: { name: true, code: true, status: true } }),
+      this.prisma.projectMember.findFirst({ where: { tenantId: conversation.tenantId, projectId: conversation.projectId, membershipId, deletedAt: null }, select: { role: true } }),
+      this.prisma.task.count({ where: { tenantId: conversation.tenantId, projectId: conversation.projectId, deletedAt: null } }),
+      this.prisma.task.count({ where: { tenantId: conversation.tenantId, projectId: conversation.projectId, deletedAt: null, status: { notIn: [TaskStatus.DONE, TaskStatus.CANCELLED] } } }),
+      this.prisma.projectDecision.count({ where: { tenantId: conversation.tenantId, projectId: conversation.projectId, deletedAt: null } }),
+      this.prisma.projectMilestone.count({ where: { tenantId: conversation.tenantId, projectId: conversation.projectId, deletedAt: null } }),
+      this.prisma.projectRepository.count({ where: { tenantId: conversation.tenantId, projectId: conversation.projectId, enabled: true } }),
+      this.prisma.knowledgeBase.count({ where: { tenantId: conversation.tenantId, projectId: conversation.projectId, deletedAt: null } }),
+      this.prisma.task.findMany({ where: { tenantId: conversation.tenantId, projectId: conversation.projectId, deletedAt: null }, orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }], take: 20, select: { title: true, status: true, priority: true, dueDate: true } }),
+      this.prisma.projectDecision.findMany({ where: { tenantId: conversation.tenantId, projectId: conversation.projectId, deletedAt: null }, orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }], take: 10, select: { title: true, status: true, conclusion: true } }),
+      this.prisma.projectMilestone.findMany({ where: { tenantId: conversation.tenantId, projectId: conversation.projectId, deletedAt: null }, orderBy: [{ targetDate: 'asc' }, { id: 'asc' }], take: 10, select: { title: true, status: true, targetDate: true } }),
+      this.prisma.projectActivity.findMany({ where: { tenantId: conversation.tenantId, projectId: conversation.projectId }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 10, select: { summary: true, createdAt: true } }),
+    ]);
+    if (!project || !projectMember) return null;
+    return [
+      `当前会话固定绑定项目「${project.name}」（${project.code}，项目 ID：${conversation.projectId}）。`,
+      `项目状态：${project.status}；当前用户项目角色：${projectMember.role}。`,
+      `当前项目上下文摘要：任务 ${taskCount} 项（未完成 ${openTaskCount} 项）、决策 ${decisionCount} 条、里程碑 ${milestoneCount} 个、启用仓库 ${repositoryCount} 个、项目知识库 ${fileCount} 个。`,
+      `最近任务：${tasks.length ? tasks.map((task) => `${task.title}[${task.status}/${task.priority}${task.dueDate ? `/截止${task.dueDate.toISOString().slice(0, 10)}` : ''}]`).join('；') : '无'}。`,
+      `项目决策：${decisions.length ? decisions.map((decision) => `${decision.title}[${decision.status}]${decision.conclusion ? `：${decision.conclusion}` : ''}`).join('；') : '无'}。`,
+      `项目里程碑：${milestones.length ? milestones.map((milestone) => `${milestone.title}[${milestone.status}/目标${milestone.targetDate.toISOString().slice(0, 10)}]`).join('；') : '无'}。`,
+      `最近正式动态：${activities.length ? activities.map((activity) => `${activity.createdAt.toISOString()} ${activity.summary}`).join('；') : '无'}。`,
+      '你只能围绕当前项目回答和生成建议，不得读取其他项目的数据；项目文件和知识库内容仍必须通过当前用户权限范围内的检索工具获取。',
+      '涉及决策发布、任务创建、负责人分配、里程碑验收和仓库配置等正式写入时，只能生成待确认草稿，不能声称已经执行。',
+    ].join('\n');
   }
 
   /**

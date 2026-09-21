@@ -11,4 +11,3 @@ export type DashboardProjectMetrics = {
     cancelled: number;
     archived: number;
 };
-

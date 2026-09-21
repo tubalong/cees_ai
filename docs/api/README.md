@@ -451,3 +451,5 @@ GET    /api/v1/projects/{projectId}/tasks/{taskId}/activities
 - Chat API 不接受 `llm_profile`、Provider、模型名、temperature 或 reasoning effort 覆盖，这些参数由 ai-service 模式配置控制。
 
 文件上传的已实现范围和后续设计见 [文件上传与 COS 设计](../architecture/file-upload.md)。正式路径和 Schema 以公开 OpenAPI 为准。
+
+- [项目工作流 API](project-workflow-api.md)：项目决策、里程碑、仓库、动态、项目会话与日报联动。

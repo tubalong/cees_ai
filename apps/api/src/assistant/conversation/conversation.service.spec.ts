@@ -15,7 +15,7 @@ describe('ConversationService', () => {
     expect(result).toEqual(expect.objectContaining({ id: CONVERSATION_ID, title: '计划讨论', version: 1 }));
     expect(result.mode).toBe('standard');
     expect(prisma.conversation.create).toHaveBeenCalledWith({
-      data: { tenantId: TENANT_ID, ownerMembershipId: MEMBERSHIP_ID, title: '计划讨论', mode: 'standard' },
+      data: { tenantId: TENANT_ID, ownerMembershipId: MEMBERSHIP_ID, title: '计划讨论', mode: 'standard', contextType: 'GENERAL', projectId: null },
     });
     expect(prisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ action: 'CONVERSATION_CREATED', resourceId: CONVERSATION_ID }),
@@ -31,7 +31,7 @@ describe('ConversationService', () => {
 
     expect(result.mode).toBe('ultra');
     expect(prisma.conversation.create).toHaveBeenCalledWith({
-      data: { tenantId: TENANT_ID, ownerMembershipId: MEMBERSHIP_ID, title: '', mode: 'ultra' },
+      data: { tenantId: TENANT_ID, ownerMembershipId: MEMBERSHIP_ID, title: '', mode: 'ultra', contextType: 'GENERAL', projectId: null },
     });
   });
 

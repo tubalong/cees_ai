@@ -412,6 +412,7 @@ function createPrismaMock(): Record<string, any> {
             updateMany: jest.fn(),
         },
         projectStatusHistory: { create: jest.fn() },
+        projectActivity: { create: jest.fn() },
         tenantMembership: { findFirst: jest.fn() },
         tenant: { findFirst: jest.fn().mockResolvedValue({ timezone: 'Asia/Shanghai' }) },
         department: { findFirst: jest.fn() },

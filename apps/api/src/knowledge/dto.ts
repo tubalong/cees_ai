@@ -33,6 +33,10 @@ export class ListKnowledgeBasesQueryDto {
     permission?: KnowledgeBaseMemberPermission;
 
     @IsOptional()
+    @IsUUID()
+    projectId?: string;
+
+    @IsOptional()
     @Type(() => Number)
     @IsInt()
     @Min(1)

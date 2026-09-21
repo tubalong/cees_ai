@@ -16,6 +16,7 @@ export interface ToolExecutionContext {
   membershipId: string;
   requestId: string;
   conversationId: string;
+  projectId?: string | null;
   turnId: string;
   toolCallId: string;
   /** 持有本轮租约的 API 实例标识；业务副作用前必须再次核对。 */

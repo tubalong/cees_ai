@@ -6,4 +6,3 @@ import type { ProjectMemberSummary } from './ProjectMemberSummary';
 export type ProjectMemberList = {
     items: Array<ProjectMemberSummary>;
 };
-

@@ -418,6 +418,7 @@ export interface ListKnowledgeBasesParams {
     limit?: number;
     cursor?: string;
     permission?: KnowledgeBaseMemberPermission;
+    projectId?: string;
 }
 
 export async function listKnowledgeBases(params: ListKnowledgeBasesParams = {}): Promise<CursorPage<KnowledgeBaseSummary>> {
@@ -425,6 +426,7 @@ export async function listKnowledgeBases(params: ListKnowledgeBasesParams = {}):
     if (params.keyword?.trim()) query.set('keyword', params.keyword.trim());
     if (params.cursor) query.set('cursor', params.cursor);
     if (params.permission) query.set('permission', params.permission);
+    if (params.projectId) query.set('projectId', params.projectId);
     return authorizedRequest<CursorPage<KnowledgeBaseSummary>>(`v1/knowledge-bases?${query}`);
 }
 
@@ -535,6 +537,7 @@ export async function uploadKnowledgeDocument(knowledgeBaseId: string, input: {
     fileObjectId: string;
     name?: string;
     visibilityScope: KnowledgeDocumentVisibilityScope;
+    projectId?: string | null;
 }): Promise<KnowledgeDocumentResult> {
     return authorizedRequest<KnowledgeDocumentResult>(`v1/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/documents`, {
         method: 'POST',
@@ -542,6 +545,7 @@ export async function uploadKnowledgeDocument(knowledgeBaseId: string, input: {
             fileObjectId: input.fileObjectId,
             name: input.name?.trim() || undefined,
             visibilityScope: input.visibilityScope,
+            ...(input.projectId ? { projectId: input.projectId } : {}),
         }),
     });
 }
@@ -1408,7 +1412,7 @@ export async function uploadAttachmentFile(file: File): Promise<string> {
 
 export type ChatMode = 'standard' | 'ultra';
 
-export interface Conversation { id: string; title: string; mode: ChatMode; visibility: 'PRIVATE'; version: number; createdAt: string; updatedAt: string; lastTurnAt?: string | null; }
+export interface Conversation { id: string; title: string; mode: ChatMode; visibility: 'PRIVATE'; contextType: 'GENERAL' | 'PROJECT'; projectId: string | null; version: number; createdAt: string; updatedAt: string; lastTurnAt?: string | null; }
 export interface ConversationMessage { id: string; role: 'USER' | 'ASSISTANT' | 'TOOL'; content: string; createdAt: string; turnId?: string | null; toolCallId?: string | null; resources?: Array<{ id: string; resourceId?: string; type: 'IMAGE' | 'DOCUMENT'; url?: string | null; resourceUrl?: string | null }> | null; sources?: Array<{ id: string; title: string; url: string; domain: string; snippet: string; publishedAt?: string | null }> | null; citations?: Array<{ id: string; title: string; snippet: string; pageIndex?: number | null; knowledgeBaseId?: string | null; deletable?: boolean }> | null; }
 export interface ConversationDetail { conversation: Conversation; messages: ConversationMessage[]; }
 export interface Turn { id: string; conversationId: string; status: 'RECEIVED' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED'; mode: ChatMode; error?: Record<string, unknown> | null; createdAt: string; completedAt?: string | null; }
@@ -1440,8 +1444,8 @@ export function parseSseFrames(input: string): { events: TurnStreamEvent[]; rest
     return { events, rest };
 }
 
-export async function createConversation(title?: string, mode: ChatMode = 'standard'): Promise<Conversation> { return authorizedRequest<Conversation>('v1/conversations', { method: 'POST', body: JSON.stringify({ ...(title ? { title } : {}), mode }) }); }
-export async function listConversations(limit = 100): Promise<{ items: Conversation[]; nextCursor: string | null }> { return authorizedRequest<{ items: Conversation[]; nextCursor: string | null }>(`v1/conversations?limit=${limit}`); }
+export async function createConversation(title?: string, mode: ChatMode = 'standard', context?: { contextType: 'GENERAL' | 'PROJECT'; projectId?: string | null }): Promise<Conversation> { return authorizedRequest<Conversation>('v1/conversations', { method: 'POST', body: JSON.stringify({ ...(title ? { title } : {}), mode, ...(context ? { contextType: context.contextType, ...(context.projectId ? { projectId: context.projectId } : {}) } : {}) }) }); }
+export async function listConversations(limit = 100, filters: { contextType?: 'GENERAL' | 'PROJECT'; projectId?: string } = {}): Promise<{ items: Conversation[]; nextCursor: string | null }> { const query = new URLSearchParams({ limit: String(limit) }); if (filters.contextType) query.set('contextType', filters.contextType); if (filters.projectId) query.set('projectId', filters.projectId); return authorizedRequest<{ items: Conversation[]; nextCursor: string | null }>(`v1/conversations?${query}`); }
 export async function getConversation(conversationId: string): Promise<ConversationDetail> { return authorizedRequest<ConversationDetail>(`v1/conversations/${encodeURIComponent(conversationId)}`); }
 export async function getImage(imageId: string): Promise<ImageAccess> { return authorizedRequest<ImageAccess>(`v1/images/${encodeURIComponent(imageId)}`); }
 export async function updateConversation(conversationId: string, title: string, version: number): Promise<Conversation> { return authorizedRequest<Conversation>(`v1/conversations/${encodeURIComponent(conversationId)}`, { method: 'PATCH', body: JSON.stringify({ title, version }) }); }
@@ -1836,6 +1840,7 @@ export interface TaskSummary {
     id: string;
     projectId: string;
     parentId: string | null;
+    decisionId?: string | null;
     title: string;
     description?: string | null;
     status: TaskStatus;
@@ -1855,6 +1860,7 @@ export interface CreateTaskInput {
     title: string;
     description?: string;
     parentId?: string | null;
+    decisionId?: string | null;
     priority?: TaskPriority;
     dueDate?: string | null;
     ownerMembershipId: string;
@@ -2821,3 +2827,85 @@ export async function getLegalContractSummary(expiringWithinDays = 30): Promise<
 function legalContractAction(id: string, action: string, body: unknown): Promise<LegalContract> {
     return authorizedRequest(`v1/legal/contracts/${encodeURIComponent(id)}/${action}`, { method: 'POST', body: JSON.stringify(body) });
 }
+
+// ---------------------------------------------------------------------------
+// 项目工作流（0.37.0）：决策、里程碑、仓库与正式动态
+// ---------------------------------------------------------------------------
+
+export type ProjectDecisionStatus = 'DRAFT' | 'PUBLISHED' | 'SUPERSEDED';
+export type ProjectMilestoneStatus = 'PLANNED' | 'IN_PROGRESS' | 'ACCEPTANCE' | 'COMPLETED' | 'CANCELLED';
+export type ProjectRepositoryProvider = 'GITHUB' | 'GITLAB' | 'GITEE' | 'OTHER';
+
+export interface ProjectMemberIdentity { membershipId: string; account: string; displayName: string; }
+export interface ProjectDecision {
+    id: string; projectId: string; title: string; problem: string; background: string | null; recommendation: string | null;
+    conclusion: string | null; rationale: string | null; risks: string[]; nextActions: string[];
+    participantMembershipIds: string[]; participants: ProjectMemberIdentity[]; status: ProjectDecisionStatus;
+    sourceConversationId: string | null; publishedAt: string | null; publishedBy: ProjectMemberIdentity | null;
+    createdBy: ProjectMemberIdentity; createdAt: string; updatedAt: string; version: number;
+}
+export interface ProjectDecisionInput {
+    title: string; problem: string; background?: string | null; recommendation?: string | null; conclusion?: string | null;
+    rationale?: string | null; risks?: string[]; nextActions?: string[]; participantMembershipIds?: string[];
+    sourceConversationId?: string | null;
+}
+export interface ProjectMilestone {
+    id: string; projectId: string; title: string; objective: string; targetDate: string; owner: ProjectMemberIdentity;
+    acceptanceCriteria: string[]; acceptanceNote: string | null; status: ProjectMilestoneStatus; startedAt: string | null;
+    acceptanceStartedAt: string | null; completedAt: string | null; cancelledAt: string | null; cancellationReason: string | null;
+    tasks: Array<{ id: string; title: string; status: TaskStatus; required: boolean }>; taskCount: number;
+    completedTaskCount: number; openTaskCount: number; progressPercent: number; overdue: boolean;
+    health: 'NORMAL' | 'AT_RISK' | 'OVERDUE'; decisions: Array<{ id: string; title: string; status: ProjectDecisionStatus }>;
+    createdAt: string; updatedAt: string; version: number;
+}
+export interface ProjectMilestoneInput {
+    title: string; objective: string; targetDate: string; ownerMembershipId: string; acceptanceCriteria: string[];
+    taskIds?: string[]; decisionIds?: string[];
+}
+export interface ProjectRepository {
+    id: string; projectId: string; provider: ProjectRepositoryProvider; name: string; url: string; defaultBranch: string;
+    enabled: boolean; lastSyncedAt: string | null; createdAt: string; updatedAt: string; version: number;
+}
+export interface ProjectActivity {
+    id: string; projectId: string; type: string; resourceType: string; resourceId: string | null; summary: string;
+    metadata: Record<string, unknown>; actor: ProjectMemberIdentity | null; createdAt: string;
+}
+export interface ProjectWorkflowSummary {
+    decisions: { total: number; draft: number; published: number; superseded: number };
+    milestones: { total: number; planned: number; inProgress: number; acceptance: number; completed: number; cancelled: number; overdue: number };
+    repositories: { total: number; enabled: number };
+    activities: ProjectActivity[];
+}
+
+export async function getProjectWorkflowSummary(projectId: string): Promise<ProjectWorkflowSummary> { return authorizedRequest<ProjectWorkflowSummary>(`v1/projects/${encodeURIComponent(projectId)}/workflow-summary`); }
+export async function listProjectActivities(projectId: string, limit = 100): Promise<ProjectActivity[]> { return authorizedRequest<ProjectActivity[]>(`v1/projects/${encodeURIComponent(projectId)}/activities?limit=${limit}`); }
+export async function listProjectDecisions(projectId: string): Promise<ProjectDecision[]> { return authorizedRequest<ProjectDecision[]>(`v1/projects/${encodeURIComponent(projectId)}/decisions`); }
+export async function createProjectDecision(projectId: string, input: ProjectDecisionInput): Promise<ProjectDecision> { return authorizedRequest<ProjectDecision>(`v1/projects/${encodeURIComponent(projectId)}/decisions`, { method: 'POST', body: JSON.stringify(input) }); }
+export async function updateProjectDecision(projectId: string, decisionId: string, input: ProjectDecisionInput & { version: number }): Promise<ProjectDecision> { return authorizedRequest<ProjectDecision>(`v1/projects/${encodeURIComponent(projectId)}/decisions/${encodeURIComponent(decisionId)}`, { method: 'PATCH', body: JSON.stringify(input) }); }
+export async function publishProjectDecision(projectId: string, decisionId: string, conclusion: string, version: number): Promise<ProjectDecision> { return authorizedRequest<ProjectDecision>(`v1/projects/${encodeURIComponent(projectId)}/decisions/${encodeURIComponent(decisionId)}/publish`, { method: 'POST', body: JSON.stringify({ conclusion, version }) }); }
+export async function deleteProjectDecision(projectId: string, decisionId: string, version: number): Promise<void> { return authorizedRequest<void>(`v1/projects/${encodeURIComponent(projectId)}/decisions/${encodeURIComponent(decisionId)}?version=${version}`, { method: 'DELETE' }); }
+export async function listProjectMilestones(projectId: string): Promise<ProjectMilestone[]> { return authorizedRequest<ProjectMilestone[]>(`v1/projects/${encodeURIComponent(projectId)}/milestones`); }
+export async function createProjectMilestone(projectId: string, input: ProjectMilestoneInput): Promise<ProjectMilestone> { return authorizedRequest<ProjectMilestone>(`v1/projects/${encodeURIComponent(projectId)}/milestones`, { method: 'POST', body: JSON.stringify(input) }); }
+export async function updateProjectMilestone(projectId: string, milestoneId: string, input: ProjectMilestoneInput & { version: number }): Promise<ProjectMilestone> { return authorizedRequest<ProjectMilestone>(`v1/projects/${encodeURIComponent(projectId)}/milestones/${encodeURIComponent(milestoneId)}`, { method: 'PATCH', body: JSON.stringify(input) }); }
+export async function startProjectMilestone(projectId: string, milestoneId: string, version: number): Promise<ProjectMilestone> { return authorizedRequest<ProjectMilestone>(`v1/projects/${encodeURIComponent(projectId)}/milestones/${encodeURIComponent(milestoneId)}/start`, { method: 'POST', body: JSON.stringify({ version }) }); }
+export async function startProjectMilestoneAcceptance(projectId: string, milestoneId: string, version: number): Promise<ProjectMilestone> { return authorizedRequest<ProjectMilestone>(`v1/projects/${encodeURIComponent(projectId)}/milestones/${encodeURIComponent(milestoneId)}/acceptance`, { method: 'POST', body: JSON.stringify({ version }) }); }
+export async function completeProjectMilestone(projectId: string, milestoneId: string, version: number, acceptanceNote?: string): Promise<ProjectMilestone> { return authorizedRequest<ProjectMilestone>(`v1/projects/${encodeURIComponent(projectId)}/milestones/${encodeURIComponent(milestoneId)}/complete`, { method: 'POST', body: JSON.stringify({ version, acceptanceNote }) }); }
+export async function cancelProjectMilestone(projectId: string, milestoneId: string, version: number, reason: string): Promise<ProjectMilestone> { return authorizedRequest<ProjectMilestone>(`v1/projects/${encodeURIComponent(projectId)}/milestones/${encodeURIComponent(milestoneId)}/cancel`, { method: 'POST', body: JSON.stringify({ version, reason }) }); }
+export async function reopenProjectMilestone(projectId: string, milestoneId: string, version: number, reason?: string): Promise<ProjectMilestone> { return authorizedRequest<ProjectMilestone>(`v1/projects/${encodeURIComponent(projectId)}/milestones/${encodeURIComponent(milestoneId)}/reopen`, { method: 'POST', body: JSON.stringify({ version, reason }) }); }
+export async function listProjectRepositories(projectId: string): Promise<ProjectRepository[]> { return authorizedRequest<ProjectRepository[]>(`v1/projects/${encodeURIComponent(projectId)}/repositories`); }
+export async function createProjectRepository(projectId: string, input: { url: string; name?: string; defaultBranch?: string }): Promise<ProjectRepository> { return authorizedRequest<ProjectRepository>(`v1/projects/${encodeURIComponent(projectId)}/repositories`, { method: 'POST', body: JSON.stringify(input) }); }
+export async function updateProjectRepository(projectId: string, repositoryId: string, input: { url?: string; name?: string; defaultBranch?: string; enabled?: boolean; version: number }): Promise<ProjectRepository> { return authorizedRequest<ProjectRepository>(`v1/projects/${encodeURIComponent(projectId)}/repositories/${encodeURIComponent(repositoryId)}`, { method: 'PATCH', body: JSON.stringify(input) }); }
+export async function deleteProjectRepository(projectId: string, repositoryId: string, version: number): Promise<void> { return authorizedRequest<void>(`v1/projects/${encodeURIComponent(projectId)}/repositories/${encodeURIComponent(repositoryId)}?version=${version}`, { method: 'DELETE' }); }
+
+export interface ProjectDailyReportContent { completedItems: string[]; plannedItems: string[]; blockers: string[]; remarks: string | null; }
+export interface ProjectDailyReport {
+    id: string; type: 'DAILY'; periodStart: string; periodEnd: string; content: ProjectDailyReportContent;
+    status: 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REJECTED'; author: ProjectMemberIdentity | null;
+    reviewer: ProjectMemberIdentity | null; projectIds: string[]; taskIds: string[]; submittedAt: string | null;
+    reviewedAt: string | null; reviewComment: string | null; createdAt: string; updatedAt: string; version: number;
+}
+export async function listProjectDailyReports(projectId: string): Promise<CursorPage<ProjectDailyReport>> { return authorizedRequest<CursorPage<ProjectDailyReport>>(`v1/work-reports?type=DAILY&projectId=${encodeURIComponent(projectId)}&limit=100`); }
+export async function createProjectDailyReport(projectId: string, reportDate: string, reviewerMembershipId: string, content: ProjectDailyReportContent, taskIds: string[] = []): Promise<ProjectDailyReport> { return authorizedRequest<ProjectDailyReport>('v1/work-reports/daily', { method: 'POST', body: JSON.stringify({ reportDate, reviewerMembershipId, content, projectIds: [projectId], taskIds }) }); }
+export async function updateProjectDailyReport(reportId: string, reviewerMembershipId: string, content: ProjectDailyReportContent, version: number, projectIds: string[], taskIds: string[]): Promise<ProjectDailyReport> { return authorizedRequest<ProjectDailyReport>(`v1/work-reports/${encodeURIComponent(reportId)}`, { method: 'PATCH', body: JSON.stringify({ reviewerMembershipId, content, version, projectIds, taskIds }) }); }
+export async function submitProjectDailyReport(reportId: string, version: number): Promise<ProjectDailyReport> { return authorizedRequest<ProjectDailyReport>(`v1/work-reports/${encodeURIComponent(reportId)}/submit`, { method: 'POST', body: JSON.stringify({ version }) }); }
+export async function withdrawProjectDailyReport(reportId: string, version: number): Promise<ProjectDailyReport> { return authorizedRequest<ProjectDailyReport>(`v1/work-reports/${encodeURIComponent(reportId)}/withdraw`, { method: 'POST', body: JSON.stringify({ version }) }); }

@@ -66,14 +66,14 @@ export class AssistantController {
   @ApiOperation({ summary: '创建当前成员的私有 AI 会话' })
   @ApiOkResponse({ description: '会话创建成功' })
   createConversation(@Body() input: CreateConversationRequestDto): Promise<PublicConversation> {
-    return this.conversationService.create(input.title, input.mode);
+    return this.conversationService.create(input.title, input.mode, input.contextType ?? 'GENERAL', input.projectId ?? null);
   }
 
   @Get()
   @ApiOperation({ summary: '查询当前成员的会话列表' })
   @ApiOkResponse({ description: '按更新时间倒序返回当前成员的私有会话' })
   listConversations(@Query() query: ListConversationsQueryDto): Promise<PublicConversationListResult> {
-    return this.conversationService.list(query.limit, query.cursor);
+    return this.conversationService.list(query.limit, query.cursor, { ...(query.contextType ? { contextType: query.contextType } : {}), ...(query.projectId ? { projectId: query.projectId } : {}) });
   }
 
   @Get(':conversationId')

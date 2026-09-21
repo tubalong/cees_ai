@@ -9,6 +9,7 @@ import { UserModule } from './user/user.module';
 import { UserMemoryModule } from './user-memory/user-memory.module';
 import { FileModule } from './file/file.module';
 import { ProjectModule } from './project/project.module';
+import { ProjectWorkflowModule } from './project-workflow/project-workflow.module';
 import { TaskModule } from './task/task.module';
 import { MeetingModule } from './meeting/meeting.module';
 import { WorkReportModule } from './work-report/work-report.module';
@@ -27,7 +28,7 @@ import { LegalModule } from './legal/legal.module';
 @Module({}) export class CommonModule { }
 
 export const BusinessModules: Type[] = [
-    OrganizationModule, RbacModule, UserModule, UserMemoryModule, ProjectModule, TaskModule, AssistantModule, WorkReportModule,
+    OrganizationModule, RbacModule, UserModule, UserMemoryModule, ProjectModule, ProjectWorkflowModule, TaskModule, AssistantModule, WorkReportModule,
     FileModule, KnowledgeModule, ResourceModule, DocumentModule, MeetingModule, NotificationModule, DashboardModule,
     AiOrchestrationModule, IntegrationModule, AuditModule, CommonModule, JobsModule, DingTalkModule, AssignmentModule,
     HrModule, FinanceModule, LegalModule,

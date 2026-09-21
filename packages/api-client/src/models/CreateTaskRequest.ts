@@ -11,5 +11,9 @@ export type CreateTaskRequest = {
     dueDate?: string | null;
     ownerMembershipId: string;
     collaboratorMembershipIds?: Array<string>;
+    /**
+     * 任务来源决策；必须属于当前项目
+     */
+    decisionId?: string | null;
 };
 

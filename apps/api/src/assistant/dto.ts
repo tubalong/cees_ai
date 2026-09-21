@@ -109,6 +109,16 @@ export class CreateConversationRequestDto {
   @ValidateIf((_object, value) => value !== undefined)
   @IsIn(['standard', 'ultra'])
   mode?: PublicTurnMode;
+
+  @ApiPropertyOptional({ description: '会话上下文类型；默认 GENERAL', enum: ['GENERAL', 'PROJECT'], default: 'GENERAL' })
+  @IsOptional()
+  @IsIn(['GENERAL', 'PROJECT'])
+  contextType?: 'GENERAL' | 'PROJECT';
+
+  @ApiPropertyOptional({ description: '项目会话绑定的项目 ID；PROJECT 时必填', format: 'uuid', nullable: true })
+  @IsOptional()
+  @IsUUID()
+  projectId?: string | null;
 }
 
 export class UpdateConversationRequestDto {
@@ -151,6 +161,16 @@ export class ListConversationsQueryDto {
   @MinLength(1)
   @MaxLength(256)
   cursor?: string;
+
+  @ApiPropertyOptional({ description: '按上下文类型筛选', enum: ['GENERAL', 'PROJECT'] })
+  @IsOptional()
+  @IsIn(['GENERAL', 'PROJECT'])
+  contextType?: 'GENERAL' | 'PROJECT';
+
+  @ApiPropertyOptional({ description: '按项目上下文筛选', format: 'uuid' })
+  @IsOptional()
+  @IsUUID()
+  projectId?: string;
 }
 
 export class CreateTurnRequestDto {

@@ -255,7 +255,7 @@ export class TurnRunnerService implements OnModuleDestroy {
 
   private async executeInBackground(input: {
     turnId: string;
-    conversation: { id: string; tenantId: string };
+    conversation: { id: string; tenantId: string; contextType: 'GENERAL' | 'PROJECT'; projectId: string | null };
     userId: string;
     membershipId: string;
     requestId: string;
@@ -320,7 +320,7 @@ export class TurnRunnerService implements OnModuleDestroy {
 
   private async runPlainTurn(input: {
     turnId: string;
-    conversation: { id: string; tenantId: string };
+    conversation: { id: string; tenantId: string; contextType: 'GENERAL' | 'PROJECT'; projectId: string | null };
     userId: string;
     membershipId: string;
     requestId: string;
@@ -340,7 +340,7 @@ export class TurnRunnerService implements OnModuleDestroy {
     // 未启用的能力通过可信 instructions 告知模型，避免它凭记忆编造外部/内部信息，
     // 并引导它在用户确有需求时提示开启开关或改写为明确请求。
     const guidance = buildCapabilityGuidance(input.capabilities);
-    if (guidance) chatRequest.instructions = guidance;
+    chatRequest.instructions = combineInstructions(chatRequest.instructions, guidance);
     if (input.signal.aborted) return;
 
     const upstream = await this.gateway.streamChat(
@@ -387,7 +387,7 @@ export class TurnRunnerService implements OnModuleDestroy {
    */
   private async runToolTurn(input: {
     turnId: string;
-    conversation: { id: string; tenantId: string };
+    conversation: { id: string; tenantId: string; contextType: 'GENERAL' | 'PROJECT'; projectId: string | null };
     userId: string;
     membershipId: string;
     requestId: string;
@@ -423,7 +423,7 @@ export class TurnRunnerService implements OnModuleDestroy {
         user_id: input.userId,
         conversation_id: conversation.id,
         mode: input.mode === 'ultra' ? 'ultra' : 'standard',
-        instructions: buildCapabilityGuidance(input.capabilities) ?? null,
+        instructions: combineInstructions(messages.projectInstructions, buildCapabilityGuidance(input.capabilities)),
         conversation_summary: messages.summary ?? null,
         user_memories: messages.userMemories.length > 0 ? messages.userMemories : null,
         messages: messages.items,
@@ -565,7 +565,7 @@ export class TurnRunnerService implements OnModuleDestroy {
 
   private async executeToolCalls(input: {
     turnId: string;
-    conversation: { id: string; tenantId: string };
+    conversation: { id: string; tenantId: string; contextType: 'GENERAL' | 'PROJECT'; projectId: string | null };
     userId: string;
     membershipId: string;
     requestId: string;
@@ -695,6 +695,7 @@ export class TurnRunnerService implements OnModuleDestroy {
             membershipId: input.membershipId,
             requestId: input.requestId,
             conversationId: input.conversation.id,
+            projectId: input.conversation.projectId,
             turnId: input.turnId,
             toolCallId: effectiveToolCallId,
             executionOwner: input.executionOwner,
@@ -1062,6 +1063,11 @@ function resolveTurnCapabilities(input: {
  * 两项能力都已启用时返回 null（无需额外提示）。本片段只约束能力边界，
  * 不改变回答风格。
  */
+function combineInstructions(...parts: Array<string | null | undefined>): string | null {
+  const merged = parts.map((part) => part?.trim()).filter((part): part is string => Boolean(part));
+  return merged.length > 0 ? merged.join('\n\n') : null;
+}
+
 function buildCapabilityGuidance(capabilities: PublicTurnCapabilities): string | null {
   const notes: string[] = [];
   if (!capabilities.webSearch) {

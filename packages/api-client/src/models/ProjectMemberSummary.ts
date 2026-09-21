@@ -13,4 +13,3 @@ export type ProjectMemberSummary = {
     joinedAt: string;
     version: number;
 };
-

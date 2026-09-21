@@ -779,7 +779,7 @@ function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element 
             setMessages((items) => [...items, userMessage]);
             const conversationId = activeConversationId ?? (await createConversation()).id;
             setActiveConversationId(conversationId);
-            if (!conversations.some((item) => item.id === conversationId)) setConversations((items) => [{ id: conversationId, title: t('新对话'), mode, visibility: 'PRIVATE', version: 1, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }, ...items]);
+            if (!conversations.some((item) => item.id === conversationId)) setConversations((items) => [{ id: conversationId, title: t('新对话'), mode, visibility: 'PRIVATE', contextType: 'GENERAL', projectId: null, version: 1, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }, ...items]);
             let turnId = ''; let seq = 0; let answer = ''; let terminal = false; const streamingMessageId = `streaming-${Date.now()}`; const resources: ChatResource[] = []; const sources: ChatSource[] = []; const citations: ChatCitation[] = []; const toolTypes = new Map<string, ChatResource['type']>(); const toolFormats = new Map<string, ChatResource['format']>();
             const updateStreamingMessage = (): void => setMessages((items) => [...items.filter((item) => item.id !== streamingMessageId), { id: streamingMessageId, role: 'assistant', content: answer, resources: [...resources], sources: [...sources], citations: [...citations] }]);
             const handle = (event: TurnStreamEvent): void => {

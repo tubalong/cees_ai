@@ -4,6 +4,7 @@
  * 本文件仅提供 NestJS 实现侧的类型约束。
  */
 export type PublicConversationVisibility = 'PRIVATE';
+export type PublicConversationContextType = 'GENERAL' | 'PROJECT';
 export type PublicConversationMessageRole = 'USER' | 'ASSISTANT' | 'TOOL';
 export type PublicTurnStatus = 'RECEIVED' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
 export type PublicTurnMode = 'standard' | 'ultra';
@@ -39,6 +40,8 @@ export interface PublicConversation {
   id: string;
   title: string;
   visibility: PublicConversationVisibility;
+  contextType: PublicConversationContextType;
+  projectId: string | null;
   /** 会话默认对话执行模式；发起轮次未显式指定 mode 时使用。 */
   mode: PublicTurnMode;
   createdAt: Date;

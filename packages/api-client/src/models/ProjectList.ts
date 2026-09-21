@@ -7,4 +7,3 @@ export type ProjectList = {
     items: Array<ProjectSummary>;
     nextCursor: string | null;
 };
-

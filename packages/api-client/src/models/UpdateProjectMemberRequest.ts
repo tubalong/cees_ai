@@ -12,4 +12,3 @@ export namespace UpdateProjectMemberRequest {
         MEMBER = 'MEMBER',
     }
 }
-

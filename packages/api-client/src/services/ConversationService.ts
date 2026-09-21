@@ -2,6 +2,7 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
+import type { ConversationContextType } from '../models/ConversationContextType';
 import type { ConversationDetailResponseEnvelope } from '../models/ConversationDetailResponseEnvelope';
 import type { ConversationListResponseEnvelope } from '../models/ConversationListResponseEnvelope';
 import type { ConversationResponseEnvelope } from '../models/ConversationResponseEnvelope';
@@ -75,6 +76,8 @@ export class ConversationService {
     public static listConversations({
         limit = 20,
         cursor,
+        contextType,
+        projectId,
     }: {
         /**
          * 每页数量，默认 20，最大 100
@@ -84,6 +87,14 @@ export class ConversationService {
          * 分页游标，上一页返回的 nextCursor
          */
         cursor?: string,
+        /**
+         * 按上下文类型筛选
+         */
+        contextType?: ConversationContextType,
+        /**
+         * 按项目上下文筛选
+         */
+        projectId?: string,
     }): CancelablePromise<ConversationListResponseEnvelope> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -91,6 +102,8 @@ export class ConversationService {
             query: {
                 'limit': limit,
                 'cursor': cursor,
+                'contextType': contextType,
+                'projectId': projectId,
             },
             errors: {
                 400: `请求字段校验失败`,

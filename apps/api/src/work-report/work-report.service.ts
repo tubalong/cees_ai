@@ -35,6 +35,7 @@ export class WorkReportService {
             status: query.status,
             authorMembershipId: query.authorMembershipId,
             reviewerMembershipId: query.reviewerMembershipId,
+            ...(query.projectId ? { projects: { some: { projectId: query.projectId } } } : {}),
             periodStart: this.periodRange(query.periodFrom, query.periodTo),
         });
         if (query.cursor) {
@@ -158,6 +159,20 @@ export class WorkReportService {
             const result = await transaction.workReport.updateMany({ where: { id, tenantId: context.tenantId, deletedAt: null, version }, data: { status: target, submittedAt: action === 'submit' ? new Date() : null, reviewedAt: action === 'submit' ? null : report.reviewedAt, reviewComment: action === 'submit' ? null : report.reviewComment, updatedBy: context.userId, version: { increment: 1 } } });
             if (result.count !== 1) throw this.versionConflict();
             await transaction.auditLog.create({ data: auditData(context, action === 'submit' ? 'WORK_REPORT_SUBMITTED' : 'WORK_REPORT_WITHDRAWN', id, { version }) });
+            if (report.projects.length > 0) {
+                await transaction.projectActivity.createMany({
+                    data: report.projects.map(({ projectId }) => ({
+                        tenantId: context.tenantId,
+                        projectId,
+                        actorMembershipId: context.membershipId,
+                        type: action === 'submit' ? 'WORK_REPORT_SUBMITTED' : 'WORK_REPORT_WITHDRAWN',
+                        resourceType: 'WORK_REPORT',
+                        resourceId: id,
+                        summary: action === 'submit' ? `${report.type === WorkReportType.DAILY ? '日报' : '周报'}已提交` : `${report.type === WorkReportType.DAILY ? '日报' : '周报'}已撤回`,
+                        metadata: { authorMembershipId: context.membershipId, periodStart: report.periodStart.toISOString().slice(0, 10) },
+                    })),
+                });
+            }
             return toWorkReportResult(await transaction.workReport.findUniqueOrThrow({ where: { id }, select: workReportSelect }));
         });
     }

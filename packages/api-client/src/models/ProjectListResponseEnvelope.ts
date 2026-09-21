@@ -8,4 +8,3 @@ export type ProjectListResponseEnvelope = {
     data: ProjectList;
     requestId?: string | null;
 };
-

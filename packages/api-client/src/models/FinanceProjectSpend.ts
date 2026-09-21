@@ -9,4 +9,3 @@ export type FinanceProjectSpend = {
     approvedAmount: number;
     paidAmount: number;
 };
-

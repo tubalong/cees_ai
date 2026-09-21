@@ -594,6 +594,18 @@ export class ProjectService {
                     changedByMembershipId: context.membershipId,
                 },
             });
+            await transaction.projectActivity.create({
+                data: {
+                    tenantId: context.tenantId,
+                    projectId,
+                    actorMembershipId: context.membershipId,
+                    type: 'PROJECT_STATUS_CHANGED',
+                    resourceType: 'PROJECT',
+                    resourceId: projectId,
+                    summary: `项目状态由 ${project.status} 变更为 ${options.to}`,
+                    metadata: { fromStatus: project.status, toStatus: options.to, reason: options.reason ?? options.completionSummary ?? null },
+                },
+            });
             await transaction.auditLog.create({
                 data: auditData(context, options.action, projectId, {
                     fromStatus: project.status,

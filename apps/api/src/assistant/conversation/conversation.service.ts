@@ -7,6 +7,7 @@ import {
 import {
   AssistantTurnStatus,
   AuditOutcome,
+  ConversationContextType,
   ConversationMessageRole,
   Prisma,
 } from '@prisma/client';
@@ -36,6 +37,8 @@ const memberConversationSelect = {
   ownerMembershipId: true,
   title: true,
   visibility: true,
+  contextType: true,
+  projectId: true,
   mode: true,
   lastTurnAt: true,
   createdAt: true,
@@ -66,10 +69,11 @@ export class ConversationService {
     private readonly tenantContext: TenantContext,
   ) { }
 
-  async create(title?: string | null, mode?: PublicTurnMode): Promise<PublicConversation> {
+  async create(title?: string | null, mode?: PublicTurnMode, contextType: 'GENERAL' | 'PROJECT' = 'GENERAL', projectId?: string | null): Promise<PublicConversation> {
     const context = this.tenantContext.require();
     const normalizedTitle = normalizeOptionalTitle(title);
     const normalizedMode = normalizeConversationMode(mode);
+    await this.validateProjectContext(context.tenantId, context.membershipId, contextType, projectId ?? null);
     const conversation = await this.prisma.$transaction(async (transaction) => {
       const created = await transaction.conversation.create({
         data: {
@@ -77,6 +81,8 @@ export class ConversationService {
           ownerMembershipId: context.membershipId,
           title: normalizedTitle,
           mode: normalizedMode,
+          contextType: contextType === 'PROJECT' ? ConversationContextType.PROJECT : ConversationContextType.GENERAL,
+          projectId: contextType === 'PROJECT' ? projectId : null,
         },
       });
       await transaction.auditLog.create({
@@ -89,7 +95,7 @@ export class ConversationService {
           resourceType: 'CONVERSATION',
           resourceId: created.id,
           requestId: context.requestId,
-          metadata: { title: normalizedTitle || null, mode: normalizedMode },
+          metadata: { title: normalizedTitle || null, mode: normalizedMode, contextType, projectId: contextType === 'PROJECT' ? projectId : null },
         },
       });
       return created;
@@ -97,7 +103,7 @@ export class ConversationService {
     return toPublicConversation(conversation);
   }
 
-  async list(limit = DEFAULT_LIST_LIMIT, cursor?: string): Promise<PublicConversationListResult> {
+  async list(limit = DEFAULT_LIST_LIMIT, cursor?: string, filters: { contextType?: 'GENERAL' | 'PROJECT'; projectId?: string } = {}): Promise<PublicConversationListResult> {
     assertListLimit(limit);
     const { tenantId, membershipId } = this.tenantContext.require();
     const keyset = cursor ? decodeConversationCursor(cursor) : undefined;
@@ -107,6 +113,8 @@ export class ConversationService {
         tenantId,
         ownerMembershipId: membershipId,
         deletedAt: null,
+        ...(filters.contextType ? { contextType: filters.contextType === 'PROJECT' ? ConversationContextType.PROJECT : ConversationContextType.GENERAL } : {}),
+        ...(filters.projectId ? { projectId: filters.projectId } : {}),
         ...(keyset
           ? {
             OR: [
@@ -292,7 +300,27 @@ export class ConversationService {
       select: memberConversationSelect,
     });
     if (!conversation) throw conversationNotFound();
+    if (conversation.contextType === ConversationContextType.PROJECT && conversation.projectId) {
+      const projectMember = await database.projectMember.findFirst({
+        where: { tenantId, projectId: conversation.projectId, membershipId, deletedAt: null },
+        select: { id: true },
+      });
+      if (!projectMember) throw conversationNotFound();
+    }
     return conversation;
+  }
+
+  private async validateProjectContext(tenantId: string, membershipId: string, contextType: 'GENERAL' | 'PROJECT', projectId: string | null): Promise<void> {
+    if (contextType === 'GENERAL') {
+      if (projectId) throw new BadRequestException({ code: 'CONVERSATION_PROJECT_CONTEXT_INVALID', message: '通用会话不能绑定项目' });
+      return;
+    }
+    if (!projectId) throw new BadRequestException({ code: 'CONVERSATION_PROJECT_REQUIRED', message: '项目会话必须提供 projectId' });
+    const project = await this.prisma.project.findFirst({
+      where: { id: projectId, tenantId, deletedAt: null, members: { some: { membershipId, deletedAt: null } } },
+      select: { id: true },
+    });
+    if (!project) throw new NotFoundException({ code: 'PROJECT_NOT_FOUND', message: '项目不存在或当前成员无权访问' });
   }
 
   /** 轮次完成且会话尚无标题时，按首条 user 消息生成标题。 */
@@ -331,6 +359,8 @@ function toPublicConversation(conversation: {
   id: string;
   title: string;
   visibility: 'PRIVATE';
+  contextType: ConversationContextType;
+  projectId: string | null;
   mode: string;
   createdAt: Date;
   updatedAt: Date;
@@ -341,6 +371,8 @@ function toPublicConversation(conversation: {
     id: conversation.id,
     title: conversation.title,
     visibility: conversation.visibility,
+    contextType: conversation.contextType === ConversationContextType.PROJECT ? 'PROJECT' : 'GENERAL',
+    projectId: conversation.projectId,
     mode: conversation.mode === 'ultra' ? 'ultra' : 'standard',
     createdAt: conversation.createdAt,
     updatedAt: conversation.updatedAt,
