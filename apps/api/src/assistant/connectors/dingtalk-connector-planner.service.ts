@@ -13,7 +13,10 @@ const MAX_PLANNED_CALLS = 3;
 const MAX_SELECTED_TOOLS = 32;
 const TOOL_ID_PATTERN = /^dws_read_[a-f0-9]{16}$/;
 const SELECTOR_TOOL_NAME = 'select_dws_read_tools';
+const PERSONAL_ATTENDANCE_QUERY_PATTERN = /(?:我的|我|本人|自己|个人).{0,40}(?:考勤|打卡|上下班)|(?:考勤|打卡|上下班).{0,40}(?:我的|我|本人|自己|个人)/i;
+const ATTENDANCE_APPROVAL_QUERY_PATTERN = /请假|加班|出差|外出|补卡|审批/;
 const PRIORITY_TOOL_NAMES = new Set([
+  'cees.my_attendance_records',
   'attendance.shortcut_my_attendance',
   'attendance.shortcut_this_month',
   'cees.my_attendance_approvals',
@@ -39,6 +42,9 @@ export class DingTalkConnectorPlannerService {
       toolMap.set(tool.toolId, tool);
     });
 
+    const deterministicAttendanceCall = personalAttendanceCall(query, tools);
+    if (deterministicAttendanceCall) return { calls: [deterministicAttendanceCall] };
+
     const selectedIds = await this.selectTools(query, tools, context);
     if (selectedIds.length === 0) return { calls: [] };
     const definitions: ChatToolDefinition[] = selectedIds.map((toolId) => {
@@ -57,6 +63,7 @@ export class DingTalkConnectorPlannerService {
         'You plan read-only DingTalk DWS queries for a desktop connector.',
         'Call tools only when the user needs current DingTalk data available through the supplied tools.',
         'Prefer CEES composite tools and DWS shortcut tools that resolve the current user or recursively collect complete data.',
+        'For personal attendance or punch-record questions, prefer cees.my_attendance_records. Its time fields are already normalized; never recalculate timestamps or treat workDate as a clock time.',
         'When the user asks whether personal attendance data can be queried, use a matching no-argument personal attendance tool to verify instead of answering from assumptions.',
         'Do not answer the user, do not invent unavailable tools or arguments, and never request write operations.',
         `Return at most ${MAX_PLANNED_CALLS} tool calls. Return no tool calls when required arguments are missing.`,
@@ -70,6 +77,10 @@ export class DingTalkConnectorPlannerService {
     tools: DingTalkConnectorToolInput[],
     context: ReturnType<TenantContext['require']>,
   ): Promise<string[]> {
+    if (isPersonalAttendanceQuery(query)) {
+      const attendanceTool = tools.find((tool) => tool.name === 'cees.my_attendance_records');
+      if (attendanceTool) return [attendanceTool.toolId];
+    }
     if (tools.length <= MAX_SELECTED_TOOLS) return tools.map((tool) => tool.toolId);
     const priorityTools = tools.filter((tool) => PRIORITY_TOOL_NAMES.has(tool.name)).slice(0, MAX_SELECTED_TOOLS);
     const remainingTools = tools.filter((tool) => !priorityTools.some((priority) => priority.toolId === tool.toolId));
@@ -156,6 +167,34 @@ export class DingTalkConnectorPlannerService {
     if (!completed) throw new BadGatewayException('钉钉连接器规划未正常完成');
     return calls;
   }
+}
+
+function personalAttendanceCall(
+  query: string,
+  tools: DingTalkConnectorToolInput[],
+): DingTalkConnectorPlannedCall | null {
+  if (!isPersonalAttendanceQuery(query)) return null;
+  const tool = tools.find((item) => item.name === 'cees.my_attendance_records');
+  if (!tool) return null;
+  const dates = [...query.matchAll(/\b(\d{4}-\d{2}-\d{2})\b/g)].map((match) => match[1]!);
+  if (dates.length > 0 && dates.every(isValidDateText)) {
+    return {
+      toolId: tool.toolId,
+      arguments: { start: dates[0], end: dates[1] ?? dates[0] },
+    };
+  }
+  if (/本月|上月|这个月|本周|上周|最近|过去|近\s*\d+|昨天|前天/.test(query)) return null;
+  return { toolId: tool.toolId, arguments: {} };
+}
+
+function isPersonalAttendanceQuery(query: string): boolean {
+  return PERSONAL_ATTENDANCE_QUERY_PATTERN.test(query) && !ATTENDANCE_APPROVAL_QUERY_PATTERN.test(query);
+}
+
+function isValidDateText(value: string): boolean {
+  const [year, month, day] = value.split('-').map(Number);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  return parsed.getUTCFullYear() === year && parsed.getUTCMonth() === month - 1 && parsed.getUTCDate() === day;
 }
 
 function validateTool(tool: DingTalkConnectorToolInput, existing: Map<string, DingTalkConnectorToolInput>): void {
