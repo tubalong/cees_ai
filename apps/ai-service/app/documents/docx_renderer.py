@@ -55,9 +55,9 @@ class DocxRenderer:
         # 保证 DOCX 与 PPTX/PDF 的成稿一致，不出现重复封面与占位符。
         document = normalize_document_spec(document)
         validate_document_spec(document, request_id=request_id, status_code=422)
-        template_id = options.template_id or TemplateId.business_standard
-        if template_id != TemplateId.business_standard:
-            raise ValueError(f"unsupported document template: {template_id}")
+        # DOCX 暂时共用稳定的 Word 样式；接受全部契约模板 ID，避免调用方省略
+        # template_id 时因默认 editorial-modern 被拒绝。PDF/PPTX 承载完整主题差异。
+        _template_id = options.template_id or TemplateId.editorial_modern
 
         locale = options.locale or "zh-CN"
         word_document = WordDocument()

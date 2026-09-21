@@ -38,6 +38,7 @@ import FinanceManagement from '../features/finance/FinanceManagement';
 import LegalContractManagement from '../features/legal/LegalContractManagement';
 import KnowledgeManagement from '../features/knowledge/KnowledgeManagement';
 import ManagedDocumentsPage from '../features/documents/ManagedDocumentsPage';
+import RoleBasedHomePage from '../features/dashboard/HomePage';
 import { useDateFormatter, useI18n } from '../core/i18n';
 
 interface WebviewElement extends HTMLWebViewElement {
@@ -835,7 +836,20 @@ function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element 
                     if (resourceId && resourceType) { resources.push({ id: resourceId, type: resourceType, url: event.resourceUrl, format: toolFormats.get(event.toolCallId) }); if (resourceType === 'IMAGE') setImageGenerating(false); updateStreamingMessage(); }
                 }
                 if (event.type === 'error') { terminal = true; setImageGenerating(false); throw new Error(event.error.message); }
-                if (event.type === 'completed') { terminal = true; setImageGenerating(false); if (event.finishReason === 'length') message.warning(t('回答达到长度上限，内容可能不完整')); }
+                if (event.type === 'completed') {
+                    terminal = true;
+                    setImageGenerating(false);
+                    if (streamFlush.current) {
+                        clearTimeout(streamFlush.current);
+                        streamFlush.current = undefined;
+                        updateStreamingMessage();
+                    }
+                    if (version === requestVersion.current) {
+                        setSending(false);
+                        setActiveTurn(undefined);
+                    }
+                    if (event.finishReason === 'length') message.warning(t('回答达到长度上限，内容可能不完整'));
+                }
             };
             const replay = async (): Promise<void> => {
                 for (let attempt = 0; attempt < 3 && !terminal; attempt += 1) await replayTurnEvents(conversationId, turnId, seq, handle, controller.signal);
@@ -1027,7 +1041,7 @@ function CurrentPage({ authContext, members, documents, membersLoading, document
     if (location.pathname === '/knowledge') return <KnowledgeManagement authContext={authContext} onSessionExpired={onSessionExpired} />;
     if (location.pathname === '/profile') return <ProfileSettings tenantName={authContext.tenant.name} onProfileUpdated={onProfileUpdated} onSessionExpired={onSessionExpired} />;
     if (location.pathname === '/notifications') return <NotificationCenter authContext={authContext} onSessionExpired={onSessionExpired} />;
-    return <HomePage authContext={authContext} documents={documents} memberCount={members.length} />;
+    return <RoleBasedHomePage authContext={authContext} />;
     /*
     function DocumentEditorModal({ documentId, onClose }: { documentId?: string; onClose: () => void }): JSX.Element {
         const { message } = AntdApp.useApp();
@@ -1108,7 +1122,7 @@ function CurrentPage({ authContext, members, documents, membersLoading, document
 
     function CurrentPage({ authContext, members, documents, membersLoading, documentsLoading, onSessionExpired, onProfileUpdated }: { authContext: MeResult; members: TenantMember[]; documents: ManagedDocumentSummary[]; membersLoading: boolean; documentsLoading: boolean; onSessionExpired: () => void; onProfileUpdated: (displayName: string) => void }): JSX.Element {
         return <Routes>
-            <Route path="/" element={<HomePage authContext={authContext} documents={documents} memberCount={members.length} />} />
+            <Route path="/" element={<RoleBasedHomePage authContext={authContext} />} />
             <Route path="/browser" element={<BrowserPage />} />
             <Route path="/assistant" element={<AssistantPage />} />
             <Route path="/projects" element={<ProjectManagement authContext={authContext} onSessionExpired={onSessionExpired} />} />

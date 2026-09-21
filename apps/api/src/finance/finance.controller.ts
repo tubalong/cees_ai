@@ -20,6 +20,7 @@ import { TenantContextInterceptor } from '../tenant/tenant-context.interceptor';
 import { TenantGuard } from '../tenant/tenant.guard';
 import {
     CreateFinanceExpenseCategoryDto,
+    CreateFinanceLedgerImportDto,
     CreateFinanceExpenseReportDto,
     DeleteFinanceVersionQueryDto,
     FinanceExpenseActionDto,
@@ -27,12 +28,14 @@ import {
     FinanceExpenseVersionDto,
     FinanceProjectSpendQueryDto,
     ListFinanceExpenseReportsQueryDto,
+    ListFinanceLedgerEntriesQueryDto,
     MarkFinanceExpenseReportPaidDto,
     ReviewFinanceExpenseReportDto,
     UpdateFinanceExpenseCategoryDto,
     UpdateFinanceExpenseReportDto,
 } from './dto';
 import { FinanceService } from './finance.service';
+import { FinanceLedgerService } from './finance-ledger.service';
 
 @ApiTags('Finance')
 @ApiBearerAuth()
@@ -40,7 +43,24 @@ import { FinanceService } from './finance.service';
 @UseGuards(JwtAuthGuard, TenantGuard, PermissionGuard)
 @UseInterceptors(TenantContextInterceptor)
 export class FinanceController {
-    constructor(private readonly financeService: FinanceService) { }
+    constructor(private readonly financeService: FinanceService, private readonly ledgerService: FinanceLedgerService) { }
+
+    @Get('ledger-entries')
+    @RequirePermissions('finance.ledger.read')
+    listLedgerEntries(@Query() query: ListFinanceLedgerEntriesQueryDto): Promise<unknown> { return this.ledgerService.listEntries(query); }
+
+    @Post('ledger-imports')
+    @RequirePermissions('finance.ledger.manage')
+    importLedger(@Body() input: CreateFinanceLedgerImportDto): Promise<unknown> { return this.ledgerService.importRows(input); }
+
+    @Get('ledger-imports/:importId')
+    @RequirePermissions('finance.ledger.read')
+    getLedgerImport(@Param('importId', new ParseUUIDPipe()) importId: string): Promise<unknown> { return this.ledgerService.getImport(importId); }
+
+    @Delete('ledger-imports/:importId')
+    @RequirePermissions('finance.ledger.manage')
+    @HttpCode(HttpStatus.NO_CONTENT)
+    rollbackLedgerImport(@Param('importId', new ParseUUIDPipe()) importId: string): Promise<void> { return this.ledgerService.rollbackImport(importId); }
 
     @Get('expense-categories')
     @RequirePermissions('finance.expense.read')

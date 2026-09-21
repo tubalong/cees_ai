@@ -51,6 +51,12 @@ def render_options(*, include_toc: bool = False) -> DocumentOptions:
     )
 
 
+def themed_options(template_id: str) -> DocumentOptions:
+    return DocumentOptions.model_validate(
+        {"locale": "zh-CN", "template_id": template_id, "include_toc": False}
+    )
+
+
 def document_with_subheading() -> DocumentSpec:
     """带节内小标题的文档：小标题是短句且不以句末标点结尾。"""
     payload = document_data()
@@ -129,3 +135,15 @@ def test_rejects_table_rows_with_wrong_column_count() -> None:
             request_id="req-render-pdf-2",
         )
     assert raised.value.status_code == 422
+
+
+def test_executive_dark_uses_a_dark_vector_cover() -> None:
+    rendered = PdfRenderer().render(
+        DocumentSpec.model_validate(document_data()),
+        themed_options("executive-dark"),
+        request_id="req-render-pdf-executive",
+    )
+    pdf = fitz.open(stream=rendered.content, filetype="pdf")
+    pixel = pdf[0].get_pixmap(matrix=fitz.Matrix(0.2, 0.2), alpha=False).pixel(2, 2)
+
+    assert max(pixel) < 80

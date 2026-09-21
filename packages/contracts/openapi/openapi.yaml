@@ -2296,6 +2296,13 @@ paths:
         schema:
           type: string
           format: uuid
+      - name: template
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [business-standard, editorial-modern, executive-dark]
+          default: editorial-modern
     get:
       summary: 导出授权范围内文档为 PDF
       description: >-
@@ -2361,6 +2368,13 @@ paths:
         schema:
           type: string
           format: uuid
+      - name: template
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [business-standard, editorial-modern, executive-dark]
+          default: editorial-modern
     get:
       summary: 导出授权范围内文档为 PPTX
       description: >-
@@ -4551,6 +4565,44 @@ paths:
         '200': { description: 工作台概览, content: { application/json: { schema: { $ref: '#/components/schemas/DashboardOverviewResponseEnvelope' } } } }
         '403': { description: 缺少 dashboard.read 权限, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
 
+  /dashboard/home:
+    get:
+      summary: 查询当前成员角色化首页
+      operationId: dashboardHome
+      tags: [Dashboard]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: 角色化首页, content: { application/json: { schema: { $ref: '#/components/schemas/DashboardHomepageResponseEnvelope' } } } }
+        '403': { description: 缺少 dashboard.read 权限, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+
+  /dashboard/trends:
+    get:
+      summary: 查询首页指标快照趋势
+      operationId: dashboardTrends
+      tags: [Dashboard]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: metrics, in: query, required: true, schema: { type: array, items: { type: string }, minItems: 1 }, style: form, explode: false }
+        - { name: period, in: query, required: true, schema: { type: string, enum: [DAY, MONTH] } }
+        - { name: from, in: query, required: true, schema: { type: string, format: date } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date } }
+      responses:
+        '200': { description: 指标趋势, content: { application/json: { schema: { $ref: '#/components/schemas/DashboardTrendsResponseEnvelope' } } } }
+
+  /dashboard/snapshots/rebuild:
+    post:
+      summary: 重算租户日/月仪表盘快照
+      operationId: dashboardSnapshotRebuild
+      tags: [Dashboard]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RebuildDashboardSnapshotRequest' }
+      responses:
+        '200': { description: 快照重算完成, content: { application/json: { schema: { $ref: '#/components/schemas/DashboardSnapshotRebuildResponseEnvelope' } } } }
+
   /dashboard/task-statistics:
     get:
       summary: 查询当前成员可见任务统计
@@ -6628,6 +6680,57 @@ paths:
         '401': { description: 登录状态无效或已过期 }
         '403': { description: 缺少 finance.expense.manage_all 权限 }
         '409': { description: 报销类别编码已存在 }
+
+  /finance/ledger-entries:
+    get:
+      summary: 查询财务收支台账
+      operationId: listFinanceLedgerEntries
+      tags: [Finance]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: direction, in: query, schema: { type: string, enum: [INCOME, EXPENSE] } }
+        - { name: dateFrom, in: query, schema: { type: string, format: date } }
+        - { name: dateTo, in: query, schema: { type: string, format: date } }
+        - { name: departmentId, in: query, schema: { type: string, format: uuid } }
+        - { name: projectId, in: query, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+        - { name: cursor, in: query, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: 台账记录, content: { application/json: { schema: { $ref: '#/components/schemas/FinanceLedgerEntryListResponseEnvelope' } } } }
+
+  /finance/ledger-imports:
+    post:
+      summary: 导入财务收支台账
+      operationId: createFinanceLedgerImport
+      tags: [Finance]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateFinanceLedgerImportRequest' }
+      responses:
+        '201': { description: 导入完成, content: { application/json: { schema: { $ref: '#/components/schemas/FinanceLedgerImportResponseEnvelope' } } } }
+
+  /finance/ledger-imports/{importId}:
+    get:
+      summary: 查询财务台账导入批次
+      operationId: getFinanceLedgerImport
+      tags: [Finance]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: importId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: 导入批次, content: { application/json: { schema: { $ref: '#/components/schemas/FinanceLedgerImportResponseEnvelope' } } } }
+    delete:
+      summary: 回滚财务台账导入批次
+      operationId: deleteFinanceLedgerImport
+      tags: [Finance]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: importId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204': { description: 批次已回滚 }
 
   /finance/expense-categories/{categoryId}:
     parameters:
@@ -10421,6 +10524,182 @@ components:
       properties:
         success: { type: boolean, const: true }
         data: { $ref: '#/components/schemas/WorkReportStatistics' }
+        requestId: { type: [string, 'null'] }
+
+    DashboardHomepageSkeleton:
+      type: string
+      enum: [EXECUTIVE, MANAGER, EMPLOYEE]
+
+    DashboardHomepageDomain:
+      type: string
+      enum: [FINANCE, LEGAL, HR, PROJECT]
+
+    DashboardHomepageCard:
+      type: object
+      additionalProperties: true
+      required: [key, span, payload]
+      properties:
+        key: { type: string }
+        span: { type: string, enum: [FULL, HALF, THIRD] }
+        payload: {}
+        link: { type: [string, 'null'] }
+        empty: { type: [string, 'null'], enum: [NEW_TENANT, NO_DATA, null] }
+
+    DashboardHomepage:
+      type: object
+      additionalProperties: false
+      required: [archetype, cards, alerts, generatedAt]
+      properties:
+        archetype:
+          type: object
+          required: [skeleton, domains, reason]
+          properties:
+            skeleton: { $ref: '#/components/schemas/DashboardHomepageSkeleton' }
+            domains: { type: array, items: { $ref: '#/components/schemas/DashboardHomepageDomain' } }
+            reason: { type: array, items: { type: string } }
+        cards: { type: array, items: { $ref: '#/components/schemas/DashboardHomepageCard' } }
+        alerts:
+          type: array
+          items:
+            type: object
+            required: [code, severity, title, detail]
+            properties:
+              code: { type: string }
+              severity: { type: string, enum: [HIGH, MEDIUM, LOW] }
+              title: { type: string }
+              detail: { type: string }
+              link: { type: [string, 'null'] }
+        generatedAt: { type: string, format: date-time }
+
+    DashboardTrendPoint:
+      type: object
+      required: [periodStart, metricKey, value, scopeKey]
+      properties:
+        periodStart: { type: string, format: date }
+        metricKey: { type: string }
+        value: { type: string }
+        scopeKey: { type: string }
+        meta: {}
+
+    DashboardTrends:
+      type: object
+      required: [period, items]
+      properties:
+        period: { type: string, enum: [DAY, MONTH] }
+        items: { type: array, items: { $ref: '#/components/schemas/DashboardTrendPoint' } }
+
+    RebuildDashboardSnapshotRequest:
+      type: object
+      required: [tenantId, date]
+      properties:
+        tenantId: { type: string, format: uuid }
+        date: { type: string, format: date }
+
+    FinanceLedgerDirection:
+      type: string
+      enum: [INCOME, EXPENSE]
+
+    FinanceLedgerRow:
+      type: object
+      required: [rowNumber, occurredOn, direction, amount, currency, voucherNo]
+      properties:
+        rowNumber: { type: integer, minimum: 1 }
+        occurredOn: { type: string, format: date }
+        direction: { $ref: '#/components/schemas/FinanceLedgerDirection' }
+        amount: { type: number, exclusiveMinimum: 0 }
+        currency: { type: string, minLength: 3, maxLength: 3 }
+        categoryCode: { type: [string, 'null'] }
+        categoryName: { type: [string, 'null'] }
+        departmentId: { type: [string, 'null'], format: uuid }
+        projectId: { type: [string, 'null'], format: uuid }
+        counterparty: { type: [string, 'null'] }
+        summary: { type: [string, 'null'] }
+        voucherNo: { type: string }
+
+    CreateFinanceLedgerImportRequest:
+      type: object
+      required: [fileName, format, periodStart, periodEnd, rows]
+      properties:
+        fileName: { type: string }
+        format: { type: string, enum: [XLSX, CSV] }
+        periodStart: { type: string, format: date }
+        periodEnd: { type: string, format: date }
+        rows: { type: array, minItems: 1, items: { $ref: '#/components/schemas/FinanceLedgerRow' } }
+
+    FinanceLedgerEntry:
+      allOf:
+        - $ref: '#/components/schemas/FinanceLedgerRow'
+        - type: object
+          required: [id]
+          properties:
+            id: { type: string, format: uuid }
+
+    FinanceLedgerImport:
+      type: object
+      required: [id, fileName, format, periodStart, periodEnd, status, rowCount, importedCount, skippedCount, errorCount]
+      properties:
+        id: { type: string, format: uuid }
+        fileName: { type: string }
+        format: { type: string }
+        periodStart: { type: string, format: date }
+        periodEnd: { type: string, format: date }
+        status: { type: string, enum: [PENDING, PARSING, SUCCEEDED, PARTIAL, FAILED] }
+        rowCount: { type: integer }
+        importedCount: { type: integer }
+        skippedCount: { type: integer }
+        errorCount: { type: integer }
+        errors: { type: array, items: { type: object } }
+
+    DashboardHomepageResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/DashboardHomepage' }
+        requestId: { type: [string, 'null'] }
+
+    DashboardTrendsResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/DashboardTrends' }
+        requestId: { type: [string, 'null'] }
+
+    DashboardSnapshotRebuildResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data:
+          type: object
+          required: [periodStart, count]
+          properties:
+            periodStart: { type: string, format: date-time }
+            count: { type: integer }
+        requestId: { type: [string, 'null'] }
+
+    FinanceLedgerEntryList:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/FinanceLedgerEntry' } }
+        nextCursor: { type: [string, 'null'], format: uuid }
+
+    FinanceLedgerImportResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/FinanceLedgerImport' }
+        requestId: { type: [string, 'null'] }
+
+    FinanceLedgerEntryListResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/FinanceLedgerEntryList' }
         requestId: { type: [string, 'null'] }
 
     DashboardProjectMetrics:

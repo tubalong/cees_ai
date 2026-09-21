@@ -22,6 +22,7 @@ from app.api.generated.models import (
     PptxSlide,
     PptxSpec,
     PptxTableBlock,
+    TemplateId,
     Theme,
 )
 from app.documents.images import load_image
@@ -46,6 +47,13 @@ _ROW_ALT = RGBColor(0xF7, 0xF8, 0xFB)
 
 _NEUTRAL = RGBColor(0x5F, 0x67, 0x77)
 _NEUTRAL_SOFT = RGBColor(0xF1, 0xF3, 0xF8)
+
+_EDITORIAL = RGBColor(0x0F, 0x76, 0x6E)
+_EDITORIAL_SOFT = RGBColor(0xE6, 0xFF, 0xFB)
+_EDITORIAL_ACCENT = RGBColor(0xF2, 0x86, 0x4A)
+_EXECUTIVE = RGBColor(0xF5, 0x9E, 0x0B)
+_EXECUTIVE_COVER = RGBColor(0x0F, 0x17, 0x2A)
+_EXECUTIVE_SOFT = RGBColor(0xFE, 0xF3, 0xC7)
 
 # 16:9 版心几何（英寸）。所有版式坐标都由这些常量推导，避免散落的魔法数字。
 _SLIDE_W = 13.333
@@ -149,8 +157,8 @@ class PptxRenderer:
         # 是「版式乱、样式丑」的主要来源。
         spec = normalize_pptx_spec(spec)
         validate_pptx_spec(spec, request_id=request_id, status_code=422)
-        theme = spec.theme or Theme.brand
-        palette = _palette(theme)
+        template_id = options.template_id or TemplateId.editorial_modern
+        palette = _palette(template_id, spec.theme or Theme.brand)
 
         presentation = Presentation()
         presentation.slide_width = Inches(_SLIDE_W)
@@ -172,11 +180,39 @@ class PptxRenderer:
         )
 
 
-def _palette(theme: Theme) -> dict[str, RGBColor]:
+def _palette(template_id: TemplateId, theme: Theme) -> dict[str, RGBColor]:
+    if template_id == TemplateId.editorial_modern:
+        return {
+            "primary": _EDITORIAL,
+            "primary_soft": _EDITORIAL_SOFT,
+            "accent": _EDITORIAL_ACCENT,
+            "cover": RGBColor(0xF7, 0xFB, 0xFA),
+            "cover_text": _TEXT,
+            "cover_muted": _MUTED,
+            "text": _TEXT,
+            "muted": _MUTED,
+            "line": RGBColor(0xD8, 0xE4, 0xE5),
+        }
+    if template_id == TemplateId.executive_dark:
+        return {
+            "primary": _EXECUTIVE,
+            "primary_soft": _EXECUTIVE_SOFT,
+            "accent": RGBColor(0x38, 0xB, 0xDF),
+            "cover": _EXECUTIVE_COVER,
+            "cover_text": _WHITE,
+            "cover_muted": RGBColor(0xCB, 0xD5, 0xE1),
+            "text": _TEXT,
+            "muted": _MUTED,
+            "line": RGBColor(0xCB, 0xD5, 0xE1),
+        }
     if theme == Theme.neutral:
         return {
             "primary": _NEUTRAL,
             "primary_soft": _NEUTRAL_SOFT,
+            "accent": _BRAND,
+            "cover": _NEUTRAL,
+            "cover_text": _WHITE,
+            "cover_muted": _NEUTRAL_SOFT,
             "text": _TEXT,
             "muted": _MUTED,
             "line": _LINE,
@@ -184,6 +220,10 @@ def _palette(theme: Theme) -> dict[str, RGBColor]:
     return {
         "primary": _BRAND,
         "primary_soft": _BRAND_SOFT,
+        "accent": RGBColor(0x14, 0xB8, 0xA6),
+        "cover": _BRAND,
+        "cover_text": _WHITE,
+        "cover_muted": _BRAND_SOFT,
         "text": _TEXT,
         "muted": _MUTED,
         "line": _LINE,
@@ -192,27 +232,54 @@ def _palette(theme: Theme) -> dict[str, RGBColor]:
 
 def _render_cover(presentation: Presentation, spec: PptxSpec, palette: dict[str, RGBColor]) -> None:
     slide = presentation.slides.add_slide(presentation.slide_layouts[_BLANK_LAYOUT_INDEX])
-    _set_background(slide, palette["primary"])
+    _set_background(slide, palette["cover"])
+
+    # 封面右侧矢量构图：全部为 PowerPoint 原生几何形状，可在 Office 中继续编辑。
+    panel = slide.shapes.add_shape(
+        MSO_SHAPE.RECTANGLE, Inches(9.7), Inches(0), Inches(3.633), Inches(_SLIDE_H)
+    )
+    _style_shape(panel, fill=palette["primary"])
+    circle = slide.shapes.add_shape(
+        MSO_SHAPE.OVAL, Inches(10.35), Inches(0.8), Inches(2.15), Inches(2.15)
+    )
+    _style_shape(circle, fill=palette["accent"])
+    diamond = slide.shapes.add_shape(
+        MSO_SHAPE.DIAMOND, Inches(9.25), Inches(5.25), Inches(1.35), Inches(1.35)
+    )
+    _style_shape(diamond, fill=palette["primary_soft"])
+    for offset in range(4):
+        line = slide.shapes.add_shape(
+            MSO_SHAPE.RECTANGLE,
+            Inches(10.3 + offset * 0.32),
+            Inches(3.55),
+            Inches(0.08),
+            Inches(1.15 + offset * 0.24),
+        )
+        _style_shape(line, fill=palette["cover_text"])
 
     # 顶部细白线作为品牌装饰，避免纯色底过于单调。
     accent = slide.shapes.add_shape(
         MSO_SHAPE.RECTANGLE, Inches(_MARGIN_X), Inches(2.5), Inches(2.2), Inches(_RULE_HEIGHT)
     )
-    _style_shape(accent, fill=_WHITE)
+    _style_shape(accent, fill=palette["accent"])
 
+    cover_text_width = 8.35
     title_height = _text_box_height(
-        _wrap_lines(spec.title, _COVER_TITLE_SIZE, _BODY_WIDTH), _COVER_TITLE_SIZE
+        _wrap_lines(spec.title, _COVER_TITLE_SIZE, cover_text_width), _COVER_TITLE_SIZE
     )
     title = slide.shapes.add_textbox(
-        Inches(_MARGIN_X), Inches(2.72), Inches(_BODY_WIDTH), Inches(title_height)
+        Inches(_MARGIN_X), Inches(2.72), Inches(cover_text_width), Inches(title_height)
     )
-    _write_text(title, spec.title, _COVER_TITLE_SIZE, _WHITE, bold=True)
+    _write_text(title, spec.title, _COVER_TITLE_SIZE, palette["cover_text"], bold=True)
 
     if spec.subtitle:
         subtitle = slide.shapes.add_textbox(
-            Inches(_MARGIN_X), Inches(2.72 + title_height + 0.16), Inches(_BODY_WIDTH), Inches(0.7)
+            Inches(_MARGIN_X),
+            Inches(2.72 + title_height + 0.16),
+            Inches(cover_text_width),
+            Inches(0.7),
         )
-        _write_text(subtitle, spec.subtitle, _COVER_SUBTITLE_SIZE, _BRAND_SOFT)
+        _write_text(subtitle, spec.subtitle, _COVER_SUBTITLE_SIZE, palette["cover_muted"])
 
 
 @dataclass(frozen=True)
@@ -379,10 +446,20 @@ def _render_page(
 ) -> None:
     slide = presentation.slides.add_slide(presentation.slide_layouts[_BLANK_LAYOUT_INDEX])
 
+    _add_page_motif(slide, palette, index)
+
     if page.layout == "section_header":
         _set_background(slide, palette["primary"])
         _render_centered_title(slide, page.title, _SLIDE_TITLE_SIZE + 6, _WHITE)
-        _add_footer(slide, doc_title, index, total, palette, color=_BRAND_SOFT, rule=_WHITE)
+        _add_footer(
+            slide,
+            doc_title,
+            index,
+            total,
+            palette,
+            color=palette["cover_text"],
+            rule=palette["accent"],
+        )
         return
 
     if page.layout == "title":
@@ -401,10 +478,51 @@ def _render_page(
     _add_footer(slide, doc_title, index, total, palette)
 
     available = _BODY_BOTTOM - _BODY_TOP
-    if page.layout == "two_column":
+    if any(isinstance(block, PptxImageBlock) for block in page.blocks) and any(
+        not isinstance(block, PptxImageBlock) for block in page.blocks
+    ):
+        _render_media_layout(slide, page.blocks, palette, available, page.font_pt)
+    elif page.layout == "two_column":
         _render_two_column(slide, page.blocks, palette, available, page.font_pt)
     else:
         _render_flow(slide, page.blocks, palette, _BODY_TOP, _BODY_WIDTH, available, page.font_pt)
+
+
+def _add_page_motif(slide, palette: dict[str, RGBColor], index: int) -> None:
+    """在正文页加入可编辑矢量装饰，不抢占正文版心。"""
+    rail = slide.shapes.add_shape(
+        MSO_SHAPE.RECTANGLE, Inches(0), Inches(0), Inches(0.12), Inches(_SLIDE_H)
+    )
+    _style_shape(rail, fill=palette["primary"])
+    dot = slide.shapes.add_shape(
+        MSO_SHAPE.OVAL, Inches(12.72), Inches(0.35), Inches(0.22), Inches(0.22)
+    )
+    _style_shape(dot, fill=palette["accent"] if index % 2 else palette["primary_soft"])
+
+
+def _render_media_layout(
+    slide, blocks: list, palette: dict[str, RGBColor], height: float, font_pt: int
+) -> None:
+    """图文页使用左文右图布局，避免图片作为普通块挤压文字流。"""
+    images = [block for block in blocks if isinstance(block, PptxImageBlock)]
+    text_blocks = [block for block in blocks if not isinstance(block, PptxImageBlock)]
+    text_width = 6.25
+    media_left = _BODY_LEFT + text_width + 0.55
+    media_width = _BODY_WIDTH - text_width - 0.55
+    if text_blocks:
+        _render_flow(slide, text_blocks, palette, _BODY_TOP, text_width, height, font_pt)
+    cursor = _BODY_TOP
+    for image in images:
+        cursor = _render_image(
+            slide,
+            image,
+            palette,
+            media_left,
+            cursor,
+            media_width,
+            max(1.0, height - (cursor - _BODY_TOP)),
+        )
+        cursor += _BLOCK_GAP
 
 
 def _render_slide_title(slide, title: str, palette: dict[str, RGBColor]) -> None:

@@ -583,7 +583,7 @@ paths:
               document_options:
                 title: Project implementation plan
                 locale: en-US
-                template_id: business-standard
+                template_id: editorial-modern
                 include_toc: false
                 generation_mode: quality
                 planning_max_output_tokens: 2048
@@ -1978,8 +1978,8 @@ components:
           default: zh-CN
         template_id:
           type: string
-          enum: [business-standard]
-          default: business-standard
+          enum: [business-standard, editorial-modern, executive-dark]
+          default: editorial-modern
         include_toc:
           type: boolean
           default: false

@@ -25,7 +25,7 @@ const ALLOWED_TRANSITIONS: Record<TaskStatus, ReadonlySet<TaskStatus>> = {
     [TaskStatus.TODO]: new Set([TaskStatus.IN_PROGRESS, TaskStatus.CANCELLED]),
     [TaskStatus.IN_PROGRESS]: new Set([TaskStatus.BLOCKED, TaskStatus.DONE, TaskStatus.CANCELLED]),
     [TaskStatus.BLOCKED]: new Set([TaskStatus.IN_PROGRESS, TaskStatus.DONE, TaskStatus.CANCELLED]),
-    [TaskStatus.DONE]: new Set(),
+    [TaskStatus.DONE]: new Set([TaskStatus.IN_PROGRESS]),
     [TaskStatus.CANCELLED]: new Set(),
 };
 
@@ -319,6 +319,9 @@ export class TaskService {
             const task = await this.requireTask(context, projectId, taskId, transaction);
             this.assertProjectEditable(project);
             this.assertTaskExecutorOrManager(context, project, task);
+            if (task.status === TaskStatus.DONE && input.status === TaskStatus.IN_PROGRESS && !reason) {
+                throw new BadRequestException({ code: 'TASK_STATUS_REASON_REQUIRED', message: '任务重开时必须填写原因' });
+            }
             if (!ALLOWED_TRANSITIONS[task.status].has(input.status)) {
                 throw new ConflictException({
                     code: 'TASK_STATUS_TRANSITION_INVALID',
@@ -331,7 +334,12 @@ export class TaskService {
                     id: taskId, tenantId: context.tenantId, projectId,
                     status: task.status, version: input.version, deletedAt: null,
                 },
-                data: { status: input.status, updatedBy: context.userId, version: { increment: 1 } },
+                data: {
+                    status: input.status,
+                    completedAt: input.status === TaskStatus.DONE ? new Date() : null,
+                    updatedBy: context.userId,
+                    version: { increment: 1 },
+                },
             });
             if (updated.count !== 1) throw this.versionConflict();
             const metadata = { fromStatus: task.status, toStatus: input.status, reason };

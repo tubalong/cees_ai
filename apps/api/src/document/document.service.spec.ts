@@ -345,6 +345,78 @@ describe('DocumentService', () => {
         expect(result.url).toBe('https://cos.example.com/signed');
     });
 
+    it('uses the modern editorial template for PDF exports by default', async () => {
+        const prisma = createPrismaMock();
+        prisma.managedDocument.findFirst.mockResolvedValue(documentRecord({
+            documentSpec: {
+                schema_version: '1.0', title: '模板测试', subtitle: null,
+                sections: [{ heading: '概览', level: 1, blocks: [{ type: 'paragraph', text: '内容' }] }],
+                source_refs: [],
+            },
+        }));
+        const gateway = {
+            composeDocument: jest.fn(),
+            renderDocumentPdf: jest.fn().mockResolvedValue(Buffer.from('pdf-bytes')),
+        };
+        const service = createService(prisma, createAccessMock(), gateway);
+
+        await service.exportDocumentPdf(DOCUMENT_ID);
+
+        expect(gateway.renderDocumentPdf).toHaveBeenCalledWith(expect.objectContaining({
+            document_options: expect.objectContaining({ template_id: 'editorial-modern' }),
+        }));
+    });
+
+    it('passes the selected executive template to PPTX rendering', async () => {
+        const prisma = createPrismaMock();
+        prisma.managedDocument.findFirst.mockResolvedValue(documentRecord({
+            documentSpec: {
+                schema_version: '1.0', title: '模板测试', subtitle: null,
+                sections: [{ heading: '概览', level: 1, blocks: [{ type: 'paragraph', text: '内容' }] }],
+                source_refs: [],
+            },
+        }));
+        const gateway = {
+            composeDocument: jest.fn(),
+            renderDocumentPptx: jest.fn().mockResolvedValue(Buffer.from('pptx-bytes')),
+        };
+        const service = createService(prisma, createAccessMock(), gateway);
+
+        await service.exportDocumentPptx(DOCUMENT_ID, 'executive-dark');
+
+        expect(gateway.renderDocumentPptx).toHaveBeenCalledWith(expect.objectContaining({
+            options: expect.objectContaining({ template_id: 'executive-dark' }),
+        }));
+    });
+
+    it('drops slides whose blocks all map to nothing and normalizes a blank subtitle', async () => {
+        const prisma = createPrismaMock();
+        prisma.managedDocument.findFirst.mockResolvedValue(documentRecord({
+            documentSpec: {
+                schema_version: '1.0', title: '边界用例', subtitle: '   ',
+                sections: [
+                    { heading: '仅分页', level: 1, blocks: [{ type: 'page_break' }] },
+                    { heading: '正文', level: 1, blocks: [{ type: 'paragraph', text: '内容' }] },
+                ],
+                source_refs: [],
+            },
+        }));
+        const gateway = {
+            composeDocument: jest.fn(),
+            renderDocumentPptx: jest.fn().mockResolvedValue(Buffer.from('pptx-bytes')),
+        };
+        const service = createService(prisma, createAccessMock(), gateway);
+
+        await service.exportDocumentPptx(DOCUMENT_ID);
+
+        const request = gateway.renderDocumentPptx.mock.calls[0][0] as {
+            pptx: { subtitle: string | null; slides: Array<{ title: string; blocks: unknown[] }> };
+        };
+        expect(request.pptx.subtitle).toBeNull();
+        expect(request.pptx.slides).toHaveLength(1);
+        expect(request.pptx.slides[0].title).toBe('正文');
+    });
+
     it('rejects export when the document has no stored spec', async () => {
         const prisma = createPrismaMock();
         prisma.managedDocument.findFirst.mockResolvedValue(documentRecord({ documentSpec: null }));

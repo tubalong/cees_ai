@@ -4,6 +4,7 @@
 /* eslint-disable */
 import type { CreateFinanceExpenseCategoryRequest } from '../models/CreateFinanceExpenseCategoryRequest';
 import type { CreateFinanceExpenseReportRequest } from '../models/CreateFinanceExpenseReportRequest';
+import type { CreateFinanceLedgerImportRequest } from '../models/CreateFinanceLedgerImportRequest';
 import type { FinanceExpenseActionRequest } from '../models/FinanceExpenseActionRequest';
 import type { FinanceExpenseCategoryListResponseEnvelope } from '../models/FinanceExpenseCategoryListResponseEnvelope';
 import type { FinanceExpenseCategoryResponseEnvelope } from '../models/FinanceExpenseCategoryResponseEnvelope';
@@ -12,6 +13,8 @@ import type { FinanceExpenseReportResponseEnvelope } from '../models/FinanceExpe
 import type { FinanceExpenseStatus } from '../models/FinanceExpenseStatus';
 import type { FinanceExpenseSummaryResponseEnvelope } from '../models/FinanceExpenseSummaryResponseEnvelope';
 import type { FinanceExpenseVersionRequest } from '../models/FinanceExpenseVersionRequest';
+import type { FinanceLedgerEntryListResponseEnvelope } from '../models/FinanceLedgerEntryListResponseEnvelope';
+import type { FinanceLedgerImportResponseEnvelope } from '../models/FinanceLedgerImportResponseEnvelope';
 import type { FinanceProjectSpendResponseEnvelope } from '../models/FinanceProjectSpendResponseEnvelope';
 import type { MarkFinanceExpenseReportPaidRequest } from '../models/MarkFinanceExpenseReportPaidRequest';
 import type { ReviewFinanceExpenseReportRequest } from '../models/ReviewFinanceExpenseReportRequest';
@@ -56,6 +59,95 @@ export class FinanceService {
                 401: `登录状态无效或已过期`,
                 403: `缺少 finance.expense.manage_all 权限`,
                 409: `报销类别编码已存在`,
+            },
+        });
+    }
+    /**
+     * 查询财务收支台账
+     * @returns FinanceLedgerEntryListResponseEnvelope 台账记录
+     * @throws ApiError
+     */
+    public static listFinanceLedgerEntries({
+        direction,
+        dateFrom,
+        dateTo,
+        departmentId,
+        projectId,
+        limit = 20,
+        cursor,
+    }: {
+        direction?: 'INCOME' | 'EXPENSE',
+        dateFrom?: string,
+        dateTo?: string,
+        departmentId?: string,
+        projectId?: string,
+        limit?: number,
+        cursor?: string,
+    }): CancelablePromise<FinanceLedgerEntryListResponseEnvelope> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/finance/ledger-entries',
+            query: {
+                'direction': direction,
+                'dateFrom': dateFrom,
+                'dateTo': dateTo,
+                'departmentId': departmentId,
+                'projectId': projectId,
+                'limit': limit,
+                'cursor': cursor,
+            },
+        });
+    }
+    /**
+     * 导入财务收支台账
+     * @returns FinanceLedgerImportResponseEnvelope 导入完成
+     * @throws ApiError
+     */
+    public static createFinanceLedgerImport({
+        requestBody,
+    }: {
+        requestBody: CreateFinanceLedgerImportRequest,
+    }): CancelablePromise<FinanceLedgerImportResponseEnvelope> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/finance/ledger-imports',
+            body: requestBody,
+            mediaType: 'application/json',
+        });
+    }
+    /**
+     * 查询财务台账导入批次
+     * @returns FinanceLedgerImportResponseEnvelope 导入批次
+     * @throws ApiError
+     */
+    public static getFinanceLedgerImport({
+        importId,
+    }: {
+        importId: string,
+    }): CancelablePromise<FinanceLedgerImportResponseEnvelope> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/finance/ledger-imports/{importId}',
+            path: {
+                'importId': importId,
+            },
+        });
+    }
+    /**
+     * 回滚财务台账导入批次
+     * @returns void
+     * @throws ApiError
+     */
+    public static deleteFinanceLedgerImport({
+        importId,
+    }: {
+        importId: string,
+    }): CancelablePromise<void> {
+        return __request(OpenAPI, {
+            method: 'DELETE',
+            url: '/finance/ledger-imports/{importId}',
+            path: {
+                'importId': importId,
             },
         });
     }

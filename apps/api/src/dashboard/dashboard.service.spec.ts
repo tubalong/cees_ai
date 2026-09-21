@@ -1,6 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import { MeetingResponseStatus, MeetingStatus, ProjectStatus, TaskStatus, WorkReportStatus, WorkReportType } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
+import { DataScopeResolverService } from '../rbac/data-scope-resolver.service';
 import { TenantContext } from '../tenant/tenant-context';
 import { DashboardService } from './dashboard.service';
 
@@ -48,10 +49,10 @@ describe('DashboardService', () => {
             generatedAt: NOW,
         });
         expect(prisma.project.findMany).toHaveBeenCalledWith(expect.objectContaining({
-            where: expect.objectContaining({ tenantId: TENANT_ID, members: { some: { membershipId: MEMBERSHIP_ID, deletedAt: null } } }),
+            where: expect.objectContaining({ tenantId: TENANT_ID, OR: expect.any(Array) }),
         }));
         expect(prisma.task.findMany).toHaveBeenCalledWith(expect.objectContaining({
-            where: expect.objectContaining({ tenantId: TENANT_ID, project: expect.objectContaining({ members: { some: { membershipId: MEMBERSHIP_ID, deletedAt: null } } }) }),
+            where: expect.objectContaining({ tenantId: TENANT_ID, OR: expect.any(Array) }),
         }));
         expect(prisma.notificationRecipient.count).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ tenantId: TENANT_ID, userId: USER_ID }) }));
     });
@@ -176,7 +177,8 @@ function createService(prisma: Record<string, any>, permissions: string[] = ['da
             permissions,
         }),
     } as unknown as TenantContext;
-    return new DashboardService(prisma as unknown as PrismaService, tenantContext);
+    const dataScopeResolver = { resolveFor: jest.fn().mockResolvedValue({ scopes: ['SELF'], tenantWide: false, membershipIds: [MEMBERSHIP_ID], departmentIds: [], projectIds: [] }) };
+    return new DashboardService(prisma as unknown as PrismaService, tenantContext, dataScopeResolver as unknown as DataScopeResolverService);
 }
 
 function createPrismaMock(): Record<string, any> {

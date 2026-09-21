@@ -432,7 +432,7 @@ export type DocumentSourceMaterial = {
 export type DocumentOptions = {
     title?: string | null;
     locale?: string;
-    template_id?: 'business-standard';
+    template_id?: 'business-standard' | 'editorial-modern' | 'executive-dark';
     include_toc?: boolean;
     /**
      * Fast composes directly; quality creates a reasoning plan before composition.

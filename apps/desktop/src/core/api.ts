@@ -587,11 +587,14 @@ export async function exportDocument(
     documentId: string,
     format: 'docx' | 'pdf' | 'pptx',
     preferredName?: string,
+    template: 'business-standard' | 'editorial-modern' | 'executive-dark' = 'editorial-modern',
 ): Promise<void> {
     const accessToken = getStoredValue(ACCESS_TOKEN_KEY);
     if (!accessToken) throw new Error('登录状态已失效，请重新登录');
     const suffix = format === 'docx' ? 'export' : `export/${format}`;
-    const response = await fetch(new URL(`v1/documents/${encodeURIComponent(documentId)}/${suffix}`, API_BASE_URL), {
+    const requestUrl = new URL(`v1/documents/${encodeURIComponent(documentId)}/${suffix}`, API_BASE_URL);
+    if (format !== 'docx') requestUrl.searchParams.set('template', template);
+    const response = await fetch(requestUrl, {
         headers: { Authorization: `Bearer ${accessToken}` },
     });
     if (!response.ok) {
@@ -600,12 +603,12 @@ export async function exportDocument(
     }
     const blob = await response.blob();
     const filename = resolveDownloadFilename(response.headers.get('Content-Disposition'), format, preferredName);
-    const url = URL.createObjectURL(blob);
+    const blobUrl = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
-    anchor.href = url;
+    anchor.href = blobUrl;
     anchor.download = filename;
     anchor.click();
-    URL.revokeObjectURL(url);
+    URL.revokeObjectURL(blobUrl);
 }
 
 /**
@@ -1666,6 +1669,30 @@ export async function getDashboardTodos(params: { taskLimit?: number; reportLimi
 
 export async function getDashboardUpcomingMeetings(limit = 5): Promise<{ items: DashboardUpcomingMeeting[] }> {
     return authorizedRequest<{ items: DashboardUpcomingMeeting[] }>(`v1/dashboard/upcoming-meetings?limit=${limit}`);
+}
+
+export type DashboardHomepageCard = { key: string; span: 'FULL' | 'HALF' | 'THIRD'; payload: any; link?: string; empty?: 'NEW_TENANT' | 'NO_DATA' | null };
+export type DashboardHomepage = {
+    archetype: { skeleton: 'EXECUTIVE' | 'MANAGER' | 'EMPLOYEE'; domains: Array<'FINANCE' | 'LEGAL' | 'HR' | 'PROJECT'>; reason: string[] };
+    cards: DashboardHomepageCard[];
+    alerts: Array<{ code: string; severity: 'HIGH' | 'MEDIUM' | 'LOW'; title: string; detail: string; link?: string }>;
+    generatedAt: string;
+};
+
+export async function getDashboardHomepage(): Promise<DashboardHomepage> {
+    return authorizedRequest<DashboardHomepage>('v1/dashboard/home');
+}
+
+export type FinanceLedgerRow = {
+    rowNumber: number; occurredOn: string; direction: 'INCOME' | 'EXPENSE'; amount: number;
+    currency: string; categoryCode?: string | null; categoryName?: string | null; departmentId?: string | null;
+    projectId?: string | null; counterparty?: string | null; summary?: string | null; voucherNo: string;
+};
+
+export type FinanceLedgerImport = { id: string; fileName: string; status: string; rowCount: number; importedCount: number; skippedCount: number; errorCount: number; errors: Array<{ rowNumber: number; message: string }> };
+
+export async function createFinanceLedgerImport(input: { fileName: string; format: 'XLSX' | 'CSV'; periodStart: string; periodEnd: string; rows: FinanceLedgerRow[] }): Promise<FinanceLedgerImport> {
+    return authorizedRequest<FinanceLedgerImport>('v1/finance/ledger-imports', { method: 'POST', body: JSON.stringify(input) });
 }
 
 // ---------------------------------------------------------------------------

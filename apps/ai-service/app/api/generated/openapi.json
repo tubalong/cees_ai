@@ -902,7 +902,7 @@
                 "document_options": {
                   "title": "Project implementation plan",
                   "locale": "en-US",
-                  "template_id": "business-standard",
+                  "template_id": "editorial-modern",
                   "include_toc": false,
                   "generation_mode": "quality",
                   "planning_max_output_tokens": 2048,
@@ -3122,9 +3122,11 @@
           "template_id": {
             "type": "string",
             "enum": [
-              "business-standard"
+              "business-standard",
+              "editorial-modern",
+              "executive-dark"
             ],
-            "default": "business-standard"
+            "default": "editorial-modern"
           },
           "include_toc": {
             "type": "boolean",

@@ -181,14 +181,19 @@ export class DocumentService {
      */
     public static documentExportPdf({
         documentId,
+        template = 'editorial-modern',
     }: {
         documentId: string,
+        template?: 'business-standard' | 'editorial-modern' | 'executive-dark',
     }): CancelablePromise<Blob> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/documents/{documentId}/export/pdf',
             path: {
                 'documentId': documentId,
+            },
+            query: {
+                'template': template,
             },
             errors: {
                 400: `文档没有可导出的生成规格`,
@@ -207,14 +212,19 @@ export class DocumentService {
      */
     public static documentExportPptx({
         documentId,
+        template = 'editorial-modern',
     }: {
         documentId: string,
+        template?: 'business-standard' | 'editorial-modern' | 'executive-dark',
     }): CancelablePromise<Blob> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/documents/{documentId}/export/pptx',
             path: {
                 'documentId': documentId,
+            },
+            query: {
+                'template': template,
             },
             errors: {
                 400: `文档没有可导出的生成规格`,

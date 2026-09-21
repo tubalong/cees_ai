@@ -110,6 +110,8 @@ export const TENANT_PERMISSION_DEFINITIONS = [
     ['finance.expense.request', '发起报销申请'],
     ['finance.expense.approve', '审批报销申请'],
     ['finance.expense.manage_all', '管理当前租户全部报销数据'],
+    ['finance.ledger.read', '查看财务收支台账与收支看板'],
+    ['finance.ledger.manage', '上传、修订和回滚财务收支台账'],
     ['legal.contract.read', '查看合同台账'],
     ['legal.contract.create', '创建合同台账'],
     ['legal.contract.update', '修改合同台账'],
