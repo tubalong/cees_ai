@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from collections.abc import Sequence
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.core.config import ModelRole, OutputMode, Settings
@@ -150,6 +151,27 @@ def test_request_validation_uses_standard_error_shape() -> None:
         )
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "INVALID_INVOCATION_REQUEST"
+
+
+def test_request_validation_logs_offending_field(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    """对外的 422 只有通用错误码，具体字段必须落在服务端日志里，否则无法定位。"""
+    client, _ = build_client()
+    payload = text_payload()
+    payload["messages"] = []
+    with client:
+        response = client.post(
+            "/internal/v1/llm/invoke",
+            headers={"X-AI-Internal-Token": "secret"},
+            json=payload,
+        )
+    assert response.status_code == 422
+    # 响应体保持通用，不泄露内部结构；字段级原因只写日志。
+    assert "messages" not in response.text
+    logs = capfd.readouterr().err
+    assert "request validation failed" in logs
+    assert "messages" in logs
 
 
 def test_message_total_size_is_limited() -> None:

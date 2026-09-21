@@ -1,6 +1,7 @@
 import { Type } from 'class-transformer';
 import {
     IsEnum,
+    IsIn,
     IsInt,
     IsOptional,
     IsString,
@@ -74,4 +75,18 @@ export class DeleteDocumentQueryDto {
     @IsInt()
     @Min(1)
     version!: number;
+}
+
+export const DOCUMENT_EXPORT_TEMPLATES = [
+    'business-standard',
+    'editorial-modern',
+    'executive-dark',
+] as const;
+
+export type DocumentExportTemplate = typeof DOCUMENT_EXPORT_TEMPLATES[number];
+
+export class ExportDocumentQueryDto {
+    @IsOptional()
+    @IsIn(DOCUMENT_EXPORT_TEMPLATES)
+    template: DocumentExportTemplate = 'editorial-modern';
 }

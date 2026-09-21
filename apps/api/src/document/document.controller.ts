@@ -23,7 +23,13 @@ import { TenantContextInterceptor } from '../tenant/tenant-context.interceptor';
 import { TenantGuard } from '../tenant/tenant.guard';
 import { DocumentService } from './document.service';
 import { DocumentListResult, DocumentResult } from './document.types';
-import { CreateDocumentDto, DeleteDocumentQueryDto, ListDocumentsQueryDto, UpdateDocumentDto } from './dto';
+import {
+    CreateDocumentDto,
+    DeleteDocumentQueryDto,
+    ExportDocumentQueryDto,
+    ListDocumentsQueryDto,
+    UpdateDocumentDto,
+} from './dto';
 
 /** DOCX 的 MIME 类型，与 ai-service DocxRenderer 保持一致。 */
 const DOCX_MEDIA_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
@@ -107,8 +113,12 @@ export class DocumentController {
     @ApiOkResponse({ description: 'PDF 文档文件' })
     async exportDocumentPdf(
         @Param('documentId', new ParseUUIDPipe()) documentId: string,
+        @Query() query: ExportDocumentQueryDto = new ExportDocumentQueryDto(),
     ): Promise<StreamableFile> {
-        const { filename, bytes } = await this.documentService.exportDocumentPdf(documentId);
+        const { filename, bytes } = await this.documentService.exportDocumentPdf(
+            documentId,
+            query.template,
+        );
         return new StreamableFile(bytes, {
             type: PDF_MEDIA_TYPE,
             disposition: attachmentDisposition(filename, 'pdf'),
@@ -125,8 +135,12 @@ export class DocumentController {
     @ApiOkResponse({ description: 'PPTX 演示文稿文件' })
     async exportDocumentPptx(
         @Param('documentId', new ParseUUIDPipe()) documentId: string,
+        @Query() query: ExportDocumentQueryDto = new ExportDocumentQueryDto(),
     ): Promise<StreamableFile> {
-        const { filename, bytes } = await this.documentService.exportDocumentPptx(documentId);
+        const { filename, bytes } = await this.documentService.exportDocumentPptx(
+            documentId,
+            query.template,
+        );
         return new StreamableFile(bytes, {
             type: PPTX_MEDIA_TYPE,
             disposition: attachmentDisposition(filename, 'pptx'),

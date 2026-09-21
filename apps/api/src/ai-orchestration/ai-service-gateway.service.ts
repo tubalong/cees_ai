@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { HttpException, Injectable } from '@nestjs/common';
 import {
   answerKnowledge as requestKnowledgeAnswer,
   compactChat as requestChatCompaction,
@@ -54,7 +54,7 @@ import {
   AiInvocationRecorderService,
 } from './ai-invocation-recorder.service';
 
-export class AiServiceInvocationError extends Error {
+export class AiServiceInvocationError extends HttpException {
   constructor(
     public readonly code: string,
     message: string,
@@ -62,7 +62,15 @@ export class AiServiceInvocationError extends Error {
     public readonly httpStatus?: number,
     public readonly execution?: AiInvocationExecution,
   ) {
-    super(message);
+    const status = httpStatus && httpStatus >= 400 && httpStatus <= 599 ? httpStatus : 503;
+    super({
+      code,
+      message,
+      details: {
+        retryable,
+        ...(execution ? { execution } : {}),
+      },
+    }, status);
     this.name = 'AiServiceInvocationError';
   }
 }
@@ -112,7 +120,7 @@ export class AiServiceGateway {
   private client?: Client;
   private cachedChatContextBudgets?: { budgets: ChatContextBudgets; fetchedAt: number };
 
-  constructor(private readonly invocationRecorder: AiInvocationRecorderService) {}
+  constructor(private readonly invocationRecorder: AiInvocationRecorderService) { }
 
   /**
    * 拉取 ai-service /ready 暴露的各模式输入 Token 预算，供上下文压缩触发使用。

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import base64
 from io import BytesIO
 
 import pytest
+from PIL import Image
 from pptx import Presentation
 from pptx.dml.color import RGBColor
+from pptx.enum.shapes import MSO_SHAPE_TYPE
 
 from app.api.generated.models import DocumentOptions, PptxSpec
 from app.core.errors import AIServiceError
@@ -48,6 +51,18 @@ def render_options() -> DocumentOptions:
     return DocumentOptions.model_validate(
         {"locale": "zh-CN", "template_id": "business-standard", "include_toc": False}
     )
+
+
+def themed_options(template_id: str) -> DocumentOptions:
+    return DocumentOptions.model_validate(
+        {"locale": "zh-CN", "template_id": template_id, "include_toc": False}
+    )
+
+
+def png_data_url() -> str:
+    buffer = BytesIO()
+    Image.new("RGB", (640, 360), (20, 150, 130)).save(buffer, format="PNG")
+    return "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
 
 
 def paragraph_blocks(*texts: str) -> list:
@@ -183,3 +198,37 @@ def test_rejects_table_rows_with_wrong_column_count() -> None:
             request_id="req-render-pptx-2",
         )
     assert raised.value.status_code == 422
+
+
+def test_editorial_cover_contains_editable_vector_artwork() -> None:
+    rendered = PptxRenderer().render(
+        PptxSpec.model_validate(pptx_data()),
+        themed_options("editorial-modern"),
+        request_id="req-render-pptx-editorial",
+    )
+    presentation = Presentation(BytesIO(rendered.content))
+
+    assert len(presentation.slides[0].shapes) >= 9
+
+
+def test_image_and_text_use_a_media_layout() -> None:
+    payload = pptx_data()
+    payload["slides"][0]["blocks"] = [
+        {"type": "paragraph", "text": "图文洞察"},
+        {"type": "paragraph", "text": "左侧保留关键结论，右侧展示主题配图。"},
+        {"type": "image", "url": png_data_url(), "caption": "主题配图"},
+    ]
+    rendered = PptxRenderer().render(
+        PptxSpec.model_validate(payload),
+        themed_options("editorial-modern"),
+        request_id="req-render-pptx-media",
+    )
+    presentation = Presentation(BytesIO(rendered.content))
+    pictures = [
+        shape
+        for shape in presentation.slides[1].shapes
+        if shape.shape_type == MSO_SHAPE_TYPE.PICTURE
+    ]
+
+    assert len(pictures) == 1
+    assert pictures[0].left.inches > 6.5

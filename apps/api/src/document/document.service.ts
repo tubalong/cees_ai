@@ -21,7 +21,7 @@ import { STORAGE_PROVIDER, STORAGE_SETTINGS } from '../storage/storage.tokens';
 import type { StorageProvider, StorageSettings } from '../storage/storage.types';
 import { CosObjectKeyFactory } from '../storage/cos-object-key.factory';
 import { TenantContext } from '../tenant/tenant-context';
-import { CreateDocumentDto, ListDocumentsQueryDto, UpdateDocumentDto } from './dto';
+import { CreateDocumentDto, DocumentExportTemplate, ListDocumentsQueryDto, UpdateDocumentDto } from './dto';
 import { DocumentListResult, DocumentResult, DocumentSummaryResult } from './document.types';
 
 /** AIActionDraft.actionType：与权限码保持一致，动作流水与权限语义一一对应。 */
@@ -729,10 +729,9 @@ export class DocumentService {
             tenant_id: input.tenantId,
             user_id: input.userId,
         };
-        const documentOptions = {
+        const baseDocumentOptions = {
             title: document.title,
             locale: 'zh-CN',
-            template_id: 'business-standard' as const,
             include_toc: false,
             generation_mode: 'fast' as const,
         };
@@ -741,19 +740,28 @@ export class DocumentService {
                 return this.gateway.renderDocumentDocx({
                     ...base,
                     document: await this.signSpecImageReferences(document),
-                    document_options: documentOptions,
+                    document_options: {
+                        ...baseDocumentOptions,
+                        template_id: 'business-standard',
+                    },
                 });
             case 'pdf':
                 return this.gateway.renderDocumentPdf({
                     ...base,
                     document: await this.signSpecImageReferences(document),
-                    document_options: documentOptions,
+                    document_options: {
+                        ...baseDocumentOptions,
+                        template_id: 'editorial-modern',
+                    },
                 });
             case 'pptx':
                 return this.gateway.renderDocumentPptx({
                     ...base,
                     pptx: await this.signSpecImageReferences(documentSpecToPptxSpec(document)),
-                    options: documentOptions,
+                    options: {
+                        ...baseDocumentOptions,
+                        template_id: 'editorial-modern',
+                    },
                 });
         }
     }
@@ -983,7 +991,10 @@ export class DocumentService {
      * 导出文档为 PDF：读取落库的 DocumentSpec，经 ai-service render-pdf
      * 确定性渲染为内嵌 CJK 字体的 PDF 字节。渲染不调用 LLM、不产生 Token 成本。
      */
-    async exportDocumentPdf(documentId: string): Promise<DocumentExportResult> {
+    async exportDocumentPdf(
+        documentId: string,
+        template: DocumentExportTemplate = 'editorial-modern',
+    ): Promise<DocumentExportResult> {
         const context = this.tenantContext.require();
         const roleIds = await this.resourceAccess.resolveCurrentRoleIds();
         const document = await this.findAccessibleDocument(documentId, 'document.read', roleIds);
@@ -1002,7 +1013,7 @@ export class DocumentService {
             document_options: {
                 title: resolveDocumentTitle(document),
                 locale: 'zh-CN',
-                template_id: 'business-standard',
+                template_id: template,
                 include_toc: false,
                 generation_mode: 'fast',
             },
@@ -1033,7 +1044,10 @@ export class DocumentService {
      * 导出文档为 PPTX：把落库的 DocumentSpec 按「一节一页」映射为 PptxSpec，
      * 经 ai-service render-pptx 确定性渲染。渲染不调用 LLM、不产生 Token 成本。
      */
-    async exportDocumentPptx(documentId: string): Promise<DocumentExportResult> {
+    async exportDocumentPptx(
+        documentId: string,
+        template: DocumentExportTemplate = 'editorial-modern',
+    ): Promise<DocumentExportResult> {
         const context = this.tenantContext.require();
         const roleIds = await this.resourceAccess.resolveCurrentRoleIds();
         const document = await this.findAccessibleDocument(documentId, 'document.read', roleIds);
@@ -1053,7 +1067,7 @@ export class DocumentService {
             options: {
                 title: resolveDocumentTitle(document),
                 locale: 'zh-CN',
-                template_id: 'business-standard',
+                template_id: template,
                 include_toc: false,
                 generation_mode: 'fast',
             },
@@ -1418,12 +1432,11 @@ function documentSpecToMarkdown(document: DocumentSpec): string {
 
 /** 把 DocumentSpec 按「一节一页」映射为 PptxSpec，供 render-pptx 渲染。 */
 function documentSpecToPptxSpec(document: DocumentSpec): PptxSpec {
-    return {
-        schema_version: '1.0',
-        title: document.title,
-        subtitle: document.subtitle ?? null,
-        theme: 'brand',
-        slides: document.sections.map((section): PptxSlide => ({
+    // 合法 DocumentSpec 未必能映射出合法 PptxSpec：PptxSlide.blocks 至少一个块，
+    // 而 page_break 等没有对应 Pptx 块的类型会被丢弃。丢弃后为空的小节必须整页
+    // 省略，否则 ai-service 契约校验会返回 422 INVALID_INVOCATION_REQUEST。
+    const slides = document.sections
+        .map((section): PptxSlide => ({
             title: section.heading,
             layout: 'title_and_content',
             blocks: section.blocks.flatMap((block): PptxBlock[] => {
@@ -1451,8 +1464,27 @@ function documentSpecToPptxSpec(document: DocumentSpec): PptxSpec {
                         return [];
                 }
             }),
-        })),
+        }))
+        .filter((slide) => slide.blocks.length > 0);
+
+    // PptxSpec.subtitle 一旦存在就必须至少 1 个字符；空白串归一为 null。
+    const subtitle = document.subtitle && document.subtitle.trim().length > 0
+        ? document.subtitle
+        : null;
+
+    return {
+        schema_version: '1.0',
+        title: document.title,
+        subtitle,
+        theme: 'brand',
+        // PptxSpec.slides 至少一页：全部小节都被省略时退化为仅标题页，避免空列表。
+        slides: slides.length > 0 ? slides : [titleOnlySlide(document.title)],
     };
+}
+
+/** 无正文可渲染时的兜底页：仅承载文档标题，保证 PptxSpec.slides 非空。 */
+function titleOnlySlide(title: string): PptxSlide {
+    return { title, layout: 'title_and_content', blocks: [{ type: 'paragraph', text: title }] };
 }
 
 /**

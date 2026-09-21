@@ -37,6 +37,7 @@ from app.api.generated.models import (
     ParagraphBlock,
     QuoteBlock,
     TableBlock,
+    TemplateId,
 )
 from app.documents.images import load_image
 from app.documents.normalize import normalize_document_spec
@@ -64,6 +65,56 @@ _MIN_COLUMN_UNITS = 2.0
 
 # 单张图片的最大显示高度：留出页眉页脚与图注的空间，避免一张竖图把版面顶到页外。
 _MAX_IMAGE_HEIGHT = 19.5 * cm
+
+
+@dataclass(frozen=True)
+class _PdfTheme:
+    primary: colors.Color
+    primary_soft: colors.Color
+    text: colors.Color
+    muted: colors.Color
+    line: colors.Color
+    row_alt: colors.Color
+    cover_background: colors.Color
+    cover_text: colors.Color
+    cover_muted: colors.Color
+
+
+_PDF_THEMES: dict[TemplateId, _PdfTheme] = {
+    TemplateId.business_standard: _PdfTheme(
+        primary=_BRAND,
+        primary_soft=_BRAND_SOFT,
+        text=_TEXT,
+        muted=_MUTED,
+        line=_LINE,
+        row_alt=_ROW_ALT,
+        cover_background=_WHITE,
+        cover_text=_TEXT,
+        cover_muted=_MUTED,
+    ),
+    TemplateId.editorial_modern: _PdfTheme(
+        primary=colors.HexColor("#0F766E"),
+        primary_soft=colors.HexColor("#E6FFFB"),
+        text=colors.HexColor("#17202A"),
+        muted=colors.HexColor("#64748B"),
+        line=colors.HexColor("#D8E4E5"),
+        row_alt=colors.HexColor("#F2F8F7"),
+        cover_background=colors.HexColor("#F7FBFA"),
+        cover_text=colors.HexColor("#17202A"),
+        cover_muted=colors.HexColor("#64748B"),
+    ),
+    TemplateId.executive_dark: _PdfTheme(
+        primary=colors.HexColor("#F59E0B"),
+        primary_soft=colors.HexColor("#3A2C12"),
+        text=colors.HexColor("#17202A"),
+        muted=colors.HexColor("#64748B"),
+        line=colors.HexColor("#CBD5E1"),
+        row_alt=colors.HexColor("#F8FAFC"),
+        cover_background=colors.HexColor("#0F172A"),
+        cover_text=colors.HexColor("#F8FAFC"),
+        cover_muted=colors.HexColor("#CBD5E1"),
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -98,13 +149,15 @@ class PdfRenderer:
             bottomMargin=2.5 * cm,
             title=document.title,
         )
-        styles = _build_styles(body_font, bold_font)
+        template_id = options.template_id or TemplateId.editorial_modern
+        theme = _PDF_THEMES.get(template_id, _PDF_THEMES[TemplateId.editorial_modern])
+        styles = _build_styles(body_font, bold_font, theme)
         story: list = []
 
         # 独立封面页：品牌色块 + 标题 + 副标题，正文另起一页。
         # 旧实现把标题直接排在正文上方，成稿首页看起来像没有封面的草稿。
         story.append(Spacer(1, 4.8 * cm))
-        story.append(_accent_band(doc.width))
+        story.append(_accent_band(doc.width, theme))
         story.append(Spacer(1, 0.52 * cm))
         story.append(Paragraph(escape(document.title), styles["CoverTitle"]))
         if document.subtitle:
@@ -117,7 +170,7 @@ class PdfRenderer:
             story.append(
                 Paragraph("目录" if is_chinese else "Table of Contents", styles["Heading1"])
             )
-            story.append(_heading_rule())
+            story.append(_heading_rule(theme))
             for section in document.sections:
                 story.append(
                     Paragraph(
@@ -135,20 +188,24 @@ class PdfRenderer:
                 story.append(PageBreak())
             story.append(Paragraph(escape(section.heading), styles[f"Heading{level}"]))
             if level == 1:
-                story.append(_heading_rule())
+                story.append(_heading_rule(theme))
             for block in section.blocks:
-                _append_block(story, block, styles, doc.width)
+                _append_block(story, block, styles, doc.width, theme)
 
         def _footer(canvas: object, _doc: object) -> None:
             if _doc.page == 1:  # type: ignore[attr-defined]
                 # 封面不排页脚，改为底部通栏品牌色带，给封面一个收边。
                 canvas.saveState()  # type: ignore[attr-defined]
-                canvas.setFillColor(_BRAND)  # type: ignore[attr-defined]
+                canvas.setFillColor(theme.cover_background)  # type: ignore[attr-defined]
+                canvas.rect(0, 0, A4[0], A4[1], stroke=0, fill=1)  # type: ignore[attr-defined]
+                canvas.setFillColor(theme.primary)  # type: ignore[attr-defined]
                 canvas.rect(0, 0, A4[0], 0.72 * cm, stroke=0, fill=1)  # type: ignore[attr-defined]
+                canvas.setFillColor(theme.primary_soft)  # type: ignore[attr-defined]
+                canvas.circle(A4[0] - 1.2 * cm, A4[1] - 1.0 * cm, 0.55 * cm, stroke=0, fill=1)  # type: ignore[attr-defined]
                 canvas.restoreState()  # type: ignore[attr-defined]
                 return
             canvas.saveState()  # type: ignore[attr-defined]
-            canvas.setStrokeColor(_LINE)  # type: ignore[attr-defined]
+            canvas.setStrokeColor(theme.line)  # type: ignore[attr-defined]
             canvas.setLineWidth(0.5)  # type: ignore[attr-defined]
             canvas.line(doc.leftMargin, 1.78 * cm, A4[0] - doc.rightMargin, 1.78 * cm)  # type: ignore[attr-defined]
             canvas.setFont(body_font, 9)  # type: ignore[attr-defined]
@@ -174,14 +231,14 @@ def _heading_level(level: object) -> int:
     return max(1, min(3, value))
 
 
-def _accent_band(width: float) -> Table:
+def _accent_band(width: float, theme: _PdfTheme) -> Table:
     """封面品牌色横条：用短色块建立封面重心，避免只有一行裸标题。"""
     band = Table([[""]], colWidths=[width * 0.16], rowHeights=[0.14 * cm])
     band.hAlign = "LEFT"
     band.setStyle(
         TableStyle(
             [
-                ("BACKGROUND", (0, 0), (-1, -1), _BRAND),
+                ("BACKGROUND", (0, 0), (-1, -1), theme.primary),
                 ("LEFTPADDING", (0, 0), (-1, -1), 0),
                 ("RIGHTPADDING", (0, 0), (-1, -1), 0),
                 ("TOPPADDING", (0, 0), (-1, -1), 0),
@@ -192,9 +249,9 @@ def _accent_band(width: float) -> Table:
     return band
 
 
-def _heading_rule() -> HRFlowable:
+def _heading_rule(theme: _PdfTheme) -> HRFlowable:
     """一级标题下的品牌色细线，强化章节分隔。"""
-    return HRFlowable(width="100%", thickness=1, color=_BRAND, spaceBefore=0, spaceAfter=8)
+    return HRFlowable(width="100%", thickness=1, color=theme.primary, spaceBefore=0, spaceAfter=8)
 
 
 def _footer_label(title: str, *, limit: int = 56) -> str:
@@ -203,7 +260,11 @@ def _footer_label(title: str, *, limit: int = 56) -> str:
 
 
 def _append_block(
-    story: list, block: object, styles: dict[str, ParagraphStyle], content_width: float
+    story: list,
+    block: object,
+    styles: dict[str, ParagraphStyle],
+    content_width: float,
+    theme: _PdfTheme,
 ) -> None:
     if isinstance(block, ParagraphBlock):
         # 短句且不以句末标点结尾的段落按节内小标题排版，建立层级而不是文字墙。
@@ -220,7 +281,7 @@ def _append_block(
                 Paragraph(f"{index}.\u00a0{_inline_markup(_clean_item(item))}", styles["Numbered"])
             )
     elif isinstance(block, TableBlock):
-        story.append(_build_table(block, styles, content_width))
+        story.append(_build_table(block, styles, content_width, theme))
     elif isinstance(block, QuoteBlock):
         story.append(Paragraph(_inline_markup(block.text), styles["Quote"]))
         if block.attribution:
@@ -279,7 +340,7 @@ def _inline_markup(text: str) -> str:
 
 
 def _build_table(
-    block: TableBlock, styles: dict[str, ParagraphStyle], content_width: float
+    block: TableBlock, styles: dict[str, ParagraphStyle], content_width: float, theme: _PdfTheme
 ) -> Table:
     head = styles["TableHead"]
     cell = styles["TableCell"]
@@ -302,13 +363,13 @@ def _build_table(
         TableStyle(
             [
                 # 品牌色表头 + 斑马纹：旧实现的通体网格线让长表格看起来像未整理的草稿。
-                ("BACKGROUND", (0, 0), (-1, 0), _BRAND),
+                ("BACKGROUND", (0, 0), (-1, 0), theme.primary),
                 ("TEXTCOLOR", (0, 0), (-1, 0), _WHITE),
-                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [_WHITE, _ROW_ALT]),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [_WHITE, theme.row_alt]),
                 # 只用横向分隔线，去掉竖向网格；表头下沿用加粗品牌色强调。
-                ("LINEBELOW", (0, 0), (-1, 0), 1.0, _BRAND),
-                ("LINEBELOW", (0, 1), (-1, -2), 0.4, _LINE),
-                ("BOX", (0, 0), (-1, -1), 0.4, _LINE),
+                ("LINEBELOW", (0, 0), (-1, 0), 1.0, theme.primary),
+                ("LINEBELOW", (0, 1), (-1, -2), 0.4, theme.line),
+                ("BOX", (0, 0), (-1, -1), 0.4, theme.line),
                 ("VALIGN", (0, 0), (-1, -1), "TOP"),
                 ("TOPPADDING", (0, 0), (-1, -1), 6),
                 ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
@@ -340,8 +401,8 @@ def _column_widths(block: TableBlock, content_width: float) -> list[float]:
     return [content_width * weight / total for weight in weights]
 
 
-def _build_styles(body_font: str, bold_font: str) -> dict[str, ParagraphStyle]:
-    base = dict(fontName=body_font, textColor=_TEXT, wordWrap="CJK")
+def _build_styles(body_font: str, bold_font: str, theme: _PdfTheme) -> dict[str, ParagraphStyle]:
+    base = dict(fontName=body_font, textColor=theme.text, wordWrap="CJK")
     # keepWithNext：标题与小标题不允许成为一页的最后一行，reportlab 会自动把它推到下一页。
     heading = dict(fontName=bold_font, wordWrap="CJK", keepWithNext=True)
     return {
@@ -351,7 +412,7 @@ def _build_styles(body_font: str, bold_font: str) -> dict[str, ParagraphStyle]:
             fontSize=30,
             leading=38,
             spaceAfter=10,
-            textColor=_TEXT,
+            textColor=theme.cover_text,
             wordWrap="CJK",
         ),
         "CoverSubtitle": ParagraphStyle(
@@ -360,7 +421,7 @@ def _build_styles(body_font: str, bold_font: str) -> dict[str, ParagraphStyle]:
             fontSize=14,
             leading=20,
             spaceAfter=8,
-            textColor=_MUTED,
+            textColor=theme.cover_muted,
             wordWrap="CJK",
         ),
         "Heading1": ParagraphStyle(
@@ -370,7 +431,7 @@ def _build_styles(body_font: str, bold_font: str) -> dict[str, ParagraphStyle]:
             # 一级章节已经独占一页，不再需要页首大间距。
             spaceBefore=0,
             spaceAfter=10,
-            textColor=_BRAND,
+            textColor=theme.primary,
             **heading,
         ),
         "Heading2": ParagraphStyle(
@@ -379,7 +440,7 @@ def _build_styles(body_font: str, bold_font: str) -> dict[str, ParagraphStyle]:
             leading=21,
             spaceBefore=16,
             spaceAfter=7,
-            textColor=_TEXT,
+            textColor=theme.text,
             **heading,
         ),
         "Heading3": ParagraphStyle(
@@ -388,7 +449,7 @@ def _build_styles(body_font: str, bold_font: str) -> dict[str, ParagraphStyle]:
             leading=18,
             spaceBefore=12,
             spaceAfter=5,
-            textColor=_TEXT,
+            textColor=theme.text,
             **heading,
         ),
         # 节内小标题：与正文区分字号与颜色，并禁止孤立在页尾。
@@ -398,7 +459,7 @@ def _build_styles(body_font: str, bold_font: str) -> dict[str, ParagraphStyle]:
             leading=18,
             spaceBefore=10,
             spaceAfter=4,
-            textColor=_BRAND,
+            textColor=theme.primary,
             **heading,
         ),
         # 正文 11pt：旧实现的 10pt 在 A4 上偏小，与标题对比度不足，是「样式丑」的一部分。
@@ -428,11 +489,11 @@ def _build_styles(body_font: str, bold_font: str) -> dict[str, ParagraphStyle]:
             leading=19,
             leftIndent=8,
             rightIndent=8,
-            backColor=_BRAND_SOFT,
+            backColor=theme.primary_soft,
             borderPadding=6,
             spaceBefore=4,
             spaceAfter=8,
-            textColor=_MUTED,
+            textColor=theme.muted,
             wordWrap="CJK",
         ),
         "Attribution": ParagraphStyle(
@@ -441,7 +502,7 @@ def _build_styles(body_font: str, bold_font: str) -> dict[str, ParagraphStyle]:
             fontSize=10,
             leading=14,
             spaceAfter=8,
-            textColor=_MUTED,
+            textColor=theme.muted,
             alignment=TA_RIGHT,
             wordWrap="CJK",
         ),
@@ -463,7 +524,7 @@ def _build_styles(body_font: str, bold_font: str) -> dict[str, ParagraphStyle]:
             fontSize=12,
             leading=18,
             spaceAfter=4,
-            textColor=_TEXT,
+            textColor=theme.text,
             wordWrap="CJK",
         ),
         "TocLevel2": ParagraphStyle(
@@ -473,7 +534,7 @@ def _build_styles(body_font: str, bold_font: str) -> dict[str, ParagraphStyle]:
             leading=16,
             leftIndent=16,
             spaceAfter=3,
-            textColor=_TEXT,
+            textColor=theme.text,
             wordWrap="CJK",
         ),
         "TocLevel3": ParagraphStyle(
@@ -483,7 +544,7 @@ def _build_styles(body_font: str, bold_font: str) -> dict[str, ParagraphStyle]:
             leading=14,
             leftIndent=32,
             spaceAfter=2,
-            textColor=_MUTED,
+            textColor=theme.muted,
             wordWrap="CJK",
         ),
         # 表格必须复用已注册的中文字体，否则 Helvetica 无 CJK 字形会把整列中文吞掉。
