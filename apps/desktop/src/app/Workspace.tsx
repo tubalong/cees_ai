@@ -579,6 +579,11 @@ function SaveToKnowledgeModal({ target, onClose, onSaved }: {
 /** 已删除引用按会话记录，只保存文档 ID；不再整份缓存来源/引用，避免把历史轮次的来源串到当前回答上。 */
 const DELETED_CITATIONS_KEY = 'cees.chat.citations.deleted';
 
+interface AssistantNavigationState {
+    createNewConversation?: boolean;
+    source?: 'DINGTALK_CONNECTOR';
+}
+
 function readDeletedCitationIds(conversationId: string): Set<string> {
     try {
         const raw = JSON.parse(localStorage.getItem(`${DELETED_CITATIONS_KEY}.${conversationId}`) ?? '[]') as unknown;
@@ -591,6 +596,7 @@ function readDeletedCitationIds(conversationId: string): Set<string> {
 function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element {
     const { t } = useI18n();
     const { message } = AntdApp.useApp();
+    const location = useLocation();
     const navigate = useNavigate();
     const canSaveToKnowledge = permissions.includes('knowledge_base.read');
     const [input, setInput] = useState('');
@@ -619,7 +625,39 @@ function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element 
     const [renameTarget, setRenameTarget] = useState<Conversation>();
     const [renameValue, setRenameValue] = useState('');
     const [dingtalkConnected, setDingtalkConnected] = useState(false);
-    useEffect(() => { void listConversations().then((result) => { setConversations(result.items); if (result.items[0]) void selectConversation(result.items[0]); }).catch((error) => message.error(error instanceof Error ? error.message : '加载会话失败')); }, []);
+    const initialConversationLoadStarted = useRef(false);
+
+    const createAndActivateConversation = async (): Promise<void> => {
+        const conversation = await createConversation();
+        setConversations((items) => [conversation, ...items.filter((item) => item.id !== conversation.id)]);
+        setActiveConversationId(conversation.id);
+        setMessages([]);
+        setPreviewDocument(undefined);
+    };
+
+    useEffect(() => {
+        if (initialConversationLoadStarted.current) return;
+        initialConversationLoadStarted.current = true;
+        const navigationState = location.state as AssistantNavigationState | null;
+        const createNewConversation = navigationState?.createNewConversation === true;
+        void listConversations()
+            .then(async (result) => {
+                setConversations(result.items);
+                if (createNewConversation) {
+                    try {
+                        await createAndActivateConversation();
+                    } catch (error) {
+                        message.error(error instanceof Error ? error.message : t('创建会话失败'));
+                        if (result.items[0]) await selectConversation(result.items[0]);
+                    } finally {
+                        navigate('/assistant', { replace: true, state: null });
+                    }
+                    return;
+                }
+                if (result.items[0]) await selectConversation(result.items[0]);
+            })
+            .catch((error) => message.error(error instanceof Error ? error.message : t('加载会话失败')));
+    }, []);
     useEffect(() => {
         const connector = window.cees?.connectors?.dingtalk;
         if (!connector) return;
@@ -681,7 +719,7 @@ function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element 
     };
 
     const newConversation = (): void => {
-        void createConversation().then((conversation) => { setConversations((items) => [conversation, ...items]); setActiveConversationId(conversation.id); setMessages([]); setPreviewDocument(undefined); }).catch((error) => message.error(error instanceof Error ? error.message : '创建会话失败'));
+        void createAndActivateConversation().catch((error) => message.error(error instanceof Error ? error.message : t('创建会话失败')));
     };
 
     /** 删除成功后只记录该文档 ID，重开对话时按 ID 标记已删除态（块 4）。 */
