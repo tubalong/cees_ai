@@ -6,7 +6,7 @@
     "scripts": {
         "dev": "tsc -p electron/tsconfig.json && concurrently -k \"vite\" \"wait-on http://localhost:5173 && electron .\"",
         "build": "tsc -b && vite build && tsc -p electron/tsconfig.json",
-        "test:dws": "tsc -p electron/tsconfig.json && node --test tests/dingtalk-dws.test.cjs tests/dingtalk-connector.test.cjs tests/connector-runtime.test.cjs",
+        "test:dws": "tsc -p electron/tsconfig.json && node --test tests/dingtalk-dws.test.cjs tests/dingtalk-connector.test.cjs tests/connector-runtime.test.cjs tests/local-cli-transport.test.cjs",
         "dist:win": "pnpm build && electron-builder --win nsis zip --x64"
     },
     "build": {

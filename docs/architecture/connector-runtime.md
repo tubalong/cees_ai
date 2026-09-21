@@ -6,8 +6,9 @@
 - 已落地：钉钉 DWS 通过兼容类型使用通用连接器核心，现有 IPC、页面和执行行为不变。
 - 已落地：增加 `ConnectorAdapter`、`ConnectorRegistry`，钉钉成为第一个通过注册中心获取的适配器。
 - 已落地：现有钉钉专用 IPC 保持不变，但其实现统一委托给 `DingTalkConnectorAdapter`。
+- 已落地：增加通用 `LocalCliTransport`，统一固定命令、参数数组、超时、输出上限、环境变量、JSON 解析和结构化错误；DWS 日常命令已迁移使用。
 - 待实现：通用 Electron IPC。
-- 待实现：通用 `LocalCliTransport`、远程 MCP Transport 和混合执行方式。
+- 待实现：远程 MCP Transport 和混合执行方式。
 - 待实现：连接器进入 Assistant 原生 Tool Loop，以及写操作的二次确认机制。
 
 ## 2. 目标
@@ -57,19 +58,30 @@ Manifest 描述连接器的静态能力，包括：
 
 当前钉钉 Manifest 声明为 Desktop 本地 CLI、OAuth 授权、支持动态工具与版本管理。Manifest 只描述能力，不保存 Token、Cookie、Secret 或用户账号数据。
 
-## 5. 安全边界
+## 5. Local CLI Transport
+
+`LocalCliTransport` 只接受由 Adapter 提供的固定可执行文件和结构化参数数组，统一提供：
+
+- `execFile` 且显式 `shell=false`；
+- 超时、最大输出字节数与隐藏窗口；
+- 基础环境变量和单次调用环境变量合并；
+- 文本、JSON、版本和健康检查；
+- 非零退出、超时、stdout/stderr 和退出信号的结构化错误。
+
+钉钉受管 DWS 直接执行固定 `dws.exe`。Windows 系统安装兼容路径仍只用于既有状态与兼容操作；对话业务工具继续要求受管 DWS。DWS 官方 PowerShell 安装器保留独立的下载、SHA-256 校验和固定参数流程，不作为通用 CLI 能力暴露。
+
+## 6. 安全边界
 
 - AI 只能使用受信任 Schema 转换出的工具 ID 和结构化参数。
 - 模型不能指定可执行文件、Shell、环境变量或任意本地路径。
 - 外部数据写入 CEES 正式业务资源时仍由 `apps/api` 进行租户、权限和审计校验。
 - 通用类型不改变钉钉现有的只读过滤、参数白名单、输出脱敏和结果大小限制。
 
-## 6. 后续演进
+## 7. 后续演进
 
 1. 增加 `ConnectorAdapter` 并将钉钉包装为首个 Adapter。
 2. 增加 `ConnectorRegistry`，由注册中心管理连接器清单。
-3. 提取安全的 `LocalCliTransport`，供 DWS 与 `wecom-cli` 复用。
-4. 增加通用 Electron IPC 和 Manifest 驱动的连接器市场。
-5. 接入企业微信 CLI，验证通用抽象。
-6. 按真实需求增加 Remote MCP Transport。
-7. 最后将本地连接器调用接入 Assistant 原生 Tool Loop。
+3. 增加通用 Electron IPC 和 Manifest 驱动的连接器市场。
+4. 接入企业微信 CLI，验证通用抽象。
+5. 按真实需求增加 Remote MCP Transport。
+6. 最后将本地连接器调用接入 Assistant 原生 Tool Loop。
