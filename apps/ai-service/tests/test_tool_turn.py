@@ -15,8 +15,12 @@ from app.main import create_app
 from tests.helpers import StubProvider, catalog, profile, ready_runtime, text_parts
 
 
-def tool_turn_payload(*, tools: list[dict[str, object]] | None = None) -> dict[str, object]:
-    return {
+def tool_turn_payload(
+    *,
+    tools: list[dict[str, object]] | None = None,
+    conversation_summary: str | None = None,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
         "request_id": "req-tool-turn-1",
         "tenant_id": "tenant-1",
         "user_id": "user-1",
@@ -36,6 +40,9 @@ def tool_turn_payload(*, tools: list[dict[str, object]] | None = None) -> dict[s
             }
         ],
     }
+    if conversation_summary is not None:
+        payload["conversation_summary"] = conversation_summary
+    return payload
 
 
 def parse_sse_events(body: str) -> list[tuple[str, dict[str, object]]]:
@@ -67,6 +74,20 @@ def test_tool_turn_prepare_builds_system_context_and_tools() -> None:
             "parameters": {"type": "object", "properties": {"prompt": {"type": "string"}}},
         },
     )
+
+
+def test_tool_turn_prepare_sets_context_strategy_from_summary() -> None:
+    without_summary = ToolTurnOrchestrator().prepare(
+        ToolTurnRequest.model_validate(tool_turn_payload())
+    )
+    assert without_summary.context_strategy.value == "full"
+
+    with_summary = ToolTurnOrchestrator().prepare(
+        ToolTurnRequest.model_validate(
+            tool_turn_payload(conversation_summary="User prefers short replies.")
+        )
+    )
+    assert with_summary.context_strategy.value == "summary_plus_recent"
 
 
 def test_tool_turn_prepare_rejects_unknown_tool_message_reference() -> None:
@@ -142,6 +163,7 @@ def test_tool_turn_stream_returns_tool_calls_event() -> None:
         "usage",
         "completed",
     ]
+    assert events[0][1]["context_usage"]["strategy"] == "full"
     assert events[1][1]["execution"] == {
         "profile": "tool",
         "provider": "openai_compatible",
@@ -156,6 +178,38 @@ def test_tool_turn_stream_returns_tool_calls_event() -> None:
         }
     ]
     assert events[3][1]["token_usage"]["total_tokens"] == 14
+
+
+def test_tool_turn_stream_reports_summary_plus_recent_strategy() -> None:
+    tool_profile = profile(capabilities={ModelCapability.chat, ModelCapability.tool_calling})
+    provider = StubProvider(
+        tool_profile,
+        [],
+        tool_stream_outcomes=[
+            [
+                ProviderStreamChunk(text="已生成图片。"),
+                ProviderStreamChunk(finish_reason="stop"),
+            ]
+        ],
+    )
+    model_catalog = catalog(
+        {"tool": tool_profile},
+        {ModelRole.orchestrator: ["tool"]},
+    )
+    router = LLMRouter(model_catalog, lambda _name, _profile: provider)
+    client = TestClient(create_app(runtime=ready_runtime(router, model_catalog)))
+
+    with client:
+        response = client.post(
+            "/internal/v1/chat/tool-turn/stream",
+            headers={"X-AI-Internal-Token": "secret"},
+            json=tool_turn_payload(conversation_summary="User prefers short replies."),
+        )
+
+    assert response.status_code == 200
+    events = parse_sse_events(response.text)
+    assert events[0][0] == "started"
+    assert events[0][1]["context_usage"]["strategy"] == "summary_plus_recent"
 
 
 def test_tool_turn_stream_extracts_follow_up_questions() -> None:

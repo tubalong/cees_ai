@@ -10,7 +10,6 @@ from pydantic import BaseModel
 
 from app.api.generated.models import (
     ChatAssistantMessage,
-    ChatContextStrategy,
     ChatContextUsage,
     ChatInvokeResponse,
     ChatMode,
@@ -187,7 +186,7 @@ async def _tool_turn_stream_events(
             conversation_id=payload.conversation_id,
             mode=ChatMode(prepared.mode.value),
             context_usage=ChatContextUsage(
-                strategy=ChatContextStrategy.full,
+                strategy=prepared.context_strategy,
                 received_message_count=prepared.received_message_count,
                 included_message_count=prepared.included_message_count,
                 history_truncated=False,
