@@ -198,6 +198,15 @@ export async function loginDingTalkDws(): Promise<DingTalkDwsStatus> {
     return getDingTalkDwsStatus();
 }
 
+export function dingTalkLogoutArguments(): string[] {
+    return ['auth', 'logout', '-y'];
+}
+
+export async function logoutDingTalkDws(): Promise<DingTalkDwsStatus> {
+    await runDws(dingTalkLogoutArguments(), 30_000);
+    return getDingTalkDwsStatus();
+}
+
 export async function selectDingTalkDwsProfile(profile: string): Promise<DingTalkDwsStatus> {
     const normalized = profile.trim();
     if (!normalized) throw new Error('请选择钉钉组织账号');

@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('cees', {
         dingtalk: {
             status: (): Promise<DingTalkDwsStatus> => ipcRenderer.invoke('cees:dingtalk-connector-status'),
             connect: (): Promise<DingTalkDwsStatus> => ipcRenderer.invoke('cees:dingtalk-connector-connect'),
+            disconnect: (): Promise<DingTalkDwsStatus> => ipcRenderer.invoke('cees:dingtalk-connector-disconnect'),
             selectProfile: (profile: string): Promise<DingTalkDwsStatus> => ipcRenderer.invoke('cees:dingtalk-dws-select-profile', profile),
             tools: (): Promise<DingTalkConnectorTool[]> => ipcRenderer.invoke('cees:dingtalk-connector-tools'),
             execute: (calls: DingTalkConnectorPlannedCall[]): Promise<DingTalkConnectorContext[]> => ipcRenderer.invoke('cees:dingtalk-connector-execute', calls),

@@ -1,7 +1,10 @@
 import { CheckCircleFilled, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import { App as AntdApp, Button, Modal, Select, Space, Spin, Tag } from 'antd';
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useI18n } from '../../core/i18n';
+
+const DINGTALK_DESCRIPTION = '通过命令行管理钉钉全产品能力：AI 表格、考勤、日历、群聊与机器人、通讯录、开放平台文档、DING 消息、钉钉文档、钉钉云盘、AI 听记、邮箱、OA 审批、日志、待办。';
 
 const EMPTY_STATUS: DingTalkConnectorStatus = {
     state: 'NOT_INSTALLED',
@@ -44,6 +47,7 @@ const EMPTY_RELEASE: DingTalkConnectorReleaseStatus = {
 export default function ConnectorMarketplacePage(): JSX.Element {
     const { t } = useI18n();
     const { message, modal } = AntdApp.useApp();
+    const navigate = useNavigate();
     const [status, setStatus] = useState<DingTalkConnectorStatus>(EMPTY_STATUS);
     const [release, setRelease] = useState<DingTalkConnectorReleaseStatus>(EMPTY_RELEASE);
     const [loading, setLoading] = useState(true);
@@ -51,6 +55,7 @@ export default function ConnectorMarketplacePage(): JSX.Element {
     const [checkingUpdate, setCheckingUpdate] = useState(false);
     const [upgrading, setUpgrading] = useState(false);
     const [rollingBack, setRollingBack] = useState(false);
+    const [disconnecting, setDisconnecting] = useState(false);
     const [dialogOpen, setDialogOpen] = useState(false);
     const [selectedProfile, setSelectedProfile] = useState<string>();
 
@@ -174,7 +179,38 @@ export default function ConnectorMarketplacePage(): JSX.Element {
         });
     };
 
-    const connected = status.installed && status.authenticated;
+    const tryConnector = (): void => {
+        setDialogOpen(false);
+        navigate('/assistant');
+    };
+
+    const confirmDisconnect = (): void => {
+        modal.confirm({
+            title: t('解绑钉钉连接器'),
+            content: t('解绑会清除本机保存的全部钉钉登录授权，但不会卸载 DWS，也不会删除已导入 CEES 的组织或业务数据。解绑后需要重新授权才能继续使用。'),
+            okText: t('确认解绑'),
+            cancelText: t('取消'),
+            okButtonProps: { danger: true },
+            onOk: async () => {
+                const connector = window.cees?.connectors?.dingtalk;
+                if (!connector) return;
+                setDisconnecting(true);
+                try {
+                    const nextStatus = await connector.disconnect();
+                    setStatus(nextStatus);
+                    setSelectedProfile(undefined);
+                    setDialogOpen(false);
+                    message.success(t('钉钉连接器已解绑'));
+                } catch (error) {
+                    message.error(error instanceof Error ? error.message : t('钉钉连接器解绑失败'));
+                } finally {
+                    setDisconnecting(false);
+                }
+            },
+        });
+    };
+
+    const connected = status.state === 'READY';
     const statusText = status.state === 'READY'
         ? t('已连接')
         : status.state === 'PROFILE_REQUIRED'
@@ -208,7 +244,7 @@ export default function ConnectorMarketplacePage(): JSX.Element {
                     <div className="connector-logo" aria-hidden="true">钉</div>
                     <div className="connector-card-copy">
                         <div className="connector-card-title"><h3>{t('钉钉')}</h3><span className={`connector-status ${connected ? 'is-connected' : ''}`}>{statusText}</span></div>
-                        <p>{t('动态读取当前账号授权范围内的 DWS 安全只读能力，并在对话中作为只读上下文使用。')}</p>
+                        <p>{t(DINGTALK_DESCRIPTION)}</p>
                     </div>
                     <div className="connector-card-meta">
                         {loading ? <Spin size="small" /> : <>
@@ -238,44 +274,62 @@ export default function ConnectorMarketplacePage(): JSX.Element {
 
         <Modal
             open={dialogOpen}
-            title={status.state === 'PROFILE_REQUIRED' ? t('选择当前钉钉组织') : connected ? t('重新授权钉钉连接器') : t('安装并连接钉钉')}
-            okText={status.state === 'PROFILE_REQUIRED' ? t('使用此组织') : connected ? t('重新授权') : t('安装并授权')}
+            title={connected ? undefined : status.state === 'PROFILE_REQUIRED' ? t('选择当前钉钉组织') : t('安装并连接钉钉')}
+            footer={connected ? null : undefined}
+            okText={status.state === 'PROFILE_REQUIRED' ? t('使用此组织') : t('安装并授权')}
             cancelText={t('取消')}
             confirmLoading={connecting}
             okButtonProps={{ disabled: status.state === 'PROFILE_REQUIRED' ? !selectedProfile : !status.installSupported && !status.installed }}
             onOk={() => void connect()}
-            onCancel={() => !connecting && setDialogOpen(false)}
-            maskClosable={!connecting}
-            closable={!connecting}
+            onCancel={() => !connecting && !disconnecting && setDialogOpen(false)}
+            maskClosable={!connecting && !disconnecting}
+            closable={!connecting && !disconnecting}
+            centered
         >
-            <div className="connector-install-dialog">
-                <div className="connector-install-logo">钉</div>
-                <div>
-                    {status.state === 'PROFILE_REQUIRED'
-                        ? <>
-                            <p>{t('当前账号已授权多个钉钉组织，请明确选择本次使用的组织。CEES 不会默认选择第一项。')}</p>
-                            <Select
-                                style={{ width: '100%', marginBottom: 12 }}
-                                placeholder={t('选择钉钉组织账号')}
-                                value={selectedProfile}
-                                onChange={setSelectedProfile}
-                                options={status.profiles.map((profile) => ({
-                                    value: profile.profile,
-                                    label: `${profile.corpName || profile.corpId || t('未知组织')} · ${profile.externalUserName || profile.externalUserId || t('未知用户')}`,
-                                }))}
-                            />
-                        </>
-                        : <p>{t('CEES 将下载并校验钉钉官方 DWS，然后安装到当前用户的 CEES 数据目录。安装完成后会自动打开钉钉授权流程。')}</p>}
-                    {status.state !== 'PROFILE_REQUIRED' && <ul>
-                        <li>{t('固定版本：{version}', { version: release.version })}</li>
-                        <li>{t('开源许可：{license}', { license: release.license })}</li>
-                        <li>{t('当前版本仅在 Windows 支持自动安装')}</li>
-                        <li>{t('授权凭据仅保存在本机，不会上传到 CEES API')}</li>
-                        <li>{t('暂不安装 DWS 技能与专家能力')}</li>
-                    </ul>}
-                    {!status.installSupported && !status.installed ? <p className="connector-install-warning">{t('当前系统不支持自动安装，请先手动安装 DWS。')}</p> : null}
+            {connected ? <div className="connector-connected-dialog">
+                <div className="connector-connected-visual" aria-hidden="true">
+                    <div className="connector-connected-node connector-connected-cees">CEES</div>
+                    <div className="connector-connected-link"><span /><CheckCircleFilled /></div>
+                    <div className="connector-connected-node connector-connected-dingtalk">钉</div>
                 </div>
-            </div>
+                <h2>{t('连接 钉钉')}</h2>
+                <p className="connector-connected-description">{t(DINGTALK_DESCRIPTION)}</p>
+                <div className="connector-connected-account">
+                    <strong>{status.corpName || t('当前钉钉组织')}</strong>
+                    <span>{status.externalUserName || status.profile || t('已完成授权')}</span>
+                </div>
+                <div className="connector-connected-actions">
+                    <Button type="primary" size="large" onClick={tryConnector}>{t('去试试')}</Button>
+                    <Button danger size="large" loading={disconnecting} onClick={confirmDisconnect}>{t('解绑')}</Button>
+                </div>
+            </div> : <div className="connector-install-dialog">
+                    <div className="connector-install-logo">钉</div>
+                    <div>
+                        {status.state === 'PROFILE_REQUIRED'
+                            ? <>
+                                <p>{t('当前账号已授权多个钉钉组织，请明确选择本次使用的组织。CEES 不会默认选择第一项。')}</p>
+                                <Select
+                                    style={{ width: '100%', marginBottom: 12 }}
+                                    placeholder={t('选择钉钉组织账号')}
+                                    value={selectedProfile}
+                                    onChange={setSelectedProfile}
+                                    options={status.profiles.map((profile) => ({
+                                        value: profile.profile,
+                                        label: `${profile.corpName || profile.corpId || t('未知组织')} · ${profile.externalUserName || profile.externalUserId || t('未知用户')}`,
+                                    }))}
+                                />
+                            </>
+                            : <p>{t('CEES 将下载并校验钉钉官方 DWS，然后安装到当前用户的 CEES 数据目录。安装完成后会自动打开钉钉授权流程。')}</p>}
+                        {status.state !== 'PROFILE_REQUIRED' && <ul>
+                            <li>{t('固定版本：{version}', { version: release.version })}</li>
+                            <li>{t('开源许可：{license}', { license: release.license })}</li>
+                            <li>{t('当前版本仅在 Windows 支持自动安装')}</li>
+                            <li>{t('授权凭据仅保存在本机，不会上传到 CEES API')}</li>
+                            <li>{t('暂不安装 DWS 技能与专家能力')}</li>
+                        </ul>}
+                        {!status.installSupported && !status.installed ? <p className="connector-install-warning">{t('当前系统不支持自动安装，请先手动安装 DWS。')}</p> : null}
+                    </div>
+                </div>}
         </Modal>
     </div>;
 }
