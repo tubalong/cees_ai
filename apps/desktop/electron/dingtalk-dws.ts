@@ -1,6 +1,11 @@
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { promisify } from 'node:util';
+import type {
+    ConnectorRecoveryAction,
+    ConnectorState,
+    ConnectorStatus,
+} from './connectors/core/connector.types';
 
 const execFileAsync = promisify(execFile);
 const ROOT_DEPARTMENT_ID = '1';
@@ -8,8 +13,8 @@ const MAX_DEPARTMENTS = 5000;
 const MAX_USERS = 20000;
 let managedExecutablePath: string | null = null;
 
-export type DingTalkConnectorState = 'NOT_INSTALLED' | 'AUTH_REQUIRED' | 'PROFILE_REQUIRED' | 'READY' | 'ERROR';
-export type DingTalkConnectorRecoveryAction = 'INSTALL' | 'MANUAL_INSTALL' | 'AUTHORIZE' | 'SELECT_PROFILE' | 'RETRY' | 'NONE';
+export type DingTalkConnectorState = ConnectorState;
+export type DingTalkConnectorRecoveryAction = ConnectorRecoveryAction;
 
 export interface DingTalkDwsProfile {
     profile: string;
@@ -40,23 +45,15 @@ export function configureDingTalkDwsExecutable(executablePath: string): void {
     managedExecutablePath = executablePath;
 }
 
-export interface DingTalkDwsStatus {
-    state: DingTalkConnectorState;
-    installed: boolean;
-    authenticated: boolean;
+export interface DingTalkDwsStatus extends ConnectorStatus {
     source: 'MANAGED' | 'SYSTEM' | null;
     installSupported: boolean;
-    version: string | null;
     profile: string | null;
     corpId: string | null;
     corpName: string | null;
     externalUserId: string | null;
     externalUserName: string | null;
     profiles: DingTalkDwsProfile[];
-    checkedAt: string;
-    issueCode: string | null;
-    recoveryAction: DingTalkConnectorRecoveryAction;
-    error: string | null;
 }
 
 export interface DingTalkDwsSnapshot {
