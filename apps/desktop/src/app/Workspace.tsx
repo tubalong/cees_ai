@@ -29,6 +29,7 @@ import ConnectorMarketplacePage from '../features/connectors/ConnectorMarketplac
 import NotificationCenter from '../features/notifications/NotificationCenter';
 import OrganizationManagement from '../features/organization/OrganizationManagement';
 import ProjectManagement from '../features/projects/ProjectManagement';
+import ProjectDetailPage from '../features/projects/ProjectDetailPage';
 import WorkReportPage from '../features/reports/WorkReportPage';
 import ProfileSettings from '../features/profile/ProfileSettings';
 import RoleManagement from '../features/roles/RoleManagement';
@@ -198,11 +199,15 @@ function SideNavigation({ collapsed, permissions, unreadCount, onToggle, onLogou
         return (!requiredPermission || permissions.includes(requiredPermission)) && (!anyPermissions || anyPermissions.some((permission) => permissions.includes(permission)));
     };
 
+    /* 子路由（如 /projects/:id）也应让父级导航项保持高亮。 */
+    const isNavItemActive = (item: NavItem): boolean => location.pathname === item.path
+        || (item.path !== '/' && location.pathname.startsWith(`${item.path}/`));
+
     const visiblePinnedItems = pinnedNavItems.filter(isPermitted);
     const visibleSections = navSections
         .map((section) => ({ ...section, items: section.items.filter(isPermitted) }))
         .filter((section) => section.items.length > 0);
-    const activeSectionKey = visibleSections.find((section) => section.items.some((item) => item.path === location.pathname))?.key;
+    const activeSectionKey = visibleSections.find((section) => section.items.some((item) => isNavItemActive(item)))?.key;
 
     useEffect(() => {
         if (!activeSectionKey) return;
@@ -214,7 +219,7 @@ function SideNavigation({ collapsed, permissions, unreadCount, onToggle, onLogou
     };
 
     const renderNavItem = (item: NavItem, isChild = false): JSX.Element => <Tooltip key={item.path} title={collapsed ? t(item.label) : ''} placement="right">
-        <button className={`nav-item ${isChild ? 'is-child' : ''} ${location.pathname === item.path ? 'is-active' : ''}`} type="button" onClick={() => navigate(item.path)}>
+        <button className={`nav-item ${isChild ? 'is-child' : ''} ${isNavItemActive(item) ? 'is-active' : ''}`} type="button" onClick={() => navigate(item.path)}>
             {item.path === '/notifications' ? <Badge count={unreadCount} size="small" offset={[2, -2]}>{item.icon}</Badge> : item.icon}{!collapsed && <span>{t(item.label)}</span>}
         </button>
     </Tooltip>;
@@ -974,6 +979,8 @@ function CurrentPage({ authContext, members, documents, membersLoading, document
     if (location.pathname === '/browser') return <BrowserPage />;
     // if (location.pathname === '/assistant') return <AssistantPage />;
     if (location.pathname === '/assistant') return <AssistantPage permissions={authContext.permissions} />;
+    const projectDetailMatch = location.pathname.match(/^\/projects\/([^/]+)$/);
+    if (projectDetailMatch) return <ProjectDetailPage projectId={decodeURIComponent(projectDetailMatch[1])} authContext={authContext} onSessionExpired={onSessionExpired} />;
     if (location.pathname === '/projects') return <ProjectManagement authContext={authContext} onSessionExpired={onSessionExpired} />;
     if (location.pathname === '/meetings') return <MeetingManagement authContext={authContext} onSessionExpired={onSessionExpired} />;
     if (location.pathname === '/reports') return <WorkReportPage authContext={authContext} onSessionExpired={onSessionExpired} />;
