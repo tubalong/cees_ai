@@ -200,6 +200,29 @@ enum FinancePaymentMethod {
   OTHER
 }
 
+enum FinanceLedgerDirection {
+  INCOME
+  EXPENSE
+}
+
+enum FinanceLedgerSource {
+  IMPORT
+  MANUAL
+}
+
+enum FinanceLedgerImportStatus {
+  PENDING
+  PARSING
+  SUCCEEDED
+  PARTIAL
+  FAILED
+}
+
+enum DashboardSnapshotPeriod {
+  DAY
+  MONTH
+}
+
 enum LegalContractStatus {
   DRAFT
   ACTIVE
@@ -462,6 +485,9 @@ model Tenant {
   financeExpenseAttachments FinanceExpenseAttachment[]
   financeExpenseHistories   FinanceExpenseStatusHistory[]
   financeExpenseSequences   FinanceExpenseReportSequence[]
+  financeLedgerImports      FinanceLedgerImport[]
+  financeLedgerEntries      FinanceLedgerEntry[]
+  dashboardMetricSnapshots  DashboardMetricSnapshot[]
   legalContracts            LegalContract[]
   legalContractAttachments  LegalContractAttachment[]
   legalContractHistories    LegalContractStatusHistory[]
@@ -1003,6 +1029,7 @@ model Task {
   status                TaskStatus        @default(TODO)
   priority              TaskPriority      @default(MEDIUM)
   dueDate               DateTime?         @map("due_date")
+  completedAt           DateTime?         @map("completed_at")
   relationType          String?           @map("relation_type")
   relationId            String?           @map("relation_id") @db.Uuid
   createdByMembershipId String?           @map("created_by_membership_id") @db.Uuid
@@ -1021,6 +1048,8 @@ model Task {
 
   @@index([tenantId, status, dueDate])
   @@index([tenantId, projectId])
+  @@index([tenantId, completedAt])
+  @@index([tenantId, projectId, completedAt])
   @@index([tenantId, projectId, parentId])
   @@index([tenantId, createdByMembershipId])
   @@map("tasks")
@@ -1484,6 +1513,87 @@ model FinanceExpenseStatusHistory {
 
   @@index([tenantId, reportId, createdAt])
   @@map("finance_expense_status_history")
+}
+
+model FinanceLedgerImport {
+  id                     String                    @id @default(uuid()) @db.Uuid
+  tenantId               String                    @map("tenant_id") @db.Uuid
+  tenant                 Tenant                    @relation(fields: [tenantId], references: [id])
+  fileName               String                    @map("file_name")
+  format                 String                    @default("XLSX") @db.VarChar(8)
+  periodStart            DateTime                  @map("period_start") @db.Date
+  periodEnd              DateTime                  @map("period_end") @db.Date
+  status                 FinanceLedgerImportStatus @default(PENDING)
+  rowCount               Int                       @default(0) @map("row_count")
+  importedCount          Int                       @default(0) @map("imported_count")
+  skippedCount           Int                       @default(0) @map("skipped_count")
+  errorCount             Int                       @default(0) @map("error_count")
+  errors                 Json?
+  uploadedByMembershipId String                    @map("uploaded_by_membership_id") @db.Uuid
+  startedAt              DateTime?                 @map("started_at")
+  finishedAt             DateTime?                 @map("finished_at")
+  entries                FinanceLedgerEntry[]
+  createdAt              DateTime                  @default(now()) @map("created_at")
+  updatedAt              DateTime                  @updatedAt @map("updated_at")
+  createdBy              String?                   @map("created_by") @db.Uuid
+  deletedAt              DateTime?                 @map("deleted_at")
+  version                Int                       @default(1)
+
+  @@index([tenantId, status, createdAt])
+  @@index([tenantId, periodStart])
+  @@map("finance_ledger_imports")
+}
+
+model FinanceLedgerEntry {
+  id           String                 @id @default(uuid()) @db.Uuid
+  tenantId     String                 @map("tenant_id") @db.Uuid
+  tenant       Tenant                 @relation(fields: [tenantId], references: [id])
+  importId     String?                @map("import_id") @db.Uuid
+  import       FinanceLedgerImport?   @relation(fields: [importId], references: [id], onDelete: Cascade)
+  occurredOn   DateTime               @map("occurred_on") @db.Date
+  direction    FinanceLedgerDirection
+  amount       Decimal                @db.Decimal(18, 2)
+  currency     String                 @default("CNY") @db.VarChar(3)
+  categoryCode String?                @map("category_code")
+  categoryName String?                @map("category_name")
+  departmentId String?                @map("department_id") @db.Uuid
+  projectId    String?                @map("project_id") @db.Uuid
+  counterparty String?
+  summary      String?
+  voucherNo    String?                @map("voucher_no")
+  source       FinanceLedgerSource    @default(IMPORT)
+  createdAt    DateTime               @default(now()) @map("created_at")
+  updatedAt    DateTime               @updatedAt @map("updated_at")
+  createdBy    String?                @map("created_by") @db.Uuid
+  updatedBy    String?                @map("updated_by") @db.Uuid
+  deletedAt    DateTime?              @map("deleted_at")
+  version      Int                    @default(1)
+
+  @@unique([tenantId, direction, occurredOn, voucherNo])
+  @@index([tenantId, occurredOn, direction])
+  @@index([tenantId, departmentId, occurredOn])
+  @@index([tenantId, projectId, occurredOn])
+  @@index([tenantId, importId])
+  @@map("finance_ledger_entries")
+}
+
+model DashboardMetricSnapshot {
+  id          String                  @id @default(uuid()) @db.Uuid
+  tenantId    String                  @map("tenant_id") @db.Uuid
+  tenant      Tenant                  @relation(fields: [tenantId], references: [id])
+  metricKey   String                  @map("metric_key") @db.VarChar(64)
+  period      DashboardSnapshotPeriod
+  periodStart DateTime                @map("period_start") @db.Date
+  scopeKey    String                  @default("TENANT") @map("scope_key") @db.VarChar(64)
+  value       Decimal                 @db.Decimal(20, 4)
+  meta        Json?
+  computedAt  DateTime                @default(now()) @map("computed_at")
+  updatedAt   DateTime                @updatedAt @map("updated_at")
+
+  @@unique([tenantId, metricKey, period, periodStart, scopeKey])
+  @@index([tenantId, period, periodStart, metricKey])
+  @@index([tenantId, metricKey, periodStart])
+  @@map("dashboard_metric_snapshots")
 }
 
 model LegalContractSequence {
