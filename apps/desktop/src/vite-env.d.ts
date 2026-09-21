@@ -40,6 +40,7 @@ interface Window {
             dingtalk: {
                 status: () => Promise<DingTalkConnectorStatus>;
                 connect: () => Promise<DingTalkConnectorStatus>;
+                disconnect: () => Promise<DingTalkConnectorStatus>;
                 selectProfile: (profile: string) => Promise<DingTalkConnectorStatus>;
                 tools: () => Promise<DingTalkConnectorTool[]>;
                 execute: (calls: DingTalkConnectorPlannedCall[]) => Promise<DingTalkConnectorContext[]>;

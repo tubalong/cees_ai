@@ -217,6 +217,104 @@
     color: #d88416;
 }
 
+.connector-connected-dialog {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 18px 20px 8px;
+    text-align: center;
+}
+
+.connector-connected-visual {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 8px 0 22px;
+}
+
+.connector-connected-node {
+    width: 68px;
+    height: 68px;
+    display: grid;
+    place-items: center;
+    border-radius: 20px;
+    color: #fff;
+    box-shadow: 0 12px 28px rgba(32, 45, 80, .16);
+    font-weight: 700;
+}
+
+.connector-connected-cees {
+    background: linear-gradient(145deg, #5c64f4, #4148c9);
+    font-size: 14px;
+    letter-spacing: .04em;
+}
+
+.connector-connected-dingtalk {
+    background: linear-gradient(145deg, #1687ff, #0866df);
+    font-size: 28px;
+}
+
+.connector-connected-link {
+    position: relative;
+    width: 92px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #28a96b;
+    font-size: 20px;
+}
+
+.connector-connected-link span {
+    position: absolute;
+    width: 100%;
+    height: 2px;
+    background: linear-gradient(90deg, rgba(92, 100, 244, .25), rgba(22, 135, 255, .35));
+}
+
+.connector-connected-link .anticon {
+    position: relative;
+    padding: 5px;
+    border-radius: 50%;
+    background: var(--surface);
+}
+
+.connector-connected-dialog h2 {
+    margin: 0 0 12px;
+    font-size: 22px;
+}
+
+.connector-connected-description {
+    max-width: 430px;
+    margin: 0;
+    color: var(--muted);
+    line-height: 1.8;
+}
+
+.connector-connected-account {
+    width: 100%;
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    margin-top: 22px;
+    padding: 14px 16px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--surface-soft);
+    text-align: left;
+}
+
+.connector-connected-account span {
+    color: var(--muted);
+}
+
+.connector-connected-actions {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-top: 22px;
+}
+
 @media (max-width: 1100px) {
     .connector-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));

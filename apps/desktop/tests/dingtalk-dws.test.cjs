@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
+    dingTalkLogoutArguments,
     dwsRetryDelayMilliseconds,
     isAuthenticatedPayload,
     listDingTalkDwsProfiles,
@@ -10,6 +11,10 @@ const {
     parseJsonOutput,
     selectCurrentProfile,
 } = require('../dist-electron/dingtalk-dws.js');
+
+test('解绑只清除 DWS 本地登录态且不触发卸载', () => {
+    assert.deepEqual(dingTalkLogoutArguments(), ['auth', 'logout', '-y']);
+});
 
 test('解析标准 JSON 和带前置日志的多行 JSON', () => {
     assert.deepEqual(parseJsonOutput('{"authenticated":true}'), { authenticated: true });

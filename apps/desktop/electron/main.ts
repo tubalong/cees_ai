@@ -4,6 +4,7 @@ import {
     fetchDingTalkVisibleOrganization,
     getDingTalkDwsStatus,
     loginDingTalkDws,
+    logoutDingTalkDws,
     selectDingTalkDwsProfile,
 } from './dingtalk-dws';
 import {
@@ -93,6 +94,17 @@ app.whenReady().then(() => {
         const status = await installAndAuthorizeDingTalkConnector();
         publishDingTalkStatus(status);
         return status;
+    });
+    ipcMain.handle('cees:dingtalk-connector-disconnect', async () => {
+        try {
+            const status = await logoutDingTalkDws();
+            resetDingTalkConnectorTools();
+            publishDingTalkStatus(status);
+            return status;
+        } catch (error) {
+            await refreshDingTalkStatus();
+            throw error;
+        }
     });
     ipcMain.handle('cees:dingtalk-connector-tools', async () => {
         try {
