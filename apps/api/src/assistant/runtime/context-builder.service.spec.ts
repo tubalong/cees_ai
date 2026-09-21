@@ -250,6 +250,7 @@ describe('ContextBuilderService buildToolTurnMessages', () => {
             ],
         });
         expect((request.messages[0]?.content as Array<{ text?: string }>)[1]?.text).toContain(JSON.stringify(connectorContexts));
+        expect((request.messages[0]?.content as Array<{ text?: string }>)[1]?.text).toContain('不得重新解释数字时间戳');
     });
 });
 

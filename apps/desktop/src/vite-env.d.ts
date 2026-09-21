@@ -1,5 +1,16 @@
 /// <reference types="vite/client" />
 
+import type {
+    ConnectorContext,
+    ConnectorManifest,
+    ConnectorPlannedCall,
+    ConnectorRecoveryAction,
+    ConnectorState,
+    ConnectorStatus,
+    ConnectorTool,
+} from '../electron/connectors/core/connector.types';
+
+declare global {
 interface Window {
     cees?: {
         platform: string;
@@ -37,6 +48,13 @@ interface Window {
             }>;
         };
         connectors?: {
+            list: () => Promise<ConnectorManifest[]>;
+            status: (connectorId: string) => Promise<ConnectorStatus>;
+            connect: (connectorId: string) => Promise<ConnectorStatus>;
+            disconnect: (connectorId: string) => Promise<ConnectorStatus>;
+            tools: (connectorId: string) => Promise<ConnectorTool[]>;
+            execute: (connectorId: string, calls: ConnectorPlannedCall[]) => Promise<ConnectorContext[]>;
+            onStatusChanged: (listener: (event: ConnectorStatusChangedEvent) => void) => () => void;
             dingtalk: {
                 status: () => Promise<DingTalkConnectorStatus>;
                 connect: () => Promise<DingTalkConnectorStatus>;
@@ -54,27 +72,19 @@ interface Window {
     };
 }
 
-interface DingTalkConnectorStatus {
-    state: DingTalkConnectorState;
-    installed: boolean;
-    authenticated: boolean;
+interface DingTalkConnectorStatus extends ConnectorStatus {
     source: 'MANAGED' | 'SYSTEM' | null;
     installSupported: boolean;
-    version: string | null;
     profile: string | null;
     corpId: string | null;
     corpName: string | null;
     externalUserId: string | null;
     externalUserName: string | null;
     profiles: DingTalkDwsProfile[];
-    checkedAt: string;
-    issueCode: string | null;
-    recoveryAction: DingTalkConnectorRecoveryAction;
-    error: string | null;
 }
 
-type DingTalkConnectorState = 'NOT_INSTALLED' | 'AUTH_REQUIRED' | 'PROFILE_REQUIRED' | 'READY' | 'ERROR';
-type DingTalkConnectorRecoveryAction = 'INSTALL' | 'MANUAL_INSTALL' | 'AUTHORIZE' | 'SELECT_PROFILE' | 'RETRY' | 'NONE';
+type DingTalkConnectorState = ConnectorState;
+type DingTalkConnectorRecoveryAction = ConnectorRecoveryAction;
 
 interface DingTalkDwsProfile {
     profile: string;
@@ -113,22 +123,16 @@ interface DingTalkConnectorReleaseStatus {
     } | null;
 }
 
-interface DingTalkConnectorContext {
-    provider: 'DINGTALK';
-    toolId: string;
-    toolName: string;
-    fetchedAt: string;
-    data: Record<string, unknown>;
+type DingTalkConnectorContext = ConnectorContext<'DINGTALK'>;
+
+type DingTalkConnectorTool = ConnectorTool;
+
+type DingTalkConnectorPlannedCall = ConnectorPlannedCall;
+
+interface ConnectorStatusChangedEvent {
+    connectorId: string;
+    status: ConnectorStatus;
+}
 }
 
-interface DingTalkConnectorTool {
-    toolId: string;
-    name: string;
-    description: string;
-    parameters: Record<string, unknown>;
-}
-
-interface DingTalkConnectorPlannedCall {
-    toolId: string;
-    arguments: Record<string, unknown>;
-}
+export {};

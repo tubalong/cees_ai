@@ -6,3 +6,4 @@ import type { CreateProjectDecisionRequest } from './CreateProjectDecisionReques
 export type UpdateProjectDecisionRequest = (CreateProjectDecisionRequest & {
     version: number;
 });
+

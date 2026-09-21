@@ -12,3 +12,4 @@ export namespace AddProjectMemberRequest {
         MEMBER = 'MEMBER',
     }
 }
+

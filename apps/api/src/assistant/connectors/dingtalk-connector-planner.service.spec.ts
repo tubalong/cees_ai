@@ -24,6 +24,59 @@ describe('DingTalkConnectorPlannerService', () => {
     },
   }];
 
+  const attendanceTool = {
+    toolId: 'dws_read_aaaaaaaaaaaaaaaa',
+    name: 'cees.my_attendance_records',
+    description: '查询并标准化本人考勤记录',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        start: { type: 'string', format: 'date' },
+        end: { type: 'string', format: 'date' },
+      },
+    },
+  };
+
+  it('本人考勤记录首轮直接路由到标准化复合工具', async () => {
+    const streamToolTurn = jest.fn();
+    const service = new DingTalkConnectorPlannerService(
+      { streamToolTurn } as unknown as AiServiceGateway,
+      { require: () => context } as unknown as TenantContext,
+    );
+
+    await expect(service.plan('把我的考勤记录列出来', [attendanceTool, ...tools])).resolves.toEqual({
+      calls: [{ toolId: attendanceTool.toolId, arguments: {} }],
+    });
+    expect(streamToolTurn).not.toHaveBeenCalled();
+  });
+
+  it('本人指定日期考勤首轮使用相同开始结束日期', async () => {
+    const streamToolTurn = jest.fn();
+    const service = new DingTalkConnectorPlannerService(
+      { streamToolTurn } as unknown as AiServiceGateway,
+      { require: () => context } as unknown as TenantContext,
+    );
+
+    await expect(service.plan('查询我 2026-09-01 的打卡记录', [attendanceTool])).resolves.toEqual({
+      calls: [{ toolId: attendanceTool.toolId, arguments: { start: '2026-09-01', end: '2026-09-01' } }],
+    });
+    expect(streamToolTurn).not.toHaveBeenCalled();
+  });
+
+  it('请假加班审批问题不误路由到打卡流水工具', async () => {
+    const streamToolTurn = jest.fn(async () => stream([
+      { type: 'completed', latency_ms: 1, finish_reason: 'stop' },
+    ]));
+    const service = new DingTalkConnectorPlannerService(
+      { streamToolTurn } as unknown as AiServiceGateway,
+      { require: () => context } as unknown as TenantContext,
+    );
+
+    await expect(service.plan('查询我的加班考勤审批', [attendanceTool])).resolves.toEqual({ calls: [] });
+    expect(streamToolTurn).toHaveBeenCalledTimes(1);
+  });
+
   it('只返回目录内的模型工具调用', async () => {
     const streamToolTurn = jest.fn(async () => stream([
       { type: 'tool_calls', tool_calls: [{ id: 'call-1', name: tools[0]!.toolId, arguments: { start: '2026-09-20' } }] },

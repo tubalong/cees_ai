@@ -56,6 +56,8 @@ FastAPI 的 `/docs`、`/redoc` 和 `/openapi.json` 直接展示由正式 YAML �
 
 Swagger 中执行 invoke 或 stream 会直接调用模型，应只使用非生产内部 Token 和测试数据。桌面端、移动端和第三方客户端必须调用 NestJS 公开 API，不得使用此内部文档作为客户端 API 入口。
 
+请求体不满足契约时对外统一返回 `INVALID_INVOCATION_REQUEST`(422)，响应体不含字段级信息；具体原因由 `logger=app.main` 以 `WARNING` 级别写入服务端日志（含 Pydantic 的 `loc`/`msg`）。排查 422 一律以服务端日志为准。
+
 ## 环境与依赖
 
 本地开发统一读取仓库根目录 `.env`；Staging 和 Production 由 Compose/平台注入环境变量。模型配置的相对路径始终以 `apps/ai-service` 为基准解析。
@@ -68,6 +70,8 @@ uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
 `pyproject.toml` 是依赖声明的唯一来源，`uv.lock` 必须提交。运行、CI 和容器使用同一 Python/uv 版本。
+
+本地联调请用根目录 `scripts/start-ai-dev.ps1`：它读取 `.env` 的 `AI_SERVICE_URL`，以其中的端口启动 uvicorn；该端口已被占用时直接报错退出。若手工另起端口，NestJS 仍会调用 `AI_SERVICE_URL` 上正在运行的旧进程，表现为「代码已改但行为未变」，并在契约变更新增枚举值时让导出接口返回 `INVALID_INVOCATION_REQUEST`(422)。
 
 关键配置：
 

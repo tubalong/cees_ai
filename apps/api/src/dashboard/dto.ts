@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
-import { IsISO8601, IsInt, IsOptional, IsUUID, Max, Min } from 'class-validator';
+import { DashboardSnapshotPeriod } from '@prisma/client';
+import { IsArray, IsDateString, IsEnum, IsISO8601, IsInt, IsOptional, IsString, IsUUID, Max, Min } from 'class-validator';
 
 export class DashboardTaskStatisticsQueryDto {
     @IsOptional()
@@ -45,4 +46,16 @@ export class DashboardUpcomingMeetingsQueryDto {
     @Min(1)
     @Max(100)
     limit = 20;
+}
+
+export class DashboardTrendsQueryDto {
+    @IsArray() @IsString({ each: true }) metrics!: string[];
+    @IsEnum(DashboardSnapshotPeriod) period: DashboardSnapshotPeriod = DashboardSnapshotPeriod.DAY;
+    @IsDateString() from!: string;
+    @IsDateString() to!: string;
+}
+
+export class RebuildDashboardSnapshotDto {
+    @IsUUID() tenantId!: string;
+    @IsDateString() date!: string;
 }

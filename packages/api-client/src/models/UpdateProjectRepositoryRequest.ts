@@ -9,3 +9,4 @@ export type UpdateProjectRepositoryRequest = {
     enabled?: boolean;
     version: number;
 };
+

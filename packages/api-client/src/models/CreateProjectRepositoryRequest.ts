@@ -7,3 +7,4 @@ export type CreateProjectRepositoryRequest = {
     name?: string;
     defaultBranch?: string;
 };
+

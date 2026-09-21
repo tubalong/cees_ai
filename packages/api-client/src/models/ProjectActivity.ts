@@ -14,3 +14,4 @@ export type ProjectActivity = {
     actor?: (ProjectMemberIdentity | null);
     createdAt: string;
 };
+

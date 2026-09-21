@@ -1,4 +1,4 @@
-import { CheckCircleFilled, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
+import { CheckCircleFilled, DingdingOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import { App as AntdApp, Button, Modal, Select, Space, Spin, Tag } from 'antd';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -181,7 +181,7 @@ export default function ConnectorMarketplacePage(): JSX.Element {
 
     const tryConnector = (): void => {
         setDialogOpen(false);
-        navigate('/assistant');
+        navigate('/assistant', { state: { createNewConversation: true, source: 'DINGTALK_CONNECTOR' } });
     };
 
     const confirmDisconnect = (): void => {
@@ -238,9 +238,15 @@ export default function ConnectorMarketplacePage(): JSX.Element {
             </div>
             <div className="connector-grid">
                 <article className={`connector-card ${connected ? 'is-connected' : ''}`}>
-                    <button className="connector-add-button" type="button" aria-label={t('安装或授权钉钉连接器')} onClick={() => setDialogOpen(true)}>
+                    <button
+                        className="connector-card-hit-area"
+                        type="button"
+                        aria-label={connected ? t('查看钉钉连接器详情') : t('安装或授权钉钉连接器')}
+                        onClick={() => setDialogOpen(true)}
+                    />
+                    <span className="connector-card-indicator" aria-hidden="true">
                         {connected ? <CheckCircleFilled /> : <PlusOutlined />}
-                    </button>
+                    </span>
                     <div className="connector-logo" aria-hidden="true">钉</div>
                     <div className="connector-card-copy">
                         <div className="connector-card-title"><h3>{t('钉钉')}</h3><span className={`connector-status ${connected ? 'is-connected' : ''}`}>{statusText}</span></div>
@@ -288,9 +294,11 @@ export default function ConnectorMarketplacePage(): JSX.Element {
         >
             {connected ? <div className="connector-connected-dialog">
                 <div className="connector-connected-visual" aria-hidden="true">
-                    <div className="connector-connected-node connector-connected-cees">CEES</div>
-                    <div className="connector-connected-link"><span /><CheckCircleFilled /></div>
-                    <div className="connector-connected-node connector-connected-dingtalk">钉</div>
+                    <div className="connector-connected-node connector-connected-cees">
+                        <img src="./assests/logo.webp" alt="" />
+                    </div>
+                    <div className="connector-connected-dots"><span /><span /><span /></div>
+                    <div className="connector-connected-node connector-connected-dingtalk"><DingdingOutlined /></div>
                 </div>
                 <h2>{t('连接 钉钉')}</h2>
                 <p className="connector-connected-description">{t(DINGTALK_DESCRIPTION)}</p>

@@ -20,7 +20,7 @@ import {
     MinLength,
     ValidateNested,
 } from 'class-validator';
-import { FinanceExpenseStatus, FinancePaymentMethod } from '@prisma/client';
+import { FinanceExpenseStatus, FinanceLedgerDirection, FinancePaymentMethod } from '@prisma/client';
 
 export class FinanceCursorQueryDto {
     @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100)
@@ -121,4 +121,37 @@ export class FinanceProjectSpendQueryDto {
     @IsOptional() @IsDateString() dateFrom?: string;
     @IsOptional() @IsDateString() dateTo?: string;
     @IsOptional() @IsString() @Length(3, 3) currency = 'CNY';
+}
+
+export class FinanceLedgerRowDto {
+    @IsInt() @Min(1) rowNumber!: number;
+    @IsDateString() occurredOn!: string;
+    @IsEnum(FinanceLedgerDirection) direction!: FinanceLedgerDirection;
+    @Type(() => Number) @IsNumber({ maxDecimalPlaces: 2 }) @Min(0.01) amount!: number;
+    @IsString() @Length(3, 3) currency = 'CNY';
+    @IsOptional() @IsString() @MaxLength(64) categoryCode?: string | null;
+    @IsOptional() @IsString() @MaxLength(120) categoryName?: string | null;
+    @IsOptional() @IsUUID() departmentId?: string | null;
+    @IsOptional() @IsUUID() projectId?: string | null;
+    @IsOptional() @IsString() @MaxLength(200) counterparty?: string | null;
+    @IsOptional() @IsString() @MaxLength(500) summary?: string | null;
+    @IsString() @MinLength(1) @MaxLength(120) voucherNo!: string;
+}
+
+export class CreateFinanceLedgerImportDto {
+    @IsString() @MinLength(1) @MaxLength(255) fileName!: string;
+    @IsOptional() @IsIn(['XLSX', 'CSV']) format = 'XLSX';
+    @IsDateString() periodStart!: string;
+    @IsDateString() periodEnd!: string;
+    @IsArray() @ArrayMinSize(1) @ArrayMaxSize(5000) @ValidateNested({ each: true }) @Type(() => FinanceLedgerRowDto)
+    rows!: FinanceLedgerRowDto[];
+}
+
+export class ListFinanceLedgerEntriesQueryDto extends FinanceCursorQueryDto {
+    @IsOptional() @IsEnum(FinanceLedgerDirection) direction?: FinanceLedgerDirection;
+    @IsOptional() @IsDateString() dateFrom?: string;
+    @IsOptional() @IsDateString() dateTo?: string;
+    @IsOptional() @IsUUID() departmentId?: string;
+    @IsOptional() @IsUUID() projectId?: string;
+    @IsOptional() @IsString() @MaxLength(120) category?: string;
 }

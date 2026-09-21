@@ -6,3 +6,4 @@ import type { CreateProjectMilestoneRequest } from './CreateProjectMilestoneRequ
 export type UpdateProjectMilestoneRequest = (CreateProjectMilestoneRequest & {
     version: number;
 });
+

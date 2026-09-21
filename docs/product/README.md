@@ -12,6 +12,8 @@
 - [日报与周报管理](work-report-management.md)：报告周期、审核状态机、项目任务关联、权限和审计。
 - [通知中心与后台任务](notification-center.md)：站内通知、未读状态、幂等投递、过期清理和日报提醒。
 - [工作台与数据看板](dashboard-workbench.md)：项目、任务、报告、会议和通知的实时概览与待办聚合。
+- [角色化首页与经营看板](role-based-homepage.md)：骨架原型 × 职能域模型、经营层与财务/法务差异视图（已落地，HR 域暂缓）。
+- [角色化首页实现说明](role-based-homepage-implementation.md)：代码结构、接口、迁移、权限边界、台账导入与验证记录。
 - [知识库管理](knowledge-base-management.md)：第一阶段知识库 CRUD、成员权限、租户隔离、乐观锁和审计。
 - [用户个人资料管理](user-profile-management.md)：成员查询并修改自己在当前租户内的展示资料。
 - [密码修改与凭证安全](../security/password-management.md)：租户成员与平台管理员修改自己的密码。

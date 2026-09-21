@@ -1,6 +1,6 @@
 # 通用文档生成
 
-> 状态：MVP 已实现，DOCX 渲染导出已接入（2026-09-14）。本文定义 ai-service 的领域无关文档组合与 DOCX 渲染能力，不定义周报、简报等业务流程；NestJS 侧的正式资源落地链路（generate_document 工具 → compose 生成 DocumentSpec → Markdown 落库 → ManagedDocument/AIActionDraft/审计）已随 AI 助手工具循环落地（2026-09-11），见 [AI 助手工具循环](assistant-tool-loop.md)。
+> 状态：DOCX/PDF/PPTX 已实现；PDF/PPTX 多模板、矢量装饰与图文版式于 2026-09-21 落地。本文定义 ai-service 的领域无关文档组合与确定性渲染能力，不定义周报、简报等业务流程；NestJS 侧的正式资源落地链路（generate_document 工具 → compose 生成 DocumentSpec → Markdown 落库 → ManagedDocument/AIActionDraft/审计）已随 AI 助手工具循环落地（2026-09-11），见 [AI 助手工具循环](assistant-tool-loop.md)。
 
 ## 1. 目标与边界
 
@@ -8,7 +8,19 @@ ai-service 接收可信内部服务提供的生成指令和纯文本材料，生
 
 桌面端、移动端和第三方客户端不得直接调用文档内部接口。ai-service 不读取业务数据库，不持有 COS 长期凭据，不把生成结果登记为正式业务资源。
 
-第一版不处理上传文件、OCR、RAG、图片、图表、宏、任意 OOXML、任意模板路径和外部关系。上传材料应先由后续文件处理链转换为经过权限过滤的纯文本。
+当前版本支持受控 `ImageBlock` 图片嵌入，但不允许任意模板路径、任意 OOXML、宏或未授权外部关系。图片必须来自调用方有权读取的 COS 签名 URL、HTTP(S) URL 或受限 data URL；渲染器不会凭空生成不相关配图。
+
+## 1.1 PDF/PPTX 模板体系
+
+| 模板 ID | 中文名 | 视觉方向 | 适用场景 |
+| --- | --- | --- | --- |
+| `editorial-modern` | 现代图文 | 青绿色主色、暖橙强调、浅色封面、图文分栏 | 默认；方案、讲义、报告 |
+| `business-standard` | 稳重商务 | 品牌紫、规整标题与表格 | 制度、正式材料、通用商务 |
+| `executive-dark` | 深色高管 | 深色封面、金色强调、浅色正文 | 高管汇报、经营复盘、路演 |
+
+PDF/PPTX 默认使用 `editorial-modern`；桌面文档编辑器导出时可以切换三种模板。DOCX 接受相同模板 ID，但当前继续共用稳定 Word 样式。
+
+PPTX 封面和正文装饰均使用 PowerPoint 原生形状，包含色块、圆形、菱形、侧边栏和角标，可在 Office 中继续编辑。页面同时包含文字与图片时自动采用左文右图布局；没有图片时仍保留矢量构图，不再是纯文字白页。
 
 ## 2. 处理流程
 
@@ -65,8 +77,15 @@ Schema 禁止额外字段并限制章节、块、表格与文本长度。表格�
 - Planner 达到 token 上限：`DOCUMENT_PLANNING_TRUNCATED`，HTTP 502，不进入 structured formatter；
 - `DocumentSpec` 不满足 Schema 或语义约束：`DOCUMENT_SPEC_INVALID`，HTTP 502（模型生成）或 422（调用方提交）；
 - Provider `finish_reason=length`：`DOCUMENT_GENERATION_TRUNCATED`，HTTP 502，不渲染部分结果；
-- 模板不在契约白名单：请求校验失败，HTTP 422；
+- 模板不在契约白名单：`template_id` 枚举校验失败，返回 `INVALID_INVOCATION_REQUEST` / `Request validation failed`，HTTP 422；
 - Provider 或服务不可用：沿用通用 LLM 错误与回退语义。
+
+> 排障：导出返回 `422 INVALID_INVOCATION_REQUEST`（`Request validation failed`）且请求里带了新增模板
+> （如 `editorial-modern`）时，通常是**运行中的 ai-service 是旧进程**，其生成的 `TemplateId` 枚举还不含该模板，
+> 而不是 `DocumentSpec` 数据有问题——同一个 `DocumentSpec` 用已知模板重试会成功。重启 ai-service
+> （`scripts/start-ai-dev.ps1` 绑定 `AI_SERVICE_URL` 端口，并在端口被占用时直接报错）后重试即可。
+> Pydantic 的具体字段错误只记录在 ai-service 服务端日志（`request validation failed ... errors=...`），
+> 对外响应刻意不含字段细节。
 
 ## 6. DOCX 安全与样式
 

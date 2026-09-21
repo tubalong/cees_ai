@@ -9,6 +9,8 @@ import {
 } from '@prisma/client';
 import { addLocalDays, dateKeyToUtcMidnight, DEFAULT_TENANT_TIMEZONE, shiftLocalDateKey, startOfLocalDay } from '../common/tenant-time';
 import { PrismaService } from '../database/prisma.service';
+import { DataScopeResolution } from '../rbac/access-control';
+import { DataScopeResolverService } from '../rbac/data-scope-resolver.service';
 import { RequestTenantContext, TenantContext } from '../tenant/tenant-context';
 import { DashboardTaskStatisticsQueryDto, DashboardTodosQueryDto, DashboardUpcomingMeetingsQueryDto } from './dto';
 import { calculateTaskMetrics } from './task-metrics';
@@ -44,25 +46,27 @@ export class DashboardService {
     constructor(
         private readonly prisma: PrismaService,
         private readonly tenantContext: TenantContext,
+        private readonly dataScopeResolver: DataScopeResolverService,
     ) { }
 
     async overview(): Promise<DashboardOverviewResult> {
         const context = this.tenantContext.require();
         const now = new Date();
+        const scope = await this.dataScopeResolver.resolveFor(context);
         const [timeZone, projects, tasks, reports, meetings, unreadCount] = await Promise.all([
             this.tenantTimeZone(context.tenantId),
             this.can(context, 'project.read')
-                ? this.prisma.project.findMany({ where: this.projectWhere(context), select: { status: true } })
+                ? this.prisma.project.findMany({ where: this.projectWhere(context, scope), select: { status: true } })
                 : Promise.resolve([]),
             this.can(context, 'task.read')
-                ? this.prisma.task.findMany({ where: this.taskWhere(context), select: taskMetricSelect })
+                ? this.prisma.task.findMany({ where: this.taskWhere(context, scope), select: taskMetricSelect })
                 : Promise.resolve([]),
             this.can(context, 'work_report.read')
-                ? this.prisma.workReport.findMany({ where: this.reportWhere(context), select: reportMetricSelect })
+                ? this.prisma.workReport.findMany({ where: this.reportWhere(context, scope), select: reportMetricSelect })
                 : Promise.resolve([]),
             this.can(context, 'meeting.read')
                 ? this.prisma.meeting.findMany({
-                    where: { ...this.meetingWhere(context), status: { notIn: [MeetingStatus.COMPLETED, MeetingStatus.CANCELLED] } },
+                    where: { ...this.meetingWhere(context, scope), status: { notIn: [MeetingStatus.COMPLETED, MeetingStatus.CANCELLED] } },
                     select: { status: true, startsAt: true, participants: { where: { membershipId: context.membershipId, deletedAt: null }, select: { responseStatus: true } } },
                 })
                 : Promise.resolve([]),
@@ -82,12 +86,13 @@ export class DashboardService {
 
     async taskStatistics(query: DashboardTaskStatisticsQueryDto): Promise<DashboardTaskMetrics> {
         const context = this.tenantContext.require();
+        const scope = await this.dataScopeResolver.resolveFor(context);
         const from = query.from ? new Date(query.from) : undefined;
         const to = query.to ? new Date(query.to) : undefined;
         if (from && to && from > to) throw new BadRequestException({ code: 'DASHBOARD_DATE_RANGE_INVALID', message: '看板时间范围无效' });
         const tasks = await this.prisma.task.findMany({
             where: {
-                ...this.taskWhere(context),
+                ...this.taskWhere(context, scope),
                 projectId: query.projectId,
                 createdAt: from || to ? { gte: from, lte: to } : undefined,
             },
@@ -99,10 +104,11 @@ export class DashboardService {
     async todos(query: DashboardTodosQueryDto): Promise<DashboardTodoListResult> {
         const context = this.tenantContext.require();
         const now = new Date();
+        const scope = await this.dataScopeResolver.resolveFor(context);
         const [tasks, reports, meetings, unreadNotificationCount] = await Promise.all([
             this.can(context, 'task.read')
                 ? this.prisma.task.findMany({
-                    where: { ...this.taskWhere(context), status: { in: ACTIVE_TASK_STATUSES } },
+                    where: { ...this.taskWhere(context, scope), status: { in: ACTIVE_TASK_STATUSES } },
                     select: taskTodoSelect,
                     orderBy: [{ dueDate: 'asc' }, { updatedAt: 'desc' }],
                     take: query.taskLimit,
@@ -110,7 +116,7 @@ export class DashboardService {
                 : Promise.resolve([]),
             this.can(context, 'work_report.read')
                 ? this.prisma.workReport.findMany({
-                    where: { ...this.reportWhere(context), reviewerMembershipId: context.membershipId, status: WorkReportStatus.SUBMITTED },
+                    where: { ...this.reportWhere(context, scope), reviewerMembershipId: context.membershipId, status: WorkReportStatus.SUBMITTED },
                     select: reportTodoSelect,
                     orderBy: [{ submittedAt: 'asc' }, { periodStart: 'asc' }],
                     take: query.reportLimit,
@@ -118,7 +124,7 @@ export class DashboardService {
                 : Promise.resolve([]),
             this.can(context, 'meeting.read')
                 ? this.prisma.meeting.findMany({
-                    where: { ...this.meetingWhere(context), status: { in: OPEN_MEETING_STATUSES }, startsAt: { gte: now } },
+                    where: { ...this.meetingWhere(context, scope), status: { in: OPEN_MEETING_STATUSES }, startsAt: { gte: now } },
                     select: { id: true, title: true, startsAt: true, status: true, participants: { where: { membershipId: context.membershipId, deletedAt: null }, select: { responseStatus: true } } },
                     orderBy: [{ startsAt: 'asc' }, { id: 'asc' }],
                     take: query.meetingLimit,
@@ -144,8 +150,9 @@ export class DashboardService {
 
     async upcomingMeetings(query: DashboardUpcomingMeetingsQueryDto): Promise<DashboardUpcomingMeetingListResult> {
         const context = this.tenantContext.require();
+        const scope = await this.dataScopeResolver.resolveFor(context);
         const meetings = await this.prisma.meeting.findMany({
-            where: { ...this.meetingWhere(context), status: { in: OPEN_MEETING_STATUSES }, startsAt: { gte: new Date() } },
+            where: { ...this.meetingWhere(context, scope), status: { in: OPEN_MEETING_STATUSES }, startsAt: { gte: new Date() } },
             select: { id: true, title: true, startsAt: true, durationMinutes: true, status: true, projectId: true, participants: { where: { membershipId: context.membershipId, deletedAt: null }, select: { responseStatus: true } } },
             orderBy: [{ startsAt: 'asc' }, { id: 'asc' }],
             take: query.limit,
@@ -163,38 +170,62 @@ export class DashboardService {
         };
     }
 
-    private projectWhere(context: RequestTenantContext): Prisma.ProjectWhereInput {
+    private projectWhere(context: RequestTenantContext, scope: DataScopeResolution): Prisma.ProjectWhereInput {
         return {
             tenantId: context.tenantId,
             deletedAt: null,
-            ...(this.can(context, 'project.manage_all') ? {} : { members: { some: { membershipId: context.membershipId, deletedAt: null } } }),
+            ...(scope.tenantWide ? {} : { OR: this.projectScopeClauses(scope) }),
         };
     }
 
-    private taskWhere(context: RequestTenantContext): Prisma.TaskWhereInput {
+    private taskWhere(context: RequestTenantContext, scope: DataScopeResolution): Prisma.TaskWhereInput {
         return {
             tenantId: context.tenantId,
             deletedAt: null,
-            project: this.can(context, 'project.manage_all')
-                ? { tenantId: context.tenantId, deletedAt: null }
-                : { tenantId: context.tenantId, deletedAt: null, members: { some: { membershipId: context.membershipId, deletedAt: null } } },
+            ...(scope.tenantWide ? {} : {
+                OR: [
+                    scope.membershipIds.length ? { createdByMembershipId: { in: scope.membershipIds } } : undefined,
+                    scope.membershipIds.length ? { assignees: { some: { membershipId: { in: scope.membershipIds } } } } : undefined,
+                    { project: { tenantId: context.tenantId, deletedAt: null, OR: this.projectScopeClauses(scope) } },
+                ].filter(Boolean) as Prisma.TaskWhereInput[]
+            }),
         };
     }
 
-    private reportWhere(context: RequestTenantContext): Prisma.WorkReportWhereInput {
+    private reportWhere(context: RequestTenantContext, scope: DataScopeResolution): Prisma.WorkReportWhereInput {
         return {
             tenantId: context.tenantId,
             deletedAt: null,
-            ...(this.can(context, 'work_report.manage_all') ? {} : { OR: [{ authorMembershipId: context.membershipId }, { reviewerMembershipId: context.membershipId, status: { not: WorkReportStatus.DRAFT } }] }),
+            ...(scope.tenantWide ? {} : {
+                OR: [
+                    { authorMembershipId: { in: scope.membershipIds } },
+                    { reviewerMembershipId: { in: scope.membershipIds }, status: { not: WorkReportStatus.DRAFT } },
+                ]
+            }),
         };
     }
 
-    private meetingWhere(context: RequestTenantContext): Prisma.MeetingWhereInput {
+    private meetingWhere(context: RequestTenantContext, scope: DataScopeResolution): Prisma.MeetingWhereInput {
         return {
             tenantId: context.tenantId,
             deletedAt: null,
-            ...(this.can(context, 'meeting.manage_all') ? {} : { OR: [{ organizerMembershipId: context.membershipId }, { participants: { some: { membershipId: context.membershipId, deletedAt: null } } }] }),
+            ...(scope.tenantWide ? {} : {
+                OR: [
+                    { organizerMembershipId: { in: scope.membershipIds } },
+                    { participants: { some: { membershipId: { in: scope.membershipIds }, deletedAt: null } } },
+                    scope.departmentIds.length ? { departmentId: { in: scope.departmentIds } } : undefined,
+                    scope.projectIds.length ? { projectId: { in: scope.projectIds } } : undefined,
+                ].filter(Boolean) as Prisma.MeetingWhereInput[]
+            }),
         };
+    }
+
+    private projectScopeClauses(scope: DataScopeResolution): Prisma.ProjectWhereInput[] {
+        return [
+            scope.projectIds.length ? { id: { in: scope.projectIds } } : undefined,
+            scope.departmentIds.length ? { departmentId: { in: scope.departmentIds } } : undefined,
+            scope.membershipIds.length ? { members: { some: { membershipId: { in: scope.membershipIds }, deletedAt: null } } } : undefined,
+        ].filter(Boolean) as Prisma.ProjectWhereInput[];
     }
 
     private can(context: RequestTenantContext, permission: string): boolean {

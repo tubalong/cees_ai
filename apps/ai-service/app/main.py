@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -108,6 +109,13 @@ def create_app(
         _request: Request, exc: RequestValidationError
     ) -> JSONResponse:
         request_id = exc.body.get("request_id") if isinstance(exc.body, dict) else None
+        # 对外只返回不泄露内部结构的通用错误；具体字段错误留在服务端日志里，
+        # 否则 422 只剩 INVALID_INVOCATION_REQUEST，无法定位是哪个字段不合法。
+        logger.warning(
+            "request validation failed request_id=%s errors=%s",
+            request_id,
+            json.dumps(exc.errors(), default=str, ensure_ascii=False),
+        )
         body = ErrorResponse(
             error=ErrorDetail(
                 code="INVALID_INVOCATION_REQUEST",

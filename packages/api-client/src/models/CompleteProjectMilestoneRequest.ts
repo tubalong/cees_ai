@@ -6,3 +6,4 @@ export type CompleteProjectMilestoneRequest = {
     version: number;
     acceptanceNote?: string | null;
 };
+

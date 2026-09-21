@@ -6,3 +6,4 @@ export type CancelProjectMilestoneRequest = {
     version: number;
     reason: string;
 };
+

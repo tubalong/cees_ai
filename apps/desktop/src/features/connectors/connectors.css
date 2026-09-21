@@ -72,6 +72,14 @@
     border-radius: 15px;
     background: linear-gradient(145deg, var(--surface) 0%, var(--surface-soft) 100%);
     box-shadow: 0 12px 30px rgba(32, 45, 80, .06);
+    transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease;
+}
+
+.connector-card:hover,
+.connector-card:focus-within {
+    transform: translateY(-2px);
+    border-color: rgba(86, 92, 246, .32);
+    box-shadow: 0 16px 38px rgba(32, 45, 80, .1);
 }
 
 .connector-card.is-connected {
@@ -79,10 +87,27 @@
     box-shadow: 0 14px 34px rgba(40, 181, 116, .1);
 }
 
-.connector-add-button {
+.connector-card-hit-area {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    padding: 0;
+    border: 0;
+    border-radius: inherit;
+    background: transparent;
+    cursor: pointer;
+}
+
+.connector-card-hit-area:focus-visible {
+    outline: 3px solid rgba(86, 92, 246, .35);
+    outline-offset: -3px;
+}
+
+.connector-card-indicator {
     position: absolute;
     top: 16px;
     right: 16px;
+    z-index: 2;
     width: 34px;
     height: 34px;
     display: grid;
@@ -92,18 +117,36 @@
     border: 1px solid rgba(86, 92, 246, .18);
     border-radius: 50%;
     background: var(--surface);
-    cursor: pointer;
-    transition: transform .16s ease, box-shadow .16s ease;
-}
-
-.connector-add-button:hover {
-    transform: translateY(-1px);
     box-shadow: 0 7px 18px rgba(86, 92, 246, .18);
+    pointer-events: none;
 }
 
-.connector-card.is-connected .connector-add-button {
+.connector-card.is-connected .connector-card-indicator {
     color: #28a96b;
     border-color: rgba(40, 169, 107, .2);
+}
+
+.connector-logo,
+.connector-card-copy,
+.connector-card-meta,
+.connector-card-error {
+    position: relative;
+    z-index: 2;
+    pointer-events: none;
+}
+
+.connector-version-panel,
+.connector-card > .ant-btn {
+    position: relative;
+    z-index: 3;
+}
+
+.connector-version-panel {
+    pointer-events: none;
+}
+
+.connector-version-panel .ant-btn {
+    pointer-events: auto;
 }
 
 .connector-logo,
@@ -237,45 +280,47 @@
     height: 68px;
     display: grid;
     place-items: center;
-    border-radius: 20px;
+    overflow: hidden;
+    border-radius: 50%;
     color: #fff;
     box-shadow: 0 12px 28px rgba(32, 45, 80, .16);
     font-weight: 700;
 }
 
 .connector-connected-cees {
-    background: linear-gradient(145deg, #5c64f4, #4148c9);
-    font-size: 14px;
-    letter-spacing: .04em;
+    border: 1px solid rgba(32, 45, 80, .08);
+    background: #fff;
+}
+
+.connector-connected-cees img {
+    width: 100%;
+    height: 100%;
+    display: block;
+    object-fit: cover;
 }
 
 .connector-connected-dingtalk {
     background: linear-gradient(145deg, #1687ff, #0866df);
-    font-size: 28px;
+    font-size: 34px;
 }
 
-.connector-connected-link {
-    position: relative;
-    width: 92px;
+.connector-connected-dots {
+    width: 74px;
     display: flex;
     align-items: center;
     justify-content: center;
-    color: #28a96b;
-    font-size: 20px;
+    gap: 9px;
 }
 
-.connector-connected-link span {
-    position: absolute;
-    width: 100%;
-    height: 2px;
-    background: linear-gradient(90deg, rgba(92, 100, 244, .25), rgba(22, 135, 255, .35));
-}
-
-.connector-connected-link .anticon {
-    position: relative;
-    padding: 5px;
+.connector-connected-dots span {
+    width: 7px;
+    height: 7px;
     border-radius: 50%;
-    background: var(--surface);
+    background: rgba(32, 45, 80, .12);
+}
+
+.connector-connected-dots span:nth-child(2) {
+    background: rgba(32, 45, 80, .22);
 }
 
 .connector-connected-dialog h2 {

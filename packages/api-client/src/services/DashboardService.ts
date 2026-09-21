@@ -2,10 +2,14 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
+import type { DashboardHomepageResponseEnvelope } from '../models/DashboardHomepageResponseEnvelope';
 import type { DashboardOverviewResponseEnvelope } from '../models/DashboardOverviewResponseEnvelope';
+import type { DashboardSnapshotRebuildResponseEnvelope } from '../models/DashboardSnapshotRebuildResponseEnvelope';
 import type { DashboardTaskStatisticsResponseEnvelope } from '../models/DashboardTaskStatisticsResponseEnvelope';
 import type { DashboardTodoListResponseEnvelope } from '../models/DashboardTodoListResponseEnvelope';
+import type { DashboardTrendsResponseEnvelope } from '../models/DashboardTrendsResponseEnvelope';
 import type { DashboardUpcomingMeetingListResponseEnvelope } from '../models/DashboardUpcomingMeetingListResponseEnvelope';
+import type { RebuildDashboardSnapshotRequest } from '../models/RebuildDashboardSnapshotRequest';
 import type { CancelablePromise } from '../core/CancelablePromise';
 import { OpenAPI } from '../core/OpenAPI';
 import { request as __request } from '../core/request';
@@ -22,6 +26,64 @@ export class DashboardService {
             errors: {
                 403: `缺少 dashboard.read 权限`,
             },
+        });
+    }
+    /**
+     * 查询当前成员角色化首页
+     * @returns DashboardHomepageResponseEnvelope 角色化首页
+     * @throws ApiError
+     */
+    public static dashboardHome(): CancelablePromise<DashboardHomepageResponseEnvelope> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/dashboard/home',
+            errors: {
+                403: `缺少 dashboard.read 权限`,
+            },
+        });
+    }
+    /**
+     * 查询首页指标快照趋势
+     * @returns DashboardTrendsResponseEnvelope 指标趋势
+     * @throws ApiError
+     */
+    public static dashboardTrends({
+        metrics,
+        period,
+        from,
+        to,
+    }: {
+        metrics: Array<string>,
+        period: 'DAY' | 'MONTH',
+        from: string,
+        to: string,
+    }): CancelablePromise<DashboardTrendsResponseEnvelope> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/dashboard/trends',
+            query: {
+                'metrics': metrics,
+                'period': period,
+                'from': from,
+                'to': to,
+            },
+        });
+    }
+    /**
+     * 重算租户日/月仪表盘快照
+     * @returns DashboardSnapshotRebuildResponseEnvelope 快照重算完成
+     * @throws ApiError
+     */
+    public static dashboardSnapshotRebuild({
+        requestBody,
+    }: {
+        requestBody: RebuildDashboardSnapshotRequest,
+    }): CancelablePromise<DashboardSnapshotRebuildResponseEnvelope> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/dashboard/snapshots/rebuild',
+            body: requestBody,
+            mediaType: 'application/json',
         });
     }
     /**

@@ -11,3 +11,4 @@ export type UpdateProjectRequest = {
     departmentId?: string | null;
     version: number;
 };
+

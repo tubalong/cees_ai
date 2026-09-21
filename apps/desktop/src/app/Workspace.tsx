@@ -39,6 +39,7 @@ import FinanceManagement from '../features/finance/FinanceManagement';
 import LegalContractManagement from '../features/legal/LegalContractManagement';
 import KnowledgeManagement from '../features/knowledge/KnowledgeManagement';
 import ManagedDocumentsPage from '../features/documents/ManagedDocumentsPage';
+import RoleBasedHomePage from '../features/dashboard/HomePage';
 import { useDateFormatter, useI18n } from '../core/i18n';
 
 interface WebviewElement extends HTMLWebViewElement {
@@ -584,6 +585,11 @@ function SaveToKnowledgeModal({ target, onClose, onSaved }: {
 /** 已删除引用按会话记录，只保存文档 ID；不再整份缓存来源/引用，避免把历史轮次的来源串到当前回答上。 */
 const DELETED_CITATIONS_KEY = 'cees.chat.citations.deleted';
 
+interface AssistantNavigationState {
+    createNewConversation?: boolean;
+    source?: 'DINGTALK_CONNECTOR';
+}
+
 function readDeletedCitationIds(conversationId: string): Set<string> {
     try {
         const raw = JSON.parse(localStorage.getItem(`${DELETED_CITATIONS_KEY}.${conversationId}`) ?? '[]') as unknown;
@@ -596,6 +602,7 @@ function readDeletedCitationIds(conversationId: string): Set<string> {
 function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element {
     const { t } = useI18n();
     const { message } = AntdApp.useApp();
+    const location = useLocation();
     const navigate = useNavigate();
     const canSaveToKnowledge = permissions.includes('knowledge_base.read');
     const [input, setInput] = useState('');
@@ -624,7 +631,39 @@ function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element 
     const [renameTarget, setRenameTarget] = useState<Conversation>();
     const [renameValue, setRenameValue] = useState('');
     const [dingtalkConnected, setDingtalkConnected] = useState(false);
-    useEffect(() => { void listConversations().then((result) => { setConversations(result.items); if (result.items[0]) void selectConversation(result.items[0]); }).catch((error) => message.error(error instanceof Error ? error.message : '加载会话失败')); }, []);
+    const initialConversationLoadStarted = useRef(false);
+
+    const createAndActivateConversation = async (): Promise<void> => {
+        const conversation = await createConversation();
+        setConversations((items) => [conversation, ...items.filter((item) => item.id !== conversation.id)]);
+        setActiveConversationId(conversation.id);
+        setMessages([]);
+        setPreviewDocument(undefined);
+    };
+
+    useEffect(() => {
+        if (initialConversationLoadStarted.current) return;
+        initialConversationLoadStarted.current = true;
+        const navigationState = location.state as AssistantNavigationState | null;
+        const createNewConversation = navigationState?.createNewConversation === true;
+        void listConversations()
+            .then(async (result) => {
+                setConversations(result.items);
+                if (createNewConversation) {
+                    try {
+                        await createAndActivateConversation();
+                    } catch (error) {
+                        message.error(error instanceof Error ? error.message : t('创建会话失败'));
+                        if (result.items[0]) await selectConversation(result.items[0]);
+                    } finally {
+                        navigate('/assistant', { replace: true, state: null });
+                    }
+                    return;
+                }
+                if (result.items[0]) await selectConversation(result.items[0]);
+            })
+            .catch((error) => message.error(error instanceof Error ? error.message : t('加载会话失败')));
+    }, []);
     useEffect(() => {
         const connector = window.cees?.connectors?.dingtalk;
         if (!connector) return;
@@ -686,7 +725,7 @@ function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element 
     };
 
     const newConversation = (): void => {
-        void createConversation().then((conversation) => { setConversations((items) => [conversation, ...items]); setActiveConversationId(conversation.id); setMessages([]); setPreviewDocument(undefined); }).catch((error) => message.error(error instanceof Error ? error.message : '创建会话失败'));
+        void createAndActivateConversation().catch((error) => message.error(error instanceof Error ? error.message : t('创建会话失败')));
     };
 
     /** 删除成功后只记录该文档 ID，重开对话时按 ID 标记已删除态（块 4）。 */
@@ -802,7 +841,20 @@ function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element 
                     if (resourceId && resourceType) { resources.push({ id: resourceId, type: resourceType, url: event.resourceUrl, format: toolFormats.get(event.toolCallId) }); if (resourceType === 'IMAGE') setImageGenerating(false); updateStreamingMessage(); }
                 }
                 if (event.type === 'error') { terminal = true; setImageGenerating(false); throw new Error(event.error.message); }
-                if (event.type === 'completed') { terminal = true; setImageGenerating(false); if (event.finishReason === 'length') message.warning(t('回答达到长度上限，内容可能不完整')); }
+                if (event.type === 'completed') {
+                    terminal = true;
+                    setImageGenerating(false);
+                    if (streamFlush.current) {
+                        clearTimeout(streamFlush.current);
+                        streamFlush.current = undefined;
+                        updateStreamingMessage();
+                    }
+                    if (version === requestVersion.current) {
+                        setSending(false);
+                        setActiveTurn(undefined);
+                    }
+                    if (event.finishReason === 'length') message.warning(t('回答达到长度上限，内容可能不完整'));
+                }
             };
             const replay = async (): Promise<void> => {
                 for (let attempt = 0; attempt < 3 && !terminal; attempt += 1) await replayTurnEvents(conversationId, turnId, seq, handle, controller.signal);
@@ -996,7 +1048,7 @@ function CurrentPage({ authContext, members, documents, membersLoading, document
     if (location.pathname === '/knowledge') return <KnowledgeManagement authContext={authContext} onSessionExpired={onSessionExpired} />;
     if (location.pathname === '/profile') return <ProfileSettings tenantName={authContext.tenant.name} onProfileUpdated={onProfileUpdated} onSessionExpired={onSessionExpired} />;
     if (location.pathname === '/notifications') return <NotificationCenter authContext={authContext} onSessionExpired={onSessionExpired} />;
-    return <HomePage authContext={authContext} documents={documents} memberCount={members.length} />;
+    return <RoleBasedHomePage authContext={authContext} />;
     /*
     function DocumentEditorModal({ documentId, onClose }: { documentId?: string; onClose: () => void }): JSX.Element {
         const { message } = AntdApp.useApp();
@@ -1077,7 +1129,7 @@ function CurrentPage({ authContext, members, documents, membersLoading, document
 
     function CurrentPage({ authContext, members, documents, membersLoading, documentsLoading, onSessionExpired, onProfileUpdated }: { authContext: MeResult; members: TenantMember[]; documents: ManagedDocumentSummary[]; membersLoading: boolean; documentsLoading: boolean; onSessionExpired: () => void; onProfileUpdated: (displayName: string) => void }): JSX.Element {
         return <Routes>
-            <Route path="/" element={<HomePage authContext={authContext} documents={documents} memberCount={members.length} />} />
+            <Route path="/" element={<RoleBasedHomePage authContext={authContext} />} />
             <Route path="/browser" element={<BrowserPage />} />
             <Route path="/assistant" element={<AssistantPage />} />
             <Route path="/projects" element={<ProjectManagement authContext={authContext} onSessionExpired={onSessionExpired} />} />

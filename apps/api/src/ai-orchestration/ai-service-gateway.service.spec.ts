@@ -567,17 +567,25 @@ describe('AiServiceGateway', () => {
     }), { status: 503, headers: { 'Content-Type': 'application/json' } }));
     const service = new AiServiceGateway(recorder);
 
-    await expect(service.invoke({
+    const invocation = service.invoke({
       request_id: 'req-2',
       tenant_id: 'tenant-1',
       user_id: 'user-1',
       messages: [{ role: 'user', content: [{ type: 'text', text: 'hello' }] }],
       response_format: { type: 'text' },
-    })).rejects.toEqual(expect.objectContaining<Partial<AiServiceInvocationError>>({
+    });
+    await expect(invocation).rejects.toEqual(expect.objectContaining<Partial<AiServiceInvocationError>>({
       code: 'LLM_UNAVAILABLE',
       retryable: true,
       httpStatus: 503,
     }));
+    await invocation.catch((error: AiServiceInvocationError) => {
+      expect(error.getStatus()).toBe(503);
+      expect(error.getResponse()).toEqual(expect.objectContaining({
+        code: 'LLM_UNAVAILABLE',
+        message: 'unavailable',
+      }));
+    });
     expect(record).not.toHaveBeenCalled();
   });
 

@@ -478,6 +478,8 @@ class DocumentSourceMaterial(BaseModel):
 
 class TemplateId(StrEnum):
     business_standard = 'business-standard'
+    editorial_modern = 'editorial-modern'
+    executive_dark = 'executive-dark'
 
 
 class GenerationMode(StrEnum):
@@ -497,7 +499,7 @@ class DocumentOptions(BaseModel):
     )
     title: constr(min_length=1, max_length=256) | None = None
     locale: constr(min_length=2, max_length=32) | None = 'zh-CN'
-    template_id: TemplateId | None = 'business-standard'
+    template_id: TemplateId | None = 'editorial-modern'
     include_toc: bool | None = False
     generation_mode: GenerationMode | None = Field(
         'fast',
