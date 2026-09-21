@@ -69,9 +69,16 @@ Desktop: 重新读取具体 leaf Schema
 对话查询中的组织和考勤复合只读能力：
 
 ```text
-用户询问本人考勤/请假
-  -> 优先使用 DWS 快捷只读工具，当前用户 ID 由 DWS Profile 注入
-  -> 日期缺省时本人审批默认使用本月第一天至今天
+用户询问本人打卡流水
+  -> 首轮确定性路由到 cees.my_attendance_records，不让模型在底层考勤工具间猜测
+  -> 当前用户 ID 由 DWS Profile 注入，底层固定调用 attendance +check-record
+  -> 日期缺省时查询 Desktop 本机时区下的今天；显式区间最多一个月
+  -> Desktop 把秒/毫秒时间戳转换为 cees.dingtalk.attendance.v1 标准结构
+  -> workDate 只表示考勤归属日期，actualCheckTime 表示实际打卡时间，baseCheckTime 表示应打卡时间
+
+用户询问本人请假/加班/出差外出/补卡审批
+  -> 使用 cees.my_attendance_approvals，当前用户 ID 由 DWS Profile 注入
+  -> 日期缺省时默认使用本月第一天至今天
 
 用户询问全部可见组织和人员
   -> 使用 CEES 复合只读工具
@@ -81,6 +88,8 @@ Desktop: 重新读取具体 leaf Schema
 ```
 
 上述能力仍然只读取当前 DWS Profile 能看到的数据，不扩大钉钉账号本身的通讯录或考勤权限；组织复合工具也不会执行 CEES 导入、映射或其他正式业务写入。
+
+考勤标准化由 Desktop 确定性执行，而不是交给最终回答模型推断：10 位整数按 Unix 秒处理，13 位整数按 Unix 毫秒处理，其他纯数字长度拒绝解析；日期与时间按 Desktop 当前 IANA 时区换算并在上下文中携带 `timezone`。最终模型必须直接使用 `actualCheckTimeLocal`、`baseCheckTimeLocal` 和 `workDate`，不得再次换算原始时间戳。标准化结果携带 `complete`、`count`、`warnings` 和字段来源；记录数不一致或分页未结束时不得宣称结果完整。
 
 连接器市场的一键连接流程为：
 
@@ -235,6 +244,10 @@ scope = VISIBLE_SCOPE
 | AI 返回目录外工具或未声明参数 | Desktop/API 拒绝计划，不执行本地命令 |
 | 执行前 leaf Schema 安全属性变化 | 拒绝执行并提示重试，不沿用旧目录 |
 | DWS Schema 使用 `+` 快捷命令 | 仅允许符合安全命名规则的快捷命令词，例如 `+my-attendance`；不放宽到任意 Shell 字符 |
+| 本人考勤记录查询 | 优先使用 `cees.my_attendance_records`，按当前 Profile 注入用户 ID，并把时间和字段语义标准化后再进入对话 |
+| 考勤时间戳不是合法的 10 位秒或 13 位毫秒值 | 拒绝生成考勤上下文并明确报错，不让模型猜测时间 |
+| 考勤记录缺少实际打卡时间 | 拒绝生成结论，提示返回结构无法可靠解析 |
+| 考勤记录数不一致或分页未结束 | 标记 `complete=false` 并携带警告，不宣称已列出全部记录 |
 | DWS 返回 `orgUserId/orgUserName` | 按 DWS 组织员工模型解析为 CEES 外部人员 ID 和姓名，不因字段名不同丢弃人员 |
 | 对话请求完整组织架构 | 使用递归可见组织复合只读工具；结果带完整性标记，不能把直属部门结果宣称为全量 |
 | 组织/人员结果超过单轮上下文上限 | 返回截断警告和 `complete=false`，提示缩小范围，不宣称已返回全部人员 |

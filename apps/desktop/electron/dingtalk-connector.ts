@@ -33,8 +33,13 @@ const MAX_CALLS = 3;
 const TOOL_ID_PATTERN = /^dws_read_[a-f0-9]{16}$/;
 const UNSAFE_PARAMETER_PATTERN = /(?:token|secret|cookie|authorization|credential|password|app[-_]?key|app[-_]?secret)/i;
 const CONTROL_PARAMETERS = new Set(['help', 'format', 'output', 'jq', 'fields', 'dry-run', 'confirm', 'confirmed', 'force', 'yes']);
+const ATTENDANCE_RECORD_TOOL_NAMES = new Set([
+    'attendance.shortcut_my_attendance',
+    'attendance.shortcut_check_record',
+]);
 const VISIBLE_ORGANIZATION_TOOL_ID = `dws_read_${createHash('sha256').update('cees.visible.organization').digest('hex').slice(0, 16)}`;
 const MY_ATTENDANCE_APPROVALS_TOOL_ID = `dws_read_${createHash('sha256').update('cees.my.attendance.approvals').digest('hex').slice(0, 16)}`;
+const MY_ATTENDANCE_RECORDS_TOOL_ID = `dws_read_${createHash('sha256').update('cees.my.attendance.records').digest('hex').slice(0, 16)}`;
 
 let installRoot: string | null = null;
 let installPromise: Promise<DingTalkDwsStatus> | null = null;
@@ -58,6 +63,19 @@ export interface DingTalkConnectorTool {
 export interface DingTalkConnectorPlannedCall {
     toolId: string;
     arguments: Record<string, unknown>;
+}
+
+export interface NormalizedDingTalkAttendanceRecord {
+    id: string | null;
+    userId: string | null;
+    workDate: string | null;
+    checkType: string | null;
+    actualCheckTime: string | null;
+    actualCheckTimeLocal: string | null;
+    baseCheckTime: string | null;
+    baseCheckTimeLocal: string | null;
+    status: string | null;
+    sourceFields: Record<string, string>;
 }
 
 export interface DingTalkConnectorReleaseStatus {
@@ -552,6 +570,14 @@ export async function executeDingTalkReadCalls(calls: DingTalkConnectorPlannedCa
             contexts.push(connectorContext(tool, buildVisibleOrganizationContextData(snapshot)));
             continue;
         }
+        if (call.toolId === MY_ATTENDANCE_RECORDS_TOOL_ID) {
+            const status = await getDingTalkDwsStatus();
+            if (!status.externalUserId) throw new Error('DWS 当前 Profile 未返回用户 ID');
+            const args = buildPersonalAttendanceRecordArguments(status.externalUserId, call.arguments);
+            const payload = await runDwsJson(args, 60_000);
+            contexts.push(connectorContext(tool, normalizeDingTalkAttendanceContext(payload)));
+            continue;
+        }
         if (call.toolId === MY_ATTENDANCE_APPROVALS_TOOL_ID) {
             const status = await getDingTalkDwsStatus();
             if (!status.externalUserId) throw new Error('DWS 当前 Profile 未返回用户 ID');
@@ -565,7 +591,10 @@ export async function executeDingTalkReadCalls(calls: DingTalkConnectorPlannedCa
         if (!current) throw new Error('钉钉 DWS 工具安全属性已变化，已拒绝执行');
         const args = buildDwsArguments(current, call.arguments);
         const payload = await runDwsJson(args, 60_000);
-        contexts.push(connectorContext(current, sanitizeConnectorData(payload)));
+        const data = ATTENDANCE_RECORD_TOOL_NAMES.has(current.name)
+            ? normalizeDingTalkAttendanceContext(payload)
+            : sanitizeConnectorData(payload);
+        contexts.push(connectorContext(current, data));
     }
     if (Buffer.byteLength(JSON.stringify(contexts), 'utf8') > MAX_CONTEXT_BYTES) {
         throw new Error('钉钉连接器返回数据过多，请缩小查询范围');
@@ -619,6 +648,7 @@ export function buildDingTalkReadToolCatalog(payload: unknown): DiscoveredDwsToo
     return [
         ...parseDingTalkReadTools(payload),
         createVisibleOrganizationTool(),
+        createPersonalAttendanceRecordsTool(),
         createPersonalAttendanceApprovalsTool(),
     ];
 }
@@ -669,6 +699,302 @@ export function buildVisibleOrganizationContextData(snapshot: DingTalkDwsSnapsho
 
 function jsonBytes(value: unknown): number {
     return Buffer.byteLength(JSON.stringify(value), 'utf8');
+}
+
+function createPersonalAttendanceRecordsTool(): DiscoveredDwsTool {
+    return {
+        toolId: MY_ATTENDANCE_RECORDS_TOOL_ID,
+        name: 'cees.my_attendance_records',
+        cliPath: 'cees my attendance records',
+        description: '查询当前登录用户本人的考勤打卡流水；日期省略时默认查询今天。返回结果已按本机时区确定性换算并明确区分工作日期、实际打卡时间和应打卡时间，回答时禁止重新换算原始时间戳',
+        parameters: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+                start: { type: 'string', format: 'date', description: '开始日期 YYYY-MM-DD，默认今天' },
+                end: { type: 'string', format: 'date', description: '结束日期 YYYY-MM-DD，默认与开始日期相同，区间最多一个月' },
+            },
+        },
+        rawParameters: {},
+        positionals: [],
+    };
+}
+
+export function buildPersonalAttendanceRecordArguments(
+    userId: string,
+    input: Record<string, unknown>,
+    now = new Date(),
+    timeZone = systemTimeZone(),
+): string[] {
+    const allowed = new Set(['start', 'end']);
+    for (const name of Object.keys(input)) {
+        if (!allowed.has(name)) throw new Error(`钉钉 DWS 工具参数 ${name} 未在 Schema 中声明`);
+    }
+    const today = formatDateInTimeZone(now, timeZone);
+    const start = input.start === undefined
+        ? input.end === undefined ? today : requireValidDateArgument('end', input.end)
+        : requireValidDateArgument('start', input.start);
+    const end = input.end === undefined ? start : requireValidDateArgument('end', input.end);
+    if (start > end) throw new Error('钉钉 DWS 工具参数 start 不能晚于 end');
+    if (!isWithinOneCalendarMonth(start, end)) throw new Error('钉钉考勤查询日期区间不能超过一个月');
+    return [
+        'attendance', '+check-record',
+        '--users', userId,
+        '--start', start,
+        '--end', end,
+        '--format', 'json',
+    ];
+}
+
+export function normalizeDingTalkAttendanceContext(
+    payload: unknown,
+    timeZone = systemTimeZone(),
+): Record<string, unknown> {
+    assertTimeZone(timeZone);
+    if (isRecord(payload) && (payload.success === false || payload.outcome === 'failure')) {
+        throw new Error(stringValue(payload.message) ?? stringValue(payload.error) ?? '钉钉考勤查询失败');
+    }
+    const sourceRecords = attendanceRecordList(payload);
+    const records = sourceRecords.map((record, index) => normalizeAttendanceRecord(record, index, timeZone));
+    const reportedCount = attendanceReportedCount(payload);
+    const warnings: string[] = [];
+    if (reportedCount !== null && reportedCount !== records.length) {
+        warnings.push(`钉钉返回记录数 ${reportedCount}，本次标准化记录数 ${records.length}`);
+    }
+    const countsMatch = reportedCount === null || reportedCount === records.length;
+    if (reportedCount !== null && reportedCount > 0 && records.length === 0) {
+        throw new Error('钉钉返回了考勤记录数量，但没有返回可解析的记录');
+    }
+    const complete = attendanceResultComplete(payload) && countsMatch;
+    if (!complete) warnings.push('钉钉考勤结果仍有后续分页，本次结果不完整');
+    return {
+        schemaVersion: 'cees.dingtalk.attendance.v1',
+        timezone: timeZone,
+        complete,
+        count: records.length,
+        warnings,
+        fieldSemantics: {
+            workDate: '考勤归属日期，不是打卡时刻',
+            actualCheckTime: '员工实际打卡时间，已按 timezone 换算',
+            baseCheckTime: '排班规定的应打卡时间，已按 timezone 换算',
+        },
+        records,
+    };
+}
+
+function normalizeAttendanceRecord(
+    record: Record<string, unknown>,
+    index: number,
+    timeZone: string,
+): NormalizedDingTalkAttendanceRecord {
+    const actualField = firstRecordField(record, ['userCheckTime', 'actualCheckTime', 'checkTime', 'checkTimeMillis']);
+    if (!actualField) throw new Error(`第 ${index + 1} 条钉钉考勤记录缺少实际打卡时间`);
+    const actualCheckTime = normalizeAttendanceTimestamp(actualField.value, timeZone);
+    if (!actualCheckTime) throw new Error(`第 ${index + 1} 条钉钉考勤记录的实际打卡时间无效`);
+    const baseField = firstRecordField(record, ['baseCheckTime', 'scheduledCheckTime', 'planCheckTime']);
+    const baseCheckTime = baseField ? normalizeAttendanceTimestamp(baseField.value, timeZone) : null;
+    if (baseField && !baseCheckTime) throw new Error(`第 ${index + 1} 条钉钉考勤记录的应打卡时间无效`);
+    const workDateField = firstRecordField(record, ['workDate', 'attendanceDate', 'date']);
+    const workDate = workDateField ? normalizeAttendanceDate(workDateField.value, timeZone) : actualCheckTime.date;
+    if (!workDate) throw new Error(`第 ${index + 1} 条钉钉考勤记录的工作日期无效`);
+    const checkTypeField = firstRecordField(record, ['checkType', 'check_type']);
+    const statusField = firstRecordField(record, ['timeResult', 'checkResult', 'status']);
+    return {
+        id: scalarText(record.id ?? record.recordId ?? record.record_id),
+        userId: scalarText(record.userId ?? record.user_id),
+        workDate,
+        checkType: normalizeCheckType(checkTypeField?.value),
+        actualCheckTime: actualCheckTime.iso,
+        actualCheckTimeLocal: actualCheckTime.local,
+        baseCheckTime: baseCheckTime?.iso ?? null,
+        baseCheckTimeLocal: baseCheckTime?.local ?? null,
+        status: scalarText(statusField?.value),
+        sourceFields: {
+            workDate: workDateField?.name ?? 'derivedFromActualCheckTime',
+            actualCheckTime: actualField.name,
+            ...(baseField ? { baseCheckTime: baseField.name } : {}),
+            ...(checkTypeField ? { checkType: checkTypeField.name } : {}),
+            ...(statusField ? { status: statusField.name } : {}),
+        },
+    };
+}
+
+function attendanceRecordList(payload: unknown): Record<string, unknown>[] {
+    const candidates = [
+        payload,
+        isRecord(payload) ? payload.records : undefined,
+        isRecord(payload) ? payload.data : undefined,
+        isRecord(payload) ? payload.result : undefined,
+    ];
+    for (const candidate of candidates) {
+        if (Array.isArray(candidate)) return candidate.filter(isRecord);
+        if (isRecord(candidate) && Array.isArray(candidate.records)) return candidate.records.filter(isRecord);
+    }
+    throw new Error('钉钉考勤返回结构缺少 records 数组');
+}
+
+function attendanceReportedCount(payload: unknown): number | null {
+    if (!isRecord(payload)) return null;
+    const candidates = [payload.count, isRecord(payload.data) ? payload.data.count : undefined, isRecord(payload.result) ? payload.result.count : undefined];
+    const count = candidates.find((value) => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0);
+    return typeof count === 'number' ? count : null;
+}
+
+function attendanceResultComplete(payload: unknown): boolean {
+    if (!isRecord(payload) || !isRecord(payload.meta) || !isRecord(payload.meta.pagination)) return true;
+    return payload.meta.pagination.endpoint_exhausted !== false;
+}
+
+function firstRecordField(record: Record<string, unknown>, names: string[]): { name: string; value: unknown } | null {
+    for (const name of names) {
+        if (record[name] !== undefined && record[name] !== null && record[name] !== '') return { name, value: record[name] };
+    }
+    return null;
+}
+
+function normalizeCheckType(value: unknown): string | null {
+    const normalized = scalarText(value)?.replace(/[\s-]+/g, '_').toUpperCase();
+    if (!normalized) return null;
+    if (normalized === 'ONDUTY' || normalized === 'ON_DUTY') return 'ON_DUTY';
+    if (normalized === 'OFFDUTY' || normalized === 'OFF_DUTY') return 'OFF_DUTY';
+    return normalized;
+}
+
+function normalizeAttendanceDate(value: unknown, timeZone: string): string | null {
+    if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) return isValidDate(value) ? value : null;
+    return normalizeAttendanceTimestamp(value, timeZone)?.date ?? null;
+}
+
+function normalizeAttendanceTimestamp(
+    value: unknown,
+    timeZone: string,
+): { iso: string; local: string; date: string } | null {
+    if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}$/.test(value)) {
+        const date = value.slice(0, 10);
+        const [, time] = value.split(/[ T]/);
+        if (!isValidDate(date) || !isValidTime(time)) return null;
+        const offset = timeZoneOffsetForLocalDate(value.replace(' ', 'T'), timeZone);
+        return { iso: `${value.replace(' ', 'T')}${offset}`, local: value.replace('T', ' '), date };
+    }
+    let epochMilliseconds: number | null = null;
+    if (typeof value === 'number' && Number.isSafeInteger(value)) {
+        const digits = String(Math.abs(value)).length;
+        epochMilliseconds = digits === 10 ? value * 1000 : digits === 13 ? value : null;
+    } else if (typeof value === 'string' && /^-?\d+$/.test(value)) {
+        const digits = value.replace('-', '').length;
+        const parsed = Number(value);
+        if (Number.isSafeInteger(parsed)) epochMilliseconds = digits === 10 ? parsed * 1000 : digits === 13 ? parsed : null;
+    } else if (typeof value === 'string') {
+        const parsed = Date.parse(value);
+        if (Number.isFinite(parsed)) epochMilliseconds = parsed;
+    }
+    if (epochMilliseconds === null) return null;
+    const date = new Date(epochMilliseconds);
+    if (Number.isNaN(date.getTime())) return null;
+    return formatInstantInTimeZone(date, timeZone);
+}
+
+function formatInstantInTimeZone(value: Date, timeZone: string): { iso: string; local: string; date: string } {
+    const parts = dateTimeParts(value, timeZone);
+    const date = `${parts.year}-${parts.month}-${parts.day}`;
+    const time = `${parts.hour}:${parts.minute}:${parts.second}`;
+    const localIso = `${date}T${time}`;
+    return { iso: `${localIso}${timeZoneOffsetForInstant(value, timeZone)}`, local: `${date} ${time}`, date };
+}
+
+function dateTimeParts(value: Date, timeZone: string): Record<'year' | 'month' | 'day' | 'hour' | 'minute' | 'second', string> {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hourCycle: 'h23',
+    }).formatToParts(value);
+    const output = Object.fromEntries(parts.filter((part) => part.type !== 'literal').map((part) => [part.type, part.value]));
+    return output as Record<'year' | 'month' | 'day' | 'hour' | 'minute' | 'second', string>;
+}
+
+function timeZoneOffsetForInstant(value: Date, timeZone: string): string {
+    const parts = dateTimeParts(value, timeZone);
+    const representedUtc = Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day), Number(parts.hour), Number(parts.minute), Number(parts.second));
+    return formatOffset(Math.round((representedUtc - value.getTime()) / 60_000));
+}
+
+function timeZoneOffsetForLocalDate(localIso: string, timeZone: string): string {
+    const [datePart, timePart] = localIso.split('T');
+    const [year, month, day] = datePart.split('-').map(Number);
+    const [hour, minute, second] = timePart.split(':').map(Number);
+    const guess = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+    const firstOffset = offsetMinutesAtInstant(guess, timeZone);
+    const instant = new Date(guess.getTime() - firstOffset * 60_000);
+    return formatOffset(offsetMinutesAtInstant(instant, timeZone));
+}
+
+function offsetMinutesAtInstant(value: Date, timeZone: string): number {
+    const parts = dateTimeParts(value, timeZone);
+    const representedUtc = Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day), Number(parts.hour), Number(parts.minute), Number(parts.second));
+    return Math.round((representedUtc - value.getTime()) / 60_000);
+}
+
+function formatOffset(offsetMinutes: number): string {
+    const sign = offsetMinutes >= 0 ? '+' : '-';
+    const absolute = Math.abs(offsetMinutes);
+    return `${sign}${String(Math.floor(absolute / 60)).padStart(2, '0')}:${String(absolute % 60).padStart(2, '0')}`;
+}
+
+function systemTimeZone(): string {
+    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return timeZone || 'Asia/Shanghai';
+}
+
+function assertTimeZone(timeZone: string): void {
+    try {
+        new Intl.DateTimeFormat('en-US', { timeZone }).format();
+    } catch {
+        throw new Error('钉钉考勤时区无效');
+    }
+}
+
+function formatDateInTimeZone(value: Date, timeZone: string): string {
+    assertTimeZone(timeZone);
+    const parts = dateTimeParts(value, timeZone);
+    return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+function requireValidDateArgument(name: string, value: unknown): string {
+    const date = requireDateArgument(name, value);
+    if (!isValidDate(date)) throw new Error(`钉钉 DWS 工具参数 ${name} 不是有效日期`);
+    return date;
+}
+
+function isValidDate(value: string): boolean {
+    const [year, month, day] = value.split('-').map(Number);
+    const parsed = new Date(Date.UTC(year, month - 1, day));
+    return parsed.getUTCFullYear() === year && parsed.getUTCMonth() === month - 1 && parsed.getUTCDate() === day;
+}
+
+function isValidTime(value: string): boolean {
+    const [hour, minute, second] = value.split(':').map(Number);
+    return hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59 && second >= 0 && second <= 59;
+}
+
+function isWithinOneCalendarMonth(start: string, end: string): boolean {
+    const [year, month, day] = start.split('-').map(Number);
+    const targetMonth = month === 12 ? 1 : month + 1;
+    const targetYear = month === 12 ? year + 1 : year;
+    const lastDayOfTargetMonth = new Date(Date.UTC(targetYear, targetMonth, 0)).getUTCDate();
+    const maximum = new Date(Date.UTC(targetYear, targetMonth - 1, Math.min(day, lastDayOfTargetMonth)));
+    const endDate = new Date(`${end}T00:00:00.000Z`);
+    return endDate.getTime() <= maximum.getTime();
+}
+
+function scalarText(value: unknown): string | null {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+    return null;
 }
 
 function createPersonalAttendanceApprovalsTool(): DiscoveredDwsTool {
