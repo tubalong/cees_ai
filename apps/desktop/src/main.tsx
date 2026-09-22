@@ -8,7 +8,8 @@ import zhCN from 'antd/locale/zh_CN';
 import zhTW from 'antd/locale/zh_TW';
 import { HashRouter } from 'react-router-dom';
 import App from './app/App';
-import { PreferencesProvider, usePreferences } from './app/preferences';
+import { hydrateSecureSession } from './core/api';
+import { PreferencesProvider, PlatformWindowChrome, usePreferences } from './app/preferences';
 import { I18nProvider, useI18n } from './core/i18n';
 import './styles/styles.css';
 import './app/login.css';
@@ -42,8 +43,15 @@ function ThemedApplication(): JSX.Element {
     </ConfigProvider>;
 }
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
-    <React.StrictMode>
-        <PreferencesProvider><I18nProvider><ThemedApplication /></I18nProvider></PreferencesProvider>
-    </React.StrictMode>,
-);
+/**
+ * 先把手机会话从加密存储解密到内存镜像，再渲染应用：
+ * 否则首屏的会话校验会因为令牌尚未就绪而把已登录用户误判为未登录。
+ * hydrateSecureSession 内部已捕获异常（解密失败按未登录处理），不会阻塞启动。
+ */
+void hydrateSecureSession().finally(() => {
+    ReactDOM.createRoot(document.getElementById('root')!).render(
+        <React.StrictMode>
+            <PreferencesProvider><I18nProvider><ThemedApplication /><PlatformWindowChrome /></I18nProvider></PreferencesProvider>
+        </React.StrictMode>,
+    );
+});

@@ -16,6 +16,21 @@ contextBridge.exposeInMainWorld('cees', {
     setZoomFactor: (factor: number) => webFrame.setZoomFactor(factor),
     openDevTools: () => ipcRenderer.send('cees:open-devtools'),
     openExternal: (url: string): Promise<boolean> => ipcRenderer.invoke('cees:open-external', url),
+    /**
+     * 加密会话存储：令牌经主进程 safeStorage 加密后落盘，
+     * 渲染层不再把刷新令牌写进 localStorage / sessionStorage。
+     */
+    secureStore: {
+        getAll: (): Promise<Record<string, string>> => ipcRenderer.invoke('cees:secure-store-get-all'),
+        set: (key: string, value: string): Promise<void> => ipcRenderer.invoke('cees:secure-store-set', key, value),
+        remove: (key: string): Promise<void> => ipcRenderer.invoke('cees:secure-store-remove', key),
+    },
+    /** macOS 全屏/退出全屏通知：全屏时系统隐藏交通灯，渲染层需收回顶部拖拽留白。 */
+    onFullScreenChanged: (listener: (fullScreen: boolean) => void): (() => void) => {
+        const handler = (_event: Electron.IpcRendererEvent, fullScreen: boolean): void => listener(fullScreen);
+        ipcRenderer.on('cees:window-fullscreen-changed', handler);
+        return () => ipcRenderer.removeListener('cees:window-fullscreen-changed', handler);
+    },
     dingtalkDws: {
         status: (): Promise<DingTalkDwsStatus> => ipcRenderer.invoke('cees:dingtalk-dws-status'),
         login: (): Promise<DingTalkDwsStatus> => ipcRenderer.invoke('cees:dingtalk-dws-login'),

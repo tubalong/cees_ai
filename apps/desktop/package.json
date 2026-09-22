@@ -1,13 +1,14 @@
 {
     "name": "@cees/desktop",
-    "version": "0.1.1",
+    "version": "0.1.2",
     "private": true,
     "main": "dist-electron/main.js",
     "scripts": {
         "dev": "tsc -p electron/tsconfig.json && concurrently -k \"vite\" \"wait-on http://localhost:5173 && electron .\"",
         "build": "tsc -b && vite build && tsc -p electron/tsconfig.json",
         "test:dws": "tsc -p electron/tsconfig.json && node --test tests/dingtalk-dws.test.cjs tests/dingtalk-connector.test.cjs tests/connector-runtime.test.cjs tests/local-cli-transport.test.cjs tests/http-api-transport.test.cjs tests/tencent-meeting-connector.test.cjs tests/tencent-meeting-auth-status.test.cjs",
-        "dist:win": "pnpm build && electron-builder --win nsis zip --x64"
+        "dist:win": "pnpm build && electron-builder --win nsis zip --x64",
+        "dist:mac": "pnpm build && electron-builder --mac dmg zip"
     },
     "build": {
         "appId": "com.cees.ai.desktop",
@@ -26,6 +27,13 @@
             "executableName": "CEES-AI",
             "target": [
                 "nsis",
+                "zip"
+            ]
+        },
+        "mac": {
+            "category": "public.app-category.business",
+            "target": [
+                "dmg",
                 "zip"
             ]
         },
