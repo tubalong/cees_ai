@@ -5,13 +5,13 @@
 - 已落地：腾讯会议 `ConnectorManifest`、通用 Adapter、Registry 注册和连接器市场动态展示。
 - 已落地：当前用户、会议列表、会议详情、参会成员、录制与纪要元数据五类只读工具 Schema。
 - 已落地：通用 `HttpApiTransport`，提供固定服务地址、路径白名单、超时、响应大小限制、JSON 解析和结构化错误。
-- 已落地：Desktop 在服务端 OAuth 尚未接线时返回明确的 `SERVER_OAUTH_REQUIRED` 状态，不伪造授权成功或会议查询结果。
+- 已落地：Desktop 连接器卡片调用 CEES API 发起 OAuth、通过系统浏览器完成授权、轮询成员级连接状态，并支持解绑和重新授权。
 - 已落地：公开契约 `0.37.1`，定义成员级 OAuth 授权、回调、状态、解绑、工具发现和批量只读执行，并将官方回调字段修正为 `auth_code`。
 - 已落地：`apps/api` 中的 OAuth State、授权回调、Token 加密托管、刷新租约、解绑和审计。
 - 已落地：腾讯会议五类只读 API 网关、Scope 工具过滤、严格参数校验、字段白名单、分页适配、响应大小限制和执行审计。
-- 待实现：Desktop 通过 CEES API 完成真实授权、状态查询和只读工具执行。
+- 待实现：Assistant Tool Loop 直接调用 CEES API 只读网关；Desktop 不建设会议列表或详情业务页面。
 
-当前 API 已具备真实 OAuth 和只读查询能力；Desktop 仍未切换到这些端点，因此市场卡片尚不能完成真实授权或会议查询。
+当前 API 已具备真实 OAuth 和只读查询能力，Desktop 市场卡片已完成授权、状态和解绑闭环。会议查询将在 Assistant Tool Loop 中由后端执行，不在 Desktop 建设独立会议客户端。
 
 ## 2. 目标
 
@@ -55,12 +55,13 @@ Desktop Connector Marketplace
 | `supportsDisconnect` | `true` | 后续支持解绑和清除授权 |
 | `supportsDynamicTools` | `true` | 工具能力可根据授权范围和服务状态发现 |
 
-当前默认生命周期行为：
+当前 Desktop 生命周期行为：
 
-- `status/connect/disconnect` 返回 `AUTH_REQUIRED`；
-- `issueCode` 固定为 `SERVER_OAUTH_REQUIRED`；
-- 工具目录可以被发现，用于验证 Schema 和后续 Tool Loop 接线；
-- 工具执行会明确失败，不返回模拟业务数据。
+- `status` 从 CEES API 获取当前租户成员的授权和 Token 健康状态；
+- `connect` 从 CEES API 获取一次性授权地址，通过受控 Electron IPC 打开 HTTPS 系统浏览器，并轮询至成功、失败或 State 超时；
+- `disconnect` 删除 CEES API 为当前租户成员保存的腾讯会议凭据；
+- Desktop 不保存腾讯会议 Access Token、Refresh Token 或应用 Secret；
+- Desktop 既有工具执行占位不会用于正式会话，后续由 Assistant Tool Loop 在 API 内部直接调用只读网关。
 
 ## 5. 第一阶段只读工具
 
@@ -95,8 +96,8 @@ Desktop Connector Marketplace
 1. 已完成：契约定义授权开始、状态、解绑和五类只读查询接口及失败语义。
 2. 已完成：API 实现 OAuth State、回调、Token 加密托管、刷新租约、解绑和审计。
 3. 已完成：将五类工具映射到固定腾讯会议 Open API，不接受任意 URL，并补齐字段过滤、分页适配、大小限制和审计。
-4. Desktop：将默认 Adapter 依赖替换为 CEES API 网关调用，授权时打开服务端返回的授权地址。
-5. Assistant：授权与查询稳定后，再接入原生 Tool Loop。
+4. 已完成：Desktop 市场卡片接入 CEES API 授权、状态、轮询和解绑，授权时通过系统浏览器打开服务端返回的地址。
+5. 下一步：Assistant 接入原生 Tool Loop，由 API 直接执行腾讯会议只读工具。
 6. 写操作：另行设计创建会议、修改会议等操作的权限和二次确认机制。
 
 ## 8. 验证

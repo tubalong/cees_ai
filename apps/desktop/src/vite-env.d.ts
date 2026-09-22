@@ -17,6 +17,7 @@ interface Window {
         version: string;
         setZoomFactor: (factor: number) => void;
         openDevTools: () => void;
+        openExternal: (url: string) => Promise<boolean>;
         dingtalkDws?: {
             status: () => Promise<DingTalkConnectorStatus>;
             login: () => Promise<DingTalkConnectorStatus>;
@@ -132,6 +133,19 @@ type DingTalkConnectorPlannedCall = ConnectorPlannedCall;
 type DesktopConnectorManifest = ConnectorManifest;
 
 type DesktopConnectorStatus = ConnectorStatus;
+
+interface TencentMeetingConnectorStatus extends ConnectorStatus {
+    account: {
+        externalUserId: string;
+        displayName: string | null;
+        organizationId: string | null;
+        organizationName: string | null;
+    } | null;
+    grantedScopes: string[];
+    tokenStatus: 'MISSING' | 'VALID' | 'EXPIRING' | 'REFRESH_FAILED' | 'REVOKED';
+    authorizedAt: string | null;
+    tokenExpiresAt: string | null;
+}
 
 interface ConnectorStatusChangedEvent {
     connectorId: string;

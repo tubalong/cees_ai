@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('cees', {
     version: process.versions.electron,
     setZoomFactor: (factor: number) => webFrame.setZoomFactor(factor),
     openDevTools: () => ipcRenderer.send('cees:open-devtools'),
+    openExternal: (url: string): Promise<boolean> => ipcRenderer.invoke('cees:open-external', url),
     dingtalkDws: {
         status: (): Promise<DingTalkDwsStatus> => ipcRenderer.invoke('cees:dingtalk-dws-status'),
         login: (): Promise<DingTalkDwsStatus> => ipcRenderer.invoke('cees:dingtalk-dws-login'),
