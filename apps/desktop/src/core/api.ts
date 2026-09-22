@@ -1,5 +1,6 @@
-// export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000/api/';
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://192.168.5.29:3000/api/';
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000/api/';
+// export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://192.168.5.29:3000/api/';
+// export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://132.232.159.186:3000/api/';
 // http://192.168.5.29:3000/api/
 // http://132.232.159.186:3000/api/
 const ACCESS_TOKEN_KEY = 'cees.accessToken';
@@ -306,22 +307,91 @@ interface ApiErrorBody {
 let refreshPromise: Promise<TokenPair> | undefined;
 let platformRefreshPromise: Promise<TokenPair> | undefined;
 
+/** 会话令牌的键；用于开机时的加密存储迁移与清理。 */
+const SESSION_TOKEN_KEYS = [ACCESS_TOKEN_KEY, REFRESH_TOKEN_KEY, PLATFORM_ACCESS_TOKEN_KEY, PLATFORM_REFRESH_TOKEN_KEY];
+
+/**
+ * 令牌存储策略（Electron 加固）。
+ *
+ * 桌面端由主进程 safeStorage（DPAPI / Keychain / libsecret）加密后落盘，
+ * 不在 localStorage / sessionStorage 里留存——Web Storage 是明文，
+ * 同源注入脚本可以一次性拿走长期有效的刷新令牌。
+ *
+ * 浏览器预览环境没有安全存储，保留原有 Web Storage 行为；
+ * 「记住我」语义不变：不勾选时令牌只驻内存，关闭应用即需重新登录。
+ */
+const secureTokens = new Map<string, string>();
+/** 已被显式要求持久化的键；未在此集合中的令牌只存在于内存。 */
+const persistedTokens = new Set<string>();
+let secureSessionHydrated = false;
+
+/** 启动时把手机会话从加密存储解密到内存镜像；完成后同步读取才能命中。 */
+export async function hydrateSecureSession(): Promise<void> {
+    if (secureSessionHydrated) return;
+    secureSessionHydrated = true;
+    const store = window.cees?.secureStore;
+    if (!store) return;
+    try {
+        const values = await store.getAll();
+        for (const [key, value] of Object.entries(values)) {
+            if (!SESSION_TOKEN_KEYS.includes(key)) continue;
+            secureTokens.set(key, value);
+            persistedTokens.add(key);
+        }
+    } catch {
+        // 解密失败（密钥环变化、文件损坏）按未登录处理：用户重新登录即可。
+    }
+    // 迁移：旧版本把令牌写在 Web Storage，这里清掉，避免明文残留。
+    for (const key of SESSION_TOKEN_KEYS) { localStorage.removeItem(key); sessionStorage.removeItem(key); }
+}
+
+function writeToken(key: string, value: string, persist: boolean): void {
+    secureTokens.set(key, value);
+    localStorage.removeItem(key);
+    sessionStorage.removeItem(key);
+    const store = window.cees?.secureStore;
+    if (!store) {
+        (persist ? localStorage : sessionStorage).setItem(key, value);
+        return;
+    }
+    if (persist) { persistedTokens.add(key); void store.set(key, value); }
+    else { persistedTokens.delete(key); void store.remove(key); }
+}
+
+function dropToken(key: string): void {
+    secureTokens.delete(key);
+    persistedTokens.delete(key);
+    localStorage.removeItem(key);
+    sessionStorage.removeItem(key);
+    void window.cees?.secureStore?.remove(key);
+}
+
+/** 该令牌是否还应该继续持久化（刷新后写回时用同一策略，避免“记住我”被无意降级）。 */
+function shouldPersistSession(): boolean {
+    return window.cees?.secureStore ? persistedTokens.has(REFRESH_TOKEN_KEY) : Boolean(localStorage.getItem(REFRESH_TOKEN_KEY));
+}
+
+function shouldPersistPlatformSession(): boolean {
+    return window.cees?.secureStore ? persistedTokens.has(PLATFORM_REFRESH_TOKEN_KEY) : Boolean(localStorage.getItem(PLATFORM_REFRESH_TOKEN_KEY));
+}
+
 export function hasStoredSession(): boolean {
     return Boolean(getStoredValue(ACCESS_TOKEN_KEY) && getStoredValue(REFRESH_TOKEN_KEY));
 }
 
 export function persistLogin(result: LoginResult, remember: boolean): void {
     clearPlatformSession();
-    const storage = remember ? localStorage : sessionStorage;
-    const otherStorage = remember ? sessionStorage : localStorage;
-    clearStorage(otherStorage);
-    storage.setItem(ACCESS_TOKEN_KEY, result.accessToken);
-    storage.setItem(REFRESH_TOKEN_KEY, result.refreshToken);
+    clearStorage(localStorage);
+    clearStorage(sessionStorage);
+    writeToken(ACCESS_TOKEN_KEY, result.accessToken, remember);
+    writeToken(REFRESH_TOKEN_KEY, result.refreshToken, remember);
 }
 
 export function clearSession(): void {
     clearStorage(localStorage);
     clearStorage(sessionStorage);
+    dropToken(ACCESS_TOKEN_KEY);
+    dropToken(REFRESH_TOKEN_KEY);
 }
 
 export async function login(input: LoginInput): Promise<LoginResult> {
@@ -730,9 +800,9 @@ async function refreshTokens(): Promise<TokenPair> {
                 method: 'POST',
                 body: JSON.stringify({ refreshToken }),
             });
-            const storage = getSessionStorage();
-            storage.setItem(ACCESS_TOKEN_KEY, tokens.accessToken);
-            storage.setItem(REFRESH_TOKEN_KEY, tokens.refreshToken);
+            const persist = shouldPersistSession();
+            writeToken(ACCESS_TOKEN_KEY, tokens.accessToken, persist);
+            writeToken(REFRESH_TOKEN_KEY, tokens.refreshToken, persist);
             return tokens;
         } catch (error) {
             clearSession();
@@ -771,11 +841,8 @@ function getErrorMessage(body: ApiSuccess<unknown> | ApiErrorBody | undefined): 
 }
 
 function getStoredValue(key: string): string | null {
-    return localStorage.getItem(key) ?? sessionStorage.getItem(key);
-}
-
-function getSessionStorage(): Storage {
-    return localStorage.getItem(REFRESH_TOKEN_KEY) ? localStorage : sessionStorage;
+    // 优先读内存镜像（可能来自加密存储），再回退 Web Storage（浏览器预览）。
+    return secureTokens.get(key) ?? localStorage.getItem(key) ?? sessionStorage.getItem(key);
 }
 
 function clearStorage(storage: Storage): void {
@@ -789,16 +856,17 @@ export function hasStoredPlatformSession(): boolean {
 
 export function persistPlatformLogin(result: PlatformLoginResult, remember: boolean): void {
     clearSession();
-    const storage = remember ? localStorage : sessionStorage;
-    const otherStorage = remember ? sessionStorage : localStorage;
-    clearPlatformStorage(otherStorage);
-    storage.setItem(PLATFORM_ACCESS_TOKEN_KEY, result.accessToken);
-    storage.setItem(PLATFORM_REFRESH_TOKEN_KEY, result.refreshToken);
+    clearPlatformStorage(localStorage);
+    clearPlatformStorage(sessionStorage);
+    writeToken(PLATFORM_ACCESS_TOKEN_KEY, result.accessToken, remember);
+    writeToken(PLATFORM_REFRESH_TOKEN_KEY, result.refreshToken, remember);
 }
 
 export function clearPlatformSession(): void {
     clearPlatformStorage(localStorage);
     clearPlatformStorage(sessionStorage);
+    dropToken(PLATFORM_ACCESS_TOKEN_KEY);
+    dropToken(PLATFORM_REFRESH_TOKEN_KEY);
 }
 
 export async function platformLogin(input: PlatformLoginInput): Promise<PlatformLoginResult> {
@@ -899,9 +967,9 @@ async function refreshPlatformTokens(): Promise<TokenPair> {
                 method: 'POST',
                 body: JSON.stringify({ refreshToken }),
             });
-            const storage = getPlatformSessionStorage();
-            storage.setItem(PLATFORM_ACCESS_TOKEN_KEY, tokens.accessToken);
-            storage.setItem(PLATFORM_REFRESH_TOKEN_KEY, tokens.refreshToken);
+            const persist = shouldPersistPlatformSession();
+            writeToken(PLATFORM_ACCESS_TOKEN_KEY, tokens.accessToken, persist);
+            writeToken(PLATFORM_REFRESH_TOKEN_KEY, tokens.refreshToken, persist);
             return tokens;
         } catch (error) {
             clearPlatformSession();
@@ -913,10 +981,6 @@ async function refreshPlatformTokens(): Promise<TokenPair> {
     } finally {
         platformRefreshPromise = undefined;
     }
-}
-
-function getPlatformSessionStorage(): Storage {
-    return localStorage.getItem(PLATFORM_REFRESH_TOKEN_KEY) ? localStorage : sessionStorage;
 }
 
 function clearPlatformStorage(storage: Storage): void {
@@ -1455,12 +1519,21 @@ export interface Turn { id: string; conversationId: string; status: 'RECEIVED' |
 export interface ImageAccess { id: string; resourceId: string; mimeType: 'image/png' | 'image/jpeg' | 'image/webp'; sizeBytes: number; url: string; prompt?: string | null; model?: string | null; createdAt: string; }
 /** 本轮实际生效的对话能力；autoEnabled 只包含服务端因意图识别自动启用的能力。 */
 export interface TurnCapabilities { webSearch: boolean; knowledgeBase: boolean; autoEnabled: Array<'web_search' | 'knowledge_search'>; }
+/** 写操作待确认预览；确认前不产生任何业务副作用。 */
+export interface ToolResultConfirmation {
+    draftId: string;
+    toolName: string;
+    title: string;
+    fields: Array<{ label: string; value: string }>;
+    expiresAt: string;
+}
+
 export type TurnStreamEvent =
     | { type: 'started'; seq: number; requestId: string; conversationId: string; turnId: string; mode: ChatMode; contextUsage: Record<string, unknown>; capabilities?: TurnCapabilities }
     | { type: 'status'; seq: number; phase: 'reasoning' | 'answering' | 'tool_executing' }
     | { type: 'content_delta'; seq: number; text: string }
     | { type: 'tool_call'; seq: number; toolCallId: string; name: string; arguments: Record<string, unknown> }
-    | { type: 'tool_result'; seq: number; toolCallId: string; status: 'completed' | 'failed' | 'rejected'; resourceId?: string | null; resourceUrl?: string | null; resource?: { id: string; type: 'IMAGE' | 'DOCUMENT' } | null; sources?: Array<{ id: string; title: string; url: string; domain: string; snippet: string; publishedAt?: string | null }>; citations?: Array<{ id: string; title: string; snippet: string; pageIndex?: number | null }>; error?: Record<string, unknown> | null }
+    | { type: 'tool_result'; seq: number; toolCallId: string; status: 'completed' | 'failed' | 'rejected' | 'awaiting_confirmation'; resourceId?: string | null; resourceUrl?: string | null; resource?: { id: string; type: 'IMAGE' | 'DOCUMENT' } | null; sources?: Array<{ id: string; title: string; url: string; domain: string; snippet: string; publishedAt?: string | null }>; citations?: Array<{ id: string; title: string; snippet: string; pageIndex?: number | null }>; confirmation?: ToolResultConfirmation | null; error?: Record<string, unknown> | null }
     | { type: 'usage'; seq: number; tokenUsage: Record<string, number | null> }
     | { type: 'completed'; seq: number; latencyMs: number; finishReason: string | null }
     | { type: 'error'; seq: number; error: { code: string; message: string; retryable: boolean } };
@@ -1525,6 +1598,27 @@ async function streamSse(path: string, init: RequestInit, onEvent: (event: TurnS
 export function createTurn(conversationId: string, input: { content: string; mode: ChatMode; imageFileIds?: string[]; fileIds?: string[]; connectorContexts?: ConnectorContext[]; knowledgeBaseEnabled?: boolean; webSearchEnabled?: boolean }, idempotencyKey: string, onEvent: (event: TurnStreamEvent) => void, signal?: AbortSignal): Promise<void> { return streamSse(`v1/conversations/${encodeURIComponent(conversationId)}/turns`, { method: 'POST', body: JSON.stringify({ content: input.content, mode: input.mode, ...(input.imageFileIds?.length ? { imageFileIds: input.imageFileIds } : {}), ...(input.fileIds?.length ? { fileIds: input.fileIds } : {}), ...(input.connectorContexts?.length ? { connectorContexts: input.connectorContexts } : {}), ...(input.knowledgeBaseEnabled ? { knowledgeBaseEnabled: true } : {}), ...(input.webSearchEnabled ? { webSearchEnabled: true } : {}) }), signal, headers: { 'Idempotency-Key': idempotencyKey } }, onEvent); }
 export function replayTurnEvents(conversationId: string, turnId: string, afterSeq: number, onEvent: (event: TurnStreamEvent) => void, signal?: AbortSignal): Promise<void> { return streamSse(`v1/conversations/${encodeURIComponent(conversationId)}/turns/${encodeURIComponent(turnId)}/events?afterSeq=${afterSeq}`, { method: 'GET', signal }, onEvent); }
 export async function cancelTurn(conversationId: string, turnId: string): Promise<Turn> { return authorizedRequest<Turn>(`v1/conversations/${encodeURIComponent(conversationId)}/turns/${encodeURIComponent(turnId)}/cancel`, { method: 'POST' }); }
+
+/** 写操作草稿的处理结果；summary 是可直接展示给用户的中文说明。 */
+export interface ActionDraftResolution {
+    draftId: string;
+    status: 'PENDING_CONFIRMATION' | 'EXECUTED' | 'FAILED' | 'REJECTED' | 'EXPIRED';
+    summary: string;
+    resource?: { type: 'IMAGE' | 'DOCUMENT'; id: string } | null;
+}
+
+/**
+ * 确认并执行写操作草稿。只提交 draftId：参数快照存在服务端，
+ * 客户端无法在确认时替换业务参数（服务端会重新鉴权并重新校验参数）。
+ */
+export async function confirmActionDraft(draftId: string): Promise<ActionDraftResolution> {
+    return authorizedRequest<ActionDraftResolution>(`v1/assistant/action-drafts/${encodeURIComponent(draftId)}/confirm`, { method: 'POST' });
+}
+
+/** 取消写操作草稿；取消后不可再确认，需重新发起对话。 */
+export async function cancelActionDraft(draftId: string): Promise<ActionDraftResolution> {
+    return authorizedRequest<ActionDraftResolution>(`v1/assistant/action-drafts/${encodeURIComponent(draftId)}/cancel`, { method: 'POST' });
+}
 
 export interface ChatMessageInput {
     id: string;
@@ -1726,10 +1820,56 @@ export type FinanceLedgerRow = {
     projectId?: string | null; counterparty?: string | null; summary?: string | null; voucherNo: string;
 };
 
-export type FinanceLedgerImport = { id: string; fileName: string; status: string; rowCount: number; importedCount: number; skippedCount: number; errorCount: number; errors: Array<{ rowNumber: number; message: string }> };
+export type FinanceLedgerImport = {
+    id: string; fileName: string; status: string; rowCount: number; importedCount: number; skippedCount: number; errorCount: number;
+    errors: Array<{ rowNumber: number; message: string }>;
+    /** 该批次的台账期间；导入历史用于核对批次覆盖的时间范围。 */
+    periodStart: string;
+    periodEnd: string;
+    /** 原始上传文件的文件对象 ID；未选择留档时为 null。 */
+    sourceFileObjectId?: string | null;
+    /** 批次创建时间；导入历史按此倒序展示。 */
+    createdAt?: string;
+    finishedAt?: string | null;
+};
 
-export async function createFinanceLedgerImport(input: { fileName: string; format: 'XLSX' | 'CSV'; periodStart: string; periodEnd: string; rows: FinanceLedgerRow[] }): Promise<FinanceLedgerImport> {
+export type FinanceLedgerEntry = FinanceLedgerRow & { id: string };
+
+export async function createFinanceLedgerImport(input: {
+    fileName: string; format: 'XLSX' | 'CSV'; periodStart: string; periodEnd: string;
+    sourceFileObjectId?: string;
+    rows: FinanceLedgerRow[];
+}): Promise<FinanceLedgerImport> {
     return authorizedRequest<FinanceLedgerImport>('v1/finance/ledger-imports', { method: 'POST', body: JSON.stringify(input) });
+}
+
+/** 导入历史（按创建时间倒序）；回滚以批次为粒度，因此必须先能看到批次。 */
+export async function listFinanceLedgerImports(limit = 20, cursor?: string): Promise<CursorPage<FinanceLedgerImport>> {
+    return requestLedgerImportPage(limit, cursor);
+}
+
+async function requestLedgerImportPage(limit: number, cursor?: string): Promise<CursorPage<FinanceLedgerImport>> {
+    const query = new URLSearchParams({ limit: String(limit) });
+    if (cursor) query.set('cursor', cursor);
+    return authorizedRequest<CursorPage<FinanceLedgerImport>>(`v1/finance/ledger-imports?${query.toString()}`);
+}
+
+/** 收支明细；direction/dateFrom/dateTo 均可选，用于台账核对。 */
+export async function listFinanceLedgerEntries(query: {
+    limit?: number; cursor?: string; direction?: 'INCOME' | 'EXPENSE';
+    dateFrom?: string; dateTo?: string; category?: string;
+} = {}): Promise<CursorPage<FinanceLedgerEntry>> {
+    const params = new URLSearchParams({ limit: String(query.limit ?? 20) });
+    for (const key of ['cursor', 'direction', 'dateFrom', 'dateTo', 'category'] as const) {
+        const value = query[key];
+        if (value) params.set(key, String(value));
+    }
+    return authorizedRequest<CursorPage<FinanceLedgerEntry>>(`v1/finance/ledger-entries?${params.toString()}`);
+}
+
+/** 回滚整个导入批次：批次内所有明细一并作废，并重算受影响日期的快照。 */
+export async function rollbackFinanceLedgerImport(importId: string): Promise<void> {
+    await authorizedRequest<unknown>(`v1/finance/ledger-imports/${encodeURIComponent(importId)}`, { method: 'DELETE' });
 }
 
 // ---------------------------------------------------------------------------

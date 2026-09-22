@@ -15,7 +15,7 @@ import ReactMarkdown, { type Components } from 'react-markdown';
 import { useLocation, useNavigate } from 'react-router-dom';
 import remarkGfm from 'remark-gfm';
 import {
-    cancelTurn, createConversation, createTurn, deleteConversation, exportDocument, getConversation, getDashboardOverview, getDashboardTodos, getDashboardUpcomingMeetings, getDocument, getImage, planDingTalkConnectorQueries, replayTurnEvents, updateConversation, uploadAttachmentFile,
+    cancelActionDraft, cancelTurn, confirmActionDraft, createConversation, createTurn, deleteConversation, exportDocument, getConversation, getDashboardOverview, getDashboardTodos, getDashboardUpcomingMeetings, getDocument, getImage, planDingTalkConnectorQueries, replayTurnEvents, updateConversation, uploadAttachmentFile,
     getUnreadNotificationCount, hasStoredSession, listConversations, listDocuments, listTenantMembers, logout,
     createKnowledgeDocument, deleteKnowledgeDocument, listWritableKnowledgeBases,
     type Conversation, type ConversationMessage, type DashboardOverview, type DashboardTodoItem, type DashboardUpcomingMeeting, type ImageAccess,
@@ -352,8 +352,26 @@ interface LocalChatMessage {
     resources?: ChatResource[];
     sources?: ChatSource[];
     citations?: ChatCitation[];
+    /** 写操作待确认卡片；副作用尚未发生，需用户在本页确认。 */
+    confirmation?: PendingActionConfirmation;
     /** 已持久化的历史消息才有稳定 message id，才能转存到知识库（块 7c）。 */
     persisted?: boolean;
+}
+
+/**
+ * 待确认的写操作。客户端只持有 draftId 与展示用的预览，
+ * 参数快照保存在服务端，确认时不可能被前端篡改。
+ */
+interface PendingActionConfirmation {
+    draftId: string;
+    toolName: string;
+    title: string;
+    fields: Array<{ label: string; value: string }>;
+    expiresAt: string;
+    /** 请求进行中，用于禁用按钮并避免双击。 */
+    resolving?: boolean;
+    resolved?: 'executed' | 'cancelled' | 'failed';
+    resultSummary?: string;
 }
 
 interface ChatResource {
@@ -599,6 +617,52 @@ function readDeletedCitationIds(conversationId: string): Set<string> {
     }
 }
 
+/**
+ * 写操作确认卡片。展示服务端返回的参数快照预览，并把用户的决策还原为一次
+ * 「只带 draftId」的确认/取消请求——参数不在客户端流转，因此不可能被篡改。
+ * 确认后卡片立刻转为终态文案，避免用户重复点击。
+ */
+function ActionConfirmationCard({ confirmation, onResolve }: {
+    confirmation: PendingActionConfirmation;
+    onResolve: (decision: 'confirm' | 'cancel') => void;
+}): JSX.Element {
+    const { t } = useI18n();
+    const resolved = confirmation.resolved;
+    const expired = !resolved && new Date(confirmation.expiresAt).getTime() <= Date.now();
+    const status = resolved === 'executed'
+        ? { className: 'is-executed', text: t('已执行') }
+        : resolved === 'cancelled'
+            ? { className: 'is-cancelled', text: t('已取消') }
+            : resolved === 'failed'
+                ? { className: 'is-failed', text: t('执行失败') }
+                : expired
+                    ? { className: 'is-expired', text: t('已过期') }
+                    : { className: 'is-pending', text: t('待确认') };
+    return <div className={`action-confirmation ${status.className}`}>
+        <div className="action-confirmation-head">
+            <CheckCircleOutlined />
+            <strong>{confirmation.title}</strong>
+            <span className="action-confirmation-status">{status.text}</span>
+        </div>
+        <dl className="action-confirmation-fields">
+            {confirmation.fields.map((field) => <div key={field.label}>
+                <dt>{field.label}</dt>
+                <dd>{field.value}</dd>
+            </div>)}
+        </dl>
+        {resolved
+            ? <p className="action-confirmation-result">{confirmation.resultSummary}</p>
+            : expired
+                ? <p className="action-confirmation-hint">{t('该操作已过期，请重新发起对话生成新的待确认操作。')}</p>
+                : <div className="action-confirmation-actions">
+                    <Button type="primary" loading={confirmation.resolving} disabled={confirmation.resolving}
+                        onClick={() => onResolve('confirm')}>{t('确认执行')}</Button>
+                    <Button disabled={confirmation.resolving} onClick={() => onResolve('cancel')}>{t('取消')}</Button>
+                    <span className="action-confirmation-hint">{t('确认前不会产生任何变更')}</span>
+                </div>}
+    </div>;
+}
+
 function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element {
     const { t } = useI18n();
     const { message } = AntdApp.useApp();
@@ -632,6 +696,32 @@ function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element 
     const [renameValue, setRenameValue] = useState('');
     const [dingtalkConnected, setDingtalkConnected] = useState(false);
     const initialConversationLoadStarted = useRef(false);
+
+    /** 就地更新某条消息上的确认卡片状态（不重建消息，避免滚动位置跳动）。 */
+    const patchConfirmation = (messageId: string, patch: Partial<PendingActionConfirmation>): void => {
+        setMessages((items) => items.map((item) => item.id === messageId && item.confirmation
+            ? { ...item, confirmation: { ...item.confirmation, ...patch } }
+            : item));
+    };
+
+    /**
+     * 确认或取消写操作草稿。只提交 draftId；服务端重新鉴权并重新校验参数，
+     * 因此即使权限在确认前被回收也不会误写（会返回 403 并在这里提示）。
+     */
+    const resolveActionDraft = async (messageId: string, draftId: string, decision: 'confirm' | 'cancel'): Promise<void> => {
+        patchConfirmation(messageId, { resolving: true });
+        try {
+            const result = decision === 'confirm' ? await confirmActionDraft(draftId) : await cancelActionDraft(draftId);
+            const resolved = result.status === 'EXECUTED' ? 'executed' : result.status === 'REJECTED' ? 'cancelled' : 'failed';
+            patchConfirmation(messageId, { resolving: false, resolved, resultSummary: result.summary });
+            if (resolved === 'executed') message.success(result.summary);
+            else if (resolved === 'cancelled') message.info(result.summary);
+            else message.error(result.summary);
+        } catch (error) {
+            patchConfirmation(messageId, { resolving: false });
+            message.error(error instanceof Error ? error.message : t('操作未完成，请刷新后重试'));
+        }
+    };
 
     const createAndActivateConversation = async (): Promise<void> => {
         const conversation = await createConversation();
@@ -823,8 +913,8 @@ function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element 
             const conversationId = activeConversationId ?? (await createConversation()).id;
             setActiveConversationId(conversationId);
             if (!conversations.some((item) => item.id === conversationId)) setConversations((items) => [{ id: conversationId, title: t('新对话'), mode, visibility: 'PRIVATE', version: 1, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }, ...items]);
-            let turnId = ''; let seq = 0; let answer = ''; let terminal = false; const streamingMessageId = `streaming-${Date.now()}`; const resources = new Map<string, ChatResource>(); const sources: ChatSource[] = []; const citations: ChatCitation[] = []; const toolTypes = new Map<string, ChatResource['type']>(); const toolFormats = new Map<string, ChatResource['format']>();
-            const updateStreamingMessage = (): void => setMessages((items) => [...items.filter((item) => item.id !== streamingMessageId), { id: streamingMessageId, role: 'assistant', content: answer, resources: [...resources.values()], sources: [...sources], citations: [...citations] }]);
+            let turnId = ''; let seq = 0; let answer = ''; let terminal = false; const streamingMessageId = `streaming-${Date.now()}`; const resources = new Map<string, ChatResource>(); const sources: ChatSource[] = []; const citations: ChatCitation[] = []; const toolTypes = new Map<string, ChatResource['type']>(); const toolFormats = new Map<string, ChatResource['format']>(); const confirmations = new Map<string, PendingActionConfirmation>();
+            const updateStreamingMessage = (): void => setMessages((items) => [...items.filter((item) => item.id !== streamingMessageId), { id: streamingMessageId, role: 'assistant', content: answer, resources: [...resources.values()], sources: [...sources], citations: [...citations], confirmation: [...confirmations.values()].at(-1) }]);
             const handle = (event: TurnStreamEvent): void => {
                 if (event.seq <= seq) return;
                 seq = event.seq;
@@ -836,6 +926,12 @@ function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element 
                         if (event.name !== 'generate_document') toolFormats.set(event.toolCallId, event.name.replace('generate_', '') as ChatResource['format']);
                     } else if (event.name === 'generate_image') { toolTypes.set(event.toolCallId, 'IMAGE'); setImageGenerating(true); }
                     else if (event.name === 'insert_document_image') { toolTypes.set(event.toolCallId, 'DOCUMENT'); }
+                }
+                if (event.type === 'tool_result' && event.status === 'awaiting_confirmation' && event.confirmation) {
+                    // 写操作：服务端已落待确认草稿，副作用尚未发生。把预览挂在流式消息上，
+                    // 用户点击确认后由 resolveActionDraft 提交 draftId。
+                    confirmations.set(event.toolCallId, { ...event.confirmation });
+                    updateStreamingMessage();
                 }
                 if (event.type === 'tool_result' && event.status === 'completed') {
                     if (event.sources?.length) { sources.push(...event.sources); updateStreamingMessage(); }
@@ -905,6 +1001,8 @@ function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element 
                         {item.role === 'assistant' && <i className="assistant-avatar"><CeesLogo /></i>}
                         <div className="chat-message-body">
                             <div className="chat-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownRenderComponents}>{item.content}</ReactMarkdown></div>
+                            {item.confirmation && <ActionConfirmationCard confirmation={item.confirmation}
+                                onResolve={(decision) => void resolveActionDraft(item.id, item.confirmation!.draftId, decision)} />}
                             {item.resources?.map((resource) => <ChatResourceCard key={chatResourceKey(resource)} resource={resource} onPreviewDocument={setPreviewDocument} onSaveToKnowledge={canSaveToKnowledge ? setSaveTarget : undefined} />)}
                             {item.sources?.length ? <div className="chat-sources">{item.sources.map((source) => <ChatSourceCard key={source.id} source={source} />)}</div> : null}
                             {item.citations?.length ? <div className="chat-sources">{groupCitations(item.citations).map((citation) => <KnowledgeCitationCard key={citation.id} citation={citation} onDeleted={handleCitationDeleted} />)}</div> : null}

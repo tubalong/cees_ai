@@ -1,5 +1,5 @@
 .workspace-shell {
-    min-width: 1080px;
+    min-width: var(--desktop-shell-min-width);
     min-height: 100vh;
     display: grid;
     grid-template-columns: 220px minmax(0, 1fr);
@@ -23,6 +23,12 @@
     border-right: 1px solid var(--line);
     background: var(--surface);
     overflow: hidden;
+}
+
+/* macOS：顶部固定拖拽区高 34px（红绿灯位置 x:18/y:18），
+   侧边栏内容必须下移，否则品牌标识会被交通灯按钮覆盖。 */
+:root[data-platform='mac'] .side-navigation {
+    padding-top: calc(14px + var(--platform-drag-height));
 }
 
 .workspace-brand {
@@ -254,12 +260,19 @@
     min-width: 0;
     height: 100vh;
     overflow: auto;
-    padding: 20px;
+    padding: var(--desktop-content-padding);
+}
+
+/* macOS：`titleBarStyle: hiddenInset` 下窗口顶部 34px 是拖拽区（红绿灯所在），
+   内容区必须整体让开这段高度，否则每个页面标题右侧的操作按钮都会落在
+   拖拽区里「点不动、还顺手把窗口拖走」。Windows / Linux 该令牌为 0，无影响。 */
+:root[data-platform='mac'] .workspace-content {
+    padding-top: calc(var(--desktop-content-padding) + var(--platform-drag-height));
 }
 
 .workspace-page {
     min-height: 100%;
-    padding: 26px 28px 32px;
+    padding: var(--desktop-page-padding);
 }
 
 .workspace-page-header {
@@ -267,6 +280,7 @@
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
+    flex-wrap: wrap;
     gap: 24px;
     margin-bottom: 22px;
 }
@@ -1589,11 +1603,12 @@
 }
 
 .application-detail {
-    min-height: 560px;
+    /* 不写死 560px：Mac 内容区顶部还要让开 34px 拖拽区，矮窗口下会凭空撑出滚动条。 */
+    min-height: clamp(360px, 58vh, 560px);
     padding: 22px;
     border: 1px solid var(--line);
-    border-radius: 8px;
-    background: #fff;
+    border-radius: var(--platform-panel-radius, 8px);
+    background: var(--surface);
 }
 
 .detail-heading h2 {
@@ -1640,7 +1655,7 @@
 }
 
 .architecture-layout {
-    height: calc(100vh - 122px);
+    height: calc(100vh - var(--page-viewport-offset));
     display: grid;
     grid-template-columns: 240px minmax(480px, 1fr) 250px;
     gap: 14px;
@@ -1805,7 +1820,7 @@
 }
 
 .knowledge-layout {
-    height: calc(100vh - 122px);
+    height: calc(100vh - var(--page-viewport-offset));
     display: grid;
     grid-template-columns: 210px minmax(500px, 1fr) 260px;
     gap: 14px;
@@ -1994,7 +2009,32 @@
     .document-preview-panel {
         position: fixed;
         z-index: 5;
-        inset: 58px 0 0 220px;
+        /* 侧边栏在 <=1280px 时收窄到 190px，抽屉左边界必须同步，否则会盖住对话区。 */
+        inset: 58px 0 0 190px;
+    }
+}
+
+/* 窄窗口降级：macOS 最小宽度 1040px 时内容区约 790px，
+   三栏布局的固定列宽总和必须收紧，否则会出现横向溢出。 */
+@media (max-width: 1180px) {
+    .architecture-layout {
+        grid-template-columns: 200px minmax(320px, 1fr) 220px;
+    }
+
+    .knowledge-layout {
+        grid-template-columns: 180px minmax(320px, 1fr) 220px;
+    }
+
+    .application-layout {
+        grid-template-columns: minmax(0, 1fr) 260px;
+    }
+
+    .home-content-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .header-actions .ant-input-affix-wrapper {
+        width: 190px;
     }
 }
 
@@ -2104,4 +2144,102 @@
     height: 100%;
     display: flex;
     border: 0;
+}
+
+/* 写操作确认卡片。
+   语义：AI 提议的业务写入在用户确认前**尚未发生**，因此卡片必须视觉上区别于
+   「已完成」的资源卡片（资源卡片用 surface 白底、本卡片用 surface-soft 浅底 + 状态徽标）。
+   颜色一律走语义令牌，暗色下由 :root[data-theme='dark'] 统一换算。 */
+.action-confirmation {
+    margin-top: 12px;
+    padding: 14px 16px;
+    border: 1px solid var(--line);
+    border-radius: var(--platform-panel-radius, 10px);
+    background: var(--surface-soft);
+}
+
+.action-confirmation-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text);
+}
+
+.action-confirmation-head .anticon {
+    color: var(--primary);
+}
+
+.action-confirmation-status {
+    margin-left: auto;
+    padding: 2px 9px;
+    border-radius: 999px;
+    background: var(--primary-soft);
+    color: var(--primary);
+    font-size: 11px;
+    white-space: nowrap;
+}
+
+.action-confirmation.is-executed .action-confirmation-status {
+    background: var(--success-soft);
+    color: var(--success-ink);
+}
+
+.action-confirmation.is-failed .action-confirmation-status {
+    background: var(--danger-soft);
+    color: var(--danger-ink);
+}
+
+.action-confirmation.is-cancelled .action-confirmation-status,
+.action-confirmation.is-expired .action-confirmation-status {
+    background: var(--surface);
+    color: var(--muted);
+}
+
+.action-confirmation-fields {
+    display: grid;
+    gap: 7px;
+    margin: 12px 0 0;
+    padding: 0;
+}
+
+.action-confirmation-fields>div {
+    display: grid;
+    grid-template-columns: 96px minmax(0, 1fr);
+    gap: 10px;
+    font-size: 12px;
+}
+
+.action-confirmation-fields dt {
+    color: var(--muted);
+}
+
+.action-confirmation-fields dd {
+    margin: 0;
+    color: var(--text);
+    overflow-wrap: anywhere;
+}
+
+.action-confirmation-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 14px;
+}
+
+.action-confirmation-hint {
+    color: var(--muted);
+    font-size: 11px;
+}
+
+.action-confirmation-result {
+    margin: 12px 0 0;
+    color: var(--text);
+    font-size: 12px;
+}
+
+/* 窄窗口（含 macOS 1040px 最小窗口）：标签列收紧，避免长值把标签列挤到换行。 */
+@media (max-width: 1180px) {
+    .action-confirmation-fields>div {
+        grid-template-columns: 84px minmax(0, 1fr);
+    }
 }
