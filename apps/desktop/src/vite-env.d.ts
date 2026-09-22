@@ -129,6 +129,10 @@ type DingTalkConnectorTool = ConnectorTool;
 
 type DingTalkConnectorPlannedCall = ConnectorPlannedCall;
 
+type DesktopConnectorManifest = ConnectorManifest;
+
+type DesktopConnectorStatus = ConnectorStatus;
+
 interface ConnectorStatusChangedEvent {
     connectorId: string;
     status: ConnectorStatus;

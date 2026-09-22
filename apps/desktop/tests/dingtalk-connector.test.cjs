@@ -19,7 +19,7 @@ test('钉钉以本地 CLI 连接器 Manifest 声明运行能力', () => {
     assert.deepEqual(DINGTALK_CONNECTOR_MANIFEST, {
         id: 'dingtalk',
         name: '钉钉',
-        description: '通过命令行管理钉钉全产品能力',
+        description: '通过命令行管理钉钉全产品能力：AI 表格、考勤、日历、群聊与机器人、通讯录、开放平台文档、DING 消息、钉钉文档、钉钉云盘、AI 听记、邮箱、OA 审批、日志、待办。',
         icon: 'dingtalk',
         transportType: 'LOCAL_CLI',
         executionLocation: 'DESKTOP',

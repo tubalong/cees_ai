@@ -582,7 +582,7 @@ const DELETED_CITATIONS_KEY = 'cees.chat.citations.deleted';
 
 interface AssistantNavigationState {
     createNewConversation?: boolean;
-    source?: 'DINGTALK_CONNECTOR';
+    source?: 'DINGTALK_CONNECTOR' | 'CONNECTOR_MARKETPLACE';
 }
 
 function readDeletedCitationIds(conversationId: string): Set<string> {
