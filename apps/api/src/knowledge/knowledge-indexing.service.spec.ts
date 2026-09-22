@@ -46,8 +46,8 @@ describe('KnowledgeIndexingService', () => {
                 acl_version: `acl-${VERSION_ID.slice(0, 8)}`,
             },
         }));
-        expect(mocks.prisma.knowledgeDocument.update).toHaveBeenCalledWith({
-            where: { id: DOCUMENT_ID },
+        expect(mocks.prisma.knowledgeDocument.updateMany).toHaveBeenNthCalledWith(2, {
+            where: { id: DOCUMENT_ID, currentVersionId: VERSION_ID },
             data: expect.objectContaining({ status: KnowledgeDocumentStatus.READY, retryCount: 0, lastError: null }),
         });
         expect(mocks.prisma.auditLog.create).toHaveBeenCalledWith({
@@ -339,6 +339,88 @@ describe('KnowledgeIndexingService', () => {
         expect(mocks.prisma.knowledgeDocument.update).not.toHaveBeenCalledWith(expect.objectContaining({
             data: expect.objectContaining({ status: KnowledgeDocumentStatus.READY }),
         }));
+        expect(mocks.gateway.deleteKnowledgeIndex).toHaveBeenCalledWith(expect.objectContaining({
+            tenant_id: TENANT_ID,
+            document_version_id: VERSION_ID,
+        }));
+    });
+
+    it('cleans the fresh index when the document was restored with a newer version during indexing', async () => {
+        const mocks = createMocks();
+        mocks.prisma.knowledgeDocument.findMany.mockResolvedValueOnce([]).mockResolvedValue([pendingDocument()]);
+        mocks.prisma.knowledgeDocument.updateMany.mockResolvedValue({ count: 1 });
+        mocks.prisma.documentVersion.findFirst.mockResolvedValue(documentVersion());
+        mocks.prisma.fileObject.findFirst.mockResolvedValue(fileObject());
+        mocks.parser.parse.mockResolvedValue(parsedDocument());
+        mocks.gateway.indexKnowledge.mockResolvedValue({
+            request_id: 'request-id',
+            indexed_chunks: 1,
+            chunking_version: 'knowledge-chunking-v1',
+            embedding_profile: 'deterministic',
+            index_version: 'knowledge-index-v1',
+            latency_ms: 12,
+        });
+        // 索引完成后文档已被恢复并追加新版本：旧版本不再是 currentVersionId。
+        mocks.prisma.knowledgeDocument.findFirst.mockResolvedValue(null);
+        mocks.gateway.deleteKnowledgeIndex.mockResolvedValue({
+            request_id: 'request-id',
+            deleted_chunks: 1,
+            document_version_id: VERSION_ID,
+            index_version: 'knowledge-index-v1',
+        });
+        const service = createService(mocks);
+
+        await service.runOnce();
+
+        // 存活校验必须同时声明 currentVersionId，否则恢复竞态下旧任务仍会写坏状态。
+        expect(mocks.prisma.knowledgeDocument.findFirst).toHaveBeenCalledWith({
+            where: { id: DOCUMENT_ID, deletedAt: null, currentVersionId: VERSION_ID },
+            select: { id: true },
+        });
+        expect(mocks.prisma.knowledgeDocument.updateMany).not.toHaveBeenCalledWith(expect.objectContaining({
+            data: expect.objectContaining({ status: KnowledgeDocumentStatus.READY }),
+        }));
+        expect(mocks.gateway.deleteKnowledgeIndex).toHaveBeenCalledWith(expect.objectContaining({
+            tenant_id: TENANT_ID,
+            document_version_id: VERSION_ID,
+        }));
+    });
+
+    it('cleans the fresh index when the version is replaced between the survival check and READY marking', async () => {
+        const mocks = createMocks();
+        mocks.prisma.knowledgeDocument.findMany.mockResolvedValueOnce([]).mockResolvedValue([pendingDocument()]);
+        mocks.prisma.documentVersion.findFirst.mockResolvedValue(documentVersion());
+        mocks.prisma.fileObject.findFirst.mockResolvedValue(fileObject());
+        mocks.parser.parse.mockResolvedValue(parsedDocument());
+        mocks.gateway.indexKnowledge.mockResolvedValue({
+            request_id: 'request-id',
+            indexed_chunks: 1,
+            chunking_version: 'knowledge-chunking-v1',
+            embedding_profile: 'deterministic',
+            index_version: 'knowledge-index-v1',
+            latency_ms: 12,
+        });
+        // 存活校验通过（版本仍是当前版本），但 claim 之后、标 READY 之前被追加了新版本：
+        // updateMany 按 currentVersionId 条件命中 0 行。
+        mocks.prisma.knowledgeDocument.findFirst.mockResolvedValue({ id: DOCUMENT_ID });
+        mocks.prisma.knowledgeDocument.updateMany
+            .mockResolvedValueOnce({ count: 1 })
+            .mockResolvedValueOnce({ count: 0 });
+        mocks.gateway.deleteKnowledgeIndex.mockResolvedValue({
+            request_id: 'request-id',
+            deleted_chunks: 1,
+            document_version_id: VERSION_ID,
+            index_version: 'knowledge-index-v1',
+        });
+        const service = createService(mocks);
+
+        await service.runOnce();
+
+        expect(mocks.prisma.knowledgeDocument.updateMany).toHaveBeenNthCalledWith(2, {
+            where: { id: DOCUMENT_ID, currentVersionId: VERSION_ID },
+            data: expect.objectContaining({ status: KnowledgeDocumentStatus.READY }),
+        });
+        expect(mocks.prisma.auditLog.create).not.toHaveBeenCalled();
         expect(mocks.gateway.deleteKnowledgeIndex).toHaveBeenCalledWith(expect.objectContaining({
             tenant_id: TENANT_ID,
             document_version_id: VERSION_ID,

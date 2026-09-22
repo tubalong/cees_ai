@@ -142,6 +142,73 @@ describe('FileService', () => {
             sizeBytes: 42,
         })).rejects.toBeInstanceOf(ConflictException);
     });
+
+    it('soft-deletes a materialized snapshot and removes its COS object', async () => {
+        const file = {
+            id: '55555555-5555-4555-8555-555555555555',
+            objectKey: 'cees/staging/tenants/t/files/2026/09/snapshot.md',
+        };
+        const prisma = createPrisma({
+            fileObject: {
+                findFirst: jest.fn().mockResolvedValue(file),
+                updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+            },
+        });
+        const storage = createStorage({ deleteObject: jest.fn().mockResolvedValue(undefined) });
+        const service = createService(prisma, storage);
+
+        await expect(service.deleteMaterializedFile({
+            tenantId: context.tenantId,
+            fileObjectId: file.id,
+        })).resolves.toBeUndefined();
+        expect(prisma.fileObject.updateMany).toHaveBeenCalledWith({
+            where: { id: file.id, tenantId: context.tenantId, deletedAt: null },
+            data: { deletedAt: expect.any(Date) },
+        });
+        expect(storage.deleteObject).toHaveBeenCalledWith(file.objectKey);
+    });
+
+    it('does nothing when the materialized snapshot no longer exists', async () => {
+        const prisma = createPrisma({
+            fileObject: {
+                findFirst: jest.fn().mockResolvedValue(null),
+                updateMany: jest.fn(),
+            },
+        });
+        const storage = createStorage({ deleteObject: jest.fn().mockResolvedValue(undefined) });
+        const service = createService(prisma, storage);
+
+        await expect(service.deleteMaterializedFile({
+            tenantId: context.tenantId,
+            fileObjectId: '55555555-5555-4555-8555-555555555555',
+        })).resolves.toBeUndefined();
+        expect(prisma.fileObject.updateMany).not.toHaveBeenCalled();
+        expect(storage.deleteObject).not.toHaveBeenCalled();
+    });
+
+    it('keeps the soft-deleted record when the COS cleanup fails', async () => {
+        const file = {
+            id: '55555555-5555-4555-8555-555555555555',
+            objectKey: 'cees/staging/tenants/t/files/2026/09/snapshot.md',
+        };
+        const prisma = createPrisma({
+            fileObject: {
+                findFirst: jest.fn().mockResolvedValue(file),
+                updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+            },
+        });
+        const storage = createStorage({
+            deleteObject: jest.fn().mockRejectedValue(new Error('cos down')),
+        });
+        const service = createService(prisma, storage);
+
+        // COS 删除失败只记日志，不阻断调用方（补偿清理为尽力而为）。
+        await expect(service.deleteMaterializedFile({
+            tenantId: context.tenantId,
+            fileObjectId: file.id,
+        })).resolves.toBeUndefined();
+        expect(prisma.fileObject.updateMany).toHaveBeenCalled();
+    });
 });
 
 function createService(prisma: PrismaService, storage: StorageProvider): FileService {

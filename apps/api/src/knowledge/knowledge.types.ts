@@ -34,6 +34,12 @@ export interface KnowledgeBaseListResult {
 export interface AssistantKnowledgeBaseCandidate extends KnowledgeBaseResult {
     /** 当前用户对该库的成员权限；manage_all 权限短路时统一标为 MANAGER。 */
     myPermission: KnowledgeBaseMemberPermission;
+    /**
+     * 是否参与助手知识库检索（search_knowledge）：真实成员库与全租户特权
+     * （manage_all/read_all）短路下的库为 true；锚点人群虚拟 READER 库仅可见、
+     * 不可检索（其库内 PRIVATE 文档无法按锚点身份过滤），恒为 false。
+     */
+    retrievable: boolean;
 }
 
 export interface KnowledgeBaseMemberResult {

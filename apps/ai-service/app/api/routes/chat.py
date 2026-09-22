@@ -345,10 +345,11 @@ async def _tool_turn_stream_events(
         "latency_ms": latency_ms,
         "finish_reason": finish_reason,
     }
-    if questions:
-        completion["related_questions"] = questions
     # 调用了工具的轮次文本只是“调用工具前的预告”，不是最终回答，按指令模型也不会
-    # 输出建议块；纯回答轮（最终回答）才携带记忆候选。
+    # 输出建议块；工具轮不携带追问与记忆候选（NestJS 侧同轮也不会发布相关事件，
+    # 双侧对称收敛，纯回答轮（最终回答）才携带）。
+    if questions and not has_tool_calls:
+        completion["related_questions"] = questions
     if memory_candidates and not has_tool_calls:
         completion["memory_candidates"] = _memory_candidate_models(memory_candidates)
     yield _encode_sse(ChatStreamCompletedEvent(**completion))

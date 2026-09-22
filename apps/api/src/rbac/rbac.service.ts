@@ -99,6 +99,8 @@ export class RbacService {
                     select: { id: true },
                 });
                 // 新角色默认拥有图片/文档的生成与查看权限，管理员可在角色编辑中调整。
+                // 调整 DEFAULT_ROLE_PERMISSION_CODES 时注意：存量角色不受影响，
+                // 需配套存量补齐迁移（见 permission-catalog.ts 变更约束）。
                 const defaultPermissions = await transaction.permission.findMany({
                     where: { code: { in: [...DEFAULT_ROLE_PERMISSION_CODES] } },
                     select: { id: true },

@@ -252,6 +252,8 @@ export class KnowledgeDocumentService {
                 const raced = await this.findSourceDocument(actor.tenantId, input.sourceType, input.sourceId);
                 if (!raced) throw error;
                 if (raced.knowledgeBaseId !== input.knowledgeBaseId) throw this.sourceAlreadySaved();
+                // 本次物化的快照未被引用（追加路径会重新物化），补偿删除避免孤儿。
+                if (resolved.materialized) this.discardMaterializedFile(actor, resolved.fileObjectId);
                 return this.appendSourceVersion(actor, {
                     knowledgeBaseId: input.knowledgeBaseId,
                     documentId: raced.id,
@@ -262,6 +264,7 @@ export class KnowledgeDocumentService {
                     scope,
                 });
             }
+            if (resolved.materialized) this.discardMaterializedFile(actor, resolved.fileObjectId);
             if (isUniqueConstraintError(error)) throw this.fileObjectInUse();
             throw error;
         }
@@ -349,6 +352,14 @@ export class KnowledgeDocumentService {
             void this.indexingService.kick();
             return this.requireDocumentAsActor(actor, input.knowledgeBaseId, documentId);
         } catch (error) {
+            // 事务失败时补偿删除本次物化的快照文件，避免孤儿 FileObject 与 COS 对象。
+            void this.fileService.deleteMaterializedFile({
+                tenantId: actor.tenantId,
+                fileObjectId,
+            }).catch((cleanupError: unknown) => {
+                const message = cleanupError instanceof Error ? cleanupError.message : 'unknown error';
+                this.logger.warn(`直存失败补偿清理物化文件失败（文件 ${fileObjectId}）：${message}`);
+            });
             if (isUniqueConstraintError(error)) throw this.fileObjectInUse();
             throw error;
         }
@@ -358,11 +369,11 @@ export class KnowledgeDocumentService {
     private async resolveSourceSnapshot(
         actor: KnowledgeSourceSaveActor,
         input: { sourceType: KnowledgeDocumentSourceType; sourceId: string; name?: string },
-    ): Promise<{ fileObjectId: string; name: string }> {
+    ): Promise<{ fileObjectId: string; name: string; materialized: boolean }> {
         switch (input.sourceType) {
             case 'FILE_OBJECT': {
                 const file = await this.requireAvailableFile(actor.tenantId, input.sourceId);
-                return { fileObjectId: file.id, name: input.name?.trim() || file.originalName };
+                return { fileObjectId: file.id, name: input.name?.trim() || file.originalName, materialized: false };
             }
             case 'DOCUMENT': {
                 const document = await this.requireReadableDocument(actor, input.sourceId);
@@ -376,7 +387,7 @@ export class KnowledgeDocumentService {
                     mimeType: 'text/markdown',
                     content: Buffer.from(document.content, 'utf8'),
                 });
-                return { fileObjectId, name };
+                return { fileObjectId, name, materialized: true };
             }
             case 'MESSAGE': {
                 const message = await this.requireSavableMessage(actor, input.sourceId);
@@ -390,9 +401,20 @@ export class KnowledgeDocumentService {
                     mimeType: 'text/markdown',
                     content: Buffer.from(message.content, 'utf8'),
                 });
-                return { fileObjectId, name };
+                return { fileObjectId, name, materialized: true };
             }
         }
+    }
+
+    /** 事务失败补偿：删除本次刚物化、尚未被业务文档引用的快照文件（失败只记日志）。 */
+    private discardMaterializedFile(actor: KnowledgeSourceSaveActor, fileObjectId: string): void {
+        void this.fileService.deleteMaterializedFile({
+            tenantId: actor.tenantId,
+            fileObjectId,
+        }).catch((error: unknown) => {
+            const message = error instanceof Error ? error.message : 'unknown error';
+            this.logger.warn(`转存失败补偿清理物化文件失败（文件 ${fileObjectId}）：${message}`);
+        });
     }
 
     /** AI 生成文档来源：必须存在且当前用户可读（租户 + 资源访问控制），防止把他人文档转存。 */
@@ -563,6 +585,8 @@ export class KnowledgeDocumentService {
                 });
             });
         } catch (error) {
+            // 追加版本失败时补偿删除本次物化的快照文件；FILE_OBJECT 复用不物化，无需清理。
+            if (resolved.materialized) this.discardMaterializedFile(actor, resolved.fileObjectId);
             if (isVersionNumberConflict(error)) throw this.versionConflict();
             if (isUniqueConstraintError(error)) throw this.fileObjectInUse();
             throw error;

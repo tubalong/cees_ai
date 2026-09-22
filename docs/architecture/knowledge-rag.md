@@ -316,7 +316,8 @@ PENDING -> PARSING -> PARSED -> INDEXING -> READY
 - 把 RAG 检索注册为 Assistant 工具（块 7b 已落地）：
   - `knowledge_search` 工具（版本 1.0.0，`knowledge_base.query` 权限，READ 风险级）注册进 Assistant 工具链；
   - 对话级开关：`CreateTurnRequest.knowledgeBaseEnabled`（可选，默认 false）决定本轮是否暴露/允许 `knowledge_search`；关闭时工具列表被过滤，且工具执行前二次校验兼底（拒绝时 `ToolPolicyError` 告知用户「未在本轮启用」）；
-  - 检索走 `KnowledgeService.searchKnowledgeForAssistant`：显式传 tenantId/userId/membershipId/permissions（后台执行不依赖 AsyncLocalStorage），`manage_all` / `read_all` 短路为全租户库，否则按成员可见库折叠三层 scope；ai-service 不返回标题时按 `document_id` 查 `KnowledgeDocument` 补标题；
+  - 检索走 `KnowledgeService.searchKnowledgeForAssistant`：显式传 tenantId/userId/membershipId/permissions（后台执行不依赖 AsyncLocalStorage），`manage_all` / `read_all` 短路为全租户库，否则按成员可见库折叠三层 scope；注意两个特权码只放开库级范围，文档级 `DEPARTMENT`/`PROJECT` scope 仍按查询者本人部门树与可见项目过滤（与公开单库问答入口语义一致）；ai-service 不返回标题时按 `document_id` 查 `KnowledgeDocument` 补标题；
+  - `list_knowledge_bases` 助手清单为每个候选库标注 `retrievable`：真实成员库（及特权短路下的全租户库）为 true，锚点人群虚拟 READER 库为 false（仅可见、不参与检索），指令引导模型对不可检索库如实说明需先成为成员；
   - 回喂模型的 summary 只含业务内容（S1 标签/标题/snippet/pageIndex），不含 document_id/chunk_id/知识库 ID 等内部标识；
   - 公开侧 `TurnStreamToolResultEvent` 新增可选 `citations`（兼容新增，老客户端忽略），desktop 渲染知识库引用卡片（标题+摘录+页码），并按轮次归组恢复：`GET /conversations/{id}` 的 TOOL 消息回传该轮次的 `citations`，前端按 `turnId` 挂回同一轮的助手回答，不再使用会话级 `localStorage` 缓存，避免历史引用串到最新回答；引用契约 `KnowledgeToolCitation` 新增可选 `knowledgeBaseId`/`deletable`（块 9 落地）：`deletable` 由 NestJS 按当前用户对引用文档所属库的成员等级（EDITOR/MANAGER 或 `manage_all`）逐用户计算，仅 `deletable` 的引用卡片展示删除入口（二次确认后调正式 DELETE 文档端点），AI 工具层不提供删除能力；
   - 多库检索时 `KnowledgeQueryLog.knowledgeBaseId` 记 null，审计 `resourceId` 为 null、`metadata.knowledgeBaseIds` 记录实际范围（块 7b 落地）。
