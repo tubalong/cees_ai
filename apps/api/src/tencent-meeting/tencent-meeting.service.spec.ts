@@ -23,13 +23,17 @@ describe('TencentMeetingService', () => {
     const tenantContext = { require: jest.fn(() => context) } as unknown as TenantContext;
     const settings = {
         sdkId: 'sdk-1',
+        corpId: 'corp-1',
         secret: 'secret-1',
         redirectUri: 'https://cees.test/api/v1/connectors/tencent-meeting/oauth/callback',
         authorizeUrl: 'https://meeting.test/oauth2/authorize',
         tokenUrl: 'https://meeting.test/access-token',
         refreshTokenUrl: 'https://meeting.test/refresh-token',
         userInfoUrl: 'https://meeting.test/user-info',
+        apiBaseUrl: 'https://api.meeting.test',
         requestTimeoutMs: 1000,
+        providerResponseMaxBytes: 524288,
+        executionResponseMaxBytes: 262144,
     };
     const config = {
         assertConfigured: jest.fn(() => settings),
@@ -85,6 +89,8 @@ describe('TencentMeetingService', () => {
         expect(createInput.data.stateHash).toBe(createHash('sha256').update(rawState).digest('hex'));
         expect(JSON.stringify(createInput)).not.toContain(rawState);
         expect(url.searchParams.get('sdk_id')).toBe('sdk-1');
+        expect(url.searchParams.get('corp_id')).toBe('corp-1');
+        expect(url.searchParams.has('response_type')).toBe(false);
     });
 
     it('已连接成员不能重复发起授权', async () => {
@@ -94,6 +100,20 @@ describe('TencentMeetingService', () => {
             response: expect.objectContaining({ code: 'CONNECTOR_ALREADY_CONNECTED' }),
         });
         expect(prisma.tencentMeetingOAuthState.create).not.toHaveBeenCalled();
+    });
+
+    it('只按当前租户成员加载和解密可用凭据', async () => {
+        (prisma.tencentMeetingConnection.findUnique as jest.Mock).mockResolvedValue(connection());
+
+        await expect(service.requireAuthorizedCredential()).resolves.toMatchObject({
+            connectionId: '00000000-0000-4000-8000-000000000020',
+            accessToken: 'access',
+            openId: 'meeting-user-1',
+        });
+        expect(prisma.tencentMeetingConnection.findUnique).toHaveBeenCalledWith({
+            where: { tenantId_membershipId: { tenantId: context.tenantId, membershipId: context.membershipId } },
+        });
+        expect(decrypt).toHaveBeenCalledWith('encrypted:access');
     });
 
     it('拒绝过期 State 并记录失败审计', async () => {

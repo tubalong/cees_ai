@@ -1,4 +1,5 @@
 import {
+    Body,
     Controller,
     Delete,
     Get,
@@ -17,13 +18,22 @@ import type { Request, Response } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { TenantContextInterceptor } from '../tenant/tenant-context.interceptor';
 import { TenantGuard } from '../tenant/tenant.guard';
+import { TencentMeetingGatewayService } from './tencent-meeting-gateway.service';
 import { TencentMeetingService } from './tencent-meeting.service';
-import { TencentMeetingAuthorizationResult, TencentMeetingConnectionResult } from './tencent-meeting.types';
+import {
+    TencentMeetingAuthorizationResult,
+    TencentMeetingConnectionResult,
+    TencentMeetingConnectorExecutionResult,
+    TencentMeetingConnectorTool,
+} from './tencent-meeting.types';
 
 @ApiTags('TencentMeeting')
 @Controller('connectors/tencent-meeting')
 export class TencentMeetingController {
-    constructor(private readonly service: TencentMeetingService) { }
+    constructor(
+        private readonly service: TencentMeetingService,
+        private readonly gateway: TencentMeetingGatewayService,
+    ) { }
 
     @Post('authorization')
     @ApiBearerAuth()
@@ -63,6 +73,24 @@ export class TencentMeetingController {
     @ApiOkResponse({ description: '当前成员的腾讯会议连接状态' })
     getStatus(): Promise<TencentMeetingConnectionResult> {
         return this.service.getStatus();
+    }
+
+    @Get('tools')
+    @ApiBearerAuth()
+    @UseGuards(JwtAuthGuard, TenantGuard)
+    @UseInterceptors(TenantContextInterceptor)
+    @ApiOkResponse({ description: '当前授权可用的腾讯会议只读工具' })
+    listTools(): Promise<{ tools: TencentMeetingConnectorTool[] }> {
+        return this.gateway.listTools();
+    }
+
+    @Post('executions')
+    @ApiBearerAuth()
+    @UseGuards(JwtAuthGuard, TenantGuard)
+    @UseInterceptors(TenantContextInterceptor)
+    @ApiOkResponse({ description: '腾讯会议只读工具执行结果' })
+    execute(@Body() body: unknown): Promise<TencentMeetingConnectorExecutionResult> {
+        return this.gateway.execute(body);
     }
 
     @Delete('authorization')

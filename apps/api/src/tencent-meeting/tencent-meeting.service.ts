@@ -18,6 +18,7 @@ import { TencentMeetingClient, TencentMeetingProviderError } from './tencent-mee
 import { TencentMeetingConfig } from './tencent-meeting.config';
 import { TencentMeetingCredentialCipher } from './tencent-meeting-credential-cipher';
 import {
+    TencentMeetingAuthorizedCredential,
     TencentMeetingAuthorizationResult,
     TencentMeetingCallbackInput,
     TencentMeetingCallbackResult,
@@ -87,8 +88,8 @@ export class TencentMeetingService {
 
         const authorizationUrl = new URL(settings.authorizeUrl);
         authorizationUrl.searchParams.set('sdk_id', settings.sdkId);
+        authorizationUrl.searchParams.set('corp_id', settings.corpId);
         authorizationUrl.searchParams.set('redirect_uri', settings.redirectUri);
-        authorizationUrl.searchParams.set('response_type', 'code');
         authorizationUrl.searchParams.set('state', rawState);
         return { authorizationUrl: authorizationUrl.toString(), expiresAt: expiresAt.toISOString(), pollAfterMs: POLL_AFTER_MS };
     }
@@ -141,9 +142,9 @@ export class TencentMeetingService {
                         refreshTokenCiphertext: this.credentialCipher.encrypt(tokens.refreshToken),
                         accessTokenExpiresAt: tokens.accessTokenExpiresAt,
                         refreshTokenExpiresAt: tokens.refreshTokenExpiresAt,
-                        externalUserId: account.externalUserId,
+                        externalUserId: tokens.externalUserId,
                         displayName: account.displayName,
-                        organizationId: account.organizationId,
+                        organizationId: account.organizationId ?? tokens.openCorpId,
                         organizationName: account.organizationName,
                         grantedScopes: tokens.scopes,
                         state: TencentMeetingConnectionState.READY,
@@ -156,9 +157,9 @@ export class TencentMeetingService {
                         refreshTokenCiphertext: this.credentialCipher.encrypt(tokens.refreshToken),
                         accessTokenExpiresAt: tokens.accessTokenExpiresAt,
                         refreshTokenExpiresAt: tokens.refreshTokenExpiresAt,
-                        externalUserId: account.externalUserId,
+                        externalUserId: tokens.externalUserId,
                         displayName: account.displayName,
-                        organizationId: account.organizationId,
+                        organizationId: account.organizationId ?? tokens.openCorpId,
                         organizationName: account.organizationName,
                         grantedScopes: tokens.scopes,
                         state: TencentMeetingConnectionState.READY,
@@ -217,6 +218,48 @@ export class TencentMeetingService {
                 localCredentialsDeleted: true,
             });
         });
+    }
+
+    async requireAuthorizedCredential(): Promise<TencentMeetingAuthorizedCredential> {
+        const context = this.tenantContext.require();
+        this.config.assertConfigured();
+        let connection = await this.prisma.tencentMeetingConnection.findUnique({
+            where: { tenantId_membershipId: { tenantId: context.tenantId, membershipId: context.membershipId } },
+        });
+        if (!connection || connection.state !== TencentMeetingConnectionState.READY) {
+            throw new ConflictException({ code: 'AUTH_REQUIRED', message: '请先连接腾讯会议账号' });
+        }
+        if (shouldRefresh(connection.accessTokenExpiresAt, connection.state, this.config.refreshThresholdMs())) {
+            connection = await this.refreshConnection(connection.id, context);
+        }
+        if (
+            connection.state !== TencentMeetingConnectionState.READY
+            || connection.tokenStatus === TencentMeetingTokenStatus.REFRESH_FAILED
+            || !connection.accessTokenCiphertext
+            || !connection.externalUserId
+            || expired(connection.accessTokenExpiresAt)
+        ) {
+            const code = connection.tokenStatus === TencentMeetingTokenStatus.REFRESH_FAILED ? 'TOKEN_REFRESH_FAILED' : 'AUTH_REQUIRED';
+            throw new ConflictException({ code, message: '腾讯会议授权已失效，请重新连接' });
+        }
+        let accessToken: string;
+        try {
+            accessToken = this.credentialCipher.decrypt(connection.accessTokenCiphertext);
+        } catch {
+            throw new ConflictException({ code: 'AUTH_REQUIRED', message: '腾讯会议授权凭据不可用，请重新连接' });
+        }
+        return {
+            connectionId: connection.id,
+            accessToken,
+            openId: connection.externalUserId,
+            grantedScopes: jsonStringArray(connection.grantedScopes),
+            account: {
+                externalUserId: connection.externalUserId,
+                displayName: connection.displayName,
+                organizationId: connection.organizationId,
+                organizationName: connection.organizationName,
+            },
+        };
     }
 
     private async refreshConnection(connectionId: string, context: RequestTenantContext) {
