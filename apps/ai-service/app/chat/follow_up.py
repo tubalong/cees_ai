@@ -140,12 +140,17 @@ def _parse_questions(parsed: Any) -> list[str]:
     if not isinstance(parsed, list):
         return []
     candidates: list[str] = []
+    seen: set[str] = set()
     for item in parsed:
         if not isinstance(item, str):
             continue
         question = item.strip()
         if not question or len(question) > MAX_QUESTION_CHARS:
             continue
+        # 完全相同的追问只保留第一条，避免重复建议块干扰用户。
+        if question in seen:
+            continue
+        seen.add(question)
         candidates.append(question)
     return candidates[:MAX_QUESTION_COUNT]
 

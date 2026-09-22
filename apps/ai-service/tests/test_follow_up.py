@@ -66,6 +66,18 @@ def test_ignores_invalid_or_overlong_questions() -> None:
     assert follow_up.result() == (["ok", "有效问题"], [])
 
 
+def test_deduplicates_identical_questions_keeping_first() -> None:
+    follow_up = FollowUpStreamFilter()
+    follow_up.feed(
+        OPEN_TAG
+        + '["怎么申请试用？", " 怎么申请试用？ ", "有免费额度吗？", "怎么申请试用？"]'
+        + CLOSE_TAG
+    )
+    follow_up.finish()
+    # strip 后完全相同的追问只保留第一条（含首尾空白差异）。
+    assert follow_up.result() == (["怎么申请试用？", "有免费额度吗？"], [])
+
+
 def test_result_empty_without_block() -> None:
     follow_up = FollowUpStreamFilter()
     follow_up.feed("普通回答，没有建议块。")

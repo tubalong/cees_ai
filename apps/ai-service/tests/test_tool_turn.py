@@ -281,3 +281,50 @@ def test_tool_turn_stream_extracts_follow_up_questions() -> None:
     deltas = [data["text"] for name, data in events if name == "content_delta"]
     assert "".join(deltas) == "已生成图片。"
     assert events[-1][1]["related_questions"] == ["换成黑白的？"]
+
+
+def test_tool_turn_stream_omits_questions_and_memories_when_tools_called() -> None:
+    tool_profile = profile(capabilities={ModelCapability.chat, ModelCapability.tool_calling})
+    provider = StubProvider(
+        tool_profile,
+        [],
+        tool_stream_outcomes=[
+            [
+                ProviderStreamChunk(
+                    tool_calls=(
+                        ToolCall(
+                            id="call_1",
+                            name="generate_image",
+                            arguments={"prompt": "a cat"},
+                        ),
+                    ),
+                ),
+                ProviderStreamChunk(
+                    text='<follow_up_questions>{"questions": ["换成黑白的？"], '
+                    '"memories": [{"type": "PREFERENCE", "content": "用户偏好黑白图片"}]}'
+                    '</follow_up_questions>',
+                ),
+                ProviderStreamChunk(finish_reason="stop"),
+            ]
+        ],
+    )
+    model_catalog = catalog(
+        {"tool": tool_profile},
+        {ModelRole.orchestrator: ["tool"]},
+    )
+    router = LLMRouter(model_catalog, lambda _name, _profile: provider)
+    client = TestClient(create_app(runtime=ready_runtime(router, model_catalog)))
+
+    with client:
+        response = client.post(
+            "/internal/v1/chat/tool-turn/stream",
+            headers={"X-AI-Internal-Token": "secret"},
+            json=tool_turn_payload(),
+        )
+
+    assert response.status_code == 200
+    events = parse_sse_events(response.text)
+    assert events[-1][0] == "completed"
+    # 工具轮文本只是调用工具前的预告，追问与记忆候选均不携带（与 NestJS 侧丢弃行为对称）。
+    assert "related_questions" not in events[-1][1]
+    assert "memory_candidates" not in events[-1][1]
