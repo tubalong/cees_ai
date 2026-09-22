@@ -242,8 +242,12 @@ describe('KnowledgeService', () => {
             take: 100,
         }));
         expect(result).toHaveLength(2);
-        expect(result[0]).toEqual(expect.objectContaining({ id: KNOWLEDGE_BASE_ID, myPermission: 'EDITOR' }));
-        expect(result[1]).toEqual(expect.objectContaining({ id: OTHER_KNOWLEDGE_BASE_ID, myPermission: 'READER' }));
+        expect(result[0]).toEqual(expect.objectContaining({
+            id: KNOWLEDGE_BASE_ID, myPermission: 'EDITOR', retrievable: true,
+        }));
+        expect(result[1]).toEqual(expect.objectContaining({
+            id: OTHER_KNOWLEDGE_BASE_ID, myPermission: 'READER', retrievable: true,
+        }));
     });
 
     it('labels anchor-only knowledge bases as READER for the assistant', async () => {
@@ -262,7 +266,10 @@ describe('KnowledgeService', () => {
             permissions: ['knowledge_base.read'],
         });
 
-        expect(result).toEqual([expect.objectContaining({ id: KNOWLEDGE_BASE_ID, myPermission: 'READER' })]);
+        // 锚点人群虚拟 READER：仅可见，不参与 search_knowledge 检索。
+        expect(result).toEqual([expect.objectContaining({
+            id: KNOWLEDGE_BASE_ID, myPermission: 'READER', retrievable: false,
+        })]);
     });
 
     it('returns no candidates when the user is neither a member nor in any anchor group', async () => {
@@ -296,7 +303,9 @@ describe('KnowledgeService', () => {
         });
 
         expect(prisma.knowledgeBaseMember.findMany).not.toHaveBeenCalled();
-        expect(result).toEqual([expect.objectContaining({ id: KNOWLEDGE_BASE_ID, myPermission: 'MANAGER' })]);
+        expect(result).toEqual([expect.objectContaining({
+            id: KNOWLEDGE_BASE_ID, myPermission: 'MANAGER', retrievable: true,
+        })]);
     });
 
     it('labels every candidate READER for the assistant when read_all shortcuts', async () => {
@@ -313,7 +322,9 @@ describe('KnowledgeService', () => {
         });
 
         expect(prisma.knowledgeBaseMember.findMany).not.toHaveBeenCalled();
-        expect(result).toEqual([expect.objectContaining({ id: KNOWLEDGE_BASE_ID, myPermission: 'READER' })]);
+        expect(result).toEqual([expect.objectContaining({
+            id: KNOWLEDGE_BASE_ID, myPermission: 'READER', retrievable: true,
+        })]);
     });
 
     it('lets anchor readers open a TENANT-scoped knowledge base detail', async () => {

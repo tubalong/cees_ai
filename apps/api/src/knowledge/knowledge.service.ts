@@ -202,6 +202,7 @@ export class KnowledgeService {
             return Promise.all(records.map(async (record) => ({
                 ...(await this.toKnowledgeBaseResult(record)),
                 myPermission: 'MANAGER' as KnowledgeBaseMemberPermission,
+                retrievable: true,
             })));
         }
         if (input.permissions.includes('knowledge_base.read_all')) {
@@ -214,6 +215,7 @@ export class KnowledgeService {
             return Promise.all(records.map(async (record) => ({
                 ...(await this.toKnowledgeBaseResult(record)),
                 myPermission: 'READER' as KnowledgeBaseMemberPermission,
+                retrievable: true,
             })));
         }
         const [memberRecords, anchorIds] = await Promise.all([
@@ -244,6 +246,9 @@ export class KnowledgeService {
         return Promise.all(records.map(async (record) => ({
             ...(await this.toKnowledgeBaseResult(record)),
             myPermission: permissionByKnowledgeBaseId.get(record.id) ?? 'READER',
+            // 真实成员库参与检索；锚点人群虚拟 READER 库仅可见、不可检索
+            // （与 searchKnowledgeForAssistant 的成员库检索范围一致）。
+            retrievable: permissionByKnowledgeBaseId.has(record.id),
         })));
     }
 
