@@ -1,5 +1,5 @@
-import { DeleteOutlined, PlusOutlined, TeamOutlined, UserOutlined } from '@ant-design/icons';
-import { App as AntdApp, Button, Modal, Popconfirm, Select, Tag } from 'antd';
+import { DeleteOutlined, PlusOutlined, TeamOutlined } from '@ant-design/icons';
+import { App as AntdApp, Avatar, Button, Modal, Popconfirm, Select, Tag } from 'antd';
 import { useState } from 'react';
 import {
     addProjectMember, removeProjectMember, transferProjectOwner, updateProjectMember,
@@ -68,30 +68,34 @@ export default function ProjectMembersPanel({
     };
 
     return <>
-        <div className="task-toolbar">
-            {canManage && <Button type="primary" icon={<PlusOutlined />} onClick={() => setAddOpen(true)}>{t('添加成员')}</Button>}
-            {canManage && <Select showSearch allowClear optionFilterProp="label" placeholder={t('转移负责人给…')} value={transferTarget} onChange={(value) => setTransferTarget(value)} style={{ minWidth: 200 }} options={projectMembers.filter((member) => member.role !== 'OWNER').map((member) => ({ value: member.membershipId, label: member.displayName }))} />}
-            {transferTarget && <Button type="primary" ghost onClick={() => void handleTransfer()}>{t('确认转移')}</Button>}
-            <span style={{ flex: 1 }} />
-            <small style={{ color: 'var(--cees-muted)' }}><TeamOutlined /> {projectMembers.length}</small>
+        <div className="project-panel-heading project-member-toolbar">
+            <div><h2>{t('项目成员')}</h2><p><TeamOutlined /> {projectMembers.length} {t('名成员')}</p></div>
+            <div className="project-inline-actions">
+                {canManage && <Select showSearch allowClear optionFilterProp="label" placeholder={t('转移负责人给…')} value={transferTarget} onChange={(value) => setTransferTarget(value)} style={{ minWidth: 180 }} options={projectMembers.filter((member) => member.role !== 'OWNER').map((member) => ({ value: member.membershipId, label: member.displayName }))} />}
+                {transferTarget && <Button type="primary" ghost onClick={() => void handleTransfer()}>{t('确认转移')}</Button>}
+                {canManage && <Button type="primary" icon={<PlusOutlined />} onClick={() => setAddOpen(true)}>{t('添加成员')}</Button>}
+            </div>
         </div>
-        <div className="task-list">
-            {projectMembers.map((member) => <div className="task-row-item" key={member.id} style={{ cursor: 'default' }}>
-                <UserOutlined />
-                <strong>{member.displayName}</strong>
-                <small>{member.account}</small>
-                <Tag color={member.role === 'OWNER' ? 'gold' : member.role === 'MANAGER' ? 'blue' : 'default'}>{t(projectMemberRoleLabels[member.role])}</Tag>
-                {canManage && member.role !== 'OWNER' && <Select size="small" value={member.role} style={{ width: 110 }} options={[{ value: 'MANAGER', label: t('项目经理') }, { value: 'MEMBER', label: t('项目成员') }]} onChange={(role) => void (async () => {
-                    try {
-                        await updateProjectMember(projectId, member.membershipId, role as 'MANAGER' | 'MEMBER', member.version);
-                        message.success(t('角色已更新'));
-                        onRefreshMembers();
-                    } catch (error) {
-                        message.error(error instanceof Error ? error.message : t('操作失败'));
-                    }
-                })()} />}
-                {canManage && member.role !== 'OWNER' && member.membershipId !== myMembershipId && <Popconfirm title={t('确认移出该成员？')} onConfirm={() => void handleRemove(member)}><Button size="small" danger icon={<DeleteOutlined />} /></Popconfirm>}
-            </div>)}
+        <div className="project-member-grid">
+            {projectMembers.map((member) => <article className="project-member-card" key={member.id}>
+                <div className="project-member-card-head">
+                    <Avatar size={38}>{member.displayName.slice(0, 1)}</Avatar>
+                    <div><strong>{member.displayName}</strong><small>{member.account}</small></div>
+                    <Tag color={member.role === 'OWNER' ? 'gold' : member.role === 'MANAGER' ? 'blue' : 'default'}>{t(projectMemberRoleLabels[member.role])}</Tag>
+                </div>
+                <div className="project-member-card-actions">
+                    {canManage && member.role !== 'OWNER' && <Select size="small" value={member.role} style={{ flex: 1 }} options={[{ value: 'MANAGER', label: t('项目经理') }, { value: 'MEMBER', label: t('项目成员') }]} onChange={(role) => void (async () => {
+                        try {
+                            await updateProjectMember(projectId, member.membershipId, role as 'MANAGER' | 'MEMBER', member.version);
+                            message.success(t('角色已更新'));
+                            onRefreshMembers();
+                        } catch (error) {
+                            message.error(error instanceof Error ? error.message : t('操作失败'));
+                        }
+                    })()} />}
+                    {canManage && member.role !== 'OWNER' && member.membershipId !== myMembershipId && <Popconfirm title={t('确认移出该成员？')} onConfirm={() => void handleRemove(member)}><Button size="small" danger icon={<DeleteOutlined />} /></Popconfirm>}
+                </div>
+            </article>)}
         </div>
         <Modal open={addOpen} title={t('添加项目成员')} okText={t('添加')} cancelText={t('取消')} onOk={() => void handleAdd()} onCancel={() => setAddOpen(false)}>
             <div className="form-grid">
