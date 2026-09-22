@@ -11,10 +11,11 @@
 - 已落地：Desktop 连接器市场通过 `ConnectorManifest[]` 动态渲染卡片，并通过通用 Preload API 查询状态、连接、解绑和监听状态事件。
 - 已保留：`window.cees.connectors.dingtalk` 与旧钉钉 IPC/状态事件继续兼容，用于 Profile 选择、DWS 版本检查、升级与回滚等提供方扩展能力。
 - 已落地：增加通用 `HttpApiTransport`，统一固定服务地址、路径白名单、超时、响应大小限制、JSON 解析和结构化错误。
-- 已落地：腾讯会议 Manifest、Adapter、市场入口和五类只读工具 Schema；服务端 OAuth 尚未接入时明确返回 `SERVER_OAUTH_REQUIRED`，不伪造成功结果。
-- 已落地：公开契约 `0.37.0` 冻结腾讯会议成员级 OAuth、状态、解绑、工具发现和批量只读执行接口。
+- 已落地：腾讯会议 Manifest、Adapter、市场入口和五类只读工具 Schema；Desktop 尚未接入 API OAuth 时明确返回 `SERVER_OAUTH_REQUIRED`，不伪造成功结果。
+- 已落地：公开契约 `0.37.1` 冻结腾讯会议成员级 OAuth、状态、解绑、工具发现和批量只读执行接口，并兼容修正官方 `auth_code` 回调字段。
+- 已落地：腾讯会议服务端 OAuth State、Token 加密托管、刷新租约、状态查询、幂等解绑和审计。
 - 待实现：远程 MCP Transport 和混合执行方式。
-- 待实现：腾讯会议服务端 OAuth/Token 托管和只读 API 网关。
+- 待实现：腾讯会议只读 API 网关和 Desktop 真实授权接线。
 - 待实现：连接器进入 Assistant 原生 Tool Loop，以及写操作的二次确认机制。
 
 ## 2. 目标

@@ -5,12 +5,13 @@
 - 已落地：腾讯会议 `ConnectorManifest`、通用 Adapter、Registry 注册和连接器市场动态展示。
 - 已落地：当前用户、会议列表、会议详情、参会成员、录制与纪要元数据五类只读工具 Schema。
 - 已落地：通用 `HttpApiTransport`，提供固定服务地址、路径白名单、超时、响应大小限制、JSON 解析和结构化错误。
-- 已落地：在服务端 OAuth 尚未接入时返回明确的 `SERVER_OAUTH_REQUIRED` 状态，不伪造授权成功或会议查询结果。
-- 已落地：公开契约 `0.37.0`，定义成员级 OAuth 授权、回调、状态、解绑、工具发现和批量只读执行。
-- 待实现：`apps/api` 中的 OAuth State、授权回调、Token 加密托管、刷新、解绑、审计和腾讯会议 API 网关。
+- 已落地：Desktop 在服务端 OAuth 尚未接线时返回明确的 `SERVER_OAUTH_REQUIRED` 状态，不伪造授权成功或会议查询结果。
+- 已落地：公开契约 `0.37.1`，定义成员级 OAuth 授权、回调、状态、解绑、工具发现和批量只读执行，并将官方回调字段修正为 `auth_code`。
+- 已落地：`apps/api` 中的 OAuth State、授权回调、Token 加密托管、刷新租约、解绑和审计。
+- 待实现：腾讯会议只读 API 网关以及 Desktop 真实授权接线。
 - 待实现：Desktop 通过 CEES API 完成真实授权、状态查询和只读工具执行。
 
-当前阶段是连接器基础能力，不代表腾讯会议账号已经可以完成真实授权或查询。市场卡片会展示连接器及待授权状态，并明确提示必须先接入 CEES API 服务端 OAuth。
+当前 API 已具备真实 OAuth 后端能力；Desktop 仍未切换到这些端点，因此市场卡片尚不能完成真实授权或会议查询。
 
 ## 2. 目标
 
@@ -90,7 +91,7 @@ Desktop Connector Marketplace
 ## 7. 后续实施顺序
 
 1. 已完成：契约定义授权开始、状态、解绑和五类只读查询接口及失败语义。
-2. API：实现 OAuth State、回调、Token 加密托管、刷新和审计。
+2. 已完成：API 实现 OAuth State、回调、Token 加密托管、刷新租约、解绑和审计。
 3. 网关：将五类工具映射到固定腾讯会议 Open API，不接受任意 URL。
 4. Desktop：将默认 Adapter 依赖替换为 CEES API 网关调用，授权时打开服务端返回的授权地址。
 5. Assistant：授权与查询稳定后，再接入原生 Tool Loop。
