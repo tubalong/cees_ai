@@ -73,6 +73,40 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponseEnvelope'
 
+  /assistant/action-drafts/{draftId}/confirm:
+    post:
+      summary: 确认并执行 AI 写操作草稿
+      description: |
+        写工具（riskLevel=WRITE）在对话中不会直接执行：模型只产出参数与预览，服务端落为
+        待确认草稿并在 tool_result 事件的 confirmation 字段里返回。用户确认后调用本接口。
+        服务端只信任草稿内保存的参数快照，重新解析成员实时权限并重新执行参数校验，
+        因此确认前被回收权限或停用成员都不会产生写入。PENDING_CONFIRMATION → EXECUTING
+        通过条件更新抢占：重复确认返回同一结果，不会重复写入。
+      operationId: confirmAssistantActionDraft
+      tags: [Conversation]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: draftId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: 草稿已执行, content: { application/json: { schema: { $ref: '#/components/schemas/AssistantActionDraftResolutionEnvelope' } } } }
+        '403': { description: 确认瞬间权限已不足, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '404': { description: 草稿不存在或不属于当前成员, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '409': { description: 草稿已过期、已取消或已被处理, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+
+  /assistant/action-drafts/{draftId}/cancel:
+    post:
+      summary: 取消 AI 写操作草稿
+      description: 用户拒绝执行草稿。取消后草稿进入 REJECTED 终态，不可再确认；需重新发起对话生成新草稿。
+      operationId: cancelAssistantActionDraft
+      tags: [Conversation]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: draftId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: 草稿已取消, content: { application/json: { schema: { $ref: '#/components/schemas/AssistantActionDraftResolutionEnvelope' } } } }
+        '404': { description: 草稿不存在或不属于当前成员, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+        '409': { description: 草稿已过期、已执行或已被处理, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' } } } }
+
   /conversations:
     post:
       summary: 创建当前成员的私有 AI 会话
@@ -6919,6 +6953,17 @@ paths:
         '200': { description: 台账记录, content: { application/json: { schema: { $ref: '#/components/schemas/FinanceLedgerEntryListResponseEnvelope' } } } }
 
   /finance/ledger-imports:
+    get:
+      summary: 查询财务台账导入历史
+      description: 按创建时间倒序返回当前租户的导入批次；用于「导入历史」列表与回滚入口。只返回未删除的批次。
+      operationId: listFinanceLedgerImports
+      tags: [Finance]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+        - { name: cursor, in: query, required: false, schema: { type: string, format: uuid, description: 上一页最后一条批次 ID } }
+      responses:
+        '200': { description: 导入批次列表, content: { application/json: { schema: { $ref: '#/components/schemas/FinanceLedgerImportListResponseEnvelope' } } } }
     post:
       summary: 导入财务收支台账
       operationId: createFinanceLedgerImport
@@ -10363,8 +10408,8 @@ components:
           description: 对应 TurnStreamToolCallEvent 中的 toolCallId
         status:
           type: string
-          enum: [completed, failed, rejected]
-          description: 工具执行结果状态
+          enum: [completed, failed, rejected, awaiting_confirmation]
+          description: 工具执行结果状态；awaiting_confirmation 表示写操作已生成待确认草稿，副作用尚未发生
         resource:
           oneOf:
             - $ref: '#/components/schemas/ToolResultResourceReference'
@@ -10384,6 +10429,11 @@ components:
           items:
             $ref: '#/components/schemas/KnowledgeToolCitation'
           description: 知识库检索工具命中的文档引用；老客户端可忽略该字段
+        confirmation:
+          oneOf:
+            - $ref: '#/components/schemas/ToolResultConfirmation'
+            - type: 'null'
+          description: 写操作的待确认预览；status 为 awaiting_confirmation 时必定存在
         error:
           type: [object, 'null']
           description: 工具失败或被拒绝时的错误信息
@@ -10402,6 +10452,48 @@ components:
           type: string
           format: uuid
           description: 正式资源 ID
+
+    ToolResultConfirmationField:
+      type: object
+      additionalProperties: false
+      required: [label, value]
+      properties:
+        label:
+          type: string
+          maxLength: 40
+          description: 字段名，例如「部门名称」
+        value:
+          type: string
+          maxLength: 500
+          description: 字段值（已格式化，不含内部 ID 与权限枚举）
+
+    ToolResultConfirmation:
+      type: object
+      additionalProperties: false
+      required: [draftId, toolName, title, fields, expiresAt]
+      properties:
+        draftId:
+          type: string
+          format: uuid
+          description: 待确认草稿 ID；确认与取消接口只接受该 ID，不接受重新提交参数
+        toolName:
+          type: string
+          description: 将要执行的受控工具名（面向开发者，不用于展示）
+        title:
+          type: string
+          maxLength: 200
+          description: 动作标题，例如「新建部门」
+        fields:
+          type: array
+          maxItems: 20
+          items:
+            $ref: '#/components/schemas/ToolResultConfirmationField'
+          description: 参数预览字段，供确认卡片展示
+        expiresAt:
+          type: string
+          format: date-time
+          description: 草稿过期时间；过期后确认接口返回 409，需重新发起对话
+      description: 写操作的待确认预览；用户确认前不产生任何业务副作用
 
     ToolSource:
       type: object
@@ -10844,6 +10936,10 @@ components:
         format: { type: string, enum: [XLSX, CSV] }
         periodStart: { type: string, format: date }
         periodEnd: { type: string, format: date }
+        sourceFileObjectId:
+          type: string
+          format: uuid
+          description: 可选；原始上传文件的文件对象 ID，只有勾选「留档原文件」时才携带
         rows: { type: array, minItems: 1, items: { $ref: '#/components/schemas/FinanceLedgerRow' } }
 
     FinanceLedgerEntry:
@@ -10869,6 +10965,18 @@ components:
         skippedCount: { type: integer }
         errorCount: { type: integer }
         errors: { type: array, items: { type: object } }
+        sourceFileObjectId:
+          type: [string, 'null']
+          format: uuid
+          description: 原始上传文件的文件对象 ID；未留档时为 null
+        createdAt:
+          type: string
+          format: date-time
+          description: 批次创建时间；导入历史按此倒序
+        finishedAt:
+          type: [string, 'null']
+          format: date-time
+          description: 批次处理完成时间
 
     DashboardHomepageResponseEnvelope:
       type: object
@@ -10912,6 +11020,49 @@ components:
       properties:
         success: { type: boolean, const: true }
         data: { $ref: '#/components/schemas/FinanceLedgerImport' }
+        requestId: { type: [string, 'null'] }
+
+    FinanceLedgerImportList:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/FinanceLedgerImport' } }
+        nextCursor: { type: [string, 'null'], format: uuid }
+
+    FinanceLedgerImportListResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/FinanceLedgerImportList' }
+        requestId: { type: [string, 'null'] }
+
+    AssistantActionDraftResolution:
+      type: object
+      additionalProperties: false
+      required: [draftId, status, summary]
+      properties:
+        draftId: { type: string, format: uuid }
+        status:
+          type: string
+          enum: [PENDING_CONFIRMATION, EXECUTED, FAILED, REJECTED, EXPIRED]
+          description: 草稿处理结果状态
+        summary:
+          type: string
+          maxLength: 2000
+          description: 面向用户的结果说明；失败时为可安全展示的原因
+        resource:
+          oneOf:
+            - $ref: '#/components/schemas/ToolResultResourceReference'
+            - type: 'null'
+          description: 执行产生的正式资源；多数业务写操作无资源产出
+
+    AssistantActionDraftResolutionEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/AssistantActionDraftResolution' }
         requestId: { type: [string, 'null'] }
 
     FinanceLedgerEntryListResponseEnvelope:
