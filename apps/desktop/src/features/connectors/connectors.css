@@ -20,7 +20,10 @@
 
 .connector-marketplace-header h1 {
     margin: 6px 0 8px;
-    font-size: 30px;
+    /* 一级标题统一为 24px，与 `.workspace-page-header h1` 对齐（规范 §4）；
+       原先的 30px 是全站唯一超出标题级别的页面，在 Retina 上显重。
+       macOS 下的 22px 收敛统一登记在 `styles/styles.css`。 */
+    font-size: 24px;
 }
 
 .connector-marketplace-header p,
@@ -134,9 +137,11 @@
     pointer-events: none;
 }
 
+/* 连接态一律使用状态色令牌族：暗色下 `--success` / `--success-line`
+   会整体换算为高前景亮度 + 暗底，写死 #28a96b 会在深色工作区里发暗。 */
 .connector-card.is-connected .connector-card-indicator {
-    color: #28a96b;
-    border-color: rgba(40, 169, 107, .2);
+    color: var(--success);
+    border-color: var(--success-line);
 }
 
 .connector-logo,
@@ -149,7 +154,7 @@
 }
 
 .connector-version-panel,
-.connector-card > .ant-btn {
+.connector-card>.ant-btn {
     position: relative;
     z-index: 3;
 }
@@ -191,7 +196,7 @@
 }
 
 .connector-status.is-connected {
-    color: #28a96b;
+    color: var(--success);
     font-weight: 600;
 }
 
@@ -215,7 +220,7 @@
 
 .connector-card-error {
     margin-top: 10px;
-    color: #d84a3f;
+    color: var(--danger);
     font-size: 12px;
 }
 
@@ -246,7 +251,7 @@
 }
 
 .connector-version-message.is-error {
-    color: #d84a3f;
+    color: var(--danger);
 }
 
 .connector-install-dialog {
@@ -270,7 +275,7 @@
 
 .connector-install-warning {
     margin-top: 12px !important;
-    color: #d88416;
+    color: var(--warning);
 }
 
 .connector-connected-dialog {
@@ -301,8 +306,8 @@
 }
 
 .connector-connected-cees {
-    border: 1px solid rgba(32, 45, 80, .08);
-    background: #fff;
+    border: 1px solid var(--line);
+    background: var(--surface);
 }
 
 .connector-connected-cees img {
@@ -374,7 +379,8 @@
     margin-top: 22px;
 }
 
-@media (max-width: 1100px) {
+/* 与桌面端统一的窄窗口阈值（1180px）对齐，覆盖 Mac 1040px 最小窗口。 */
+@media (max-width: 1180px) {
     .connector-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }

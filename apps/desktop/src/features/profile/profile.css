@@ -1,5 +1,9 @@
+/* 该元素渲染在 `.workspace-content`（已是 100vh 高）内部，用 100vh 会让
+   内容比可用高度多出「容器内边距」的高度；macOS 下内容区顶部还要再让开
+   34px 拖拽区，溢出会额外放大到 46px，出现无意义的纵向滚动条。
+   改为跟随父容器高度即可在两端都正确。 */
 .profile-page-loading {
-    min-height: 100vh;
+    min-height: 100%;
     display: grid;
     place-items: center;
     padding: 24px;
@@ -10,9 +14,9 @@
     align-items: center;
     gap: 18px;
     padding: 22px;
-    border: 1px solid #e5e8ee;
-    border-radius: 8px;
-    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: var(--platform-panel-radius, 8px);
+    background: var(--surface);
 }
 
 .profile-identity-panel h2,
@@ -26,7 +30,7 @@
 
 .profile-identity-panel p {
     margin: 4px 0 8px;
-    color: #7f8796;
+    color: var(--muted);
     font-size: 12px;
 }
 
@@ -38,11 +42,13 @@
 }
 
 .profile-setting-panel {
-    min-height: 430px;
+    /* 不使用写死的 430px：Mac 内容区顶部还要让开 34px 拖拽区，
+       矮窗口下固定最小值会凭空撑出纵向滚动条；改为随视口高度收敛。 */
+    min-height: clamp(300px, 46vh, 430px);
     padding: 22px;
-    border: 1px solid #e5e8ee;
-    border-radius: 8px;
-    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: var(--platform-panel-radius, 8px);
+    background: var(--surface);
 }
 
 .personalization-panel {
@@ -57,7 +63,7 @@
     justify-content: space-between;
     gap: 24px;
     padding: 12px 0;
-    border-top: 1px solid var(--app-border, #e5e8ee);
+    border-top: 1px solid var(--line);
 }
 
 .preference-setting-row:first-of-type {
@@ -75,7 +81,7 @@
 
 .preference-setting-row small {
     margin-top: 4px;
-    color: #8b92a1;
+    color: var(--muted);
     font-size: 10px;
 }
 
@@ -96,7 +102,7 @@
     display: grid;
     place-items: center;
     color: var(--primary);
-    border-radius: 7px;
+    border-radius: var(--platform-panel-radius, 7px);
     background: var(--primary-soft);
     font-size: 20px;
     font-style: normal;
@@ -113,15 +119,15 @@
 
 .profile-setting-heading p {
     margin-top: 3px;
-    color: #8b92a1;
+    color: var(--muted);
     font-size: 11px;
 }
 
 .security-panel dl {
     margin: 18px 0;
     padding: 12px 14px;
-    border-radius: 7px;
-    background: #f8f9fb;
+    border-radius: var(--platform-panel-radius, 7px);
+    background: var(--surface-soft);
 }
 
 .security-panel dl div {
@@ -132,9 +138,17 @@
 }
 
 .security-panel dt {
-    color: #8b92a1;
+    color: var(--muted);
 }
 
 .security-panel dd {
     margin: 0;
+}
+
+/* 窄窗口（Mac 最小 1040px / Windows 1100px）：右侧 minmax(320px, .8fr)
+   会把左侧表单压到 480px 以下，双列设置面板降为单列。 */
+@media (max-width: 1180px) {
+    .profile-settings-grid {
+        grid-template-columns: 1fr;
+    }
 }

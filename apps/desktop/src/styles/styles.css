@@ -12,6 +12,34 @@
     --primary-rgb: 86, 92, 246;
     --primary-soft: #eef0ff;
 
+    /* 状态色令牌：规范 §3 的「危险色 / 警告色」在暗色与 Mac 下都需要整体
+       换算，因此统一在 `:root` 定义一次。功能页不得再写死 `#d4380d` /
+       `#e5484d` / `#f2d4b8` 一类色值，否则暗色下会残留浅色卡片。 */
+    --danger: #f0564a;
+    --danger-soft: #fff6f6;
+    --danger-line: #f2b9b9;
+    --danger-ink: #9f2d2d;
+    --warning: #f97316;
+    --warning-soft: #fffaf5;
+    --warning-line: #f2d4b8;
+    --warning-ink: #7b4b20;
+    --success: #28a96b;
+    --success-soft: #e9f8f1;
+    --success-line: #bfe6d4;
+    --success-ink: #14683f;
+
+    --platform-safe-top: 0px;
+    --desktop-page-padding-x: 24px;
+
+    /* 平台自适应令牌：Windows / Linux 为基准值，macOS 在下方覆盖 */
+    --desktop-shell-min-width: 1080px;
+    --desktop-content-padding: 20px;
+    --desktop-page-padding: 26px 28px 32px;
+    --page-viewport-offset: 122px;
+    --platform-drag-height: 0px;
+    --platform-panel-radius: 8px;
+    --platform-scrollbar-width: 10px;
+
     /* 兼容别名：preferences 面板等历史用法，统一指向语义令牌 */
     --app-background: var(--workspace-bg);
     --app-surface: var(--surface);
@@ -25,6 +53,134 @@
     font-family: "Manrope", "Noto Sans SC", sans-serif;
 }
 
+:root[data-platform='mac'] {
+    --platform-safe-top: 10px;
+    --desktop-page-padding-x: 18px;
+    /* macOS 采用更轻、更紧凑的视觉密度，并放宽最小宽度到 1040px */
+    --desktop-shell-min-width: 1040px;
+    --desktop-content-padding: 12px;
+    --desktop-page-padding: 18px 20px 24px;
+    --platform-drag-height: 34px;
+    /* 内容区顶部额外让开 34px 拖拽区后，所有 `calc(100vh - 偏移)` 的
+       表格/三栏布局必须同步增高，否则窗口底部会凭空多出 34px 溢出。 */
+    --page-viewport-offset: calc(106px + var(--platform-drag-height));
+    --platform-panel-radius: 10px;
+    --platform-scrollbar-width: 8px;
+}
+
+/* macOS 全屏：系统会隐藏交通灯，顶部 34px 拖拽区与拖拽层都失去意义。
+   这里把令牌一并归零，各页（侧边栏、内容区、登录页、平台管理台、
+   `calc(100vh - var(--page-viewport-offset))` 的三栏页）会自动收回留白，
+   不需逐页写全屏分支；`.platform-window-drag` 的高度也取自该令牌，
+   归零后不再遮挡顶部内容。Windows / Linux 不写该属性，选择器永不命中。 */
+:root[data-platform='mac'][data-fullscreen='true'] {
+    --platform-drag-height: 0px;
+    --platform-safe-top: 0px;
+}
+
+/* macOS：hiddenInset 无边框窗口没有原生标题栏，必须显式提供拖拽区域，
+   否则用户无法移动主窗口（Windows / Linux 由原生标题栏承担该职责）。 */
+.platform-window-drag {
+    display: none;
+}
+
+:root[data-platform='mac'] .platform-window-drag {
+    display: block;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: var(--platform-drag-height);
+    z-index: 60;
+    -webkit-app-region: drag;
+    -webkit-user-select: none;
+    user-select: none;
+}
+
+/* macOS：Retina 下启用抗锯齿字重与半透明细滚动条，贴近系统原生密度 */
+:root[data-platform='mac'] body {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+}
+
+:root[data-platform='mac'] ::-webkit-scrollbar {
+    width: var(--platform-scrollbar-width);
+    height: var(--platform-scrollbar-width);
+}
+
+:root[data-platform='mac'] ::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+:root[data-platform='mac'] ::-webkit-scrollbar-thumb {
+    border: 2px solid transparent;
+    border-radius: 999px;
+    background: rgba(120, 126, 148, .38);
+    background-clip: content-box;
+}
+
+:root[data-platform='mac'] ::-webkit-scrollbar-thumb:hover {
+    background: rgba(120, 126, 148, .62);
+    background-clip: content-box;
+}
+
+:root[data-platform='mac'] .surface-panel {
+    border-radius: var(--platform-panel-radius);
+}
+
+/* macOS：功能页大量直接使用 Ant Design 组件（各页 xxx.css 只覆盖局部样式），
+   统一在此按平台收敛圆角，避免逐页重复声明；Windows / Linux 保持令牌默认值。 */
+:root[data-platform='mac'] .ant-card,
+:root[data-platform='mac'] .ant-modal .ant-modal-content,
+:root[data-platform='mac'] .ant-drawer .ant-drawer-content,
+:root[data-platform='mac'] .ant-table-wrapper .ant-table,
+:root[data-platform='mac'] .ant-table-wrapper .ant-table-container {
+    border-radius: var(--platform-panel-radius);
+}
+
+/* macOS：界面密度更轻，一级标题与区块标题整体下调一级，避免 Retina 下显得过重。
+   功能页若自建标题栏（未复用 `.workspace-page-header`），必须在下方登记，
+   否则该页一级标题在 Mac 下会比其它页面重一级。
+   当前已登记的自建标题栏：`.hr-header`（人力资源）、
+   `.connector-marketplace-header`（连接器）、`.platform-heading`（平台管理台）、
+   `.finance-heading`（财务管理）、`.legal-heading`（合同台账）。 */
+:root[data-platform='mac'] .workspace-page-header h1,
+:root[data-platform='mac'] .hr-header h1,
+:root[data-platform='mac'] .connector-marketplace-header h1,
+:root[data-platform='mac'] .platform-heading h1,
+:root[data-platform='mac'] .finance-heading h2,
+:root[data-platform='mac'] .legal-heading h2 {
+    font-size: 22px;
+}
+
+:root[data-platform='mac'] .workspace-page-header p,
+:root[data-platform='mac'] .hr-header p,
+:root[data-platform='mac'] .connector-marketplace-header p,
+:root[data-platform='mac'] .platform-heading p,
+:root[data-platform='mac'] .finance-heading p,
+:root[data-platform='mac'] .legal-heading p {
+    font-size: 11px;
+}
+
+:root[data-platform='mac'] .section-title {
+    font-size: 15px;
+}
+
+:root[data-platform='mac'] .login-card,
+:root[data-platform='mac'] .workspace-shell {
+    border-radius: 16px;
+}
+
+:root[data-platform='mac'] .login-panel {
+    padding-top: calc(72px + var(--platform-safe-top));
+}
+
+:root[data-platform='mac'] .workspace-shell {
+    border: 1px solid rgba(105, 112, 154, 0.12);
+    box-shadow: 0 18px 46px rgba(34, 43, 84, 0.08);
+}
+
 :root[data-theme='dark'] {
     --workspace-bg: #111214;
     --surface: #1a1b1f;
@@ -33,6 +189,21 @@
     --text: #f2f3f5;
     --muted: #a1a5ae;
     --primary-soft: #292b4d;
+
+    /* 暗色下状态色需要提高前景亮度并改用暗底，否则浅底状态卡会在
+       深色工作区里突兀地发白。 */
+    --danger: #ff6b5e;
+    --danger-soft: #2a1a1a;
+    --danger-line: #4c2b2b;
+    --danger-ink: #ff9c92;
+    --warning: #ffa23f;
+    --warning-soft: #2a2016;
+    --warning-line: #4c3a26;
+    --warning-ink: #ffc78a;
+    --success: #3ec98a;
+    --success-soft: #142a20;
+    --success-line: #2a4c39;
+    --success-ink: #7ee0b0;
 }
 
 * {

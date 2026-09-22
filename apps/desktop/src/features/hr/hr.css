@@ -1,9 +1,43 @@
-.hr-page { padding-bottom: 28px; }
-.hr-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-.hr-header h1 { margin: 0; font-size: 24px; }
-.hr-header p { margin: 6px 0 0; color: var(--text-secondary, #64748b); }
-.hr-card, .hr-stack { width: 100%; }
-.hr-full { width: 100%; }
-.hr-page .ant-card { border-radius: 14px; }
-.hr-page .ant-table-wrapper { overflow-x: auto; }
-.hr-import { margin-top: 16px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+.hr-page {
+    padding-bottom: 28px;
+}
+
+.hr-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+}
+
+.hr-header h1 {
+    margin: 0;
+    font-size: 24px;
+}
+
+.hr-header p {
+    margin: 6px 0 0;
+    color: var(--muted);
+}
+
+.hr-card,
+.hr-stack {
+    width: 100%;
+}
+
+.hr-full {
+    width: 100%;
+}
+
+/* 圆角统一由 `--platform-panel-radius` 驱动，禁止功能页写死覆盖全局 Mac 收敛。 */
+.hr-page .ant-card {
+    border-radius: var(--platform-panel-radius, 14px);
+}
+
+.hr-page .ant-table-wrapper {
+    overflow-x: auto;
+}
+
+.hr-import {
+    margin-top: 16px;
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}

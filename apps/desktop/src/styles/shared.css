@@ -7,7 +7,8 @@
 .project-meta-grid>div {
     padding: 12px 14px;
     border-radius: 10px;
-    background: var(--app-surface-soft, #f8f9fb);
+    /* 语义令牌直连，不再保留 `--app-*` 别名与十六进制兜底值（规范 §12.4）。 */
+    background: var(--surface-soft);
     display: flex;
     flex-direction: column;
     gap: 3px;
@@ -62,8 +63,9 @@
 }
 
 .task-row-item:hover {
-    border-color: #3478ff;
-    box-shadow: 0 2px 8px rgba(52, 120, 255, .08);
+    /* 悬浮描边与阴影一律由主色令牌推导（半透明阴影用 `--primary-rgb`）。 */
+    border-color: var(--primary);
+    box-shadow: 0 2px 8px rgba(var(--primary-rgb), .08);
 }
 
 .task-row-item.is-subtask {
@@ -160,3 +162,48 @@
     white-space: nowrap;
 }
 
+/* macOS：该文件被项目/任务、会议、周报、通知、知识库与组织导入等多个功能页
+   共用，按平台统一收紧一次密度即可，各功能页无需再重复声明。
+   圆角统一走 `--platform-panel-radius`，与 `styles.css` 的订阅规则保持一致。 */
+:root[data-platform='mac'] .task-row-item,
+:root[data-platform='mac'] .attachment-row {
+    padding: 10px 12px;
+    border-radius: var(--platform-panel-radius);
+}
+
+:root[data-platform='mac'] .task-comment-item,
+:root[data-platform='mac'] .task-activity-item {
+    padding: 9px 11px;
+    border-radius: var(--platform-panel-radius);
+}
+
+:root[data-platform='mac'] .project-meta-grid>div {
+    padding: 10px 12px;
+    border-radius: var(--platform-panel-radius);
+}
+
+:root[data-platform='mac'] .task-detail-sections {
+    gap: 15px;
+}
+
+/* 窄窗口（Mac 最小 1040px 及以下）：任务行右侧的状态/时间戳允许收缩省略，
+   避免因 `white-space: nowrap` 把标题挤成只剩几个字（不隐藏任何信息）。 */
+@media (max-width: 1180px) {
+    .task-row-item {
+        gap: 8px;
+        padding: 10px 12px;
+    }
+
+    .task-row-item>small {
+        flex: 0 1 auto;
+        min-width: 0;
+        max-width: 96px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .task-comment-item header,
+    .task-activity-item header {
+        flex-wrap: wrap;
+    }
+}

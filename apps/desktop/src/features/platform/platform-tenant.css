@@ -1,14 +1,14 @@
 .platform-tenant-row {
     width: 100%;
     border: 0;
-    border-bottom: 1px solid #edf0f4;
+    border-bottom: 1px solid var(--line);
     background: transparent;
     text-align: left;
     cursor: pointer;
 }
 
 .platform-tenant-row:hover {
-    background: var(--app-surface-soft, #f8f9fb);
+    background: var(--surface-soft);
 }
 
 .platform-drawer-loading {
@@ -31,9 +31,9 @@
     justify-content: space-between;
     gap: 16px;
     padding: 16px;
-    border: 1px solid var(--app-border, #e5e8ee);
+    border: 1px solid var(--line);
     border-radius: 8px;
-    background: var(--app-surface-soft, #f8f9fb);
+    background: var(--surface-soft);
 }
 
 .tenant-detail-summary>div {
@@ -66,7 +66,7 @@
 .tenant-detail-summary p,
 .tenant-admin-heading p {
     margin-top: 3px;
-    color: var(--app-muted, #858c9b);
+    color: var(--muted);
     font-size: 10px;
 }
 
@@ -87,12 +87,12 @@
     justify-content: space-between;
     padding: 10px 12px;
     border-radius: 6px;
-    background: var(--app-surface-soft, #f8f9fb);
+    background: var(--surface-soft);
     font-size: 11px;
 }
 
 .tenant-detail-meta dt {
-    color: var(--app-muted, #858c9b);
+    color: var(--muted);
 }
 
 .tenant-detail-meta dd {
@@ -117,7 +117,7 @@
     min-height: 58px;
     gap: 10px;
     padding: 8px 4px;
-    border-bottom: 1px solid var(--app-border, #e5e8ee);
+    border-bottom: 1px solid var(--line);
 }
 
 .tenant-admin-row>span {
@@ -132,6 +132,30 @@
 }
 
 .tenant-admin-row small {
-    color: var(--app-muted, #858c9b);
+    color: var(--muted);
     font-size: 10px;
+}
+
+/* 与桌面端统一的窄窗口阈值（1180px）对齐，覆盖 Mac 1040px 最小窗口：
+   租户详情抽屉的双列元信息与「姓名+账号 / 角色 / 操作」并排的
+   管理员行，在窄窗口下会把角色与操作按钮挤出可视区。 */
+@media (max-width: 1180px) {
+    .tenant-detail-meta {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .tenant-admin-row {
+        flex-wrap: wrap;
+    }
+
+    .tenant-admin-row>span {
+        flex-basis: 100%;
+    }
+
+    .tenant-admin-row b,
+    .tenant-admin-row small {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
 }
