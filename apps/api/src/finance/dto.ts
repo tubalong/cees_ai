@@ -143,9 +143,14 @@ export class CreateFinanceLedgerImportDto {
     @IsOptional() @IsIn(['XLSX', 'CSV']) format = 'XLSX';
     @IsDateString() periodStart!: string;
     @IsDateString() periodEnd!: string;
+    /** 可选：原始上传文件对应的文件对象 ID；只有用户勾选「留档原文件」时才携带。 */
+    @IsOptional() @IsUUID() sourceFileObjectId?: string;
     @IsArray() @ArrayMinSize(1) @ArrayMaxSize(5000) @ValidateNested({ each: true }) @Type(() => FinanceLedgerRowDto)
     rows!: FinanceLedgerRowDto[];
 }
+
+/** 导入历史与收支明细共用同一套游标分页参数。 */
+export class ListFinanceLedgerImportsQueryDto extends FinanceCursorQueryDto { }
 
 export class ListFinanceLedgerEntriesQueryDto extends FinanceCursorQueryDto {
     @IsOptional() @IsEnum(FinanceLedgerDirection) direction?: FinanceLedgerDirection;
