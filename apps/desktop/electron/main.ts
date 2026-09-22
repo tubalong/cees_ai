@@ -6,13 +6,17 @@ import {
 } from './connectors/core/connector-host';
 import { ConnectorRegistry } from './connectors/core/connector-registry';
 import { DingTalkConnectorAdapter } from './connectors/dingtalk/dingtalk.adapter';
+import { TencentMeetingConnectorAdapter } from './connectors/tencent-meeting/tencent-meeting.adapter';
 
 const connectorRegistry = new ConnectorRegistry();
-connectorRegistry.register(new DingTalkConnectorAdapter());
+const dingtalkConnector = new DingTalkConnectorAdapter();
+const tencentMeetingConnector = new TencentMeetingConnectorAdapter();
+connectorRegistry.register(dingtalkConnector);
+connectorRegistry.register(tencentMeetingConnector);
 const connectorHost = new ConnectorHost(connectorRegistry, publishConnectorStatus);
 
 function getDingTalkConnector(): DingTalkConnectorAdapter {
-    return connectorRegistry.get<DingTalkConnectorAdapter>('dingtalk');
+    return dingtalkConnector;
 }
 
 function publishConnectorStatus(event: ConnectorStatusChangedEvent): void {
@@ -55,7 +59,9 @@ function createWindow(): void {
 
 app.whenReady().then(() => {
     const dingtalkConnector = getDingTalkConnector();
-    dingtalkConnector.configure(app.getPath('userData'));
+    const userDataPath = app.getPath('userData');
+    dingtalkConnector.configure(userDataPath);
+    tencentMeetingConnector.configure(userDataPath);
     Menu.setApplicationMenu(null);
     ipcMain.on('cees:open-devtools', (event) => {
         BrowserWindow.fromWebContents(event.sender)?.webContents.openDevTools({ mode: 'detach', activate: true });
