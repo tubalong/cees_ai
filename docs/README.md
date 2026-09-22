@@ -12,6 +12,8 @@
 | [钉钉 DWS/MCP 连接器](product/dingtalk-mcp-connector.md) | 连接器市场、一键安装 DWS、本地授权、对话只读上下文、可见范围导入和租户管理员确认流程 |
 | [腾讯会议连接器](product/tencent-meeting-connector.md) | HTTP API 型连接器基础、服务端 OAuth 安全边界、只读工具目录与后续 API 接入顺序 |
 | [分配策略与人财法](product/assignment-and-hr-finance-legal.md) | AssignmentPolicy、完整 HR 与 Finance 已实现；Legal 契约已冻结待实现 |
+| [AI 助手业务写操作](product/assistant-business-tools.md) | 聊天式部门/知识库写入：发现+动作两层工具、待确认草稿、确认前无副作用、幂等与重鉴权 |
+| [桌面端安全加固](engineering/desktop-security-hardening.md) | CSP（dev 响应头 + 打包 meta）、IPC 来源校验、导航锁定、webview 策略、令牌移出 Web Storage |
 | [用户个人资料管理](product/user-profile-management.md) | 当前租户成员查询和修改自己的展示资料 |
 | [密码修改与凭证安全](security/password-management.md) | 租户成员和平台管理员修改自己的密码及会话安全规则 |
 | [architecture](architecture/overview.md) | 总体架构、目录树、边界与数据流 |

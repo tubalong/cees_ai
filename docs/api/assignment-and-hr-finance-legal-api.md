@@ -138,6 +138,31 @@ GET    /api/v1/finance/reports/project-spend
 - 报销单包含明细数组，`totalAmount` 由服务端与明细求和校验。
 - 审批通过统一 `review` 接口，`decision = APPROVE | REJECT`。
 
+### 3.1 收支台账（`finance.ledger.*`）
+
+```text
+GET    /api/v1/finance/ledger-imports?limit={limit}&cursor={importId}
+POST   /api/v1/finance/ledger-imports
+GET    /api/v1/finance/ledger-imports/{importId}
+DELETE /api/v1/finance/ledger-imports/{importId}
+GET    /api/v1/finance/ledger-entries?limit={limit}&cursor={entryId}&direction={INCOME|EXPENSE}&dateFrom={date}&dateTo={date}&category={keyword}
+```
+
+- `GET /finance/ledger-imports`：**导入历史**，按创建时间倒序返回未删除批次，游标分页；
+  每项含文件名、期间、状态、`rowCount` / `importedCount` / `skippedCount` / `errorCount`、
+  `createdAt` / `finishedAt` 与 `sourceFileObjectId`（未留档为 `null`）。权限：`finance.ledger.read`。
+- `POST /finance/ledger-imports`：按「方向 + 发生日期 + 凭证号」去重导入（重复行计入 `skippedCount`），
+  导入后重算受影响日期的日/月快照。`sourceFileObjectId` 可选——只有用户勾选「留档原文件」时才传，
+  值为先前上传得到的文件对象 ID。权限：`finance.ledger.manage`。
+- `GET /finance/ledger-imports/{importId}`：查询单个批次（含逐行错误列表）。权限：`finance.ledger.read`。
+- `DELETE /finance/ledger-imports/{importId}`：**整批回滚**——批次内全部明细作废并重算受影响日期快照，
+  其他批次不受影响。回滚以批次为粒度，避免逐行删除造成账面与原始凭证不一致。权限：`finance.ledger.manage`。
+- `GET /finance/ledger-entries`：**收支明细**，支持方向、日期区间、科目关键字与部门/项目筛选，游标分页。
+  权限：`finance.ledger.read`。
+- 历史提示：`finance.ledger.read` / `finance.ledger.manage` 在 `20260921093000_role_based_dashboard_foundation`
+  建表时**漏了授予存量租户的 `tenant_admin`**，导致已上线租户看不到「收支台账」页签；
+  迁移 `20260922090000_grant_finance_ledger_permissions` 已回填（幂等）。
+
 ## 4. Legal 合同台账（已实现）
 
 ```text

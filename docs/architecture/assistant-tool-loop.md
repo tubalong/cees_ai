@@ -342,6 +342,8 @@ POST   /conversations/{conversationId}/turns/{turnId}/cancel              取消
 | 9 | ✅ 落地（2026-09-11） | `image` 模块：generate_image 执行器 → `ImageService`（ai-service 出图 → COS 落盘 → FileObject/Resource(IMAGE)/ManagedImage → AIActionDraft(EXECUTED) → 审计），以 tool_call_id 幂等 |
 | 10 | ✅ 落地（部分，2026-09-11） | `document` 模块：generate_document 执行器 → `DocumentService.createGeneratedDocument`（ai-service compose 出 DocumentSpec → NestJS 序列化为 Markdown → Resource(DOCUMENT)/ManagedDocument → AIActionDraft(EXECUTED) → 审计），以 tool_call_id 幂等；任务、会议等其余工具暂缓 |
 | 10 | ✅ 落地（2026-09-18） | 生成工具拆分为 `generate_docx` / `generate_pdf` / `generate_pptx` 三个独立工具；新增 `insert_document_image`：读目标文档 `DocumentSpec` → 章节末尾追加 `ImageBlock`（`cos://{objectKey}` 稳定引用）→ 原位重渲染同一文档，正文不被改写（见 17） |
+| 11 | ✅ 落地（2026-09-22） | 写操作确认：新增 `AssistantActionDraft`（待确认草稿）+ `ToolCallStatus.AWAITING_CONFIRMATION` + `tool_result(awaiting_confirmation)`；部门 discovery/action 工具（`list_departments` / `create_department`）与 `create_knowledge_base` 改走确认链路，见 [AI 助手业务写操作](../product/assistant-business-tools.md) |
+| 12 | ✅ 落地（2026-09-22） | 工具面扩展：新增 `runAsTenant` 适配器（业务 Service 一行不改即可被工具复用）+ 项目/任务四个工具（`list_projects` / `create_project` / `list_tasks` / `create_task` / `update_task_status`）；两端客户端都支持确认卡片 |
 
 实现与设计的偏差（有意为之）：
 
@@ -365,7 +367,7 @@ POST   /conversations/{conversationId}/turns/{turnId}/cancel              取消
 
 - 结构化业务数据（任务、文档、成员等）一律通过工具（Function Calling）接入，不做 RAG：RAG 面向非结构化、只读、语义模糊的知识问答，而任务/文档需要精确过滤、实时状态、权限收口与写操作，检索快照无法满足；RAG 留给未来的知识库问答功能，与工具循环互补；
 - 工具接入采用 discovery + action 两层（检索工具返回带 ID 的小批量摘要，操作工具按 ID 精确执行），模型负责自然语言→ID 的消歧，匹配不上时反问用户；不采用 text-to-SQL（绕过业务服务层与权限收口），不采用服务端名称模糊解析（歧义责任不清）；
-- 写入确认边界：生成新资产（图片、文档）在用户要求下直接落正式数据，无需确认环节（幂等、无破坏性）；修改/推进既有业务状态（任务创建、状态流转）预留 DRAFT→用户确认机制，接入时再定；
+- 写入确认边界（2026-09-22 收口）：生成新资产（图片、文档）在用户要求下直接落正式数据，无需确认环节（幂等、无破坏性）；**修改/推进既有业务状态一律先落待确认草稿**——工具声明 `buildConfirmation` 后不会执行，用户在同一会话确认后才写入。实现与安全约束见 [AI 助手业务写操作](../product/assistant-business-tools.md)；
 - 工具面保持最小：只暴露当前功能必需的工具动作，检索类工具随任务工具接入一起规划，避免工具列表膨胀导致模型误选；
 - 取消语义按状态机生效：cancelTurn 通过 `updateMany` 抢占 RUNNING 状态（与 completeTurn 对称），事件与状态立刻终态化；当前通过 AbortController 中断上游流，多实例部署下非本实例的活跃执行无法即时中断（上游流不会无限运行，会因无消费者而结束），跨实例即时中断留待 Redis pub/sub 时再收口；
 - 图片授权边界：`GET /images/{imageId}` 当前为 owner-only（按 Resource.ownerMembershipId 校验），不消费 ResourceAcl；ACL 分享随图片分享功能扩展时再接入 resource-access 服务。
@@ -376,9 +378,9 @@ POST   /conversations/{conversationId}/turns/{turnId}/cancel              取消
 - `ai.image.generate` / `ai.document.generate` 权限的授予对象与默认角色；
 - 各工具额度单位的初始定价与套餐上限；
 - Token 总量与总执行时长上限的具体数值（模型调用次数与工具步数已定为 5 / 10）；
-- 任务工具（get_task / create_task 等）的 ID 解析与写操作确认机制：拟采用 discovery（list_projects/list_tasks）+ action 两层工具，写操作是否走 DRAFT→用户确认待定；
+- 任务工具（get_task / create_task 等）的 ID 解析与写操作确认机制：确认链路已就绪（discovery + action 两层 + 待确认草稿），任务/项目/财务工具按同一模板接入即可，逐步推进；
 - AssistantEvent 事件表的清理策略：重放以事件为唯一事实源，暂不设置 TTL；长期运营的归档/分级清理策略待定；
-- AIActionDraft 的语义张力：当前兼具“AI 动作流水”（EXECUTED）与“待用户确认草稿”（PENDING）两种语义，任务工具接入写确认时需统一模型与命名。
+- ~~AIActionDraft 的语义张力~~（2026-09-22 已裁定）：保留 `AIActionDraft` 作为「已执行动作流水」（生成图片/文档以 EXECUTED 留痕），另建 `AssistantActionDraft` 专管「待用户确认的业务写」；两者语义不同，不合并。
 
 ## 16. 联网搜索工具（2026-09-14）
 

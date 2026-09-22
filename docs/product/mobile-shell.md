@@ -21,6 +21,23 @@
 - 我的页面展示真实人员身份（展示名、账号、部门、角色）、当前企业，并支持编辑展示名、修改密码、切换语言和退出登录。
 - 多语言（i18n）已接入：简体中文、繁体中文、英文、日文四语言，通过 `core/l10n.dart` 的 `AppLocalizations` + Riverpod `languageProvider` 实现，语言偏好持久化到 Hive `settings` 盒；切换后 `MaterialApp` 依据 `locale` 重新加载文案。
 
+## 平台适配
+
+- 采用 `ThemeData(platform: TargetPlatform.iOS)` 作为移动端基础主题，保证 iPhone 端保留系统风格感和触控反馈。
+- 关键页面统一使用 `SafeArea` 与 `MediaQuery.padding.bottom`，避免底部导航、键盘和刘海区域遮挡动作区。
+- 目前的底部导航、登录页和聊天页都已兼容紧凑屏幕（iPhone SE / 12 Mini 级宽度），左右边距自动收紧，底部距保留安全区。
+- 尺寸常量集中在 `lib/src/shared/layout.dart`（紧凑屏阈值 `kCompactWidth`、矮屏阈值 `kCompactHeight`、导航高度、底部安全区下沉、触控目标、气泡宽度、页面边距），页面不得再写死底部留白与阈值魔数：
+  - 悬浮导航之上的列表/页面底部留白 → `contentBottomInset(context)`；
+  - 弹窗（`showModalBottomSheet` / `DraggableScrollableSheet`）内容底部 → `sheetBottomInset(context)`，让出 Home Indicator 或键盘高度；
+  - 键盘内的输入区/表单 → `keyboardBottomInset(context)`（登录页与成员部门选择、项目/会议表单均已改用它）；
+  - 紧凑屏判定 → `isCompactWidth(context)`，矮屏（含键盘弹起后的可视高度）→ `isCompactHeight(context)`，需要收紧密度时统一用 `isCompactViewport(context)`，页面不得自行写 `width < 360` / `height < 700` 一类阈值；悬浮底部导航（`mobile_shell.dart`）自身的左右边距同样取 `pagePadding(context)`，紧凑屏判定复用 `isCompactWidth(context)`，不得回写 `12 / 18`。
+- 触控目标不低于 44x44pt：组织页四个等宽标签、工作台横向标签条均为 44pt 高；紧凑屏下标签字号下调一级并允许省略，防止多语言标签（Members / Departments 等）溢出。
+- AI 助手已与桌面端同步：两端共用服务端工具与会话接口，因此「聊天式业务操作」在移动端同样可用。
+  - 写操作确认卡片（`awaiting_confirmation`）：位于输入区上方，展示服务端返回的参数快照预览与「确认执行 / 取消」按钮（44pt 高），
+    确认后立即转为终态文案；卡片是会话内瞬态，不写入本地缓存。
+  - 目标草稿由服务端持有，客户端只提交 `draftId`（`v1/assistant/action-drafts/{id}/confirm|cancel`），参数不可能被前端篡改。
+- 后续新增移动端页面必须在最窄屏宽度、横屏和键盘弹起状态下复查，不得依赖仅适配大屏布局。
+
 ## 接口边界
 
 - 移动端只有租户域登录，不提供平台超级管理员登录与平台管理能力。

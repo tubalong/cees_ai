@@ -303,6 +303,58 @@ ai-service 的 `completed` 表示一次模型调用完成；当该调用同时�
 
 `web_search` 失败语义：角色缺少 `ai.web.search` 权限时 `status` 为 `rejected`、`error.code` 为 `PERMISSION_DENIED`；搜索服务未配置、超时、不可用或响应异常时 `status` 为 `failed`，`error.code` 为 `WEB_SEARCH_NOT_CONFIGURED` / `WEB_SEARCH_TIMEOUT` / `WEB_SEARCH_UNAVAILABLE` / `WEB_SEARCH_INVALID_RESPONSE`。搜索无结果不是失败，`sources` 为空数组，模型会向用户解释。
 
+### 4.3 写操作待确认（`awaiting_confirmation`）
+
+写工具（`riskLevel=WRITE` 且声明了确认钩子）**不会在轮次内执行**。服务端先把参数快照与预览落为待确认草稿，
+再以 `tool_result` 事件返回，`status` 为 `awaiting_confirmation`：
+
+```json
+{
+  "type": "tool_result",
+  "seq": 9,
+  "toolCallId": "…",
+  "status": "awaiting_confirmation",
+  "resource": null,
+  "sources": [],
+  "citations": [],
+  "confirmation": {
+    "draftId": "…",
+    "toolName": "create_department",
+    "title": "新建部门",
+    "fields": [
+      { "label": "部门名称", "value": "华东销售部" },
+      { "label": "上级部门", "value": "销售中心" }
+    ],
+    "expiresAt": "2026-09-22T09:15:00.000Z"
+  },
+  "error": null
+}
+```
+
+该状态下**副作用尚未发生**，业务数据没有任何变化。客户端应渲染确认卡片，由用户决定：
+
+```text
+POST /api/v1/assistant/action-drafts/{draftId}/confirm
+POST /api/v1/assistant/action-drafts/{draftId}/cancel
+```
+
+两个接口**只接受 `draftId`**：参数快照保存在服务端，客户端无法在确认时替换业务参数。
+响应为 `{ draftId, status, summary, resource }`，`status` ∈ `EXECUTED` / `FAILED` / `REJECTED`，
+`summary` 是可直接展示的中文说明。
+
+服务端保证（确认路径）：
+
+- 草稿不属于当前成员 → `404`（不泄露草稿存在性）；
+- 已过期 / 已处理 → `409`；过期后必须重新发起对话生成新草稿；
+- **确认瞬间重新解析实时权限**并重新校验参数：创建草稿后被回收权限 → `403`，且草稿置 `REJECTED`；
+- **确认瞬间重新核对成员状态**（停用 / 删除 / 租户停用）→ `403`；
+- `PENDING_CONFIRMATION → CONFIRMED` 为条件更新抢占：重复确认 / 双击只执行一次，第二次返回 `409`；
+- 执行收口会把草稿终态、`ToolCall` 终态、TOOL 消息、审计与 `tool_result` 事件在同一事务提交，
+  并把事件**追加回原轮次**——因此重放 `events?afterSeq=N` 能看到
+  `awaiting_confirmation → completed` 的完整演化，刷新页面不会停在待确认状态。
+
+完整设计见 [AI 助手业务写操作](../product/assistant-business-tools.md)。
+
 ## 5. 断线重连和取消
 
 ### 5.1 事件重放
