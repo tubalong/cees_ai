@@ -7,6 +7,7 @@ import { AiServiceGateway, AiServiceInvocationError } from '../../ai-orchestrati
 import type { PublicTurnStreamEvent } from '../assistant.types';
 import { ConversationService } from '../conversation/conversation.service';
 import { EventService } from '../conversation/event.service';
+import { AssistantActionDraftService } from '../drafts/assistant-action-draft.service';
 import { ToolPolicyError, ToolPolicyService } from '../tools/tool-policy.service';
 import { ToolRegistryService } from '../tools/tool-registry';
 import type { ToolExecutionResult } from '../tools/tool.types';
@@ -1187,6 +1188,29 @@ function createHarness(options: {
             terminal = true;
             return true;
         }),
+        /** 写操作确认：把 ToolCall 置为 AWAITING_CONFIRMATION 并推送确认预览。 */
+        awaitToolConfirmation: jest.fn(async (input: {
+            toolCallId: string;
+            summary: string;
+            confirmation: { draftId: string; toolName: string; title: string; fields: Array<{ label: string; value: string }>; expiresAt: string };
+        }) => {
+            const record = records.get(input.toolCallId);
+            if (record) record.status = ToolCallStatus.AWAITING_CONFIRMATION;
+            appendEvent({
+                type: 'tool_result',
+                toolCallId: input.toolCallId,
+                status: 'awaiting_confirmation',
+                resource: null,
+                sources: [],
+                confirmation: input.confirmation,
+                error: null,
+            });
+            return true;
+        }),
+    };
+
+    const actionDrafts = {
+        createDraft: jest.fn(async () => ({ draftId: 'draft-1', expiresAt: new Date(Date.now() + 15 * 60 * 1000) })),
     };
 
     const service = new TurnRunnerService(
@@ -1202,6 +1226,7 @@ function createHarness(options: {
         messageContent as unknown as AssistantMessageContentService,
         new IntentCapabilityService(),
         userMemory as unknown as UserMemoryService,
+        actionDrafts as unknown as AssistantActionDraftService,
     );
     return {
         service,

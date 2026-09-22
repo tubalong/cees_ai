@@ -9,7 +9,7 @@ import {
   ToolCallStatus,
 } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
-import type { ConnectorContextInput, PublicTurnMode, PublicTurnStreamEvent } from '../assistant.types';
+import type { ConnectorContextInput, PublicToolConfirmation, PublicTurnMode, PublicTurnStreamEvent } from '../assistant.types';
 import { EventService } from '../conversation/event.service';
 import { lockConversationForUpdate } from '../conversation/conversation-transaction-lock';
 import type { KnowledgeToolCitation, ToolSource } from '../tools/tool.types';
@@ -333,6 +333,30 @@ export class TurnStateService {
     });
   }
 
+  /**
+   * 写操作待确认：程序化批准通过后不执行，先落为待确认草稿。
+   * ToolCall 由 PROPOSED 直接进入 AWAITING_CONFIRMATION（从未进入 EXECUTING，
+   * 因此不存在“执行中丢失租约”的恢复语义）；事件携带确认预览，供客户端渲染确认卡片。
+   */
+  async awaitToolConfirmation(input: {
+    toolCallId: string;
+    turnId: string;
+    tenantId: string;
+    conversationId: string;
+    executionOwner: string;
+    summary: string;
+    confirmation: PublicToolConfirmation;
+  }): Promise<boolean> {
+    return this.settleToolCall({
+      ...input,
+      expectedStatus: ToolCallStatus.PROPOSED,
+      status: ToolCallStatus.AWAITING_CONFIRMATION,
+      eventStatus: 'awaiting_confirmation',
+      executionToken: null,
+      result: { summary: input.summary, resourceType: null, resourceId: null, sources: [] },
+    });
+  }
+
   /** 执行成功：保存稳定资源引用；访问 URL 一律由资源接口按需生成，不进事件与快照。 */
   async completeToolCall(input: {
     toolCallId: string;
@@ -574,14 +598,18 @@ export class TurnStateService {
     executionOwner: string;
     expectedStatus: ToolCallStatus;
     status: ToolCallStatus;
-    eventStatus: 'completed' | 'failed' | 'rejected';
+    eventStatus: 'completed' | 'failed' | 'rejected' | 'awaiting_confirmation';
     executionToken: string | null;
     code?: string;
     summary: string;
     /** 详细错误信息，仅落库与事件携带；回喂模型只使用 summary。 */
     errorMessage?: string;
+    /** 写操作待确认预览；仅 eventStatus 为 awaiting_confirmation 时携带。 */
+    confirmation?: PublicToolConfirmation;
     result: StableToolResult;
   }): Promise<boolean> {
+    // 待确认不等于失败：它既不是业务成功，也不是错误，因此不写 errorCode / errorMessage。
+    const settled = input.eventStatus === 'completed' || input.eventStatus === 'awaiting_confirmation';
     return this.prisma.$transaction(async (transaction) => {
       const now = new Date();
       const updated = await transaction.toolCall.updateMany({
@@ -607,8 +635,8 @@ export class TurnStateService {
           completedAt: new Date(),
           leaseExpiresAt: null,
           result: input.result as unknown as Prisma.InputJsonObject,
-          errorCode: input.eventStatus === 'completed' ? null : input.code ?? 'TOOL_EXECUTION_FAILED',
-          errorMessage: input.eventStatus === 'completed' ? null : input.errorMessage ?? input.summary,
+          errorCode: settled ? null : input.code ?? 'TOOL_EXECUTION_FAILED',
+          errorMessage: settled ? null : input.errorMessage ?? input.summary,
           executedResourceType: input.result.resourceType,
           executedResourceId: input.result.resourceId,
         },
@@ -638,7 +666,10 @@ export class TurnStateService {
             : null,
           sources: input.eventStatus === 'completed' ? input.result.sources : [],
           citations: input.eventStatus === 'completed' ? (input.result.citations ?? []) : [],
-          error: input.eventStatus === 'completed'
+          ...(input.eventStatus === 'awaiting_confirmation'
+            ? { confirmation: input.confirmation ?? null }
+            : {}),
+          error: settled
             ? null
             : {
               code: input.code ?? 'TOOL_EXECUTION_FAILED',

@@ -35,6 +35,7 @@ import {
 } from '../assistant.types';
 import { ConversationService } from '../conversation/conversation.service';
 import { EventService } from '../conversation/event.service';
+import { AssistantActionDraftService } from '../drafts/assistant-action-draft.service';
 import { ToolPolicyError, ToolPolicyService } from '../tools/tool-policy.service';
 import { ToolRegistryService } from '../tools/tool-registry';
 import { KNOWLEDGE_SEARCH_TOOL_NAME, WEB_SEARCH_TOOL_NAME } from '../tools/tool.types';
@@ -85,6 +86,7 @@ export class TurnRunnerService implements OnModuleDestroy {
     private readonly messageContent: AssistantMessageContentService,
     private readonly intentCapability: IntentCapabilityService,
     private readonly userMemory: UserMemoryService,
+    private readonly actionDrafts: AssistantActionDraftService,
   ) { }
 
   onModuleDestroy(): void {
@@ -639,6 +641,8 @@ export class TurnRunnerService implements OnModuleDestroy {
 
       let approval: ReturnType<ToolPolicyService['approve']>;
       let executionPermissions = input.permissions;
+      /** 执行瞬间实时解析出的角色；业务 Service 可能按角色判断，不能只传权限。 */
+      let executionRoles: string[] = [];
       try {
         if (!(await isActiveMembership(
           this.prisma,
@@ -653,6 +657,7 @@ export class TurnRunnerService implements OnModuleDestroy {
           input.membershipId,
         );
         executionPermissions = currentAuthorization.permissions;
+        executionRoles = currentAuthorization.roles;
         approval = this.toolPolicy.approve({
           name: call.name,
           arguments: call.arguments,
@@ -670,6 +675,75 @@ export class TurnRunnerService implements OnModuleDestroy {
           summary: rejection.summary,
         });
         if (!settled) return { limitExceeded: false, ownershipLost: true };
+        continue;
+      }
+
+      /**
+       * 写操作确认：声明了 buildConfirmation 的 WRITE 工具不在此处执行。
+       * 先把参数快照与预览落为待确认草稿，把 ToolCall 置为 AWAITING_CONFIRMATION，
+       * 并以 awaiting_confirmation 的 tool_result 事件把确认卡片推给客户端；
+       * 真正的副作用由 AssistantActionDraftService 在用户确认后执行。
+       * 预览生成失败（如上级部门已不存在）按工具被拒绝处理，让模型据实说明。
+       */
+      if (approval.definition.riskLevel === 'WRITE' && approval.definition.buildConfirmation) {
+        let confirmation; let draft;
+        try {
+          confirmation = await approval.definition.buildConfirmation(
+            {
+              tenantId: input.conversation.tenantId,
+              userId: input.userId,
+              membershipId: input.membershipId,
+              requestId: input.requestId,
+              permissions: executionPermissions,
+              roles: executionRoles,
+            },
+            approval.parsedArguments,
+          );
+          draft = await this.actionDrafts.createDraft({
+            tenantId: input.conversation.tenantId,
+            conversationId: input.conversation.id,
+            turnId: input.turnId,
+            membershipId: input.membershipId,
+            userId: input.userId,
+            requestId: input.requestId,
+            toolCallId: effectiveToolCallId,
+            toolName: approval.definition.name,
+            toolVersion: approval.definition.version,
+            riskLevel: approval.definition.riskLevel,
+            arguments: approval.parsedArguments,
+            confirmation,
+          });
+        } catch (error) {
+          const rejection = toToolFailure(error);
+          const settled = await this.state.rejectToolCall({
+            toolCallId: effectiveToolCallId,
+            turnId: input.turnId,
+            tenantId: input.conversation.tenantId,
+            conversationId: input.conversation.id,
+            executionOwner: input.executionOwner,
+            code: rejection.code,
+            summary: rejection.summary,
+          });
+          if (!settled) return { limitExceeded: false, ownershipLost: true };
+          continue;
+        }
+
+        const awaiting = await this.state.awaitToolConfirmation({
+          toolCallId: effectiveToolCallId,
+          turnId: input.turnId,
+          tenantId: input.conversation.tenantId,
+          conversationId: input.conversation.id,
+          executionOwner: input.executionOwner,
+          summary: confirmation.summary,
+          confirmation: {
+            draftId: draft.draftId,
+            toolName: approval.definition.name,
+            title: confirmation.title,
+            fields: confirmation.fields,
+            expiresAt: draft.expiresAt.toISOString(),
+          },
+        });
+        if (!awaiting) return { limitExceeded: false, ownershipLost: true };
         continue;
       }
 
@@ -701,6 +775,7 @@ export class TurnRunnerService implements OnModuleDestroy {
             executionToken,
             signal: input.signal,
             permissions: executionPermissions,
+            roles: executionRoles,
             knowledgeBaseEnabled: input.capabilities.knowledgeBase,
             webSearchEnabled: input.capabilities.webSearch,
           },
