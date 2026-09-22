@@ -10,7 +10,10 @@
 - 已落地：增加 `ConnectorHost` 和通用 Electron IPC/Preload API，统一列表、状态、连接、解绑、工具发现、执行、失败刷新和状态事件。
 - 已落地：Desktop 连接器市场通过 `ConnectorManifest[]` 动态渲染卡片，并通过通用 Preload API 查询状态、连接、解绑和监听状态事件。
 - 已保留：`window.cees.connectors.dingtalk` 与旧钉钉 IPC/状态事件继续兼容，用于 Profile 选择、DWS 版本检查、升级与回滚等提供方扩展能力。
+- 已落地：增加通用 `HttpApiTransport`，统一固定服务地址、路径白名单、超时、响应大小限制、JSON 解析和结构化错误。
+- 已落地：腾讯会议 Manifest、Adapter、市场入口和五类只读工具 Schema；服务端 OAuth 尚未接入时明确返回 `SERVER_OAUTH_REQUIRED`，不伪造成功结果。
 - 待实现：远程 MCP Transport 和混合执行方式。
+- 待实现：腾讯会议服务端 OAuth/Token 托管和只读 API 网关。
 - 待实现：连接器进入 Assistant 原生 Tool Loop，以及写操作的二次确认机制。
 
 ## 2. 目标
@@ -38,6 +41,7 @@ ConnectorContext
 ConnectorAdapter
 ConnectorRegistry
 LocalCliTransport
+HttpApiTransport
 ConnectorHost
 ```
 
@@ -48,12 +52,13 @@ Renderer
     -> 通用 Connector Preload API
         -> ConnectorHost
             -> ConnectorRegistry
-                -> DingTalkConnectorAdapter
-                    -> LocalCliTransport
-                        -> dws
+                -> DingTalkConnectorAdapter -> LocalCliTransport -> dws
+                -> TencentMeetingConnectorAdapter
+                    -> CEES API Connector Gateway（待实现）
+                        -> Tencent Meeting OAuth / Open API
 ```
 
-通用 IPC 当前包括 `list/status/connect/disconnect/tools/execute` 和统一状态事件。市场页根据 Manifest 的安装、解绑、授权与版本管理声明决定通用交互；Profile 选择、版本升级与回滚仍属于钉钉扩展能力，暂不强制所有连接器实现。本阶段不修改公开 OpenAPI、不修改 Prisma、不新增企业微信或腾讯会议连接器，也不改变对话前执行 DWS 并通过 `connectorContexts` 注入结果的现有流程。
+通用 IPC 当前包括 `list/status/connect/disconnect/tools/execute` 和统一状态事件。市场页根据 Manifest 的安装、解绑、授权与版本管理声明决定通用交互；Profile 选择、版本升级与回滚仍属于钉钉扩展能力，暂不强制所有连接器实现。腾讯会议当前只完成 Desktop 基础适配，尚未修改公开 OpenAPI、Prisma 或 Assistant Tool Loop；其真实 OAuth 和查询必须先通过契约优先流程进入 `apps/api`。现有钉钉对话前执行 DWS 并通过 `connectorContexts` 注入结果的流程不变。
 
 ## 4. Manifest
 
@@ -65,7 +70,7 @@ Manifest 描述连接器的静态能力，包括：
 - 授权方式；
 - 是否支持安装、解绑、账号 Profile、动态工具和版本管理。
 
-当前钉钉 Manifest 声明为 Desktop 本地 CLI、OAuth 授权、支持安装、解绑、账号 Profile、动态工具与版本管理。注册中心新增连接器后，市场页可直接展示其名称、描述、连接状态和基础生命周期操作，无需复制一套页面。Manifest 只描述能力，不保存 Token、Cookie、Secret 或用户账号数据。
+当前钉钉 Manifest 声明为 Desktop 本地 CLI、OAuth 授权、支持安装、解绑、账号 Profile、动态工具与版本管理。腾讯会议 Manifest 声明为 API 侧 HTTP API、OAuth 授权、不安装本地组件并支持动态只读工具。注册中心新增连接器后，市场页可直接展示其名称、描述、连接状态和基础生命周期操作，无需复制一套页面。Manifest 只描述能力，不保存 Token、Cookie、Secret 或用户账号数据。
 
 ## 5. Local CLI Transport
 
@@ -85,10 +90,15 @@ Manifest 描述连接器的静态能力，包括：
 - 模型不能指定可执行文件、Shell、环境变量或任意本地路径。
 - 外部数据写入 CEES 正式业务资源时仍由 `apps/api` 进行租户、权限和审计校验。
 - 通用类型不改变钉钉现有的只读过滤、参数白名单、输出脱敏和结果大小限制。
+- API 型连接器的第三方应用 Secret、Access Token 和 Refresh Token 必须保存在 `apps/api`，不得写入 Desktop Manifest、Renderer Storage 或安装包。
+- `HttpApiTransport` 只能请求 Adapter 预先配置的固定服务和路径前缀，模型不能直接指定 URL、Header 或认证信息。
+
+腾讯会议阶段设计见 [腾讯会议连接器](../product/tencent-meeting-connector.md)。
 
 ## 7. 后续演进
 
-1. 接入企业微信或腾讯会议适配器，验证 Manifest 驱动市场与通用生命周期。
-2. 按真实需求增加 Remote MCP Transport 和混合执行方式。
-3. 将连接器调用接入 Assistant 原生 Tool Loop。
-4. 为写操作增加风险分级、显式二次确认和审计闭环。
+1. 在契约和 `apps/api` 中补齐腾讯会议 OAuth、Token 托管和只读 API 网关。
+2. 完成腾讯会议 Desktop Adapter 与服务端网关联调，验证 API 执行型连接器。
+3. 按真实需求增加 Remote MCP Transport 和混合执行方式。
+4. 将连接器调用接入 Assistant 原生 Tool Loop。
+5. 为写操作增加风险分级、显式二次确认和审计闭环。
