@@ -5,6 +5,7 @@ import '../../core/auth_controller.dart';
 import '../../core/l10n.dart';
 import '../../core/mobile_api.dart';
 import '../../shared/async_list_view.dart';
+import '../../shared/layout.dart';
 
 const _meetingStatusLabels = {'DRAFT': '草稿', 'SCHEDULED': '已安排', 'IN_PROGRESS': '进行中', 'COMPLETED': '已完成', 'CANCELLED': '已取消'};
 const _meetingStatusColors = {'DRAFT': Color(0xffa5adbc), 'SCHEDULED': Color(0xff3478ff), 'IN_PROGRESS': Color(0xfff5a623), 'COMPLETED': Color(0xff1fbf75), 'CANCELLED': Color(0xfff0564a)};
@@ -62,9 +63,9 @@ class _MeetingsTabState extends ConsumerState<MeetingsTab> {
     final identity = ref.watch(authControllerProvider).value;
     return Column(children: [
       Padding(
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+        padding: EdgeInsets.fromLTRB(pagePadding(context), 0, pagePadding(context), 10),
         child: Row(children: [
-          Expanded(child: SizedBox(height: 38, child: ListView(scrollDirection: Axis.horizontal, children: [
+          Expanded(child: SizedBox(height: kFilterStripHeight, child: ListView(scrollDirection: Axis.horizontal, children: [
             Padding(padding: const EdgeInsets.only(right: 8), child: ChoiceChip(label: Text(context.tr('workbench.all')), selected: statusFilter.isEmpty, onSelected: (_) { setState(() => statusFilter = ''); _load(); })),
             for (final entry in _meetingStatusLabels.entries) Padding(padding: const EdgeInsets.only(right: 8), child: ChoiceChip(label: Text(entry.value), selected: statusFilter == entry.key, onSelected: (_) { setState(() => statusFilter = entry.key); _load(); })),
           ]))),
@@ -232,7 +233,9 @@ class _MeetingDetailSheetBodyState extends ConsumerState<_MeetingDetailSheetBody
       maxChildSize: .94,
       builder: (sheetContext, scrollController) => ListView(
         controller: scrollController,
-        padding: const EdgeInsets.fromLTRB(18, 12, 18, 32),
+        // 弹窗底部固定 32px 未覆盖刘海屏 34pt 安全区，最后一个参会人/
+        // 纪要按钮会与 Home Indicator 重叠，改按安全区与键盘高度推导。
+        padding: EdgeInsets.fromLTRB(pagePadding(context), 12, pagePadding(context), sheetBottomInset(context, gap: 16)),
         children: [
           Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: const Color(0xffd7dce7), borderRadius: BorderRadius.circular(2)))),
           const SizedBox(height: 14),
@@ -355,7 +358,7 @@ class _MeetingCreateSheetBodyState extends State<_MeetingCreateSheetBody> {
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: EdgeInsets.fromLTRB(18, 12, 18, MediaQuery.of(context).viewInsets.bottom + 24),
+    padding: EdgeInsets.fromLTRB(pagePadding(context), 12, pagePadding(context), keyboardBottomInset(context, gap: 24)),
     child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
       Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: const Color(0xffd7dce7), borderRadius: BorderRadius.circular(2)))),
       const SizedBox(height: 16),

@@ -5,6 +5,7 @@ import '../../core/auth_controller.dart';
 import '../../core/l10n.dart';
 import '../../core/mobile_api.dart';
 import '../../shared/async_list_view.dart';
+import '../../shared/layout.dart';
 
 /// 通知中心：当前成员可见通知与已读操作。
 class NotificationsTab extends ConsumerStatefulWidget {
@@ -62,7 +63,9 @@ class _NotificationsTabState extends ConsumerState<NotificationsTab> {
   @override
   Widget build(BuildContext context) => Column(children: [
     Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+      padding: EdgeInsets.fromLTRB(pagePadding(context), 0, pagePadding(context), 10),
+      // 紧凑屏下「未读过滤 + 全部已读 + 未读计数」四个元素容易溢出，
+      // 计数文字改为可收缩并省略，保证不出现 RenderFlex overflow。
       child: Row(children: [
         FilterChip(
           label: Text(context.tr('workbench.unreadOnly')),
@@ -70,8 +73,8 @@ class _NotificationsTabState extends ConsumerState<NotificationsTab> {
           onSelected: (value) { setState(() => unreadOnly = value); _load(); },
         ),
         const Spacer(),
-        TextButton(onPressed: unreadCount > 0 ? _markAll : null, child: Text(context.tr('workbench.markAllRead'))),
-        Text('${context.tr('workbench.unread')} $unreadCount', style: const TextStyle(fontSize: 12, color: Color(0xffa5adbc))),
+        TextButton(onPressed: unreadCount > 0 ? _markAll : null, child: Text(context.tr('workbench.markAllRead'), maxLines: 1, overflow: TextOverflow.ellipsis)),
+        Flexible(child: Text('${context.tr('workbench.unread')} $unreadCount', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: Color(0xffa5adbc)))),
       ]),
     ),
     Expanded(

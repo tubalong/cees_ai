@@ -5,6 +5,7 @@ import '../../core/auth_controller.dart';
 import '../../core/l10n.dart';
 import '../../core/mobile_api.dart';
 import '../../shared/async_list_view.dart';
+import '../../shared/layout.dart';
 
 const _dataScopes = ['SELF', 'DEPARTMENT', 'DEPARTMENT_TREE', 'PROJECT', 'CUSTOM', 'TENANT'];
 
@@ -45,7 +46,7 @@ class _RolesTabState extends ConsumerState<RolesTab> {
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+          padding: EdgeInsets.fromLTRB(pagePadding(context), 0, pagePadding(context), 12),
           child: Row(
             children: [
               Expanded(

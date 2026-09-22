@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'layout.dart';
+
 /// 通用的「加载 / 错误 / 空 / 列表」四态列表容器。
 class AsyncListView extends StatelessWidget {
   const AsyncListView({
@@ -9,7 +11,7 @@ class AsyncListView extends StatelessWidget {
     required this.emptyText,
     required this.onRefresh,
     required this.children,
-    this.padding = const EdgeInsets.fromLTRB(16, 0, 16, 104),
+    this.padding,
   });
 
   final bool loading;
@@ -17,7 +19,9 @@ class AsyncListView extends StatelessWidget {
   final String emptyText;
   final Future<void> Function() onRefresh;
   final List<Widget> children;
-  final EdgeInsetsGeometry padding;
+
+  /// 不传时按平台尺寸与导航安全区动态计算底部留白。
+  final EdgeInsetsGeometry? padding;
 
   @override
   Widget build(BuildContext context) {
@@ -39,7 +43,11 @@ class AsyncListView extends StatelessWidget {
     }
     return RefreshIndicator(
       onRefresh: onRefresh,
-      child: ListView(padding: padding, children: children),
+      child: ListView(
+        padding: padding ??
+            EdgeInsets.fromLTRB(pagePadding(context), 0, pagePadding(context), contentBottomInset(context)),
+        children: children,
+      ),
     );
   }
 }
@@ -51,7 +59,7 @@ class _Centered extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Center(
         child: Padding(
-          padding: const EdgeInsets.only(bottom: 104),
+          padding: EdgeInsets.only(bottom: contentBottomInset(context)),
           child: child,
         ),
       );

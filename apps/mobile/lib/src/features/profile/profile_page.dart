@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/auth_controller.dart';
 import '../../core/l10n.dart';
 import '../../core/mobile_api.dart';
+import '../../shared/layout.dart';
 
 class ProfilePage extends ConsumerStatefulWidget {
   const ProfilePage({super.key});
@@ -52,7 +53,16 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
         child: RefreshIndicator(
           onRefresh: _load,
           child: ListView(
-            padding: const EdgeInsets.fromLTRB(18, 14, 18, 104),
+            // 原先写死 `104`：紧凑屏上左右留白偏大、机身又偏窄，长昵称与
+            // 角色文本容易被挤到换行；底部 `104` 在无 Home Indicator 的机型
+            // 上会多出一大块空白，在刘海屏上又不足。改由页面边距与导航
+            // 安全区推导，键盘弹起时也能正确让位。
+            padding: EdgeInsets.fromLTRB(
+              pagePadding(context),
+              14,
+              pagePadding(context),
+              contentBottomInset(context),
+            ),
             children: [
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -67,7 +77,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
               ),
               const SizedBox(height: 18),
               Container(
-                padding: const EdgeInsets.all(20),
+                padding: EdgeInsets.all(pagePadding(context)),
                 decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(20)),
@@ -105,7 +115,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
               ),
               const SizedBox(height: 16),
               Container(
-                padding: const EdgeInsets.all(16),
+                padding: EdgeInsets.all(pagePadding(context)),
                 decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(20)),

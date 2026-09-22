@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/auth_controller.dart';
 import '../../core/l10n.dart';
+import '../../shared/layout.dart';
 import 'departments_tab.dart';
 import 'invitations_tab.dart';
 import 'members_tab.dart';
@@ -30,13 +31,19 @@ class _OrganizationPageState extends ConsumerState<OrganizationPage> {
 
     if (selectedIndex >= tabs.length) selectedIndex = 0;
 
+    // 四个等宽标签在 iPhone SE / mini 上每格仅约 85pt，英文/日文标签
+    // （Members / Departments…）会超出容器；同时 42pt 高低于 Apple 建议的
+    // 44pt 最小触控目标。这里抬高到 44pt，紧凑屏再缩字号并允许省略号。
+    final compact = isCompactWidth(context);
+    final tabFontSize = compact ? 13.0 : 14.0;
+
     return Scaffold(
       body: SafeArea(
         bottom: false,
         child: Column(
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+              padding: EdgeInsets.fromLTRB(pagePadding(context), 14, pagePadding(context), 12),
               child: Row(
                 children: [
                   Text(context.tr('org.title'), style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
@@ -48,7 +55,7 @@ class _OrganizationPageState extends ConsumerState<OrganizationPage> {
               Expanded(child: Center(child: Text(context.tr('org.noPermission'), style: const TextStyle(color: Color(0xff8f98a8)))))
             else ...[
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
+                padding: EdgeInsets.symmetric(horizontal: pagePadding(context)),
                 child: Row(
                   children: List.generate(tabs.length, (index) {
                     final selected = index == selectedIndex;
@@ -57,7 +64,7 @@ class _OrganizationPageState extends ConsumerState<OrganizationPage> {
                         onTap: () => setState(() => selectedIndex = index),
                         child: AnimatedContainer(
                           duration: const Duration(milliseconds: 180),
-                          height: 42,
+                          height: kFilterStripHeight,
                           margin: const EdgeInsets.symmetric(horizontal: 3),
                           alignment: Alignment.center,
                           decoration: BoxDecoration(
@@ -66,7 +73,13 @@ class _OrganizationPageState extends ConsumerState<OrganizationPage> {
                           ),
                           child: Text(
                             tabs[index].label,
-                            style: TextStyle(color: selected ? Colors.white : const Color(0xff737c8d), fontWeight: selected ? FontWeight.w600 : FontWeight.w400),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: tabFontSize,
+                              color: selected ? Colors.white : const Color(0xff737c8d),
+                              fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                            ),
                           ),
                         ),
                       ),

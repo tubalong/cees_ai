@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/l10n.dart';
+import '../../shared/layout.dart';
 import '../../shared/search_field.dart';
 
 class MessagesPage extends StatefulWidget {
@@ -28,7 +29,7 @@ class _MessagesPageState extends State<MessagesPage> {
       body: SafeArea(
         bottom: false,
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 14, 16, 104),
+          padding: EdgeInsets.fromLTRB(pagePadding(context), 14, pagePadding(context), contentBottomInset(context)),
           children: [
             Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
               Text(context.tr('messages.title'),

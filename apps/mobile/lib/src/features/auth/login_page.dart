@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/auth_controller.dart';
 import '../../core/l10n.dart';
 import '../../core/mobile_api.dart';
+import '../../shared/layout.dart';
 
 String? _requiredValue(BuildContext context, String? value) =>
     value == null || value.trim().isEmpty ? context.tr('login.required') : null;
@@ -33,6 +34,9 @@ class _LoginPageState extends ConsumerState<LoginPage> {
   @override
   Widget build(BuildContext context) {
     final loading = ref.watch(authControllerProvider).isLoading;
+    // 紧凑屏判定与左边距统一走 `shared/layout.dart`，避免这里再写 `< 360` / `24`
+    // 一类魔数：iPhone SE / 12 mini 级宽度下必须收紧边距，否则表单两侧被挤压。
+    final compact = isCompactWidth(context);
     ref.listen(authControllerProvider, (_, next) { 
       next.whenOrNull(error: (error, __) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(apiErrorMessage(error))));
@@ -43,7 +47,13 @@ class _LoginPageState extends ConsumerState<LoginPage> {
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
+            // 键盘弹起时让出键盘高度，否则小屏上「激活」按钮会被键盘遮挡。
+            padding: EdgeInsets.fromLTRB(
+              pagePadding(context),
+              pagePadding(context),
+              pagePadding(context),
+              pagePadding(context) + MediaQuery.viewInsetsOf(context).bottom,
+            ),
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 420),
               child: Form(
@@ -52,20 +62,20 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     Container(
-                      width: 58,
-                      height: 58,
+                      width: compact ? 52 : 58,
+                      height: compact ? 52 : 58,
                       alignment: Alignment.center,
                       decoration: BoxDecoration(
                         gradient: const LinearGradient(colors: [Color(0xff3478ff), Color(0xff8b4dff)]),
                         borderRadius: BorderRadius.circular(16),
                       ),
-                      child: const Text('B', style: TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.w700)),
+                      child: Text('B', style: TextStyle(color: Colors.white, fontSize: compact ? 25 : 28, fontWeight: FontWeight.w700)),
                     ),
-                    const SizedBox(height: 28),
-                    Text(context.tr('login.title'), style: const TextStyle(fontSize: 27, fontWeight: FontWeight.w700)),
+                    SizedBox(height: compact ? 22 : 28),
+                    Text(context.tr('login.title'), style: TextStyle(fontSize: compact ? 24 : 27, fontWeight: FontWeight.w700)),
                     const SizedBox(height: 6),
                     Text(context.tr('login.subtitle'), style: const TextStyle(color: Color(0xff7f8898))),
-                    const SizedBox(height: 28),
+                    SizedBox(height: compact ? 22 : 28),
                     TextFormField(
                       controller: tenantController,
                       decoration: InputDecoration(labelText: context.tr('login.tenantCode'), prefixIcon: const Icon(Icons.apartment_outlined)),
