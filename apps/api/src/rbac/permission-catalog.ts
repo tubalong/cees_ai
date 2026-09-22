@@ -124,6 +124,11 @@ export const TENANT_ADMIN_ROLE_CODE = 'tenant_admin';
 /**
  * 新建租户角色时默认授予的 AI 能力权限：图片/文档的生成与查看，
  * 以及文档库与知识库的基础读取（AI 对话工具集对每个账号默认可用）。
+ *
+ * 变更约束：本集合只在“新建角色”时生效，存量角色不会自动获得新增或移除的权限码。
+ * 调整集合时必须同步编写存量补齐（或回收）迁移——参照
+ * `20260920055850_role_default_knowledge_base_read`（CROSS JOIN + ON CONFLICT DO NOTHING
+ * 幂等补齐 `knowledge_base.read`）；否则新建角色与存量角色的默认能力集合将长期不一致。
  */
 export const DEFAULT_ROLE_PERMISSION_CODES = [
     'image.read',
