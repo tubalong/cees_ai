@@ -14,7 +14,10 @@ describe('TencentMeetingCredentialCipher', () => {
 
     it('拒绝被篡改的密文', () => {
         const encrypted = cipher.encrypt('refresh-token-secret');
-        const tampered = `${encrypted.slice(0, -1)}${encrypted.endsWith('A') ? 'B' : 'A'}`;
+        const parts = encrypted.split('.');
+        const ciphertext = Buffer.from(parts[2], 'base64url');
+        ciphertext[0] ^= 1;
+        const tampered = `${parts[0]}.${parts[1]}.${ciphertext.toString('base64url')}`;
 
         expect(() => cipher.decrypt(tampered)).toThrow();
     });
