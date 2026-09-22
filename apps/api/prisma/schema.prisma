@@ -453,6 +453,19 @@ enum DingTalkSyncScope {
   VISIBLE_SCOPE
 }
 
+enum TencentMeetingConnectionState {
+  AUTHORIZING
+  READY
+  ERROR
+}
+
+enum TencentMeetingTokenStatus {
+  VALID
+  EXPIRING
+  REFRESH_FAILED
+  REVOKED
+}
+
 model Tenant {
   id                        String                         @id @default(uuid()) @db.Uuid
   code                      String                         @unique
@@ -512,6 +525,8 @@ model Tenant {
   dingTalkDepartments       DingTalkDepartment[]
   dingTalkUsers             DingTalkUser[]
   dingTalkSyncJobs          DingTalkSyncJob[]
+  tencentMeetingConnections TencentMeetingConnection[]
+  tencentMeetingOAuthStates TencentMeetingOAuthState[]
   createdAt                 DateTime                       @default(now()) @map("created_at")
   updatedAt                 DateTime                       @updatedAt @map("updated_at")
   deletedAt                 DateTime?                      @map("deleted_at")
@@ -588,6 +603,8 @@ model TenantMembership {
   ownedLegalContracts     LegalContract[]                @relation("LegalContractOwner")
   legalStatusChanges      LegalContractStatusHistory[]   @relation("LegalContractStatusActor")
   dingTalkUserBindings    DingTalkUser[]
+  tencentMeetingConnection TencentMeetingConnection?
+  tencentMeetingOAuthStates TencentMeetingOAuthState[]
   hrProfile               HrProfile?
   hrLeaveBalances         HrLeaveBalance[]
   hrLeaveRequests         HrLeaveRequest[]
@@ -1852,6 +1869,56 @@ model DingTalkSyncJob {
   @@index([tenantId, createdAt])
   @@index([integrationId, status])
   @@map("dingtalk_sync_jobs")
+}
+
+model TencentMeetingConnection {
+  id                     String                        @id @default(uuid()) @db.Uuid
+  tenantId               String                        @map("tenant_id") @db.Uuid
+  tenant                 Tenant                        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  membershipId           String                        @unique @map("membership_id") @db.Uuid
+  membership             TenantMembership              @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  accessTokenCiphertext  String?                       @map("access_token_ciphertext") @db.Text
+  refreshTokenCiphertext String?                       @map("refresh_token_ciphertext") @db.Text
+  accessTokenExpiresAt   DateTime?                     @map("access_token_expires_at")
+  refreshTokenExpiresAt  DateTime?                     @map("refresh_token_expires_at")
+  externalUserId         String?                       @map("external_user_id")
+  displayName            String?                       @map("display_name")
+  organizationId         String?                       @map("organization_id")
+  organizationName       String?                       @map("organization_name")
+  grantedScopes          Json                          @default("[]") @map("granted_scopes")
+  state                  TencentMeetingConnectionState @default(AUTHORIZING)
+  tokenStatus            TencentMeetingTokenStatus?    @map("token_status")
+  authorizedAt           DateTime?                     @map("authorized_at")
+  lastVerifiedAt         DateTime?                     @map("last_verified_at")
+  lastErrorCode          String?                       @map("last_error_code")
+  lastErrorMessage       String?                       @map("last_error_message")
+  refreshLeaseId         String?                       @map("refresh_lease_id") @db.Uuid
+  refreshLeaseExpiresAt  DateTime?                     @map("refresh_lease_expires_at")
+  createdAt              DateTime                      @default(now()) @map("created_at")
+  updatedAt              DateTime                      @updatedAt @map("updated_at")
+  version                Int                           @default(1)
+
+  @@unique([tenantId, membershipId])
+  @@index([tenantId, state])
+  @@index([refreshLeaseExpiresAt])
+  @@map("tencent_meeting_connections")
+}
+
+model TencentMeetingOAuthState {
+  id           String           @id @default(uuid()) @db.Uuid
+  tenantId     String           @map("tenant_id") @db.Uuid
+  tenant       Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  membershipId String           @map("membership_id") @db.Uuid
+  membership   TenantMembership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  stateHash    String           @unique @map("state_hash") @db.Char(64)
+  expiresAt    DateTime         @map("expires_at")
+  consumedAt   DateTime?        @map("consumed_at")
+  failureCode  String?          @map("failure_code")
+  createdAt    DateTime         @default(now()) @map("created_at")
+
+  @@index([tenantId, membershipId, expiresAt])
+  @@index([expiresAt, consumedAt])
+  @@map("tencent_meeting_oauth_states")
 }
 
 model KnowledgeBase {

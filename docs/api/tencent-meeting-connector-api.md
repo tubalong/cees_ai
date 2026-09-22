@@ -1,6 +1,6 @@
 # 腾讯会议连接器 API
 
-> 状态：契约已冻结，服务端尚未实现。公开契约版本：`0.37.0`。
+> 状态：OAuth 后端已实现，只读工具网关待实现。公开契约版本：`0.37.1`。
 
 完整定义以 `packages/contracts/openapi/openapi.yaml` 为准。当前契约只定义个人 OAuth 授权、连接状态、解绑、只读工具发现和只读工具执行，不包含创建、修改或取消会议等写操作。
 
@@ -53,9 +53,10 @@
 `GET /connectors/tencent-meeting/oauth/callback` 是公开浏览器回调：
 
 - `state` 必填；
-- 授权成功时 `code` 必填；
+- 授权成功时使用腾讯会议官方回调字段 `auth_code`；
+- `code` 仅作为 `0.37.0` 的废弃兼容别名，与 `auth_code` 同时存在时值必须一致；
 - 用户拒绝授权时可返回 `error` 和 `error_description`；
-- `code` 与 `error` 至少存在一个；
+- `auth_code`（或兼容字段 `code`）与 `error` 至少存在一个；
 - State 必须短期有效、绑定租户成员、只能消费一次；
 - Token 交换和账号查询完成后返回简单 HTML，引导用户回到 CEES Desktop；
 - 回调页面和日志不得输出授权码、Access Token、Refresh Token 或应用 Secret。
@@ -127,13 +128,37 @@
 
 错误响应不得向客户端泄露上游请求签名、应用 Secret、Token、完整提供方响应或内部网络地址。
 
-## 8. 后续实现要求
+## 8. OAuth 服务端实现
 
-- 契约实现前先增加 Prisma migration，保存成员级连接、OAuth State 和加密 Token；
-- Secret 只来自服务端环境变量或平台 Secret；
-- Token 使用服务端密钥加密，Refresh Token 更新必须具备并发控制；
-- 授权、回调、刷新、执行和解绑均记录租户、成员、连接器、请求和结果审计事件；
+OAuth 后端位于 `apps/api/src/tencent-meeting`，数据库迁移为
+`apps/api/prisma/migrations/20260922120000_tencent_meeting_oauth_backend/migration.sql`。
+
+已实现：
+
+- 当前成员发起授权、公开回调、状态查询和幂等解绑；
+- State 仅保存 SHA-256 摘要，最长 64 字节，默认十分钟过期并一次性消费；
+- Access Token 与 Refresh Token 使用 AES-256-GCM 加密保存；
+- Token 临近过期时通过数据库刷新租约避免并发重复刷新；
+- 授权开始、成功、失败、刷新成功、刷新失败和解绑审计；
+- 回调 HTML 不输出授权码、Token、Secret 或上游原始响应；
+- 回调优先读取腾讯会议官方 `auth_code`，兼容旧契约 `code`。
+
+服务端配置：
+
+| 配置项 | 说明 |
+| --- | --- |
+| `TENCENT_MEETING_SDK_ID` | 腾讯会议市场应用 SDK ID |
+| `TENCENT_MEETING_SECRET` | 腾讯会议市场应用 Secret |
+| `TENCENT_MEETING_REDIRECT_URI` | 与腾讯会议应用后台登记完全一致的 OAuth 回调地址 |
+| `TENCENT_MEETING_CREDENTIAL_ENCRYPTION_KEY` | 32 字节十六进制或 Base64 Token 加密密钥 |
+
+生产环境不得使用 `change_me`，回调地址必须使用 HTTPS。解绑当前只删除 CEES 服务端托管凭据；腾讯会议未提供适用的 OAuth 撤销接口时，本地删除作为 CEES 的权威解绑结果。
+
+## 9. 后续实现要求
+
+- 实现 `/tools` 与 `/executions` 腾讯会议只读 API 网关；
+- 执行入口继续记录租户、成员、连接器、请求和结果审计事件；
 - Desktop 只能调用 CEES API，不能直接持有腾讯会议应用 Secret 或 Token；
-- 写操作不在 `0.37.0` 范围内，后续必须单独提升契约版本并增加二次确认设计。
+- 写操作不在 `0.37.1` 范围内，后续必须单独提升契约版本并增加二次确认设计。
 
 产品与运行时设计见 [腾讯会议连接器](../product/tencent-meeting-connector.md) 和 [Desktop 连接器运行时](../architecture/connector-runtime.md)。

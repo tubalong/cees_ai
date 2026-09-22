@@ -22,6 +22,7 @@ import { AssignmentModule } from './assignment/assignment.module';
 import { HrModule } from './hr/hr.module';
 import { FinanceModule } from './finance/finance.module';
 import { LegalModule } from './legal/legal.module';
+import { TencentMeetingModule } from './tencent-meeting/tencent-meeting.module';
 
 @Module({}) export class IntegrationModule { }
 @Module({}) export class CommonModule { }
@@ -30,5 +31,5 @@ export const BusinessModules: Type[] = [
     OrganizationModule, RbacModule, UserModule, UserMemoryModule, ProjectModule, TaskModule, AssistantModule, WorkReportModule,
     FileModule, KnowledgeModule, ResourceModule, DocumentModule, MeetingModule, NotificationModule, DashboardModule,
     AiOrchestrationModule, IntegrationModule, AuditModule, CommonModule, JobsModule, DingTalkModule, AssignmentModule,
-    HrModule, FinanceModule, LegalModule,
+    HrModule, FinanceModule, LegalModule, TencentMeetingModule,
 ];

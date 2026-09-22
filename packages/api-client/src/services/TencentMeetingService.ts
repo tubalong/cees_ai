@@ -51,13 +51,15 @@ export class TencentMeetingService {
     /**
      * 接收腾讯会议 OAuth 回调
      * 腾讯会议浏览器授权完成后的公开回调。服务端只依据一次性 State 定位并验证发起授权的租户成员，
-     * 交换并加密保存 Token 后返回可关闭的 HTML 页面。code 与 error 至少提供一个；State 过期、无效或已消费时拒绝处理。
+     * 交换并加密保存 Token 后返回可关闭的 HTML 页面。auth_code（或兼容字段 code）与 error 至少提供一个；
+     * State 过期、无效或已消费时拒绝处理。服务端优先使用腾讯会议官方返回的 auth_code。
      *
      * @returns string 授权结果已处理；HTML 页面提示用户返回 CEES Desktop
      * @throws ApiError
      */
     public static completeTencentMeetingAuthorization({
         state,
+        authCode,
         code,
         error,
         errorDescription,
@@ -67,7 +69,12 @@ export class TencentMeetingService {
          */
         state: string,
         /**
-         * 腾讯会议返回的授权码；授权成功时必填
+         * 腾讯会议官方回调返回的授权码；授权成功时必填
+         */
+        authCode?: string,
+        /**
+         * 历史兼容授权码字段；新接入必须使用 auth_code，若与 auth_code 同时存在则值必须一致
+         * @deprecated
          */
         code?: string,
         /**
@@ -84,6 +91,7 @@ export class TencentMeetingService {
             url: '/connectors/tencent-meeting/oauth/callback',
             query: {
                 'state': state,
+                'auth_code': authCode,
                 'code': code,
                 'error': error,
                 'error_description': errorDescription,

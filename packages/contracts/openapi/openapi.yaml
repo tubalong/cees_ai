@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CEES AI API
-  version: 0.37.0
+  version: 0.37.1
   description: 以本文件为唯一事实源的公开 API 契约。资源与操作按 docs/api 约定补充。
 
 servers:
@@ -5362,7 +5362,8 @@ paths:
       summary: 接收腾讯会议 OAuth 回调
       description: |
         腾讯会议浏览器授权完成后的公开回调。服务端只依据一次性 State 定位并验证发起授权的租户成员，
-        交换并加密保存 Token 后返回可关闭的 HTML 页面。code 与 error 至少提供一个；State 过期、无效或已消费时拒绝处理。
+        交换并加密保存 Token 后返回可关闭的 HTML 页面。auth_code（或兼容字段 code）与 error 至少提供一个；
+        State 过期、无效或已消费时拒绝处理。服务端优先使用腾讯会议官方返回的 auth_code。
       operationId: completeTencentMeetingAuthorization
       tags: [TencentMeeting]
       security: []
@@ -5371,11 +5372,17 @@ paths:
           in: query
           required: true
           description: 服务端签发并持久化校验的一次性 OAuth State
-          schema: { type: string, minLength: 32, maxLength: 512 }
+          schema: { type: string, minLength: 32, maxLength: 64 }
+        - name: auth_code
+          in: query
+          required: false
+          description: 腾讯会议官方回调返回的授权码；授权成功时必填
+          schema: { type: string, minLength: 1, maxLength: 2048 }
         - name: code
           in: query
           required: false
-          description: 腾讯会议返回的授权码；授权成功时必填
+          deprecated: true
+          description: 历史兼容授权码字段；新接入必须使用 auth_code，若与 auth_code 同时存在则值必须一致
           schema: { type: string, minLength: 1, maxLength: 2048 }
         - name: error
           in: query
