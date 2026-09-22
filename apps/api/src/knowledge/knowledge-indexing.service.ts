@@ -234,8 +234,15 @@ export class KnowledgeIndexingService implements OnModuleInit, OnModuleDestroy {
             );
             // 删除与索引并发竞态：索引完成后文档可能已被软删，此时不再标回 READY，
             // 并补删刚写入的向量索引，避免已删文档残留可检索的向量数据。
+            // 恢复竞态同理：删除→恢复→追加新版本后，处理中的旧版本不再是
+            // currentVersionId；若旧任务晚于补删才写向量，此校验能兜住残留
+            // （见 knowledge-document.service restoreSourceDocument）。
             const surviving = await this.prisma.knowledgeDocument.findFirst({
-                where: { id: document.id, deletedAt: null },
+                where: {
+                    id: document.id,
+                    deletedAt: null,
+                    currentVersionId: version.id,
+                },
                 select: { id: true },
             });
             if (!surviving) {
@@ -249,8 +256,10 @@ export class KnowledgeIndexingService implements OnModuleInit, OnModuleDestroy {
                 });
                 return true;
             }
-            await this.prisma.knowledgeDocument.update({
-                where: { id: document.id },
+            // 标 READY 同样要求版本仍为当前版本：校验与写入之间被追加新版本时
+            // 放弃标 READY 并补删，避免旧任务把新版本重置的状态写坏。
+            const marked = await this.prisma.knowledgeDocument.updateMany({
+                where: { id: document.id, currentVersionId: version.id },
                 data: {
                     status: KnowledgeDocumentStatus.READY,
                     retryCount: 0,
@@ -258,6 +267,17 @@ export class KnowledgeIndexingService implements OnModuleInit, OnModuleDestroy {
                     lastProcessedAt: new Date(),
                 },
             });
+            if (marked.count !== 1) {
+                void this.deleteDocumentVersionIndex(
+                    document.tenantId,
+                    document.createdBy ?? 'system',
+                    version.id,
+                ).catch((error: unknown) => {
+                    const message = error instanceof Error ? error.message : 'unknown error';
+                    this.logger.warn(`版本已替换索引竞态清理失败（版本 ${version.id}）：${message}`);
+                });
+                return true;
+            }
             await this.writeAudit(document, 'KNOWLEDGE_DOCUMENT_INDEXED', AuditOutcome.SUCCESS, {
                 documentVersionId: version.id,
                 indexedChunks: indexResult.indexed_chunks,

@@ -3,6 +3,12 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import type {
+    ConnectorContext,
+    ConnectorPlannedCall,
+    ConnectorTool,
+} from './connectors/core/connector.types';
+export { DINGTALK_CONNECTOR_MANIFEST } from './connectors/dingtalk/dingtalk.manifest';
 import {
     configureDingTalkDwsExecutable,
     fetchDingTalkVisibleOrganization,
@@ -45,25 +51,11 @@ let installRoot: string | null = null;
 let installPromise: Promise<DingTalkDwsStatus> | null = null;
 let releaseOperationPromise: Promise<DingTalkConnectorReleaseResult> | null = null;
 
-export interface DingTalkConnectorContext {
-    provider: 'DINGTALK';
-    toolId: string;
-    toolName: string;
-    fetchedAt: string;
-    data: Record<string, unknown>;
-}
+export type DingTalkConnectorContext = ConnectorContext<'DINGTALK'>;
 
-export interface DingTalkConnectorTool {
-    toolId: string;
-    name: string;
-    description: string;
-    parameters: Record<string, unknown>;
-}
+export type DingTalkConnectorTool = ConnectorTool;
 
-export interface DingTalkConnectorPlannedCall {
-    toolId: string;
-    arguments: Record<string, unknown>;
-}
+export type DingTalkConnectorPlannedCall = ConnectorPlannedCall;
 
 export interface NormalizedDingTalkAttendanceRecord {
     id: string | null;
@@ -123,7 +115,7 @@ interface PersistedDingTalkReleaseState {
     lastOperation?: DingTalkConnectorReleaseOperation;
 }
 
-export interface DiscoveredDwsTool extends DingTalkConnectorTool {
+export interface DiscoveredDwsTool extends ConnectorTool {
     cliPath: string;
     rawParameters: Record<string, DwsParameter>;
     positionals: DwsPositional[];

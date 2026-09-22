@@ -44,6 +44,7 @@ describe('ListKnowledgeBasesTool', () => {
                 createdAt: new Date(),
                 updatedAt: new Date(),
                 myPermission: 'EDITOR',
+                retrievable: true,
             },
             {
                 id: 'kb-2',
@@ -60,6 +61,7 @@ describe('ListKnowledgeBasesTool', () => {
                 createdAt: new Date(),
                 updatedAt: new Date(),
                 myPermission: 'READER',
+                retrievable: false,
             },
         ]);
         const result = await definition!.execute({
@@ -90,12 +92,17 @@ describe('ListKnowledgeBasesTool', () => {
             instruction: string;
         };
         expect(summary.candidates).toEqual([
-            expect.objectContaining({ knowledge_base_id: 'kb-1', name: '产品知识库', my_permission: 'EDITOR' }),
-            expect.objectContaining({ knowledge_base_id: 'kb-2', name: '公司制度库', my_permission: 'READER' }),
+            expect.objectContaining({
+                knowledge_base_id: 'kb-1', name: '产品知识库', my_permission: 'EDITOR', retrievable: true,
+            }),
+            expect.objectContaining({
+                knowledge_base_id: 'kb-2', name: '公司制度库', my_permission: 'READER', retrievable: false,
+            }),
         ]);
         expect(summary.instruction).toContain('save_to_knowledge');
         expect(summary.instruction).toContain('不要输出 READER/EDITOR/MANAGER');
         expect(summary.instruction).toContain('不要向用户展示 knowledge_base_id');
+        expect(summary.instruction).toContain('retrievable 为 false');
     });
 
     it('instructs the model to stop when the user is not a member of any knowledge base', async () => {

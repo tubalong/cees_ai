@@ -1,15 +1,29 @@
-import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { promisify } from 'node:util';
+import type {
+    ConnectorRecoveryAction,
+    ConnectorState,
+    ConnectorStatus,
+} from './connectors/core/connector.types';
+import {
+    LocalCliTransport,
+    decodeLocalCliOutput,
+    parseLocalCliJsonOutput,
+    type LocalCliExecutable,
+} from './connectors/transports/local-cli.transport';
 
-const execFileAsync = promisify(execFile);
 const ROOT_DEPARTMENT_ID = '1';
 const MAX_DEPARTMENTS = 5000;
 const MAX_USERS = 20000;
 let managedExecutablePath: string | null = null;
+const dwsTransport = new LocalCliTransport({
+    resolveExecutable: resolveDwsExecutable,
+});
+type DingTalkDwsExecutable = LocalCliExecutable<'MANAGED' | 'SYSTEM'> & {
+    source: 'MANAGED' | 'SYSTEM';
+};
 
-export type DingTalkConnectorState = 'NOT_INSTALLED' | 'AUTH_REQUIRED' | 'PROFILE_REQUIRED' | 'READY' | 'ERROR';
-export type DingTalkConnectorRecoveryAction = 'INSTALL' | 'MANUAL_INSTALL' | 'AUTHORIZE' | 'SELECT_PROFILE' | 'RETRY' | 'NONE';
+export type DingTalkConnectorState = ConnectorState;
+export type DingTalkConnectorRecoveryAction = ConnectorRecoveryAction;
 
 export interface DingTalkDwsProfile {
     profile: string;
@@ -40,23 +54,15 @@ export function configureDingTalkDwsExecutable(executablePath: string): void {
     managedExecutablePath = executablePath;
 }
 
-export interface DingTalkDwsStatus {
-    state: DingTalkConnectorState;
-    installed: boolean;
-    authenticated: boolean;
+export interface DingTalkDwsStatus extends ConnectorStatus {
     source: 'MANAGED' | 'SYSTEM' | null;
     installSupported: boolean;
-    version: string | null;
     profile: string | null;
     corpId: string | null;
     corpName: string | null;
     externalUserId: string | null;
     externalUserName: string | null;
     profiles: DingTalkDwsProfile[];
-    checkedAt: string;
-    issueCode: string | null;
-    recoveryAction: DingTalkConnectorRecoveryAction;
-    error: string | null;
 }
 
 export interface DingTalkDwsSnapshot {
@@ -360,62 +366,33 @@ export async function runDws(
     timeout: number,
     envOverrides: NodeJS.ProcessEnv = {},
 ): Promise<string> {
-    const executable = resolveDwsExecutable();
-    const command = executable.source === 'MANAGED'
-        ? executable.command
-        : process.platform === 'win32' ? 'cmd.exe' : 'dws';
-    const commandArgs = executable.source === 'MANAGED'
-        ? args
-        : process.platform === 'win32' ? ['/d', '/s', '/c', 'dws', ...args] : args;
     try {
-        const result = await execFileAsync(command, commandArgs, {
-            encoding: null,
-            timeout,
-            windowsHide: true,
-            maxBuffer: 16 * 1024 * 1024,
-            env: {
-                ...process.env,
-                ...envOverrides,
-            },
+        return await dwsTransport.execute(args, {
+            timeoutMs: timeout,
+            envOverrides,
+            outputLabel: 'DWS',
         });
-        return decodeDwsOutput(result.stdout);
     } catch (error) {
         throw new DingTalkDwsCommandError(safeError(error), parseDwsFailureDetails(error));
     }
 }
 
-function resolveDwsExecutable(): { command: string; source: 'MANAGED' | 'SYSTEM' } {
+function resolveDwsExecutable(): DingTalkDwsExecutable {
     if (managedExecutablePath && existsSync(managedExecutablePath)) {
         return { command: managedExecutablePath, source: 'MANAGED' };
+    }
+    if (process.platform === 'win32') {
+        return {
+            command: 'cmd.exe',
+            prefixArgs: ['/d', '/s', '/c', 'dws'],
+            source: 'SYSTEM',
+        };
     }
     return { command: 'dws', source: 'SYSTEM' };
 }
 
 export function parseJsonOutput(output: string): unknown {
-    const trimmed = output.trim();
-    if (!trimmed) throw new Error('DWS 未返回 JSON 数据');
-    try {
-        return JSON.parse(trimmed) as unknown;
-    } catch {
-        const lines = trimmed.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-        for (let index = lines.length - 1; index >= 0; index -= 1) {
-            try {
-                return JSON.parse(lines[index]!) as unknown;
-            } catch {
-                continue;
-            }
-        }
-        const jsonStarts = [trimmed.indexOf('{'), trimmed.indexOf('[')]
-            .filter((index) => index >= 0)
-            .sort((left, right) => left - right);
-        for (const jsonStart of jsonStarts) {
-            try {
-                return JSON.parse(trimmed.slice(jsonStart)) as unknown;
-            } catch {
-            }
-        }
-        throw new Error('DWS 返回了无法解析的 JSON 数据');
-    }
+    return parseLocalCliJsonOutput(output, 'DWS');
 }
 
 export function selectCurrentProfile(payload: unknown): Record<string, unknown> {
@@ -494,7 +471,7 @@ function classifyDwsIssue(error: unknown): {
     if (/多个.*组织|multiple.*profile|选择.*组织|profile.*(required|ambiguous)/.test(message)) {
         return { state: 'PROFILE_REQUIRED', code: 'DWS_PROFILE_REQUIRED', recoveryAction: 'SELECT_PROFILE' };
     }
-    if (/timed out|timeout|etimedout/.test(message)) {
+    if (/超时|timed out|timeout|etimedout/.test(message)) {
         return { state: 'ERROR', code: 'DWS_TIMEOUT', recoveryAction: 'RETRY' };
     }
     return { state: 'ERROR', code: 'DWS_UNAVAILABLE', recoveryAction: 'RETRY' };
@@ -675,12 +652,11 @@ function safeError(error: unknown): string {
     return error instanceof Error ? error.message.slice(0, 500) : 'DWS 调用失败';
 }
 
+/**
+ * 保留原导出名（错误路径与 `tests/dingtalk-dws.test.cjs` 仍在用）。
+ * 实现已下沉到共享传输层，保证 DWS 与其它本地 CLI 的解码行为一致：
+ * 严格 UTF-8 探测 → Windows 回退 GB18030（修复中文 Windows 下的命令输出乱码）。
+ */
 export function decodeDwsOutput(output: string | Buffer): string {
-    if (typeof output === 'string') return output;
-    try {
-        return new TextDecoder('utf-8', { fatal: true }).decode(output);
-    } catch {
-        if (process.platform === 'win32') return new TextDecoder('gb18030').decode(output);
-        return output.toString('utf8');
-    }
+    return decodeLocalCliOutput(output);
 }

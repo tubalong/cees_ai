@@ -447,6 +447,7 @@ const OTHER_CONVERSATION_ID = '90000000-0000-0000-0000-000000000003';
 const kickSpy = jest.fn();
 const deleteVersionIndexSpy = jest.fn();
 const createMaterializedFileSpy = jest.fn();
+const deleteMaterializedFileSpy = jest.fn().mockResolvedValue(undefined);
 
 describe('KnowledgeDocumentService.saveFromSource', () => {
     const actor: KnowledgeSourceSaveActor = {
@@ -804,6 +805,7 @@ describe('KnowledgeDocumentService.saveFromSource', () => {
         );
         prisma.conversationMessage.findFirst.mockResolvedValue(messageRecord());
         createMaterializedFileSpy.mockResolvedValue(NEW_FILE_OBJECT_ID);
+        deleteMaterializedFileSpy.mockClear();
         prisma.documentVersion.findFirst
             .mockResolvedValueOnce({ versionNumber: 1 })
             .mockResolvedValueOnce({
@@ -825,6 +827,11 @@ describe('KnowledgeDocumentService.saveFromSource', () => {
 
         expect(prisma.auditLog.create).toHaveBeenCalledWith({
             data: expect.objectContaining({ action: 'KNOWLEDGE_DOCUMENT_VERSION_CREATED' }),
+        });
+        // 冲突回退到追加版本：本次物化的快照未被引用，应补偿删除避免孤儿文件。
+        expect(deleteMaterializedFileSpy).toHaveBeenCalledWith({
+            tenantId: TENANT_ID,
+            fileObjectId: NEW_FILE_OBJECT_ID,
         });
         expect(result).toEqual(expect.objectContaining({ id: DOCUMENT_ID, versionNumber: 2 }));
     });
@@ -964,6 +971,7 @@ function createService(prisma: Record<string, any>): KnowledgeDocumentService {
     );
     const fileService = {
         createMaterializedFile: createMaterializedFileSpy,
+        deleteMaterializedFile: deleteMaterializedFileSpy,
     } as unknown as FileService;
     const indexingService = {
         kick: kickSpy,

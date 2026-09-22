@@ -47,7 +47,8 @@ export class ListKnowledgeBasesTool implements OnModuleInit {
             permissions: context.permissions,
         });
         // knowledge_base_id 是后续 save_to_knowledge 的参数引用，必须进模型上下文；
-        // my_permission 是转存门槛判断依据（仅 EDITOR/MANAGER 可写），其余只放业务内容。
+        // my_permission 是转存门槛判断依据（仅 EDITOR/MANAGER 可写），retrievable
+        // 标注该库是否参与 search_knowledge 检索，其余只放业务内容。
         const summary = JSON.stringify({
             type: 'knowledge_base_candidates',
             candidates: candidates.map((candidate) => ({
@@ -56,12 +57,15 @@ export class ListKnowledgeBasesTool implements OnModuleInit {
                 description: candidate.description ?? '',
                 member_count: candidate.memberCount,
                 my_permission: candidate.myPermission,
+                retrievable: candidate.retrievable,
             })),
             instruction: candidates.length === 0
                 ? '当前用户不在任何知识库的成员列表中，请如实告知用户，不要调用 save_to_knowledge。'
                 : '用户询问有哪些知识库时，如实列出全部候选（含只读库，可附带说明权限）。'
                     + '向用户说明权限时只用中文表述（只读 / 可编辑 / 管理员），不要输出 READER/EDITOR/MANAGER 等枚举词，'
                     + '也不要向用户展示 knowledge_base_id。'
+                    + 'retrievable 为 false 的库（部门/项目/全员可见但用户非成员）仅供浏览清单，不参与 search_knowledge 检索：'
+                    + '用户想检索这类库内容时，如实说明需要先成为该库成员。'
                     + '用户想保存内容时，只能选择 my_permission 为 EDITOR 或 MANAGER 的库：'
                     + '用户确认后调用 save_to_knowledge 并传对应 knowledge_base_id；'
                     + '若用户尚未确认，先展示可写候选并询问用户选择，绝不替用户挑选。',

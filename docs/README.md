@@ -10,6 +10,7 @@
 | [知识库管理](product/knowledge-base-management.md) | 知识库 CRUD、成员授权、文档上传与处理状态机、公开知识库查询 |
 | [钉钉组织架构与人员同步](product/dingtalk-organization-sync.md) | 企业应用凭证或 DWS/MCP 可见组织快照、部门和人员外部镜像同步 |
 | [钉钉 DWS/MCP 连接器](product/dingtalk-mcp-connector.md) | 连接器市场、一键安装 DWS、本地授权、对话只读上下文、可见范围导入和租户管理员确认流程 |
+| [腾讯会议连接器](product/tencent-meeting-connector.md) | HTTP API 型连接器基础、服务端 OAuth 安全边界、只读工具目录与后续 API 接入顺序 |
 | [分配策略与人财法](product/assignment-and-hr-finance-legal.md) | AssignmentPolicy、完整 HR 与 Finance 已实现；Legal 契约已冻结待实现 |
 | [用户个人资料管理](product/user-profile-management.md) | 当前租户成员查询和修改自己的展示资料 |
 | [密码修改与凭证安全](security/password-management.md) | 租户成员和平台管理员修改自己的密码及会话安全规则 |
@@ -17,7 +18,7 @@
 | [ai-service-foundation](architecture/ai-service-foundation.md) | 通用 LLM、多模型路由、LangGraph 与 LlamaIndex 基础设施 |
 | [contextual-chat](architecture/contextual-chat.md) | Standard/Ultra、多轮上下文、SSE 与对话摘要压缩 |
 | [用户级记忆](architecture/user-memory.md) | 跨会话用户级长期记忆设计：仅用户级不做租户级、提炼与合并流程、注入与分块计划 |
-| [公开 AI 对话链路与 Token 计量](architecture/public-chat-api-and-token-metering.md) | 客户端本地历史、NestJS Chat API、ai-service 调用和企业/成员/会话/轮次用量记录 |
+| [AI 调用与 Token 计量](architecture/public-chat-api-and-token-metering.md) | AiInvocationRecorderService 与 AIInvocationLog：模型调用、Token 记录与写入规则 |
 | [ai-tool-calling](architecture/ai-tool-calling.md) | 通用 Tool Calling、Tool Turn SSE、NestJS 工具执行边界 |
 | [web-search](architecture/web-search.md) | Tavily 联网搜索工具、来源回填与安全边界 |
 | [task-scope-proposal](architecture/task-scope-proposal.md) | 通用任务 tasks.scope 的 C/D 协调基线、来源追溯与跨职能任务边界 |
@@ -36,6 +37,7 @@
 | [项目管理 API](api/project-management-api.md) | 项目、成员、负责人和状态命令接口 |
 | [知识库管理 API](api/knowledge-base-api.md) | 知识库 CRUD、成员权限、文档上传和公开查询接口 |
 | [钉钉组织架构与人员同步 API](api/dingtalk-organization-sync-api.md) | 钉钉绑定、组织人员同步和同步任务查询 |
+| [腾讯会议连接器 API](api/tencent-meeting-connector-api.md) | 成员级 OAuth 授权、状态、解绑、只读工具发现与执行契约 |
 | [分配策略与人财法 API](api/assignment-and-hr-finance-legal-api.md) | AssignmentPolicy、HR 与 Finance 已实现；Legal 契约已冻结待实现 |
 | [database](database/README.md) | 数据模型与迁移约定 |
 | [security](security/README.md) | 安全模型、租户隔离与审计 |

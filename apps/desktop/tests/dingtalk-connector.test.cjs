@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
+    DINGTALK_CONNECTOR_MANIFEST,
     buildPersonalAttendanceRecordArguments,
     buildDwsArguments,
     buildDingTalkReadToolCatalog,
@@ -13,6 +14,23 @@ const {
     parseDingTalkReadTools,
     sanitizeConnectorData,
 } = require('../dist-electron/dingtalk-connector.js');
+
+test('钉钉以本地 CLI 连接器 Manifest 声明运行能力', () => {
+    assert.deepEqual(DINGTALK_CONNECTOR_MANIFEST, {
+        id: 'dingtalk',
+        name: '钉钉',
+        description: '通过命令行管理钉钉全产品能力：AI 表格、考勤、日历、群聊与机器人、通讯录、开放平台文档、DING 消息、钉钉文档、钉钉云盘、AI 听记、邮箱、OA 审批、日志、待办。',
+        icon: 'dingtalk',
+        transportType: 'LOCAL_CLI',
+        executionLocation: 'DESKTOP',
+        authType: 'OAUTH',
+        supportsInstall: true,
+        supportsDisconnect: true,
+        supportsProfiles: true,
+        supportsDynamicTools: true,
+        supportsVersionManagement: true,
+    });
+});
 
 test('规范化并比较 DWS 语义版本', () => {
     assert.equal(normalizeDwsVersion('dws version v1.0.62'), 'v1.0.62');

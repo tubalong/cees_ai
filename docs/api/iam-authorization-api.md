@@ -239,7 +239,7 @@ GET /audit-events/{auditEventId}
 
 Permission 是平台预置能力目录，不开放租户级写接口。角色 `code` 在租户内唯一且创建后不可修改，`name` 是展示名称，租户创建的角色默认不是系统角色。
 
-新建自定义角色默认授予 `image.read`、`document.read`、`knowledge_base.read`、`ai.image.generate`、`ai.document.generate` 五项权限（图片/文档的生成与查看 + 文档库/知识库基础读取，2026-09-20 起默认集合），管理员可在角色编辑中调整；存量角色由迁移 `20260920055850_role_default_knowledge_base_read` 统一补齐 `knowledge_base.read`。
+新建自定义角色默认授予 `image.read`、`document.read`、`knowledge_base.read`、`ai.image.generate`、`ai.document.generate` 五项权限（图片/文档的生成与查看 + 文档库/知识库基础读取，2026-09-20 起默认集合），管理员可在角色编辑中调整；存量角色由迁移 `20260920055850_role_default_knowledge_base_read` 统一补齐 `knowledge_base.read`。默认集合只在“新建角色”时生效：调整 `DEFAULT_ROLE_PERMISSION_CODES` 必须同步编写存量补齐/回收迁移，否则新建角色与存量角色的默认能力集合长期不一致。
 
 角色权限接口使用 `PUT` 替换最终 Permission 集合。修改角色或权限后，必须清除受影响成员的授权缓存并写入审计。
 

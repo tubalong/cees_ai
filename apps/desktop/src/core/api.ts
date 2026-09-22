@@ -37,6 +37,31 @@ export interface MeResult extends AuthContext {
     permissions: string[];
 }
 
+export interface TencentMeetingAuthorization {
+    authorizationUrl: string;
+    expiresAt: string;
+    pollAfterMs: number;
+}
+
+export interface TencentMeetingConnection {
+    state: 'NOT_CONNECTED' | 'AUTHORIZING' | 'READY' | 'ERROR';
+    authenticated: boolean;
+    account: {
+        externalUserId: string;
+        displayName: string | null;
+        organizationId: string | null;
+        organizationName: string | null;
+    } | null;
+    grantedScopes: string[];
+    tokenStatus: 'MISSING' | 'VALID' | 'EXPIRING' | 'REFRESH_FAILED' | 'REVOKED';
+    authorizedAt: string | null;
+    tokenExpiresAt: string | null;
+    lastVerifiedAt: string | null;
+    lastErrorCode: string | null;
+    lastErrorMessage: string | null;
+    updatedAt: string;
+}
+
 export interface PlatformLoginInput {
     account: string;
     password: string;
@@ -313,6 +338,18 @@ export async function login(input: LoginInput): Promise<LoginResult> {
 
 export async function getMe(): Promise<MeResult> {
     return authorizedRequest<MeResult>('v1/auth/me');
+}
+
+export function startTencentMeetingAuthorization(): Promise<TencentMeetingAuthorization> {
+    return authorizedRequest<TencentMeetingAuthorization>('v1/connectors/tencent-meeting/authorization', { method: 'POST' });
+}
+
+export function getTencentMeetingConnection(): Promise<TencentMeetingConnection> {
+    return authorizedRequest<TencentMeetingConnection>('v1/connectors/tencent-meeting/status');
+}
+
+export function disconnectTencentMeeting(): Promise<void> {
+    return authorizedRequest<void>('v1/connectors/tencent-meeting/authorization', { method: 'DELETE' });
 }
 
 export async function getUserProfile(): Promise<UserProfile> {

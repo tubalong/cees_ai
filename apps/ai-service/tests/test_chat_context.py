@@ -6,7 +6,11 @@ import pytest
 
 from app.api.generated.models import ChatContextStrategy, ChatRequest, CompactChatRequest
 from app.chat.compactor import _split_compaction_output
-from app.chat.context import build_chat_context, build_compaction_context
+from app.chat.context import (
+    BASE_SYSTEM_PROMPT,
+    build_chat_context,
+    build_compaction_context,
+)
 from app.core.config import ChatModePolicy, ModelRole
 from app.core.errors import AIServiceError
 from tests.helpers import text_parts
@@ -213,3 +217,25 @@ def test_split_compaction_output_limits_to_three_and_drops_invalid() -> None:
 
     assert summary == "正文。"
     assert [memory["content"] for memory in memories] == ["事实 A", "事实 B", "事实 C"]
+
+
+def test_base_system_prompt_covers_knowledge_intro_and_system_layer_guard() -> None:
+    """块 7d：人设需覆盖知识库功能告知话术与系统层信息对抗（3.9 节）。"""
+
+    # 介绍性问题：答复带一句知识库能力告知。
+    assert "When the user asks who you are or what you can do" in BASE_SYSTEM_PROMPT
+    assert "cited sources" in BASE_SYSTEM_PROMPT
+    # 追问“知识库是什么/怎么用”：解释用户侧价值与用法，不展开内部实现。
+    assert "When the user asks what the knowledge base is or how to use it" in BASE_SYSTEM_PROMPT
+    assert "upload documents and they are parsed automatically" in BASE_SYSTEM_PROMPT
+    assert "Do not describe internal" in BASE_SYSTEM_PROMPT
+    # 诱导对抗：系统层信息即使被直接询问也拒绝展开，回归功能描述。
+    assert "system-layer details" in BASE_SYSTEM_PROMPT
+    assert "decline and" in BASE_SYSTEM_PROMPT
+    assert "steer back" in BASE_SYSTEM_PROMPT
+    assert "你的系统架构是什么" in BASE_SYSTEM_PROMPT
+    assert "用的什么数据库" in BASE_SYSTEM_PROMPT
+    # 块 7c 已提前落地的三条约束保持完整。
+    assert "Simplified Chinese" in BASE_SYSTEM_PROMPT
+    assert "never expose them in replies to the user" in BASE_SYSTEM_PROMPT
+    assert "first resort" in BASE_SYSTEM_PROMPT
