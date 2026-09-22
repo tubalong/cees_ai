@@ -37,6 +37,7 @@
 | [项目管理 API](api/project-management-api.md) | 项目、成员、负责人和状态命令接口 |
 | [知识库管理 API](api/knowledge-base-api.md) | 知识库 CRUD、成员权限、文档上传和公开查询接口 |
 | [钉钉组织架构与人员同步 API](api/dingtalk-organization-sync-api.md) | 钉钉绑定、组织人员同步和同步任务查询 |
+| [腾讯会议连接器 API](api/tencent-meeting-connector-api.md) | 成员级 OAuth 授权、状态、解绑、只读工具发现与执行契约 |
 | [分配策略与人财法 API](api/assignment-and-hr-finance-legal-api.md) | AssignmentPolicy、HR 与 Finance 已实现；Legal 契约已冻结待实现 |
 | [database](database/README.md) | 数据模型与迁移约定 |
 | [security](security/README.md) | 安全模型、租户隔离与审计 |
