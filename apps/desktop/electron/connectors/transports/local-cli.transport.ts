@@ -4,6 +4,34 @@ import { promisify } from 'node:util';
 const defaultExecFile = promisify(execFile);
 const DEFAULT_MAX_BUFFER_BYTES = 16 * 1024 * 1024;
 
+/**
+ * `promisify(execFile)` 的声明在 `encoding: 'buffer'` 下推断不出 `Buffer`，
+ * 这里收口成一个显式签名，避免在每个调用点重复断言。
+ */
+type ExecFileWithBuffer = (
+    file: string,
+    args: string[],
+    options: LocalCliProcessOptions,
+) => Promise<{ stdout: Buffer; stderr: Buffer }>;
+
+/**
+ * 本地 CLI 输出解码。
+ *
+ * 不能让 Node 用 `encoding: 'utf8'` 直接解码：中文 Windows 上部分 CLI（含 DWS）
+ * 按系统 ANSI（GBK/GB18030）输出，强制按 UTF-8 解码会得到乱码。
+ * 这里先以严格模式探测 UTF-8（`fatal: true`），失败则回退为 GB18030（仅 Windows），
+ * 其余平台保留宽松 UTF-8。任何新接入的本地 CLI 都自动获得这一行为。
+ */
+export function decodeLocalCliOutput(output: string | Buffer): string {
+    if (typeof output === 'string') return output;
+    try {
+        return new TextDecoder('utf-8', { fatal: true }).decode(output);
+    } catch {
+        if (process.platform === 'win32') return new TextDecoder('gb18030').decode(output);
+        return output.toString('utf8');
+    }
+}
+
 export interface LocalCliExecutable<Source extends string = string> {
     command: string;
     prefixArgs?: string[];
@@ -11,7 +39,8 @@ export interface LocalCliExecutable<Source extends string = string> {
 }
 
 export interface LocalCliProcessOptions {
-    encoding: 'utf8';
+    /** 拿原始字节交给 decodeLocalCliOutput：编码判定需要看字节，不能在 Node 侧提前定死。 */
+    encoding: 'buffer';
     timeout: number;
     windowsHide: boolean;
     shell: false;
@@ -20,8 +49,8 @@ export interface LocalCliProcessOptions {
 }
 
 export interface LocalCliProcessResult {
-    stdout: string;
-    stderr?: string;
+    stdout: string | Buffer;
+    stderr?: string | Buffer;
 }
 
 export type LocalCliProcessExecutor = (
@@ -85,10 +114,10 @@ export class LocalCliTransport {
 
     constructor(private readonly options: LocalCliTransportOptions) {
         this.executeFile = options.executeFile ?? (async (command, args, processOptions) => {
-            const result = await defaultExecFile(command, args, processOptions);
+            const result = await (defaultExecFile as unknown as ExecFileWithBuffer)(command, args, processOptions);
             return {
-                stdout: String(result.stdout),
-                stderr: String(result.stderr),
+                stdout: result.stdout ?? Buffer.alloc(0),
+                stderr: result.stderr ?? Buffer.alloc(0),
             };
         });
     }
@@ -101,7 +130,7 @@ export class LocalCliTransport {
         const outputLabel = executeOptions.outputLabel ?? '本地 CLI';
         try {
             const result = await this.executeFile(executable.command, commandArgs, {
-                encoding: 'utf8',
+                encoding: 'buffer',
                 timeout: executeOptions.timeoutMs,
                 windowsHide: true,
                 shell: false,
@@ -112,7 +141,7 @@ export class LocalCliTransport {
                     ...executeOptions.envOverrides,
                 },
             });
-            return result.stdout;
+            return decodeLocalCliOutput(result.stdout);
         } catch (error) {
             throw toLocalCliCommandError(error, executable.command, commandArgs, outputLabel);
         }
@@ -198,8 +227,9 @@ function toLocalCliCommandError(
     outputLabel: string,
 ): LocalCliCommandError {
     const record = isRecord(error) ? error : {};
-    const stderr = typeof record.stderr === 'string' ? record.stderr : '';
-    const stdout = typeof record.stdout === 'string' ? record.stdout : '';
+    // 失败输出同样可能是 GBK：错误文案里出现乱码会直接暴露给用户，因此走同一套解码。
+    const stderr = record.stderr === undefined ? '' : decodeLocalCliOutput(record.stderr as string | Buffer);
+    const stdout = record.stdout === undefined ? '' : decodeLocalCliOutput(record.stdout as string | Buffer);
     const exitCode = typeof record.code === 'string' || typeof record.code === 'number' ? record.code : null;
     const signal = typeof record.signal === 'string' ? record.signal : null;
     const timedOut = exitCode === 'ETIMEDOUT' || signal === 'SIGTERM';

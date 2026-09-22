@@ -5,6 +5,7 @@ import '../../core/auth_controller.dart';
 import '../../core/l10n.dart';
 import '../../core/mobile_api.dart';
 import '../../shared/async_list_view.dart';
+import '../../shared/layout.dart';
 
 const _reportStatusLabels = {'DRAFT': '草稿', 'SUBMITTED': '已提交', 'APPROVED': '已通过', 'REJECTED': '已驳回'};
 const _reportStatusColors = {'DRAFT': Color(0xffa5adbc), 'SUBMITTED': Color(0xff3478ff), 'APPROVED': Color(0xff1fbf75), 'REJECTED': Color(0xfff0564a)};
@@ -119,14 +120,18 @@ class _ReportsTabState extends ConsumerState<ReportsTab> {
   @override
   Widget build(BuildContext context) => Column(children: [
     Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+      padding: EdgeInsets.fromLTRB(pagePadding(context), 0, pagePadding(context), 10),
+      // 紧凑屏（iPhone SE / mini）下三个筛选 chip 加新建按钮放在同一行必然溢出，
+      // chip 部分改为横向可滚动且高度按 44pt 触控目标保留。
       child: Row(children: [
-        ChoiceChip(label: Text(context.tr('workbench.all')), selected: typeFilter.isEmpty, onSelected: (_) { setState(() => typeFilter = ''); _load(); }),
+        Expanded(child: SizedBox(height: kFilterStripHeight, child: ListView(scrollDirection: Axis.horizontal, children: [
+          ChoiceChip(label: Text(context.tr('workbench.all')), selected: typeFilter.isEmpty, onSelected: (_) { setState(() => typeFilter = ''); _load(); }),
+          const SizedBox(width: 8),
+          ChoiceChip(label: Text(context.tr('workbench.daily')), selected: typeFilter == 'DAILY', onSelected: (_) { setState(() => typeFilter = 'DAILY'); _load(); }),
+          const SizedBox(width: 8),
+          ChoiceChip(label: Text(context.tr('workbench.weekly')), selected: typeFilter == 'WEEKLY', onSelected: (_) { setState(() => typeFilter = 'WEEKLY'); _load(); }),
+        ]))),
         const SizedBox(width: 8),
-        ChoiceChip(label: Text(context.tr('workbench.daily')), selected: typeFilter == 'DAILY', onSelected: (_) { setState(() => typeFilter = 'DAILY'); _load(); }),
-        const SizedBox(width: 8),
-        ChoiceChip(label: Text(context.tr('workbench.weekly')), selected: typeFilter == 'WEEKLY', onSelected: (_) { setState(() => typeFilter = 'WEEKLY'); _load(); }),
-        const Spacer(),
         FilledButton.tonalIcon(onPressed: _create, icon: const Icon(Icons.edit_note, size: 18), label: Text(context.tr('workbench.newReport'))),
       ]),
     ),

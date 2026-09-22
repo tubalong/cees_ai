@@ -6,6 +6,7 @@ import type {
 } from './connectors/core/connector.types';
 import {
     LocalCliTransport,
+    decodeLocalCliOutput,
     parseLocalCliJsonOutput,
     type LocalCliExecutable,
 } from './connectors/transports/local-cli.transport';
@@ -478,8 +479,8 @@ function classifyDwsIssue(error: unknown): {
 
 export function parseDwsFailureDetails(error: unknown): DwsFailureDetails {
     if (error instanceof DingTalkDwsCommandError) return error.details;
-    const raw = isRecord(error) && typeof error.stderr === 'string'
-        ? error.stderr
+    const raw = isRecord(error) && (typeof error.stderr === 'string' || Buffer.isBuffer(error.stderr))
+        ? decodeDwsOutput(error.stderr)
         : error instanceof Error ? error.message : typeof error === 'string' ? error : '';
     const payload = tryParseJsonFragment(raw);
     const record = isRecord(payload) && isRecord(payload.error) ? payload.error : isRecord(payload) ? payload : {};
@@ -638,7 +639,7 @@ function booleanField(record: Record<string, unknown>, ...keys: string[]): boole
 
 function safeError(error: unknown): string {
     if (isRecord(error)) {
-        const stderr = typeof error.stderr === 'string' ? error.stderr.trim() : '';
+        const stderr = typeof error.stderr === 'string' || Buffer.isBuffer(error.stderr) ? decodeDwsOutput(error.stderr).trim() : '';
         const message = typeof error.message === 'string' ? error.message.trim() : '';
         const value = stderr || message;
         if (value) {
@@ -649,4 +650,13 @@ function safeError(error: unknown): string {
         }
     }
     return error instanceof Error ? error.message.slice(0, 500) : 'DWS 调用失败';
+}
+
+/**
+ * 保留原导出名（错误路径与 `tests/dingtalk-dws.test.cjs` 仍在用）。
+ * 实现已下沉到共享传输层，保证 DWS 与其它本地 CLI 的解码行为一致：
+ * 严格 UTF-8 探测 → Windows 回退 GB18030（修复中文 Windows 下的命令输出乱码）。
+ */
+export function decodeDwsOutput(output: string | Buffer): string {
+    return decodeLocalCliOutput(output);
 }

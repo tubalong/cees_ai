@@ -4,7 +4,7 @@ import { dateKeyToUtcMidnight } from '../common/tenant-time';
 import { PrismaService } from '../database/prisma.service';
 import { DashboardSnapshotService } from '../dashboard/snapshot.service';
 import { TenantContext } from '../tenant/tenant-context';
-import { CreateFinanceLedgerImportDto, FinanceLedgerRowDto, ListFinanceLedgerEntriesQueryDto } from './dto';
+import { CreateFinanceLedgerImportDto, FinanceLedgerRowDto, ListFinanceLedgerEntriesQueryDto, ListFinanceLedgerImportsQueryDto } from './dto';
 
 @Injectable()
 export class FinanceLedgerService {
@@ -28,7 +28,8 @@ export class FinanceLedgerService {
                     tenantId: context.tenantId, fileName: input.fileName.trim(), format: input.format,
                     periodStart, periodEnd, status: FinanceLedgerImportStatus.PARSING,
                     rowCount: input.rows.length, errorCount: errors.length, errors,
-                    uploadedByMembershipId: context.membershipId, startedAt: new Date(), createdBy: context.userId,
+                    uploadedByMembershipId: context.membershipId, sourceFileObjectId: input.sourceFileObjectId ?? null,
+                    startedAt: new Date(), createdBy: context.userId,
                 }
             });
             const inserted = await transaction.financeLedgerEntry.createMany({
@@ -78,6 +79,24 @@ export class FinanceLedgerService {
         const hasNext = items.length > query.limit;
         const page = hasNext ? items.slice(0, query.limit) : items;
         return { items: page.map(serializeEntry), nextCursor: hasNext ? page.at(-1)?.id ?? null : null };
+    }
+
+    /**
+     * 导入历史列表：按创建时间倒序，只返回未删除的批次。
+     * 用于桌面端「导入历史」页签的回滚入口：回滚按批次整体撤销，因此必须先能看到批次。
+     */
+    async listImports(query: ListFinanceLedgerImportsQueryDto): Promise<unknown> {
+        const { tenantId } = this.tenantContext.require();
+        const items = await this.prisma.financeLedgerImport.findMany({
+            where: { tenantId, deletedAt: null },
+            orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+            take: query.limit + 1,
+            cursor: query.cursor ? { id: query.cursor } : undefined,
+            skip: query.cursor ? 1 : 0,
+        });
+        const hasNext = items.length > query.limit;
+        const page = hasNext ? items.slice(0, query.limit) : items;
+        return { items: page.map(serializeImport), nextCursor: hasNext ? page.at(-1)?.id ?? null : null };
     }
 
     async getImport(importId: string): Promise<unknown> {

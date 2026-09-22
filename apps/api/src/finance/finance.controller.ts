@@ -29,6 +29,7 @@ import {
     FinanceProjectSpendQueryDto,
     ListFinanceExpenseReportsQueryDto,
     ListFinanceLedgerEntriesQueryDto,
+    ListFinanceLedgerImportsQueryDto,
     MarkFinanceExpenseReportPaidDto,
     ReviewFinanceExpenseReportDto,
     UpdateFinanceExpenseCategoryDto,
@@ -48,6 +49,10 @@ export class FinanceController {
     @Get('ledger-entries')
     @RequirePermissions('finance.ledger.read')
     listLedgerEntries(@Query() query: ListFinanceLedgerEntriesQueryDto): Promise<unknown> { return this.ledgerService.listEntries(query); }
+
+    @Get('ledger-imports')
+    @RequirePermissions('finance.ledger.read')
+    listLedgerImports(@Query() query: ListFinanceLedgerImportsQueryDto): Promise<unknown> { return this.ledgerService.listImports(query); }
 
     @Post('ledger-imports')
     @RequirePermissions('finance.ledger.manage')

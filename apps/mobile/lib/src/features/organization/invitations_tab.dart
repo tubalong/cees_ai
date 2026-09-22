@@ -6,6 +6,7 @@ import '../../core/auth_controller.dart';
 import '../../core/l10n.dart';
 import '../../core/mobile_api.dart';
 import '../../shared/async_list_view.dart';
+import '../../shared/layout.dart';
 
 class InvitationsTab extends ConsumerStatefulWidget {
   const InvitationsTab({super.key});
@@ -41,7 +42,7 @@ class _InvitationsTabState extends ConsumerState<InvitationsTab> {
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+          padding: EdgeInsets.fromLTRB(pagePadding(context), 0, pagePadding(context), 12),
           child: Row(
             children: [
               Expanded(

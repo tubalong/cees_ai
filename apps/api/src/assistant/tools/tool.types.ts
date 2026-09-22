@@ -1,4 +1,5 @@
 import type { ChatToolDefinition } from '@cees/ai-service-client';
+import type { RequestTenantContext, TenantContext } from '../../tenant/tenant-context';
 
 /** 对话级知识库开关控制的可检索工具名；开关关闭时该工具不进入模型工具列表。 */
 export const KNOWLEDGE_SEARCH_TOOL_NAME = 'knowledge_search';
@@ -25,6 +26,13 @@ export interface ToolExecutionContext {
   /** Turn 被取消时用于终止可取消的外部 I/O。 */
   signal?: AbortSignal;
   permissions: string[];
+  /**
+   * 本次执行时实时解析出的角色码。
+   * 业务 Service 除了权限码，偶尔还会按角色判断（例如钉钉导入要求 tenant_admin），
+   * 因此工具转交业务调用时必须能提供角色，而不能只传权限。
+   * 可选：由 `runAsTenant` 统一归一化为空数组，避免每个构造点都要补字段。
+   */
+  roles?: string[];
   /** 本轮是否允许检索知识库（对话级开关）；开关关闭时模型拿不到知识库工具。 */
   knowledgeBaseEnabled: boolean;
   /**
@@ -83,13 +91,48 @@ export interface ToolDefinition {
   requiredPermissions: string[];
   /**
    * 工具风险级别：READ 只读、WRITE 修改既有业务状态、EXTERNAL 生成外部产物。
-   * 当前 ToolPolicy 尚未消费（预留字段）：接入写操作确认（DRAFT→用户确认）
-   * 与额度计价时按该级别区分确认策略与计费单位，见 assistant-tool-loop.md 第 14 节。
+   * READ 直接执行；WRITE 声明 buildConfirmation 后走待确认草稿；
+   * 生成新资产（图片/文档，EXTERNAL）幂等且无破坏性，仍然直接执行。
    */
   riskLevel: 'READ' | 'WRITE' | 'EXTERNAL';
+  /**
+   * 写操作确认钩子：WRITE 工具声明本钩子后，模型给出的参数不会直接落库，
+   * 而是先落为 AssistantActionDraft 待确认草稿，用户确认后才真正执行。
+   * 钩子只负责生成用户可核对的预览与回喂摘要；权限与参数校验仍由 ToolPolicy 负责。
+   */
+  buildConfirmation?(
+    context: ToolConfirmationContext,
+    input: Record<string, unknown>,
+  ): Promise<ToolConfirmationRequest>;
   /** 校验并解析模型参数；参数非法时抛错，由 ToolPolicy 统一映射为拒绝。 */
   validate(input: unknown): Record<string, unknown>;
   execute(context: ToolExecutionContext, input: Record<string, unknown>): Promise<ToolExecutionResult>;
+}
+
+/**
+ * 确认预览的上下文：只包含身份与租户事实。
+ * 刻意不包含 executionOwner / executionToken / signal——生成预览不执行副作用，
+ * 不应持有轮次租约语义，避免工具作者误以为可以在预览阶段调用业务写服务。
+ */
+export type ToolConfirmationContext = Pick<
+  ToolExecutionContext,
+  'tenantId' | 'userId' | 'membershipId' | 'requestId' | 'permissions' | 'roles'
+>;
+
+/** 待确认草稿的预览字段；只放用户能核对的业务值，不放内部 ID 与权限枚举。 */
+export interface ToolConfirmationField {
+  label: string;
+  value: string;
+}
+
+/** 工具给出的写操作确认信息。 */
+export interface ToolConfirmationRequest {
+  /** 动作标题，例如「新建部门」。 */
+  title: string;
+  /** 预览字段列表，决定确认卡片上展示什么。 */
+  fields: ToolConfirmationField[];
+  /** 回喂模型并写入 TOOL 消息的中文摘要。 */
+  summary: string;
 }
 
 /** 把工具定义转成交给 ai-service 的 ChatToolDefinition（name/description/parameters）。 */
@@ -99,4 +142,32 @@ export function toChatToolDefinition(tool: ToolDefinition): ChatToolDefinition {
     description: tool.description,
     parameters: tool.parameters,
   };
+}
+
+/**
+ * 以工具上下文调用既有业务 Service。
+ *
+ * 业务 Service 普遍通过 `TenantContext.require()` 读上下文（AsyncLocalStorage），
+ * 而工具既可能在后台轮次里执行（无请求上下文，甚至由 `TurnRecoveryService` 在
+ * 定时任务里恢复执行），也可能在确认接口里执行。
+ * 与其给每个业务方法复制一份「显式上下文」重载，这里用 `TenantContext.run`
+ * 把工具上下文注回 ALS：
+ *   - 业务 Service **一行不改**即可被工具复用；
+ *   - 新增工具不再需要业务侧配合，真正只写一个工具文件；
+ *   - 权限与角色都取执行瞬间的实时解析结果，不沿用生成工具清单时的快照。
+ */
+export function runAsTenant<T>(
+  tenantContext: TenantContext,
+  context: ToolConfirmationContext,
+  work: () => T,
+): T {
+  const requestContext: RequestTenantContext = {
+    tenantId: context.tenantId,
+    userId: context.userId,
+    membershipId: context.membershipId,
+    requestId: context.requestId,
+    roles: context.roles ?? [],
+    permissions: context.permissions,
+  };
+  return tenantContext.run(requestContext, work);
 }

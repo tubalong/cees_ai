@@ -4,6 +4,13 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+        此处**故意不在源码里写 CSP meta**。
+        打包时由 vite.config.ts 注入（见 electron/csp.ts），开发期不带 meta。
+        原因：React Refresh 的 preamble 是内联脚本，而多个 CSP 只会取交集、无法被放宽，
+        源码内置禁止 inline 的 meta 会让 dev 直接白屏（can't detect preamble）。
+        开发期的策略由 electron/security.ts 以响应头下发。
+    -->
     <title>CEES 工作台</title>
 </head>
 

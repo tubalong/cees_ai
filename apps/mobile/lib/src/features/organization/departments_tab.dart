@@ -5,6 +5,7 @@ import '../../core/auth_controller.dart';
 import '../../core/l10n.dart';
 import '../../core/mobile_api.dart';
 import '../../shared/async_list_view.dart';
+import '../../shared/layout.dart';
 
 class DepartmentsTab extends ConsumerStatefulWidget {
   const DepartmentsTab({super.key});
@@ -55,7 +56,7 @@ class _DepartmentsTabState extends ConsumerState<DepartmentsTab> {
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+          padding: EdgeInsets.fromLTRB(pagePadding(context), 0, pagePadding(context), 12),
           child: Row(
             children: [
               Expanded(
@@ -91,8 +92,10 @@ class _DepartmentsTabState extends ConsumerState<DepartmentsTab> {
     final memberCount = (node['memberCount'] as num?)?.toInt() ?? 0;
     final disabled = node['status'] == 'DISABLED';
 
+    // 部门树的深度缩进在紧凑屏按 20px 累加会把子部门名称挤没，
+    // 紧凑屏改为 12px 一级，并保留底部卡片间距。
     return Padding(
-      padding: EdgeInsets.only(left: dept.depth * 20.0, bottom: 10),
+      padding: EdgeInsets.only(left: dept.depth * (isCompactWidth(context) ? 12.0 : 20.0), bottom: 10),
       child: Material(
         color: Colors.white,
         borderRadius: BorderRadius.circular(17),
@@ -209,7 +212,7 @@ class _DepartmentsTabState extends ConsumerState<DepartmentsTab> {
           maxChildSize: .9,
           builder: (context, scrollController) => ListView(
             controller: scrollController,
-            padding: const EdgeInsets.all(16),
+            padding: EdgeInsets.all(pagePadding(context)),
             children: [
               Text('${node['name']} · ${context.tr('org.members')}',
                   style: const TextStyle(

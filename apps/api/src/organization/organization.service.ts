@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { AuditOutcome, DepartmentStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
-import { TenantContext } from '../tenant/tenant-context';
+import { RequestTenantContext, TenantContext } from '../tenant/tenant-context';
 import { TenantService } from '../tenant/tenant.service';
 import { TenantMemberListResult, TenantMemberResult } from '../tenant/tenant.types';
 import {
@@ -38,6 +38,16 @@ const departmentSelect = {
 type DepartmentRecord = Prisma.DepartmentGetPayload<{ select: typeof departmentSelect }>;
 type DepartmentHierarchyRecord = Pick<DepartmentRecord, 'id' | 'parentId' | 'status'>;
 
+/** 供 AI 助手部门工具使用的扁平摘要；不包含权限、审计等内部字段。 */
+export interface AssistantDepartmentSummary {
+    id: string;
+    name: string;
+    parentId: string | null;
+    parentName: string | null;
+    memberCount: number;
+    status: DepartmentStatus;
+}
+
 @Injectable()
 export class OrganizationService {
     constructor(
@@ -73,7 +83,46 @@ export class OrganizationService {
     }
 
     async createDepartment(input: CreateDepartmentDto): Promise<DepartmentResult> {
-        const context = this.tenantContext.require();
+        return this.createDepartmentRecord(this.tenantContext.require(), input);
+    }
+
+    /**
+     * AI 助手写工具入口：不读 AsyncLocalStorage，显式接收可信上下文。
+     * 与 `createDepartment` 共用同一实现（父部门校验、同级重名校验、审计、事务），
+     * 因此对话路径不可能绕过业务规则；区别仅在于上下文来源。
+     */
+    async createDepartmentForContext(
+        context: RequestTenantContext,
+        input: CreateDepartmentDto,
+    ): Promise<DepartmentResult> {
+        return this.createDepartmentRecord(context, input);
+    }
+
+    /**
+     * AI 助手发现工具入口：返回扁平部门列表（含上级部门名与成员数）。
+     * 不建树是因为模型需要的是「可消歧的扁平候选 + 上级关系」，而不是展示结构。
+     */
+    async listDepartmentsForAssistant(tenantId: string): Promise<AssistantDepartmentSummary[]> {
+        const departments = await this.prisma.department.findMany({
+            where: { tenantId, deletedAt: null },
+            select: departmentSelect,
+            orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }, { id: 'asc' }],
+        });
+        const nameById = new Map(departments.map((department) => [department.id, department.name]));
+        return departments.map((department) => ({
+            id: department.id,
+            name: department.name,
+            parentId: department.parentId,
+            parentName: department.parentId ? nameById.get(department.parentId) ?? null : null,
+            memberCount: department._count.memberships,
+            status: department.status,
+        }));
+    }
+
+    private async createDepartmentRecord(
+        context: RequestTenantContext,
+        input: CreateDepartmentDto,
+    ): Promise<DepartmentResult> {
         const parentId = input.parentId ?? null;
         await this.validateParent(context.tenantId, parentId);
         const name = normalizeName(input.name);
@@ -117,7 +166,9 @@ export class OrganizationService {
             if (isPrismaError(error, 'P2002')) throw this.nameConflict();
             throw error;
         }
-        return this.getDepartment(departmentId);
+        // 显式用 context.tenantId 读回，不依赖 AsyncLocalStorage，
+        // 使 AI 助手确认路径也能复用同一实现。
+        return toDepartmentResult(await this.requireDepartment(context.tenantId, departmentId));
     }
 
     async updateDepartment(departmentId: string, input: UpdateDepartmentDto): Promise<DepartmentResult> {

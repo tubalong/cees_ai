@@ -14,6 +14,7 @@ import type { FinanceExpenseStatus } from '../models/FinanceExpenseStatus';
 import type { FinanceExpenseSummaryResponseEnvelope } from '../models/FinanceExpenseSummaryResponseEnvelope';
 import type { FinanceExpenseVersionRequest } from '../models/FinanceExpenseVersionRequest';
 import type { FinanceLedgerEntryListResponseEnvelope } from '../models/FinanceLedgerEntryListResponseEnvelope';
+import type { FinanceLedgerImportListResponseEnvelope } from '../models/FinanceLedgerImportListResponseEnvelope';
 import type { FinanceLedgerImportResponseEnvelope } from '../models/FinanceLedgerImportResponseEnvelope';
 import type { FinanceProjectSpendResponseEnvelope } from '../models/FinanceProjectSpendResponseEnvelope';
 import type { MarkFinanceExpenseReportPaidRequest } from '../models/MarkFinanceExpenseReportPaidRequest';
@@ -93,6 +94,28 @@ export class FinanceService {
                 'dateTo': dateTo,
                 'departmentId': departmentId,
                 'projectId': projectId,
+                'limit': limit,
+                'cursor': cursor,
+            },
+        });
+    }
+    /**
+     * 查询财务台账导入历史
+     * 按创建时间倒序返回当前租户的导入批次；用于「导入历史」列表与回滚入口。只返回未删除的批次。
+     * @returns FinanceLedgerImportListResponseEnvelope 导入批次列表
+     * @throws ApiError
+     */
+    public static listFinanceLedgerImports({
+        limit = 20,
+        cursor,
+    }: {
+        limit?: number,
+        cursor?: string,
+    }): CancelablePromise<FinanceLedgerImportListResponseEnvelope> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/finance/ledger-imports',
+            query: {
                 'limit': limit,
                 'cursor': cursor,
             },

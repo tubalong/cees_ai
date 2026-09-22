@@ -1,5 +1,5 @@
 .role-management-layout {
-    height: calc(100vh - 120px);
+    height: calc(100vh - var(--page-viewport-offset));
     display: grid;
     grid-template-columns: 280px minmax(0, 1fr);
     gap: 14px;
@@ -9,9 +9,9 @@
 .role-detail-panel {
     min-width: 0;
     overflow: auto;
-    border: 1px solid #e5e8ee;
-    border-radius: 8px;
-    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: var(--platform-panel-radius, 8px);
+    background: var(--surface);
 }
 
 .role-list-panel {
@@ -29,7 +29,7 @@
     align-items: center;
     gap: 10px;
     padding: 10px;
-    color: #596173;
+    color: var(--text);
     border: 0;
     border-radius: 7px;
     background: transparent;
@@ -50,7 +50,7 @@
     display: grid;
     place-items: center;
     border-radius: 7px;
-    background: #f1f3f8;
+    background: var(--surface-soft);
     font-style: normal;
 }
 
@@ -66,7 +66,7 @@
 
 .role-list small {
     margin-top: 3px;
-    color: #8b92a1;
+    color: var(--muted);
     font-size: 10px;
 }
 
@@ -97,7 +97,7 @@
     display: grid;
     place-items: center;
     color: var(--primary);
-    border-radius: 8px;
+    border-radius: var(--platform-panel-radius, 8px);
     background: var(--primary-soft);
     font-size: 21px;
     font-style: normal;
@@ -114,7 +114,7 @@
 
 .role-detail-heading p {
     margin-top: 4px;
-    color: #8b92a1;
+    color: var(--muted);
     font-size: 11px;
 }
 
@@ -128,8 +128,8 @@
 .role-summary-grid>div {
     gap: 10px;
     padding: 14px;
-    border-radius: 7px;
-    background: #f8f9fb;
+    border-radius: var(--platform-panel-radius, 7px);
+    background: var(--surface-soft);
 }
 
 .role-summary-grid .anticon {
@@ -143,13 +143,13 @@
 }
 
 .role-summary-grid span {
-    color: #8b92a1;
+    color: var(--muted);
     font-size: 10px;
 }
 
 .role-summary-grid strong {
     margin-top: 3px;
-    color: #202432;
+    color: var(--text);
     font-size: 13px;
 }
 
@@ -166,8 +166,8 @@
 
 .permission-groups section {
     padding: 12px;
-    border: 1px solid #e9ebf0;
-    border-radius: 7px;
+    border: 1px solid var(--line);
+    border-radius: var(--platform-panel-radius, 7px);
 }
 
 .permission-groups h4 {
@@ -185,7 +185,7 @@
 }
 
 .permission-groups code {
-    color: #8b92a1;
+    color: var(--muted);
     font-size: 9px;
 }
 
@@ -208,17 +208,17 @@
     gap: 10px;
     overflow: auto;
     padding: 10px;
-    border: 1px solid #e5e8ee;
-    border-radius: 7px;
-    background: #fafbfd;
+    border: 1px solid var(--line);
+    border-radius: var(--platform-panel-radius, 7px);
+    background: var(--surface-soft);
 }
 
 .role-permission-section {
     align-self: start;
     padding: 10px 12px;
-    border: 1px solid #e9ebf0;
-    border-radius: 7px;
-    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: var(--platform-panel-radius, 7px);
+    background: var(--surface);
 }
 
 .role-permission-section>header {
@@ -228,7 +228,7 @@
     gap: 8px;
     margin-bottom: 6px;
     padding-bottom: 6px;
-    border-bottom: 1px dashed #eceef3;
+    border-bottom: 1px dashed var(--line);
 }
 
 .role-permission-section>header .ant-checkbox-wrapper {
@@ -241,7 +241,7 @@
 }
 
 .role-permission-section>header small {
-    color: #9299a8;
+    color: var(--muted);
     font-size: 10px;
     font-variant-numeric: tabular-nums;
 }
@@ -264,6 +264,21 @@
 
 .role-permission-label small {
     display: block;
-    color: #a2a8b6;
+    color: var(--muted);
     font-size: 9px;
+}
+
+/* 窄窗口（Mac 最小 1040px / Windows 1100px）：左列固定 280px 会把权限区
+   压到 500px 以下，两列权限分组与汇总卡降为单列，避免横向溢出。 */
+@media (max-width: 1180px) {
+    .role-management-layout {
+        grid-template-columns: 220px minmax(0, 1fr);
+    }
+
+    .role-summary-grid,
+    .permission-groups,
+    .role-permission-groups,
+    .role-form-grid {
+        grid-template-columns: 1fr;
+    }
 }

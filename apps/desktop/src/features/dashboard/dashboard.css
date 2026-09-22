@@ -1,6 +1,6 @@
 .homepage-shell {
     min-height: 100%;
-    background: #f6f7fb;
+    background: var(--workspace-bg);
 }
 
 .homepage-header {
@@ -18,23 +18,23 @@
     align-items: center;
     gap: 12px;
     padding: 10px 14px;
-    border: 1px solid #f2d4b8;
+    border: 1px solid var(--warning-line);
     border-radius: 8px;
-    background: #fffaf5;
-    color: #7b4b20;
+    background: var(--warning-soft);
+    color: var(--warning-ink);
     text-align: left;
     cursor: pointer;
 }
 
 .homepage-alert span {
-    color: #966f4b;
+    color: var(--muted);
     font-size: 12px;
 }
 
 .homepage-alert-high {
-    border-color: #f2b9b9;
-    background: #fff6f6;
-    color: #9f2d2d;
+    border-color: var(--danger-line);
+    background: var(--danger-soft);
+    color: var(--danger-ink);
 }
 
 .homepage-grid {
@@ -46,8 +46,8 @@
 .homepage-card {
     min-width: 0;
     border: 1px solid var(--line);
-    border-radius: 8px;
-    background: #fff;
+    border-radius: var(--platform-panel-radius, 8px);
+    background: var(--surface);
     padding: 16px;
     box-sizing: border-box;
 }
@@ -98,7 +98,7 @@
     display: grid;
     place-items: center;
     color: var(--primary);
-    border-radius: 7px;
+    border-radius: var(--platform-panel-radius, 7px);
     background: var(--primary-soft);
     font-style: normal;
 }
@@ -113,7 +113,7 @@
 
 .homepage-list-row {
     padding: 9px 0;
-    border-top: 1px solid #f0f1f4;
+    border-top: 1px solid var(--line);
     color: var(--text);
     font-size: 12px;
 }
@@ -138,8 +138,8 @@
 .homepage-mini-metrics div,
 .ledger-values div {
     padding: 12px;
-    border-radius: 6px;
-    background: #f8f9fc;
+    border-radius: var(--platform-panel-radius, 6px);
+    background: var(--surface-soft);
 }
 
 .homepage-mini-metrics span,
@@ -168,12 +168,38 @@
     margin-top: 18px;
 }
 
-@media (max-width: 900px) {
+/* 窄窗口（Mac 最小 1040px / Windows 1100px）：6 列指标卡每张仅剩 ~140px，
+   数字与图标拥挤；降为 2 列并同步收敛跨列宽度。跨列值必须≤列数，
+   否则会生成隐式列导致横向溢出。 */
+@media (max-width: 1180px) {
+    .homepage-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
 
-    .homepage-card-full,
+    .homepage-card-full {
+        grid-column: span 2;
+    }
+
     .homepage-card-half,
     .homepage-card-third {
-        grid-column: span 6;
+        grid-column: span 1;
+    }
+
+    .homepage-mini-metrics,
+    .ledger-values {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+@media (max-width: 900px) {
+
+    .homepage-card-full {
+        grid-column: span 2;
+    }
+
+    .homepage-card-half,
+    .homepage-card-third {
+        grid-column: span 1;
     }
 
     .homepage-mini-metrics {

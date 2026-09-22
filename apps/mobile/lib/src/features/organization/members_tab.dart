@@ -6,6 +6,7 @@ import '../../core/auth_controller.dart';
 import '../../core/l10n.dart';
 import '../../core/mobile_api.dart';
 import '../../shared/async_list_view.dart';
+import '../../shared/layout.dart';
 import '../../shared/search_field.dart';
 
 class MembersTab extends ConsumerStatefulWidget {
@@ -59,7 +60,7 @@ class _MembersTabState extends ConsumerState<MembersTab> {
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+          padding: EdgeInsets.fromLTRB(pagePadding(context), 0, pagePadding(context), 12),
           child: SearchField(
             onChanged: (value) => setState(() => keyword = value),
             hintText: context.tr('member.search'),
@@ -580,7 +581,8 @@ class _AssignDepartmentSheetState extends State<_AssignDepartmentSheet> {
     final flat = _flatten(widget.departments, 0);
     return SafeArea(
       child: Padding(
-        padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+        // 底部弹窗未包 `SafeArea` 主体，必须让出键盘高度或 Home Indicator。
+        padding: EdgeInsets.only(bottom: keyboardBottomInset(context)),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,

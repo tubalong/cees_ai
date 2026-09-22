@@ -403,6 +403,9 @@ enum ToolCallStatus {
   PROPOSED
   /// 批准通过，等待执行。
   APPROVED
+  /// 写操作已通过程序化批准，但参数与预览已落为待确认草稿，等待用户在对话中确认；
+  /// 该状态下工具副作用**尚未发生**，确认前成员停用或权限回收都不会产生业务写入。
+  AWAITING_CONFIRMATION
   EXECUTING
   COMPLETED
   FAILED
@@ -1547,6 +1550,9 @@ model FinanceLedgerImport {
   errorCount             Int                       @default(0) @map("error_count")
   errors                 Json?
   uploadedByMembershipId String                    @map("uploaded_by_membership_id") @db.Uuid
+  /// 上传的原始文件（xlsx/csv）对应的文件对象；未留档时为 null。
+  /// 留档是可选能力：只保存解析后的结构化数据即可完成台账入账，原文件仅用于事后核对。
+  sourceFileObjectId     String?                   @map("source_file_object_id") @db.Uuid
   startedAt              DateTime?                 @map("started_at")
   finishedAt             DateTime?                 @map("finished_at")
   entries                FinanceLedgerEntry[]
@@ -2360,6 +2366,7 @@ model AssistantTurn {
   messages  ConversationMessage[] @relation("TurnMessages")
   events    AssistantEvent[]
   toolCalls ToolCall[]
+  actionDrafts AssistantActionDraft[]
 
   @@unique([conversationId, idempotencyKey])
   @@unique([conversationId, seq])
@@ -2420,6 +2427,7 @@ model ToolCall {
   generatedImage    ManagedImage?        @relation("GeneratedImageToolCall")
   generatedDocument ManagedDocument?     @relation("GeneratedDocumentToolCall")
   actionDraft       AIActionDraft?       @relation("ToolCallActionDraft")
+  pendingActionDraft AssistantActionDraft? @relation("ToolCallPendingActionDraft")
   invocationLogs    AIInvocationLog[]    @relation("ToolCallInvocations")
 
   @@unique([turnId, seq])
@@ -2451,6 +2459,55 @@ model AIActionDraft {
 
   @@index([tenantId, userId, status])
   @@map("ai_action_drafts")
+}
+
+/// AI 写操作的待确认草稿（写操作确认机制的唯一事实源）。
+///
+/// 与 `AIActionDraft` 的分工：`AIActionDraft` 是「已执行动作流水」（生成图片/文档后以
+/// EXECUTED 状态留痕，见 assistant-tool-loop.md 第 14 节）；本模型是「待用户确认的业务写
+/// 草稿」——模型只产出参数与预览，**副作用不发生**，必须由用户在同一会话内确认后才执行。
+/// 两者语义不同，不能合并，否则无法区分「已写」与「待写」。
+///
+/// 安全约束：
+/// - `arguments` 是确认时唯一信任的参数快照，客户端确认只提交 draftId，不接受重新提交参数；
+/// - 确认时重新解析成员实时权限并重新执行 `definition.validate`，参数与权限都不沿用创建时快照；
+/// - `status` 的 PENDING_CONFIRMATION → EXECUTING 通过条件更新抢占，双击 / 重试不会重复执行；
+/// - 过期草稿不可确认，只能重新发起对话让它重新生成。
+model AssistantActionDraft {
+  id             String       @id @default(uuid()) @db.Uuid
+  tenantId       String       @map("tenant_id") @db.Uuid
+  conversationId String       @map("conversation_id") @db.Uuid
+  /// 产出该草稿的轮次；确认结果事件会追加回该轮次，保证重放与刷新后状态一致。
+  turnId         String       @map("turn_id") @db.Uuid
+  turn           AssistantTurn @relation(fields: [turnId], references: [id], onDelete: Cascade)
+  membershipId   String       @map("membership_id") @db.Uuid
+  userId         String       @map("user_id") @db.Uuid
+  requestId      String       @map("request_id")
+  /// 一比一对应产生草稿的工具调用；同时作为执行幂等键。
+  toolCallId     String       @unique @map("tool_call_id") @db.Uuid
+  toolCall       ToolCall     @relation("ToolCallPendingActionDraft", fields: [toolCallId], references: [id], onDelete: Cascade)
+  toolName       String       @map("tool_name")
+  toolVersion    String       @map("tool_version")
+  riskLevel      String       @map("risk_level")
+  /// 经 `definition.validate` 归一化后的参数快照。
+  arguments      Json
+  /// 面向用户的预览（标题 + 字段列表），由工具定义生成；不含内部 ID 与权限枚举。
+  preview        Json
+  status         DraftStatus  @default(PENDING_CONFIRMATION)
+  expiresAt      DateTime     @map("expires_at")
+  resolvedAt     DateTime?    @map("resolved_at")
+  resolvedBy     String?      @map("resolved_by") @db.Uuid
+  /// 执行成功后的结果摘要（回喂模型与展示用户的中文文案）。
+  resultSummary  String?      @map("result_summary") @db.Text
+  errorCode      String?      @map("error_code")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+  deletedAt      DateTime?    @map("deleted_at")
+  version        Int          @default(1)
+
+  @@index([tenantId, conversationId, status])
+  @@index([status, expiresAt])
+  @@map("assistant_action_drafts")
 }
 
 /// NestJS 发起 AI 调用后写入的模型执行指标；不保存对话正文、消息或摘要。

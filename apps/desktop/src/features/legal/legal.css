@@ -1,17 +1,91 @@
-.legal-page { height: calc(100vh - 120px); overflow: auto; }
-.legal-heading, .legal-heading > div, .legal-attachments { display: flex; align-items: center; }
-.legal-heading { justify-content: space-between; margin-bottom: 14px; }
-.legal-heading > div { gap: 10px; }
-.legal-heading i { width: 42px; height: 42px; display: grid; place-items: center; color: #565cf6; background: #eef0ff; border-radius: 8px; font-size: 21px; }
-.legal-heading h2, .legal-heading p { margin: 0; }
-.legal-heading h2 { font-size: 17px; }
-.legal-heading p { margin-top: 4px; color: #8b92a1; font-size: 11px; }
-.legal-summary, .legal-filters { margin-bottom: 14px; }
-.legal-summary .ant-card-body { padding: 16px; }
-.legal-keyword { width: 210px; }
-.legal-select { width: 145px; }
-.legal-full-width { width: 100%; }
-.legal-attachments { gap: 12px; margin-top: 8px; }
-@media (max-width: 1100px) { .legal-summary .ant-col { flex: 0 0 50%; max-width: 50%; margin-bottom: 12px; } }
-.legal-date { width: 145px; }
-.legal-load-more { margin-top: 12px; }
+.legal-page {
+    height: calc(100vh - var(--page-viewport-offset));
+    overflow: auto;
+}
+
+.legal-heading,
+.legal-heading>div,
+.legal-attachments {
+    display: flex;
+    align-items: center;
+}
+
+.legal-heading {
+    justify-content: space-between;
+    margin-bottom: 14px;
+}
+
+.legal-heading>div {
+    gap: 10px;
+}
+
+.legal-heading i {
+    width: 42px;
+    height: 42px;
+    display: grid;
+    place-items: center;
+    color: var(--primary);
+    background: var(--primary-soft);
+    border-radius: var(--platform-panel-radius, 8px);
+    font-size: 21px;
+}
+
+.legal-heading h2,
+.legal-heading p {
+    margin: 0;
+}
+
+/* 本页自建页头（未复用 `.workspace-page-header`），一级标题统一到规范 §4 的
+   24px；macOS 下由 `styles.css` 收敛到 22px，必须在那里同步登记本类名。 */
+.legal-heading h2 {
+    font-size: 24px;
+}
+
+.legal-heading p {
+    margin-top: 4px;
+    color: var(--muted);
+    font-size: 11px;
+}
+
+.legal-summary,
+.legal-filters {
+    margin-bottom: 14px;
+}
+
+.legal-summary .ant-card-body {
+    padding: 16px;
+}
+
+.legal-keyword {
+    width: 210px;
+}
+
+.legal-select {
+    width: 145px;
+}
+
+.legal-full-width {
+    width: 100%;
+}
+
+.legal-attachments {
+    gap: 12px;
+    margin-top: 8px;
+}
+
+/* 与桌面端统一的窄窗口阈值（1180px）对齐，覆盖 Mac 1040px 最小窗口。 */
+@media (max-width: 1180px) {
+    .legal-summary .ant-col {
+        flex: 0 0 50%;
+        max-width: 50%;
+        margin-bottom: 12px;
+    }
+}
+
+.legal-date {
+    width: 145px;
+}
+
+.legal-load-more {
+    margin-top: 12px;
+}

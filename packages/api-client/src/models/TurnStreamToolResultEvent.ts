@@ -3,6 +3,7 @@
 /* tslint:disable */
 /* eslint-disable */
 import type { KnowledgeToolCitation } from './KnowledgeToolCitation';
+import type { ToolResultConfirmation } from './ToolResultConfirmation';
 import type { ToolResultResourceReference } from './ToolResultResourceReference';
 import type { ToolSource } from './ToolSource';
 /**
@@ -19,7 +20,7 @@ export type TurnStreamToolResultEvent = {
      */
     toolCallId: string;
     /**
-     * 工具执行结果状态
+     * 工具执行结果状态；awaiting_confirmation 表示写操作已生成待确认草稿，副作用尚未发生
      */
     status: TurnStreamToolResultEvent.status;
     /**
@@ -35,18 +36,23 @@ export type TurnStreamToolResultEvent = {
      */
     citations?: Array<KnowledgeToolCitation>;
     /**
+     * 写操作的待确认预览；status 为 awaiting_confirmation 时必定存在
+     */
+    confirmation?: (ToolResultConfirmation | null);
+    /**
      * 工具失败或被拒绝时的错误信息
      */
     error: any | null;
 };
 export namespace TurnStreamToolResultEvent {
     /**
-     * 工具执行结果状态
+     * 工具执行结果状态；awaiting_confirmation 表示写操作已生成待确认草稿，副作用尚未发生
      */
     export enum status {
         COMPLETED = 'completed',
         FAILED = 'failed',
         REJECTED = 'rejected',
+        AWAITING_CONFIRMATION = 'awaiting_confirmation',
     }
 }
 

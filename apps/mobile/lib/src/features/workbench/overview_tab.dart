@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/auth_controller.dart';
 import '../../core/l10n.dart';
 import '../../core/mobile_api.dart';
+import '../../shared/layout.dart';
 
 /// 工作台概览：实时统计 + 待办聚合 + 近期会议。
 class OverviewTab extends ConsumerStatefulWidget {
@@ -65,7 +66,14 @@ class _OverviewTabState extends ConsumerState<OverviewTab> {
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 4, 16, 96),
+        // 紧凑屏（iPhone SE / mini）收紧左右边距，底部让出悬浮导航 +
+        // Home Indicator，否则最后一张卡片会被导航遮住。
+        padding: EdgeInsets.fromLTRB(
+          pagePadding(context),
+          4,
+          pagePadding(context),
+          contentBottomInset(context),
+        ),
         children: [
           Wrap(
             spacing: 10,
@@ -116,7 +124,9 @@ class _MetricCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-        width: (MediaQuery.of(context).size.width - 52) / 2,
+        // 卡片宽度由页边距与 Wrap 间距推导，不再写死「屏宽 - 52」魔法值，
+        // 紧凑屏收紧边距后仍保持两列不溢出。
+        width: (MediaQuery.sizeOf(context).width - pagePadding(context) * 2 - 10) / 2,
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14), border: Border.all(color: const Color(0xffe8ecf4))),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, Menu, session, shell, type MenuItemConstructorOptions } from 'electron';
 import path from 'node:path';
 import {
     ConnectorHost,
@@ -7,6 +7,12 @@ import {
 import { ConnectorRegistry } from './connectors/core/connector-registry';
 import { DingTalkConnectorAdapter } from './connectors/dingtalk/dingtalk.adapter';
 import { TencentMeetingConnectorAdapter } from './connectors/tencent-meeting/tencent-meeting.adapter';
+import {
+    installContentSecurityPolicy,
+    installIpcSenderGuard,
+    installNavigationLock,
+} from './security';
+import { SecureTokenStore } from './secure-store';
 
 const connectorRegistry = new ConnectorRegistry();
 const dingtalkConnector = new DingTalkConnectorAdapter();
@@ -28,13 +34,83 @@ function publishConnectorStatus(event: ConnectorStatusChangedEvent): void {
     }
 }
 
+/**
+ * macOS 必须保留系统应用菜单：一旦置空，⌘Q / ⌘W / ⌘M / ⌘C / ⌘V / ⌘A 等
+ * 系统快捷键会全部失效，剪贴板也无法在输入框中工作。
+ * Windows / Linux 由应用内自绘导航承担，因此继续置空菜单。
+ */
+function installApplicationMenu(): void {
+    if (process.platform !== 'darwin') {
+        Menu.setApplicationMenu(null);
+        return;
+    }
+    const template: MenuItemConstructorOptions[] = [
+        { role: 'appMenu' },
+        { role: 'editMenu' },
+        {
+            label: '视图',
+            submenu: [
+                { role: 'reload' },
+                { role: 'forceReload' },
+                { role: 'toggleDevTools' },
+                { type: 'separator' },
+                { role: 'resetZoom' },
+                { role: 'zoomIn' },
+                { role: 'zoomOut' },
+            ],
+        },
+        {
+            label: '窗口',
+            submenu: [
+                { role: 'minimize' },
+                { role: 'zoom' },
+                { type: 'separator' },
+                { role: 'front' },
+                { role: 'togglefullscreen' },
+            ],
+        },
+    ];
+    Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+/** 为输入框、选中文本与外链补齐右键菜单，符合 macOS 的系统级交互预期。 */
+function installContextMenu(window: BrowserWindow): void {
+    window.webContents.on('context-menu', (_event, params) => {
+        const template: MenuItemConstructorOptions[] = [];
+        if (params.isEditable) {
+            template.push({ role: 'undo' }, { role: 'redo' }, { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' });
+        } else if (params.selectionText.trim().length > 0) {
+            template.push({ role: 'copy' }, { role: 'selectAll' });
+        }
+        if (params.linkURL && /^https?:\/\//i.test(params.linkURL)) {
+            if (template.length > 0) template.push({ type: 'separator' });
+            template.push({ label: '在浏览器中打开链接', click: () => void shell.openExternal(params.linkURL) });
+        }
+        if (template.length === 0) return;
+        Menu.buildFromTemplate(template).popup({ window });
+    });
+}
+
 function createWindow(): void {
+    const isMac = process.platform === 'darwin';
     const window = new BrowserWindow({
         width: 1440,
         height: 900,
-        minWidth: 1100,
+        // macOS 下窗口最小宽度放宽到 1040px（与 CSS 的 --desktop-shell-min-width 保持一致）。
+        minWidth: isMac ? 1040 : 1100,
         minHeight: 720,
-        backgroundColor: '#f4f6f8',
+        // 与 CSS 的 `--workspace-bg`（#f4f6f9）保持一致，避免 macOS 圆角窗口
+        // 边缘与首帧出现深浅不一致的闪白。
+        backgroundColor: '#f4f6f9',
+        titleBarStyle: isMac ? 'hiddenInset' : 'default',
+        trafficLightPosition: isMac ? { x: 18, y: 18 } : undefined,
+        // 不再显式传 `frame`：macOS 必须保留原生边框（默认 true）才能让
+        // `titleBarStyle: 'hiddenInset'` 正确隐藏标题栏并保留交通灯按钮；
+        // 一旦同时传 `frame: false`，Electron 会按「无边框窗口」处理，
+        // 交通灯可能不显示或不再按 inset 位置排布，窗口将无法关闭/缩放。
+        // Windows / Linux 同样使用原生边框（与此前 `frame: !isMac` 的取值一致）。
+        // macOS 下允许点击非激活窗口内的控件，符合系统习惯。
+        acceptFirstMouse: isMac,
         webPreferences: {
             preload: path.join(__dirname, 'preload.js'),
             contextIsolation: true,
@@ -43,6 +119,21 @@ function createWindow(): void {
             webviewTag: true,
         },
     });
+    installContextMenu(window);
+    // 导航锁定 + webview 策略：外链交系统浏览器，webview 强制无 node 集成。
+    installNavigationLock(window);
+    /**
+     * macOS：进入全屏后系统会隐藏交通灯，顶部 34px 拖拽区与拖拽层不再需要。
+     * 把全屏状态同步给渲染层，让各页收回这段留白（见 `styles.css` 的 `[data-fullscreen]`）。
+     */
+    if (isMac) {
+        const publishFullScreen = (fullScreen: boolean): void => {
+            if (!window.isDestroyed()) window.webContents.send('cees:window-fullscreen-changed', fullScreen);
+        };
+        window.on('enter-full-screen', () => publishFullScreen(true));
+        window.on('leave-full-screen', () => publishFullScreen(false));
+        window.webContents.on('did-finish-load', () => publishFullScreen(window.isFullScreen()));
+    }
     window.webContents.setWindowOpenHandler(({ url }) => {
         if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
         return { action: 'deny' };
@@ -62,7 +153,21 @@ app.whenReady().then(() => {
     const userDataPath = app.getPath('userData');
     dingtalkConnector.configure(userDataPath);
     tencentMeetingConnector.configure(userDataPath);
-    Menu.setApplicationMenu(null);
+    // 安全基线：IPC 来源校验必须最先安装，保证后续注册的所有通道都受保护。
+    installIpcSenderGuard();
+    installContentSecurityPolicy(session.defaultSession);
+    const tokenStore = new SecureTokenStore(userDataPath);
+    // macOS 保留系统菜单（⇆Q / ⇆C 等）；Windows / Linux 置空——判断内聚在 installApplicationMenu。
+    installApplicationMenu();
+    ipcMain.handle('cees:secure-store-get-all', () => tokenStore.getAll());
+    ipcMain.handle('cees:secure-store-set', (_event, key: unknown, value: unknown) => {
+        if (typeof key !== 'string' || typeof value !== 'string') throw new Error('安全存储参数无效');
+        return tokenStore.set(key, value);
+    });
+    ipcMain.handle('cees:secure-store-remove', (_event, key: unknown) => {
+        if (typeof key !== 'string') throw new Error('安全存储参数无效');
+        return tokenStore.remove(key);
+    });
     ipcMain.on('cees:open-devtools', (event) => {
         BrowserWindow.fromWebContents(event.sender)?.webContents.openDevTools({ mode: 'detach', activate: true });
     });
@@ -136,6 +241,10 @@ app.whenReady().then(() => {
         }
     });
     createWindow();
+    // macOS：窗口关闭后不退出应用，点击 Dock 图标需要重新创建窗口。
+    app.on('activate', () => {
+        if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    });
 });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 

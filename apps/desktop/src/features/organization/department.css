@@ -24,7 +24,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    color: #596173;
+    color: var(--text);
     border: 0;
     background: transparent;
     text-align: left;
@@ -57,8 +57,19 @@
 .department-node-row small {
     display: block;
     margin-top: 2px;
-    color: #9299a8;
-    font-size: 9px;
+    color: var(--muted);
+    font-size: 10px;
+}
+
+/* macOS：行高与圆角略微收紧，Retina 下 9px / 6px 的原始取值显得松散。 */
+:root[data-platform='mac'] .department-root {
+    min-height: 42px;
+    border-radius: var(--platform-panel-radius);
+}
+
+:root[data-platform='mac'] .department-node-row {
+    min-height: 40px;
+    border-radius: var(--platform-panel-radius);
 }
 
 .department-nodes {
@@ -91,7 +102,7 @@
 .department-children {
     margin-left: 15px;
     padding-left: 7px;
-    border-left: 1px solid #e5e8ee;
+    border-left: 1px solid var(--line);
 }
 
 .member-list-toolbar {
@@ -104,8 +115,22 @@
 }
 
 .member-list-toolbar>span {
-    color: #7b8494;
+    color: var(--muted);
     font-size: 11px;
+}
+
+/* 窄窗口（Mac 最小 1040px 及以下）：部门树收起冗余缩进，
+   成员搜索框自适应宽度，避免工具栏在窄窗口下换行挤压列表。 */
+@media (max-width: 1180px) {
+    .department-children {
+        margin-left: 10px;
+        padding-left: 5px;
+    }
+
+    .member-list-toolbar .ant-input-affix-wrapper,
+    .member-list-toolbar .ant-input {
+        max-width: 220px;
+    }
 }
 
 .member-detail .ant-select {

@@ -117,7 +117,16 @@ export interface PublicTurnErrorDetail {
   retryable: boolean;
 }
 
-export type PublicToolResultStatus = 'completed' | 'failed' | 'rejected';
+export type PublicToolResultStatus = 'completed' | 'failed' | 'rejected' | 'awaiting_confirmation';
+
+/** 写操作待确认预览；确认前不产生任何业务副作用。 */
+export interface PublicToolConfirmation {
+  draftId: string;
+  toolName: string;
+  title: string;
+  fields: Array<{ label: string; value: string }>;
+  expiresAt: string;
+}
 
 export interface PublicToolSource {
   id: string;
@@ -176,6 +185,8 @@ export type PublicTurnStreamEvent =
     sources?: PublicToolSource[];
     /** 知识库检索命中的文档引用。老事件可能缺少该字段。 */
     citations?: PublicKnowledgeToolCitation[];
+    /** 写操作的待确认预览；status 为 awaiting_confirmation 时必定存在。 */
+    confirmation?: PublicToolConfirmation | null;
     error: { code: string; message: string } | null;
   }
   | { type: 'completed'; seq: number; latencyMs: number; finishReason: string | null }

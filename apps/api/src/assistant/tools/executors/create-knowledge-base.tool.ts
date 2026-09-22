@@ -17,7 +17,7 @@ export class CreateKnowledgeBaseTool implements OnModuleInit {
     constructor(
         private readonly registry: ToolRegistryService,
         private readonly knowledgeService: KnowledgeService,
-    ) {}
+    ) { }
 
     onModuleInit(): void {
         this.registry.register(this.definition);
@@ -29,7 +29,8 @@ export class CreateKnowledgeBaseTool implements OnModuleInit {
         displayName: '创建知识库',
         description: '在当前用户所属租户内创建新的知识库，创建后当前用户自动成为该库管理员（MANAGER）。'
             + '仅在用户明确要求创建/新建知识库时调用；name 与 description 必须来自用户表达或经用户确认，'
-            + '不得替用户编造。创建成功后可用 save_to_knowledge 把对话内容存入新库。',
+            + '不得替用户编造。创建成功后可用 save_to_knowledge 把对话内容存入新库。'
+            + '本工具不会立即写入：系统会让用户在对话中确认参数后再执行。',
         parameters: {
             type: 'object',
             properties: {
@@ -48,6 +49,19 @@ export class CreateKnowledgeBaseTool implements OnModuleInit {
         requiredPermissions: ['knowledge_base.create'],
         riskLevel: 'WRITE',
         validate: validateCreateKnowledgeBaseArguments,
+        /**
+         * 写操作确认：知识库属于组织可见的业务对象，创建后会被其他成员看到，
+         * 因此不直接落库，先把参数与预览交给用户确认（与其他 WRITE 工具一致）。
+         */
+        buildConfirmation: (_context, input) => Promise.resolve({
+            title: '创建知识库',
+            fields: [
+                { label: '知识库名称', value: input.name as string },
+                { label: '知识库说明', value: (input.description as string | undefined) ?? '（未填写）' },
+            ],
+            summary: `已生成待确认草稿：创建知识库「${input.name as string}」。`
+                + '请告知用户这一步还没有真正创建，需要用户在对话中确认后才会写入。',
+        }),
         execute: (context, input) => this.executeCreate(context, input),
     };
 

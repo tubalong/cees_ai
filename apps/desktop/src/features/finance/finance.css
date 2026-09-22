@@ -5,7 +5,7 @@
 
 .finance-ledger-panel .ant-upload-wrapper .ant-upload-drag {
     margin-top: 16px;
-    border-radius: 8px;
+    border-radius: var(--platform-panel-radius, 8px);
 }
 
 .finance-ledger-panel .ant-alert {
@@ -13,7 +13,7 @@
 }
 
 .finance-page {
-    height: calc(100vh - 120px);
+    height: calc(100vh - var(--page-viewport-offset));
     overflow: auto;
 }
 
@@ -40,9 +40,9 @@
     height: 42px;
     display: grid;
     place-items: center;
-    color: #565cf6;
-    border-radius: 8px;
-    background: #eef0ff;
+    color: var(--primary);
+    border-radius: var(--platform-panel-radius, 8px);
+    background: var(--primary-soft);
     font-size: 21px;
     font-style: normal;
 }
@@ -52,13 +52,16 @@
     margin: 0;
 }
 
+/* 本页自建页头（未复用 `.workspace-page-header`），一级标题统一到规范 §4 的
+   24px；macOS 下由 `styles.css` 收敛到 22px，必须在那里同步登记本类名，
+   否则财务页标题会比其它页面重一级。 */
 .finance-heading h2 {
-    font-size: 17px;
+    font-size: 24px;
 }
 
 .finance-heading p {
     margin-top: 4px;
-    color: #8b92a1;
+    color: var(--muted);
     font-size: 11px;
 }
 
@@ -97,7 +100,7 @@
 }
 
 .finance-items-title span {
-    color: #565cf6;
+    color: var(--primary);
     font-weight: 600;
 }
 
@@ -134,10 +137,40 @@
     width: 260px;
 }
 
-@media (max-width: 1100px) {
+/* 与桌面端统一的窄窗口阈值（1180px）对齐，覆盖 Mac 1040px 最小窗口。 */
+@media (max-width: 1180px) {
     .finance-summary .ant-col {
         flex: 0 0 50%;
         max-width: 50%;
         margin-bottom: 12px;
     }
+}
+
+/* 台账三页签的辅助样式。 */
+.finance-ledger-options {
+    margin: 12px 0;
+}
+
+.finance-ledger-muted {
+    color: var(--muted);
+}
+
+.finance-ledger-more {
+    margin-top: 12px;
+    text-align: center;
+}
+
+.finance-ledger-date {
+    padding: 3px 8px;
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--surface);
+    font: inherit;
+    font-size: 12px;
+}
+
+/* 导入历史列较多：窄窗口下允许整表横向滚动，避免操作列被挤出可视区。 */
+.finance-ledger-panel .ant-table-wrapper {
+    overflow-x: auto;
 }

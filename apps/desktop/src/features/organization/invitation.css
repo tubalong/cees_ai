@@ -12,14 +12,16 @@
     margin: 70px 0;
 }
 
+/* 邀请行：列宽全部用比例 + 内容自适应，避免在 Mac 最小窗口（1040px）下
+   因写死 150px / 130px 而横向溢出；颜色统一走语义令牌。 */
 .invitation-row {
     min-height: 64px;
     display: grid;
-    grid-template-columns: minmax(150px, 1fr) minmax(150px, 1fr) 130px 36px;
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) auto auto;
     align-items: center;
     gap: 12px;
-    border-bottom: 1px solid #edf0f4;
-    color: #616979;
+    border-bottom: 1px solid var(--line);
+    color: var(--text);
     font-size: 12px;
 }
 
@@ -29,13 +31,23 @@
 }
 
 .invitation-row strong {
-    color: #202432;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text);
 }
 
 .invitation-row small {
     margin-top: 3px;
-    color: #9299a8;
+    color: var(--muted);
     font-size: 10px;
+}
+
+/* macOS：更轻的行高与字号，贴合 Retina 下的视觉密度。 */
+:root[data-platform='mac'] .invitation-row {
+    min-height: 58px;
+    font-size: 11px;
 }
 
 .invitation-form {
@@ -55,4 +67,14 @@
 
 .invitation-tenant-notice {
     margin-bottom: 12px;
+}
+
+/* 窄窗口（Mac 最小 1040px 及以下）：邀请行降为两列换行，
+   保证状态标签与「撤销」按钮不会被挤出可视区。 */
+@media (max-width: 1180px) {
+    .invitation-row {
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        row-gap: 6px;
+        padding: 4px 0;
+    }
 }

@@ -289,6 +289,28 @@ input {
     font-size: 12px;
 }
 
+/* 窄窗口（含 macOS 1040px 最小窗口）下英雄区收敛：
+   双列最小宽度合计 960px，在 1040px 窗口里只剩约 80px 余量，64px 标题会被
+   压成多行并挤走右侧留白；这里与其它页面统一使用 1180px 阈值收紧列宽、
+   内边距与标题字号。Windows 最小窗口为 1100px，同区间同样受益。 */
+@media (max-width: 1180px) {
+    .login-page {
+        grid-template-columns: minmax(440px, 1.06fr) minmax(490px, .94fr);
+    }
+
+    .login-intro {
+        padding: 30px clamp(34px, 4.5vw, 64px);
+    }
+
+    .intro-copy {
+        margin-top: clamp(64px, 12vh, 120px);
+    }
+
+    .intro-copy h1.ant-typography {
+        font-size: 52px;
+    }
+}
+
 @media (max-width: 900px) {
     .login-page {
         grid-template-columns: 1fr;
@@ -323,8 +345,9 @@ input {
         transform-origin: bottom right;
     }
 
+    /* 不写死 660px：Mac 矮窗口下登录面板会超出可视区，登录按钮不可达。 */
     .login-panel {
-        min-height: 660px;
+        min-height: clamp(480px, 72vh, 660px);
         padding: 80px 24px 64px;
     }
 
@@ -354,7 +377,7 @@ input {
     }
 
     .login-panel {
-        min-height: 600px;
+        min-height: clamp(440px, 68vh, 600px);
         padding-inline: 18px;
     }
 
@@ -362,4 +385,16 @@ input {
         padding: 32px 24px;
         box-shadow: none;
     }
+}
+
+/* macOS：`titleBarStyle: hiddenInset` 下窗口顶部 34px 是系统拖拽区。
+   登录页左栏品牌标识默认落在 `36px`（仅比拖拽区低 2px），右上角语言切换
+   控件同样贴在 `38px`，都会与红绿灯/拖拽热区重叠导致点不准。
+   这里统一按 `--platform-safe-top` 下移，Windows / Linux 该令牌为 0，无影响。 */
+:root[data-platform='mac'] .login-intro {
+    padding-top: calc(36px + var(--platform-safe-top));
+}
+
+:root[data-platform='mac'] .language-button {
+    top: calc(38px + var(--platform-safe-top));
 }

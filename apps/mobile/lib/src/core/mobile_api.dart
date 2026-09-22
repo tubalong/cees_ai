@@ -4,7 +4,8 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 
-const apiBaseUrl = 'http://192.168.5.29:3000/api/';
+// const apiBaseUrl = 'http://192.168.5.29:3000/api/';
+const apiBaseUrl = 'http://localhost:3000/api/';
 
 class MobileApi {
   MobileApi(this._tokens) {
@@ -173,6 +174,13 @@ class MobileApi {
   Stream<Map<String, dynamic>> createTurnStream(String conversationId, String content, String idempotencyKey, String mode, {CancelToken? cancelToken}) => _sse('v1/conversations/$conversationId/turns', method: 'POST', data: {'content': content, 'mode': mode}, headers: {'Idempotency-Key': idempotencyKey}, cancelToken: cancelToken);
   Stream<Map<String, dynamic>> replayTurnStream(String conversationId, String turnId, int afterSeq, {CancelToken? cancelToken}) => _sse('v1/conversations/$conversationId/turns/$turnId/events?afterSeq=$afterSeq', cancelToken: cancelToken);
   Future<Map<String, dynamic>> cancelTurn(String conversationId, String turnId) => _postMap('v1/conversations/$conversationId/turns/$turnId/cancel', {});
+
+  /// 确认并执行写操作草稿。只提交 draftId：参数快照存在服务端，
+  /// 客户端无法在确认时替换业务参数（服务端会重新鉴权并重新校验）。
+  Future<Map<String, dynamic>> confirmActionDraft(String draftId) => _postMap('v1/assistant/action-drafts/$draftId/confirm', {});
+
+  /// 取消写操作草稿；取消后不可再确认，需重新发起对话。
+  Future<Map<String, dynamic>> cancelActionDraft(String draftId) => _postMap('v1/assistant/action-drafts/$draftId/cancel', {});
   Future<Map<String, dynamic>> invokeChat(Map<String, dynamic> input) => _postMap('v1/chat/invoke', input);
   Future<Map<String, dynamic>> compactChat(Map<String, dynamic> input) => _postMap('v1/chat/compact', input);
 

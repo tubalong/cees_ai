@@ -1,5 +1,5 @@
 .assignment-page {
-    height: calc(100vh - 120px);
+    height: calc(100vh - var(--page-viewport-offset));
     display: grid;
     grid-template-columns: 300px minmax(0, 1fr);
     gap: 14px;
@@ -9,9 +9,9 @@
 .assignment-detail-panel {
     min-width: 0;
     overflow: auto;
-    border: 1px solid #e5e8ee;
-    border-radius: 8px;
-    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: var(--platform-panel-radius, 8px);
+    background: var(--surface);
 }
 
 .assignment-list-panel {
@@ -41,7 +41,7 @@
     justify-content: center;
     gap: 4px;
     padding: 10px;
-    color: #596173;
+    color: var(--text);
     border: 0;
     border-radius: 7px;
     background: transparent;
@@ -51,8 +51,8 @@
 
 .assignment-list-item:hover,
 .assignment-list-item.is-active {
-    color: #565cf6;
-    background: #eef0ff;
+    color: var(--primary);
+    background: var(--primary-soft);
 }
 
 .assignment-list-item strong,
@@ -86,9 +86,9 @@
     height: 42px;
     display: grid;
     place-items: center;
-    color: #565cf6;
-    border-radius: 8px;
-    background: #eef0ff;
+    color: var(--primary);
+    border-radius: var(--platform-panel-radius, 8px);
+    background: var(--primary-soft);
     font-size: 21px;
     font-style: normal;
 }
@@ -104,7 +104,7 @@
 
 .assignment-detail-heading p {
     margin-top: 4px;
-    color: #8b92a1;
+    color: var(--muted);
     font-size: 11px;
 }
 
@@ -118,12 +118,12 @@
 .assignment-summary-grid>div {
     gap: 10px;
     padding: 12px;
-    border-radius: 7px;
-    background: #f8f9fb;
+    border-radius: var(--platform-panel-radius, 7px);
+    background: var(--surface-soft);
 }
 
 .assignment-summary-grid .anticon {
-    color: #565cf6;
+    color: var(--primary);
     font-size: 18px;
 }
 
@@ -133,13 +133,13 @@
 }
 
 .assignment-summary-grid span {
-    color: #8b92a1;
+    color: var(--muted);
     font-size: 10px;
 }
 
 .assignment-summary-grid strong {
     margin-top: 3px;
-    color: #202432;
+    color: var(--text);
     font-size: 13px;
 }
 
@@ -156,18 +156,18 @@
 
 .assignment-candidate-sections section {
     padding: 12px;
-    border: 1px solid #e9ebf0;
-    border-radius: 7px;
+    border: 1px solid var(--line);
+    border-radius: var(--platform-panel-radius, 7px);
 }
 
 .assignment-candidate-sections h4 {
     margin: 0 0 8px;
-    color: #565cf6;
+    color: var(--primary);
     font-size: 12px;
 }
 
 .assignment-empty-inline {
-    color: #a0a6b2;
+    color: var(--muted);
 }
 
 .assignment-form-grid {
@@ -193,4 +193,21 @@
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
+}
+
+/* 窄窗口（Mac 最小 1040px / Windows 1100px）：左列固定 300px 会把详情区
+   压到 500px 以下，汇总卡与候选区同时降级为两列，表单降为单列。 */
+@media (max-width: 1180px) {
+    .assignment-page {
+        grid-template-columns: 220px minmax(0, 1fr);
+    }
+
+    .assignment-summary-grid,
+    .assignment-candidate-sections {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .assignment-form-grid {
+        grid-template-columns: 1fr;
+    }
 }

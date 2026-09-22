@@ -5,6 +5,7 @@ import '../../core/auth_controller.dart';
 import '../../core/l10n.dart';
 import '../../core/mobile_api.dart';
 import '../../shared/async_list_view.dart';
+import '../../shared/layout.dart';
 
 const _projectStatusLabels = {'PLANNING': '规划中', 'ACTIVE': '进行中', 'PAUSED': '已暂停', 'COMPLETED': '已完成', 'CANCELLED': '已取消', 'ARCHIVED': '已归档'};
 const _projectStatusColors = {'PLANNING': Color(0xffa5adbc), 'ACTIVE': Color(0xff3478ff), 'PAUSED': Color(0xfff5a623), 'COMPLETED': Color(0xff1fbf75), 'CANCELLED': Color(0xfff0564a), 'ARCHIVED': Color(0xff8f98a8)};
@@ -63,9 +64,9 @@ class _ProjectsTabState extends ConsumerState<ProjectsTab> {
     final identity = ref.watch(authControllerProvider).value;
     return Column(children: [
       Padding(
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+        padding: EdgeInsets.fromLTRB(pagePadding(context), 0, pagePadding(context), 10),
         child: Row(children: [
-          Expanded(child: SizedBox(height: 38, child: ListView(scrollDirection: Axis.horizontal, children: [
+          Expanded(child: SizedBox(height: kFilterStripHeight, child: ListView(scrollDirection: Axis.horizontal, children: [
             _statusChip(context.tr('workbench.all'), statusFilter.isEmpty && !includeArchived, () { setState(() { statusFilter = ''; includeArchived = false; }); _load(); }),
             for (final entry in _projectStatusLabels.entries) _statusChip(context.tr('workbench.status.${entry.key}'), statusFilter == entry.key, () { setState(() { statusFilter = entry.key; includeArchived = false; }); _load(); }),
             _statusChip(context.tr('workbench.archived'), includeArchived, () { setState(() { statusFilter = ''; includeArchived = true; }); _load(); }),
@@ -227,7 +228,9 @@ class _ProjectDetailSheetBodyState extends ConsumerState<_ProjectDetailSheetBody
       maxChildSize: .94,
       builder: (sheetContext, scrollController) => ListView(
         controller: scrollController,
-        padding: const EdgeInsets.fromLTRB(18, 12, 18, 32),
+        // 弹窗内容底部必须让出 Home Indicator / 键盘，而不是写死 32。
+        padding: EdgeInsets.fromLTRB(pagePadding(sheetContext), 12,
+            pagePadding(sheetContext), sheetBottomInset(sheetContext, gap: 12)),
         children: [
           Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: const Color(0xffd7dce7), borderRadius: BorderRadius.circular(2)))),
           const SizedBox(height: 14),
@@ -449,7 +452,9 @@ class _TaskDetailSheetBodyState extends ConsumerState<_TaskDetailSheetBody> {
       maxChildSize: .94,
       builder: (sheetContext, scrollController) => ListView(
         controller: scrollController,
-        padding: const EdgeInsets.fromLTRB(18, 12, 18, 24),
+        // 弹窗底部固定 24px 少于一屏底部安全区（刘海屏约 34pt），
+        // 评论输入行会被 Home Indicator 压住；键盘弹起时也要同步让位。
+        padding: EdgeInsets.fromLTRB(pagePadding(context), 12, pagePadding(context), sheetBottomInset(context, gap: 12)),
         children: [
           Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: const Color(0xffd7dce7), borderRadius: BorderRadius.circular(2)))),
           const SizedBox(height: 14),
@@ -525,7 +530,7 @@ class _ProjectCreateSheetBodyState extends State<_ProjectCreateSheetBody> {
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: EdgeInsets.fromLTRB(18, 12, 18, MediaQuery.of(context).viewInsets.bottom + 24),
+    padding: EdgeInsets.fromLTRB(pagePadding(context), 12, pagePadding(context), keyboardBottomInset(context, gap: 24)),
     child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
       Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: const Color(0xffd7dce7), borderRadius: BorderRadius.circular(2)))),
       const SizedBox(height: 16),

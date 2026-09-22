@@ -8,6 +8,7 @@ import 'package:dio/dio.dart';
 import '../../core/auth_controller.dart';
 import '../../core/l10n.dart';
 import '../../core/mobile_api.dart';
+import '../../shared/layout.dart';
 
 enum AssistantMode { casual, work }
 
@@ -18,6 +19,23 @@ class _ChatMessage {
     final String content;
     final List<_ChatResource> resources;
     final List<_ChatSource> sources;
+}
+
+/// 待确认的写操作。客户端只持有 draftId 与展示用预览，
+/// 参数快照保存在服务端，确认时不可能被前端篡改。
+class _PendingActionConfirmation {
+    _PendingActionConfirmation({required this.draftId, required this.title, required this.fields, required this.expiresAt});
+    final String draftId;
+    final String title;
+    final List<({String label, String value})> fields;
+    final DateTime expiresAt;
+    /// 请求进行中：禁用按钮，避免重复提交。
+    bool resolving = false;
+    /// 终态：executed / cancelled / failed；null 表示仍待确认。
+    String? resolved;
+    String? resultSummary;
+
+    bool get expired => resolved == null && expiresAt.isBefore(DateTime.now());
 }
 
 class _ChatResource {
@@ -47,6 +65,10 @@ class _HomePageState extends ConsumerState<HomePage> {
   AssistantMode mode = AssistantMode.work;
   final composer = TextEditingController();
     final conversations = <AssistantMode, List<_ChatMessage>>{};
+    /// 待确认的写操作（AI 提议的业务变更）。独立于消息列表保存：
+    /// 流式回答会反复重建气泡，卡片放在消息里会被重建丢失；
+    /// 体验上也更像一个待处理的动作条，紧贴输入区上方。
+    final pendingConfirmations = <_PendingActionConfirmation>[];
     final pending = <AssistantMode, bool>{};
     final errors = <AssistantMode, String?>{};
         final conversationIds = <AssistantMode, String?>{};
@@ -110,9 +132,36 @@ class _HomePageState extends ConsumerState<HomePage> {
         await box.put(_cacheKey(chatMode), _messagesOf(chatMode).map((item) => {'id': item.id, 'role': item.role, 'content': item.content, 'resources': item.resources.map((resource) => {'id': resource.id, 'type': resource.type, 'url': resource.url, 'content': resource.content}).toList(), 'sources': item.sources.map((source) => {'id': source.id, 'title': source.title, 'url': source.url, 'domain': source.domain, 'snippet': source.snippet}).toList()}).toList());
     }
 
+    /// 确认或取消写操作草稿。只提交 draftId：服务端重新鉴权并重新校验参数，
+    /// 因此即使权限在确认前被回收也不会误写（会返回 403 并在这里提示）。
+    Future<void> resolveActionDraft(_PendingActionConfirmation confirmation, bool confirm) async {
+        if (confirmation.resolving) return;
+        setState(() => confirmation.resolving = true);
+        try {
+            final api = ref.read(mobileApiProvider);
+            final result = confirm
+                ? await api.confirmActionDraft(confirmation.draftId)
+                : await api.cancelActionDraft(confirmation.draftId);
+            final status = (result['status'] ?? '').toString();
+            if (!mounted) return;
+            setState(() {
+                confirmation.resolving = false;
+                confirmation.resolved = status == 'EXECUTED' ? 'executed' : status == 'REJECTED' ? 'cancelled' : 'failed';
+                confirmation.resultSummary = (result['summary'] ?? '').toString();
+            });
+        } catch (error) {
+            if (mounted) setState(() => confirmation.resolving = false);
+            final text = apiErrorMessage(error);
+            if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+        }
+    }
+
   @override
   Widget build(BuildContext context) {
     final casual = mode == AssistantMode.casual;
+    // 键盘弹起时 Scaffold 已自动收缩 body，只需给一点呼吸留白；
+    // 否则必须让出悬浮底部导航占用的真实高度（导航 + Home Indicator）。
+    final keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0;
     return Scaffold(
       backgroundColor:
           casual ? const Color(0xfffff7f3) : const Color(0xfff2f5ff),
@@ -134,18 +183,26 @@ class _HomePageState extends ConsumerState<HomePage> {
                         messages: _messagesOf(AssistantMode.work),
                         pending: pending[AssistantMode.work] ?? false,
                         error: errors[AssistantMode.work])),
+            // 待确认的写操作：紧贴输入区上方，确认前不会产生任何业务变更。
+            for (final confirmation in pendingConfirmations)
+                _ActionConfirmationCard(
+                    confirmation: confirmation,
+                    onResolve: (confirm) => resolveActionDraft(confirmation, confirm)),
             _Composer(
                 controller: composer, casual: casual, onSend: sendMessage,
                 pending: pending[mode] ?? false, onCancel: cancelMessage,
                 prompt: selectedPrompt[mode],
                 onPromptChanged: (value) => setState(() => selectedPrompt[mode] = value)),
-            if (!casual) const _ToolStrip(),
-            const SizedBox(height: 88),
+            // 键盘弹出时收起工具条，避免输入区被挤出可视范围。
+            if (!casual && !keyboardOpen) const _ToolStrip(),
+            SizedBox(height: keyboardOpen ? 8 : bottomNavInset(context) + 12),
           ])),
     );
   }
 
     Future<void> sendMessage() async {
+    // 新消息提交时清掉已处理的卡片，避免历史动作堆在输入区上方。
+    pendingConfirmations.removeWhere((item) => item.resolved != null);
     final prompt = selectedPrompt[mode];
     final text = composer.text.trim();
         final content = [prompt, text].where((e) => e != null && e.isNotEmpty).join('\n');
@@ -188,6 +245,30 @@ class _HomePageState extends ConsumerState<HomePage> {
                             if (mounted) setState(() { _messagesOf(activeMode).removeWhere((item) => item.id == 'streaming'); _messagesOf(activeMode).add(_ChatMessage(id: 'streaming', role: 'assistant', content: answer, resources: List.of(resources), sources: List.of(sources))); });
                         }
                         if (type == 'tool_call') { final name = event['name']?.toString() ?? ''; final toolCallId = event['toolCallId']?.toString() ?? ''; if (name == 'generate_document') { toolTypes[toolCallId] = 'DOCUMENT'; } else if (name == 'generate_image') { toolTypes[toolCallId] = 'IMAGE'; } }
+                        if (type == 'tool_result' && event['status'] == 'awaiting_confirmation') {
+                            // 写操作：服务端已落待确认草稿，副作用尚未发生。
+                            // 用户点击确认后本页只提交 draftId，参数快照留在服务端。
+                            final raw = event['confirmation'];
+                            if (raw is Map) {
+                                final draft = Map<String, dynamic>.from(raw);
+                                final rawFields = draft['fields'];
+                                final fields = <({String label, String value})>[];
+                                if (rawFields is List) {
+                                    for (final item in rawFields) {
+                                        if (item is Map) {
+                                            fields.add((label: (item['label'] ?? '').toString(), value: (item['value'] ?? '').toString()));
+                                        }
+                                    }
+                                }
+                                final confirmation = _PendingActionConfirmation(
+                                    draftId: (draft['draftId'] ?? '').toString(),
+                                    title: (draft['title'] ?? '待确认操作').toString(),
+                                    fields: fields,
+                                    expiresAt: DateTime.tryParse((draft['expiresAt'] ?? '').toString()) ?? DateTime.now(),
+                                );
+                                if (mounted) setState(() => pendingConfirmations.add(confirmation));
+                            }
+                        }
                         if (type == 'tool_result' && event['status'] == 'completed') {
                             final rawSources = event['sources'];
                             if (rawSources is List) { for (final raw in rawSources) { if (raw is Map) { final map = Map<String, dynamic>.from(raw); sources.add(_ChatSource(id: (map['id'] ?? '').toString(), title: (map['title'] ?? '').toString(), url: (map['url'] ?? '').toString(), domain: (map['domain'] ?? '').toString(), snippet: (map['snippet'] ?? '').toString())); } } if (sources.isNotEmpty && mounted) setState(() { _messagesOf(activeMode).removeWhere((item) => item.id == 'streaming'); _messagesOf(activeMode).add(_ChatMessage(id: 'streaming', role: 'assistant', content: answer, resources: List.of(resources), sources: List.of(sources))); }); }
@@ -249,14 +330,14 @@ class _TopBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-        height: 68,
-        padding: const EdgeInsets.symmetric(horizontal: 18),
+        height: isCompactWidth(context) ? kCompactTopBarHeight : kTopBarHeight,
+        padding: EdgeInsets.symmetric(horizontal: pagePadding(context) + 2),
         color: Colors.white.withValues(alpha: .72),
         child:
             Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
           const _CircleButton(icon: Icons.menu_rounded),
           Container(
-              height: 38,
+              height: 44,
               padding: const EdgeInsets.all(3),
               decoration: BoxDecoration(
                   color: Colors.white, borderRadius: BorderRadius.circular(22)),
@@ -288,11 +369,13 @@ class _ModeButton extends StatelessWidget {
   final bool casual;
   final VoidCallback onTap;
   @override
-  Widget build(BuildContext context) => GestureDetector(
+  Widget build(BuildContext context) => InkWell(
       onTap: onTap,
+      borderRadius: BorderRadius.circular(18),
       child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
           width: 64,
+          constraints: const BoxConstraints(minHeight: 44),
           alignment: Alignment.center,
           decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(18),
@@ -316,7 +399,7 @@ class _CircleButton extends StatelessWidget {
       onPressed: () {},
       icon: Icon(icon),
       style: IconButton.styleFrom(
-          backgroundColor: Colors.white, fixedSize: const Size(40, 40)));
+          backgroundColor: Colors.white, fixedSize: const Size(44, 44)));
 }
 
 class _WorkConversation extends StatelessWidget {
@@ -326,7 +409,10 @@ class _WorkConversation extends StatelessWidget {
     final String? error;
     @override
     Widget build(BuildContext context) => ListView(
-            padding: const EdgeInsets.fromLTRB(18, 12, 16, 12),
+            // 紧凑屏（iPhone SE / mini）必须收紧到 14pt，且不得再出现左右不等
+            // 的 18 / 16 组合；统一从共享 layout.dart 推导。
+            padding: EdgeInsets.fromLTRB(
+                pagePadding(context), 12, pagePadding(context), 12),
             children: [
                 for (final message in messages)
                     message.role == 'user'
@@ -349,7 +435,7 @@ class _CasualConversation extends StatelessWidget {
   final VoidCallback onSwitchToWork;
   @override
     Widget build(BuildContext context) =>
-            ListView(padding: const EdgeInsets.fromLTRB(18, 14, 16, 12), children: [
+            ListView(padding: EdgeInsets.fromLTRB(pagePadding(context), 14, pagePadding(context), 12), children: [
         const Center(
             child: Chip(
                 avatar: Icon(Icons.sentiment_satisfied_alt_outlined,
@@ -389,20 +475,127 @@ class _CopyAction extends StatelessWidget {
     @override
     Widget build(BuildContext context) => Padding(
                 padding: EdgeInsets.only(top: 6, left: indent),
-                child: GestureDetector(
+                child: InkWell(
                     onTap: () => _copy(context),
-                    child: const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                            Icon(Icons.content_copy_rounded,
-                                    size: 14, color: Color(0xff9ca4b4)),
-                            SizedBox(width: 4),
-                            Text('复制',
-                                    style: TextStyle(fontSize: 11, color: Color(0xff9ca4b4))),
-                        ],
+                    borderRadius: BorderRadius.circular(8),
+                    // 图标 14 + 文字 11 的实际高度很小，用垂直内边距把
+                    // 可点击区域补到 iOS 要求的 44pt。
+                    child: const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 13, horizontal: 2),
+                        child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                                Icon(Icons.content_copy_rounded,
+                                        size: 14, color: Color(0xff9ca4b4)),
+                                SizedBox(width: 4),
+                                Text('复制',
+                                        style: TextStyle(fontSize: 11, color: Color(0xff9ca4b4))),
+                            ],
+                        ),
                     ),
                 ),
             );
+}
+
+/// 写操作待确认卡片。
+///
+/// 展示服务端返回的参数快照预览，并把用户的决策还原为一次「只带 draftId」的请求——
+/// 参数不在客户端流转，因此不可能被篡改。确认后立刻转为终态文案，避免重复点击。
+class _ActionConfirmationCard extends StatelessWidget {
+    const _ActionConfirmationCard({required this.confirmation, required this.onResolve});
+    final _PendingActionConfirmation confirmation;
+    final ValueChanged<bool> onResolve;
+
+    @override
+    Widget build(BuildContext context) {
+        final resolved = confirmation.resolved;
+        String statusText;
+        Color statusColor;
+        if (resolved == 'executed') {
+            statusText = '已执行';
+            statusColor = const Color(0xff12b76a);
+        } else if (resolved == 'cancelled') {
+            statusText = '已取消';
+            statusColor = const Color(0xff8f98a8);
+        } else if (resolved == 'failed') {
+            statusText = '执行失败';
+            statusColor = const Color(0xfff0564a);
+        } else if (confirmation.expired) {
+            statusText = '已过期';
+            statusColor = const Color(0xff8f98a8);
+        } else {
+            statusText = '待确认';
+            statusColor = const Color(0xff5964ff);
+        }
+
+        return Container(
+            key: ValueKey('action-confirmation-${confirmation.draftId}'),
+            margin: EdgeInsets.fromLTRB(pagePadding(context), 0, pagePadding(context), 10),
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+                color: const Color(0xfff7f8ff),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: const Color(0xffe3e5ff))),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Row(children: [
+                    Icon(Icons.fact_check_outlined, size: 18, color: statusColor),
+                    const SizedBox(width: 6),
+                    Expanded(
+                        child: Text(confirmation.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: Color(0xff273142)))),
+                    Text(statusText, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: statusColor)),
+                ]),
+                const SizedBox(height: 10),
+                for (final field in confirmation.fields)
+                    Padding(
+                        padding: const EdgeInsets.only(bottom: 6),
+                        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                            SizedBox(
+                                width: 76,
+                                child: Text(field.label, style: const TextStyle(fontSize: 12, color: Color(0xff8f98a8)))),
+                            Expanded(
+                                child: Text(field.value, style: const TextStyle(fontSize: 12, height: 1.4, color: Color(0xff273142)))),
+                        ])),
+                if (resolved != null)
+                    Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(confirmation.resultSummary ?? '', style: const TextStyle(fontSize: 12, color: Color(0xff4b5563))))
+                else if (confirmation.expired)
+                    const Padding(
+                        padding: EdgeInsets.only(top: 4),
+                        child: Text('该操作已过期，请重新发起对话生成新的待确认操作。',
+                            style: TextStyle(fontSize: 12, color: Color(0xff8f98a8))))
+                else ...[
+                    const SizedBox(height: 8),
+                    Row(children: [
+                        // Apple 建议最小触控目标 44pt，两个按钮都按 44 高实现。
+                        SizedBox(
+                            height: 44,
+                            child: FilledButton(
+                                onPressed: confirmation.resolving ? null : () => onResolve(true),
+                                style: FilledButton.styleFrom(
+                                    backgroundColor: const Color(0xff5964ff),
+                                    padding: const EdgeInsets.symmetric(horizontal: 20)),
+                                child: confirmation.resolving
+                                    ? const SizedBox(
+                                        width: 16, height: 16,
+                                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                                    : const Text('确认执行'))),
+                        const SizedBox(width: 10),
+                        SizedBox(
+                            height: 44,
+                            child: OutlinedButton(
+                                onPressed: confirmation.resolving ? null : () => onResolve(false),
+                                child: const Text('取消'))),
+                    ]),
+                    const SizedBox(height: 6),
+                    const Text('确认前不会产生任何变更', style: TextStyle(fontSize: 11, color: Color(0xff8f98a8))),
+                ],
+            ]),
+        );
+    }
 }
 
 class _Bubble extends StatelessWidget {
@@ -418,7 +611,8 @@ class _Bubble extends StatelessWidget {
                     Align(
                             alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
                             child: Container(
-                                    constraints: const BoxConstraints(maxWidth: 265),
+                                    constraints: BoxConstraints(
+                                            maxWidth: bubbleMaxWidth(context)),
                                     margin: const EdgeInsets.only(top: 12),
                                     padding:
                                             const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -560,7 +754,7 @@ class _Composer extends StatelessWidget {
         final accent =
                 casual ? const Color(0xffff4f91) : const Color(0xff5964ff);
         return Padding(
-        padding: const EdgeInsets.fromLTRB(18, 4, 18, 8),
+        padding: EdgeInsets.fromLTRB(pagePadding(context), 4, pagePadding(context), 8),
                 child: Column(
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -578,8 +772,10 @@ class _Composer extends StatelessWidget {
                                     visualDensity: VisualDensity.compact,
                                 ),
                             ),
-                        SizedBox(
-                            height: 76,
+                        ConstrainedBox(
+                            constraints: const BoxConstraints(
+                                minHeight: kComposerMinHeight,
+                                maxHeight: kComposerMaxHeight),
                             child: TextField(
                                 controller: controller,
                                 onSubmitted: (_) => onSend(),
@@ -647,10 +843,12 @@ class _Composer extends StatelessWidget {
 class _ToolStrip extends StatelessWidget {
   const _ToolStrip();
   @override
-  Widget build(BuildContext context) => Container(
-      height: 76,
-      margin: const EdgeInsets.symmetric(horizontal: 18),
-      padding: const EdgeInsets.symmetric(horizontal: 8),
+  Widget build(BuildContext context) {
+    final compact = isCompactViewport(context);
+    return Container(
+      height: compact ? kCompactToolStripHeight : kToolStripHeight,
+      margin: EdgeInsets.symmetric(horizontal: pagePadding(context)),
+      padding: const EdgeInsets.symmetric(horizontal: 4),
       decoration: BoxDecoration(
           color: Colors.white.withValues(alpha: .95),
           borderRadius: BorderRadius.circular(18),
@@ -676,7 +874,9 @@ class _ToolStrip extends StatelessWidget {
                 icon: Icons.credit_card_outlined,
                 label: '报销',
                 color: Color(0xff8b4dff))
-          ]));
+          ]),
+    );
+  }
 }
 
 class _Tool extends StatelessWidget {
@@ -685,11 +885,18 @@ class _Tool extends StatelessWidget {
   final String label;
   final Color color;
   @override
-  Widget build(BuildContext context) =>
-      Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-        Icon(icon, color: color, size: 23),
-        const SizedBox(height: 5),
-        Text(label,
-            style: const TextStyle(fontSize: 11, color: Color(0xff4e5969)))
-      ]);
+  Widget build(BuildContext context) => InkWell(
+      onTap: () {},
+      borderRadius: BorderRadius.circular(14),
+      child: SizedBox(
+        width: 68,
+        height: 44,
+        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+          Icon(icon, color: color, size: 23),
+          const SizedBox(height: 5),
+          Text(label,
+              style: const TextStyle(fontSize: 11, color: Color(0xff4e5969)))
+        ]),
+      ),
+    );
 }

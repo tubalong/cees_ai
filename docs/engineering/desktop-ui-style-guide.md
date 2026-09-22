@@ -100,8 +100,15 @@ src/
 | 主文字 | `var(--text)` `#202432` |
 | 次要文字/占位 | `var(--muted)` `#858c9b` |
 | 分隔线/描边 | `var(--line)` `#e8ebf1` |
-| 危险色（删除、关闭 hover） | `#f0564a` |
-| 警告色（逾期、警示） | `#f97316` |
+| 危险色（删除、错误文本、高优先级预警） | `var(--danger)` `#f0564a` |
+| 危险态浅底 / 描边 / 文字 | `var(--danger-soft)` / `var(--danger-line)` / `var(--danger-ink)` |
+| 警告色（逾期、待处理提醒） | `var(--warning)` `#f97316` |
+| 警告态浅底 / 描边 / 文字 | `var(--warning-soft)` / `var(--warning-line)` / `var(--warning-ink)` |
+
+状态色族（`--danger*` / `--warning*`）与语义令牌一样**只在 `styles.css` 定义一次**，
+并在 `:root[data-theme='dark']` 下整体换算（暗色下改为提高前景亮度 + 暗底，
+否则浅底状态卡会在深色工作区里突兀发白）。功能页不得写死 `#d4380d`、`#e5484d`、
+`#f2d4b8` 一类色值，也不得自行复制一份暗色覆盖。
 
 语义色调（图标/卡片角标用，成对「文字色 + 浅底」）：
 
@@ -184,7 +191,61 @@ src/
 - [ ] 删除等危险操作有二次确认。
 - [ ] 类名 kebab-case 且带功能前缀。
 
-## 12. 路由约定
+## 12. Mac / iPhone 适配要求（新增强制项）
+
+所有新功能在设计与开发阶段都必须考虑 `macOS` 与 `iPhone` 交付状态，不允许只在 Windows / Android 视口下“看起来正常”。
+
+### 12.1 Mac 适配要求
+
+- 桌面端应用必须对 `process.platform === 'darwin'` 做平台分支，使用 `titleBarStyle: 'hiddenInset'`、`trafficLightPosition`、并按 Mac 版窗口风格调整留白。
+- Mac 窗口最小宽度不得小于 `1040px`，内容区 padding 取 `18px` 级别，避免 Windows 版过宽的留白感。
+- 组件圆角与卡片边距需要在 `:root[data-platform='mac']` 下微调，保持「更轻、更圆润、适合 Retina 界面」的视觉密度。
+  - 平台标记由 `PreferencesProvider` 写入 `document.documentElement`（即 `:root`），因此选择器必须用 `:root[data-platform='mac']`；写成 `body[data-platform='mac']` 永远不会命中。
+  - 跨页面通用的圆角与标题级别收敛统一放在 `styles/styles.css`（覆盖 `.ant-card` / `.ant-modal-content` / `.ant-drawer-content` / `.ant-table` 与 `.workspace-page-header`），功能页 `xxx.css` 只需处理自己的特殊布局。
+- Mac 交互必须兼容 `Cmd` 系列快捷键；若设计了快捷键，优先使用 `metaKey` / `event.metaKey`，不要把 `Ctrl` 绑定成唯一入口。
+- 新增功能必须在大显示器、正常窗口和较窄窗口下验证布局不发生溢出，且导航区/侧边栏/对话区均可用。
+
+### 12.2 iPhone 适配要求
+
+- 移动端所有页面必须使用 `SafeArea` + `MediaQuery.padding.bottom`，避免底部导航遮挡内容。底部按钮区需保留够用的触控目标（至少 44x44pt）。
+- 紧凑屏幕（`width <= 390`）应启用更小的左右边距（12–18px），字体按 iPhone 默认阅读尺度缩放，避免被 24px 级大间距挤压。
+- 复杂列表、表单、弹窗与附件选择器必须支持单列布局，并在键盘弹出时用 `MediaQuery.viewInsets.bottom` 调整底部留白。
+- 任何 `SizedBox(height: 88)`、固定底部间距、悬浮栏或横向滚动控件，都应改为基于平台/屏幕尺寸计算，不能将通用布局写死成桌面尺寸。
+
+### 12.3 适配检查清单
+
+- [ ] 运行前检查当前功能在 macOS / iPhone 的最小窗口或最窄屏状态是否可用。
+- [ ] 识别并处理 `darwin` / `iOS` 分支；目标平台的边距、圆角、键盘适配、底部安全区均已处理。
+- [ ] 新增交互或快捷键不会只适配 Windows / Ctrl 组合键。
+- [ ] 相关文档、验收说明已同步更新。
+
+### 12.4 已落地的判定规则（逐页复查时按此对照）
+
+**macOS**
+
+- 根级整屏布局（登录页、平台管理台）不在 `.workspace-content` 内，拿不到那边的拖拽区内边距，必须自行让开窗口顶部 34px：
+  - `platform.css` 的 `.platform-topbar` 用 `calc(72px + var(--platform-drag-height))` 增高并同步 `padding-top`；
+  - `login.css` 的 `.login-intro` / 语言切换按钮按 `--platform-safe-top` 下移。
+- 高度不能用 `100vh` 的场合：凡渲染在 `.workspace-content` 内部的元素，`100vh` 会比可用高度多出「容器内边距」，macOS 再多 34px，改用 `min-height: 100%`。
+- 三分栏/固定列宽页面统一用 `height: calc(100vh - var(--page-viewport-offset))`，不要写死 `120px`；窄窗口（`<=1180px`）下由媒体查询收紧列宽。
+- macOS 全屏时系统会隐藏交通灯，主进程通过 `cees:window-fullscreen-changed` 推送状态，`styles.css` 的 `:root[data-platform='mac'][data-fullscreen='true']` 把 `--platform-drag-height` / `--platform-safe-top` 归零。新增布局只需复用这两个令牌即可自动收回留白，**不要为全屏另写一份分支**。
+- 右键菜单、应用菜单（`appMenu` / `editMenu` / 窗口菜单）与 `⌘` 系列快捷键由 `electron/main.ts` 统一提供，渲染层不要自行覆写全局按键。
+- 为 Mac 最小窗口（`1040px`）预留窄窗口分支：凡使用 `grid-template-columns` 固定列宽、或多列并排的列表行（如邀请列表、任务行、部门树），
+  必须提供 `@media (max-width: 1180px)` 收敛方案（改为等分两列、允许标题省略、收紧缩进），不得让操作按钮被挤出可视区。
+- 逐页视觉复查的补充约定：
+  - 页面级一级标题必须复用 `.workspace-page-header`，自建标题栏（`.hr-header` / `.connector-marketplace-header` / `.platform-heading` / `.finance-heading` / `.legal-heading`）需在 `styles/styles.css` 登记，避免 Mac 下字号比其它页重一级；
+  - 各功能页 `xxx.css` 的颜色必须使用语义令牌（`var(--line)` / `var(--text)` / `var(--muted)`），组织页等历史页面已从十六进制硬编码迁回令牌，不得再新增硬编码色值；状态提示统一使用 `var(--danger*)` / `var(--warning*)` 令牌族，已迁移页面包括平台管理台（`platform.css` / `platform-tenant.css`）、个人中心（`profile.css`）、财务管理（`finance.css`）、知识管理（`knowledge.css`）、钉钉连接器（`dingtalk.css`）、角色化首页（`dashboard.css`）与连接器市场（`connectors.css`：连接态用 `var(--success)` / `var(--success-line)`，安装/连接失败提示用 `var(--danger)`）；
+  - 固定左列的两栏/多栏页必须在 `@media (max-width: 1180px)` 收紧：当前已登记 `workspace.css`、`project.css`、`role.css`、`assignment.css`、`knowledge.css`、`finance.css`、`connectors.css`、`dashboard.css`、`department.css`、`invitation.css`、`profile.css`、`shared.css`、`dingtalk.css`（`.dingtalk-role-assignment`）、`legal.css`、`platform.css`、`platform-tenant.css` 与 `login.css`（登录页英雄区：双列最小宽度合计 960px，在 1040px 窗口下必须收紧标题字号与列宽），新增同类页面必须在本清单「加一」，否则在 Mac 最小窗口（1040px）下右侧内容会被挤出可视区；
+  - 被多个功能页共用的业务样式（`styles/shared.css`）只在共享层做一次平台密度收敛（任务行、附件行、评论项、元信息网格），各功能页无需重复声明；其悬浮描边取 `var(--primary)`、半透明阴影取 `rgba(var(--primary-rgb), …)`、元信息网格底色取 `var(--surface-soft)`，不得回写 `#3478ff` 一类十六进制。
+
+**iPhone**
+
+- 任何底部悬浮导航之上的内容，底部留白必须取 `contentBottomInset(context)`；弹窗内取 `sheetBottomInset(context)`；输入区取 `keyboardBottomInset(context)` / `MediaQuery.viewInsets.bottom`。禁止写死 `88 / 96 / 104` 一类数值。
+- 页面左右边距使用 `pagePadding(context)`（紧凑屏 14、常规 18），紧凑屏判定阈值统一为 `kCompactWidth = 390`。
+- 触控目标不得低于 44x44pt：标签页、筛选 chip、图标按钮都应至少 44pt 高。
+- 等宽多标签在紧凑屏上必须允许省略（`maxLines: 1` + `TextOverflow.ellipsis`）并在紧凑屏下调一级字号，防止多语言标签溢出。
+
+## 13. 路由约定
 
 - 使用 `react-router-dom` 的**声明式** `<Routes>/<Route>`，不要用 `if (pathname === '...')` 过程式分派。
 - 工作台路由统一在 `app/Workspace.tsx` 的 `CurrentPage` 里注册；登录页 / 平台工作台在 `app/App.tsx` 顶层按认证状态分支。

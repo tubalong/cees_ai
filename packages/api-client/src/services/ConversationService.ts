@@ -2,6 +2,7 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
+import type { AssistantActionDraftResolutionEnvelope } from '../models/AssistantActionDraftResolutionEnvelope';
 import type { ConversationDetailResponseEnvelope } from '../models/ConversationDetailResponseEnvelope';
 import type { ConversationListResponseEnvelope } from '../models/ConversationListResponseEnvelope';
 import type { ConversationResponseEnvelope } from '../models/ConversationResponseEnvelope';
@@ -40,6 +41,58 @@ export class ConversationService {
                 401: `Authentication or tenant membership is invalid`,
                 502: `AI provider returned an invalid plan`,
                 503: `AI service or model is temporarily unavailable`,
+            },
+        });
+    }
+    /**
+     * 确认并执行 AI 写操作草稿
+     * 写工具（riskLevel=WRITE）在对话中不会直接执行：模型只产出参数与预览，服务端落为
+     * 待确认草稿并在 tool_result 事件的 confirmation 字段里返回。用户确认后调用本接口。
+     * 服务端只信任草稿内保存的参数快照，重新解析成员实时权限并重新执行参数校验，
+     * 因此确认前被回收权限或停用成员都不会产生写入。PENDING_CONFIRMATION → EXECUTING
+     * 通过条件更新抢占：重复确认返回同一结果，不会重复写入。
+     *
+     * @returns AssistantActionDraftResolutionEnvelope 草稿已执行
+     * @throws ApiError
+     */
+    public static confirmAssistantActionDraft({
+        draftId,
+    }: {
+        draftId: string,
+    }): CancelablePromise<AssistantActionDraftResolutionEnvelope> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/assistant/action-drafts/{draftId}/confirm',
+            path: {
+                'draftId': draftId,
+            },
+            errors: {
+                403: `确认瞬间权限已不足`,
+                404: `草稿不存在或不属于当前成员`,
+                409: `草稿已过期、已取消或已被处理`,
+            },
+        });
+    }
+    /**
+     * 取消 AI 写操作草稿
+     * 用户拒绝执行草稿。取消后草稿进入 REJECTED 终态，不可再确认；需重新发起对话生成新草稿。
+     * @returns AssistantActionDraftResolutionEnvelope 草稿已取消
+     * @throws ApiError
+     */
+    public static cancelAssistantActionDraft({
+        draftId,
+    }: {
+        draftId: string,
+    }): CancelablePromise<AssistantActionDraftResolutionEnvelope> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/assistant/action-drafts/{draftId}/cancel',
+            path: {
+                'draftId': draftId,
+            },
+            errors: {
+                404: `草稿不存在或不属于当前成员`,
+                409: `草稿已过期、已执行或已被处理`,
             },
         });
     }

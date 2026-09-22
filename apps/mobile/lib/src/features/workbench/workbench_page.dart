@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/auth_controller.dart';
 import '../../core/l10n.dart';
+import '../../shared/layout.dart';
 import 'meetings_tab.dart';
 import 'notifications_tab.dart';
 import 'overview_tab.dart';
@@ -38,7 +39,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
         child: Column(
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+              padding: EdgeInsets.fromLTRB(pagePadding(context), 14, pagePadding(context), 12),
               child: Row(children: [
                 Text(context.tr('workbench.title'), style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
                 const Spacer(),
@@ -48,9 +49,11 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
               Expanded(child: Center(child: Text(context.tr('workbench.noPermission'), style: const TextStyle(color: Color(0xff8f98a8)))))
             else ...[
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
+                padding: EdgeInsets.symmetric(horizontal: pagePadding(context)),
                 child: SizedBox(
-                  height: 42,
+                  // Apple 建议最小触控目标 44pt，横向标签条统一取共享常量，
+                  // 不再写死 42 / 44 一类数值。
+                  height: kFilterStripHeight,
                   child: ListView(
                     scrollDirection: Axis.horizontal,
                     children: List.generate(tabs.length, (index) {
