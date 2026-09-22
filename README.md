@@ -56,4 +56,4 @@ COS 权限和 COSCLI 参考见 [infra/tencent-cos/README.md](infra/tencent-cos/R
 
 NestJS Swagger：`http://localhost:3000/api/docs`；FastAPI 文档本地为 `http://localhost:8000/docs`。Staging 在 `AI_SERVICE_PORT`（默认 `8000`）对外提供 `/docs`，Production 不映射 ai-service 宿主机端口。
 
-架构说明见 [docs/architecture/overview.md](docs/architecture/overview.md)，AI 基础设施说明见 [docs/architecture/ai-service-foundation.md](docs/architecture/ai-service-foundation.md)，公开对话与 Token 记录见 [docs/architecture/public-chat-api-and-token-metering.md](docs/architecture/public-chat-api-and-token-metering.md)。
+架构说明见 [docs/architecture/overview.md](docs/architecture/overview.md)，AI 基础设施说明见 [docs/architecture/ai-service-foundation.md](docs/architecture/ai-service-foundation.md)，AI 调用与 Token 计量见 [docs/architecture/public-chat-api-and-token-metering.md](docs/architecture/public-chat-api-and-token-metering.md)。

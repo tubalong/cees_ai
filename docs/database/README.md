@@ -4,7 +4,7 @@
 部门树模型、约束和成员归属见 [组织部门管理](../product/organization-department-management.md)。
 项目、项目成员和状态历史见 [项目与项目成员管理](../product/project-management.md)。
 任务、执行人、评论、附件和动态见 [项目任务管理](../product/task-management.md)。
-公开 Chat 调用与 Token 指标见 [公开 AI 对话链路与 Token 计量](../architecture/public-chat-api-and-token-metering.md)。
+AI 调用与 Token 指标见 [AI 调用与 Token 计量](../architecture/public-chat-api-and-token-metering.md)。
 通知中心与后台任务见 [通知中心与后台任务](../product/notification-center.md)。
 工作台与数据看板见 [工作台与数据看板](../product/dashboard-workbench.md)。
 

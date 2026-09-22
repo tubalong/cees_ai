@@ -2460,9 +2460,9 @@ model AIInvocationLog {
   userId         String    @map("user_id") @db.Uuid
   /// 发起调用时的租户成员身份快照；旧调用和非成员调用可为空。
   membershipId   String?   @map("membership_id") @db.Uuid
-  /// 客户端本地会话标识；仅 Chat 调用填写，不代表服务端会话实体。
+  /// 服务端会话标识（conversations 表）；仅 Chat/ToolTurn 类调用填写，不建外键以保留历史快照。
   conversationId String?   @map("conversation_id")
-  /// 客户端本地轮次标识；同一轮的压缩与回答可共享该值。
+  /// 服务端轮次标识（assistant_turns 表）；同一轮内的压缩与多次模型调用共享该值。
   turnId         String?   @map("turn_id")
   requestId      String    @map("request_id")
   /// 工具执行对应的 ToolCall ID；图片生成等工具调用填写，配合 request_id 做幂等。
