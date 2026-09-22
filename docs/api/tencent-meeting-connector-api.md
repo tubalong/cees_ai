@@ -1,6 +1,6 @@
 # 腾讯会议连接器 API
 
-> 状态：OAuth 后端已实现，只读工具网关待实现。公开契约版本：`0.37.1`。
+> 状态：OAuth 后端与只读工具网关已实现。公开契约版本：`0.37.1`。
 
 完整定义以 `packages/contracts/openapi/openapi.yaml` 为准。当前契约只定义个人 OAuth 授权、连接状态、解绑、只读工具发现和只读工具执行，不包含创建、修改或取消会议等写操作。
 
@@ -36,7 +36,7 @@
 
 ```json
 {
-  "authorizationUrl": "https://meeting.tencent.com/oauth2/authorize?...",
+  "authorizationUrl": "https://meeting.tencent.com/marketplace/authorize.html?...",
   "expiresAt": "2026-09-22T10:10:00.000Z",
   "pollAfterMs": 1500
 }
@@ -89,7 +89,7 @@
 | `tencent_meeting.participants.list` | 查询指定会议参会成员 |
 | `tencent_meeting.recordings.list` | 查询指定会议录制和纪要元数据 |
 
-`GET /tools` 根据实际 Scope 返回上述工具的子集。工具参数以服务端返回的 JSON Schema 为准，但 `POST /executions` 仍必须再次执行服务端 Schema 校验，不能信任 Desktop 或模型提交的参数。
+`GET /tools` 根据实际 Scope 返回上述工具的子集；历史授权记录 Scope 为空时保持兼容并展示全部固定工具，实际权限继续由腾讯会议提供方校验。工具参数以服务端返回的 JSON Schema 为准，但 `POST /executions` 仍再次执行服务端 Schema 校验，拒绝未知工具、额外字段、非法时间范围、非法会议 ID、越界分页以及一至三条之外的调用数量。
 
 执行请求最多包含三条调用：
 
@@ -105,6 +105,14 @@
 ```
 
 响应按请求顺序返回 `TencentMeetingConnectorContext[]`。`data` 必须经过字段白名单、敏感信息脱敏和大小限制，不得包含 Token、Secret、Cookie、Authorization Header 或提供方原始认证响应。
+
+当前网关的提供方映射：
+
+- 会议列表调用 `GET /v1/meetings`，CEES 使用 `next_pos/next_cursory` 获取后续页，并在安全分页上限内完成时间过滤和契约分页；
+- 会议详情调用 `GET /v1/meetings/{meetingId}`；
+- 参会成员调用 `GET /v1/meetings/{meetingId}/real-time-participants`，CEES 将公开 `pageSize=100` 适配为上游最多 50 条的分页请求；
+- 录制元数据先读取会议详情获得必填时间窗，再分页调用 `GET /v1/records`，不返回播放地址、下载地址或媒体正文；
+- 参会者外部标识转换为会议内稳定哈希，不返回手机号、邮箱、IP、设备标识或原始 `open_id/userid`。
 
 ## 7. 失败语义
 
@@ -128,7 +136,7 @@
 
 错误响应不得向客户端泄露上游请求签名、应用 Secret、Token、完整提供方响应或内部网络地址。
 
-## 8. OAuth 服务端实现
+## 8. 服务端实现
 
 OAuth 后端位于 `apps/api/src/tencent-meeting`，数据库迁移为
 `apps/api/prisma/migrations/20260922120000_tencent_meeting_oauth_backend/migration.sql`。
@@ -142,22 +150,30 @@ OAuth 后端位于 `apps/api/src/tencent-meeting`，数据库迁移为
 - 授权开始、成功、失败、刷新成功、刷新失败和解绑审计；
 - 回调 HTML 不输出授权码、Token、Secret 或上游原始响应；
 - 回调优先读取腾讯会议官方 `auth_code`，兼容旧契约 `code`。
+- OAuth 授权地址使用 `sdk_id/corp_id/redirect_uri/state`，Token 使用官方 `open_id/open_corp_id/expires/scopes` 字段；
+- Open API 请求由服务端注入 `X-TC-Timestamp`、`X-TC-Nonce`、`AccessToken`、`OpenId` 和 `X-TC-Registered`；
+- `/tools` 和 `/executions` 只暴露五个固定只读工具，不接受任意 URL、Header 或开放平台路径；
+- 执行成功和失败分别记录 `TENCENT_MEETING_READ_EXECUTED` 与 `TENCENT_MEETING_READ_FAILED`，审计仅包含工具 ID、调用数量、结果字节数和受控错误码。
 
 服务端配置：
 
 | 配置项 | 说明 |
 | --- | --- |
 | `TENCENT_MEETING_SDK_ID` | 腾讯会议市场应用 SDK ID |
+| `TENCENT_MEETING_CORP_ID` | 腾讯会议应用所属企业 ID，授权地址必填参数 |
 | `TENCENT_MEETING_SECRET` | 腾讯会议市场应用 Secret |
 | `TENCENT_MEETING_REDIRECT_URI` | 与腾讯会议应用后台登记完全一致的 OAuth 回调地址 |
 | `TENCENT_MEETING_CREDENTIAL_ENCRYPTION_KEY` | 32 字节十六进制或 Base64 Token 加密密钥 |
+| `TENCENT_MEETING_API_BASE_URL` | 腾讯会议 Open API 固定服务地址，默认 `https://api.meeting.qq.com` |
+| `TENCENT_MEETING_PROVIDER_RESPONSE_MAX_BYTES` | 单次上游响应字节上限，默认 `524288` |
+| `TENCENT_MEETING_EXECUTION_RESPONSE_MAX_BYTES` | 单次批量执行最终响应字节上限，默认 `262144` |
 
 生产环境不得使用 `change_me`，回调地址必须使用 HTTPS。解绑当前只删除 CEES 服务端托管凭据；腾讯会议未提供适用的 OAuth 撤销接口时，本地删除作为 CEES 的权威解绑结果。
 
 ## 9. 后续实现要求
 
-- 实现 `/tools` 与 `/executions` 腾讯会议只读 API 网关；
-- 执行入口继续记录租户、成员、连接器、请求和结果审计事件；
+- Desktop Adapter 切换到 `/authorization/status/tools/executions`，完成真实授权与查询联调；
+- Assistant Tool Loop 在 Desktop 联调稳定后消费同一固定工具目录；
 - Desktop 只能调用 CEES API，不能直接持有腾讯会议应用 Secret 或 Token；
 - 写操作不在 `0.37.1` 范围内，后续必须单独提升契约版本并增加二次确认设计。
 

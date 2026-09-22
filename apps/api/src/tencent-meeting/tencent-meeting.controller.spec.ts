@@ -1,12 +1,14 @@
 import { BadRequestException } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { TencentMeetingController } from './tencent-meeting.controller';
+import { TencentMeetingGatewayService } from './tencent-meeting-gateway.service';
 import { TencentMeetingService } from './tencent-meeting.service';
 
 describe('TencentMeetingController', () => {
     const completeAuthorization = jest.fn();
     const service = { completeAuthorization } as unknown as TencentMeetingService;
-    const controller = new TencentMeetingController(service);
+    const gateway = {} as TencentMeetingGatewayService;
+    const controller = new TencentMeetingController(service, gateway);
 
     beforeEach(() => jest.clearAllMocks());
 

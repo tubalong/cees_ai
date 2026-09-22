@@ -8,6 +8,7 @@ describe('TencentMeetingConfig', () => {
             ...originalEnv,
             NODE_ENV: 'production',
             TENCENT_MEETING_SDK_ID: 'sdk-1',
+            TENCENT_MEETING_CORP_ID: 'corp-1',
             TENCENT_MEETING_SECRET: 'secret-1',
             TENCENT_MEETING_REDIRECT_URI: 'https://cees.test/api/v1/connectors/tencent-meeting/oauth/callback',
             TENCENT_MEETING_CREDENTIAL_ENCRYPTION_KEY: Buffer.alloc(32, 9).toString('base64'),
@@ -22,7 +23,16 @@ describe('TencentMeetingConfig', () => {
         const config = new TencentMeetingConfig();
 
         expect(config.isConfigured()).toBe(true);
-        expect(config.settings()).toMatchObject({ sdkId: 'sdk-1', secret: 'secret-1' });
+        expect(config.settings()).toMatchObject({
+            sdkId: 'sdk-1',
+            corpId: 'corp-1',
+            secret: 'secret-1',
+            authorizeUrl: 'https://meeting.tencent.com/marketplace/authorize.html',
+            userInfoUrl: 'https://meeting.tencent.com/wemeet-webapi/v2/oauth2/oauth/user_info',
+            apiBaseUrl: 'https://api.meeting.qq.com/',
+            providerResponseMaxBytes: 524288,
+            executionResponseMaxBytes: 262144,
+        });
         expect(config.encryptionKey()).toHaveLength(32);
     });
 
