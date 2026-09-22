@@ -31,6 +31,19 @@
     line-height: 1.7;
 }
 
+.connector-marketplace-loading,
+.connector-marketplace-error {
+    padding: 32px;
+    border: 1px dashed var(--line);
+    border-radius: 14px;
+    text-align: center;
+}
+
+.connector-marketplace-error {
+    margin-bottom: 18px;
+    color: #d84a3f;
+}
+
 .connector-marketplace-eyebrow {
     color: var(--primary);
     font-size: 11px;
@@ -299,6 +312,7 @@
     object-fit: cover;
 }
 
+.connector-connected-provider,
 .connector-connected-dingtalk {
     background: linear-gradient(145deg, #1687ff, #0866df);
     font-size: 34px;
