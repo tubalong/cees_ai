@@ -301,6 +301,29 @@ export class FileService {
         return fileId;
     }
 
+    /**
+     * 补偿删除服务端物化文件（转存事务失败时的孤儿清理）：软删 FileObject 记录并删除
+     * COS 对象。仅用于本次会话内刚物化、尚未被任何业务文档引用的快照；
+     * 记录不存在（已删）时静默返回，COS 删除失败只记日志，不阻断业务异常上抛。
+     */
+    async deleteMaterializedFile(input: { tenantId: string; fileObjectId: string }): Promise<void> {
+        const file = await this.prisma.fileObject.findFirst({
+            where: { id: input.fileObjectId, tenantId: input.tenantId, deletedAt: null },
+            select: { id: true, objectKey: true },
+        });
+        if (!file) return;
+        await this.prisma.fileObject.updateMany({
+            where: { id: file.id, tenantId: input.tenantId, deletedAt: null },
+            data: { deletedAt: new Date() },
+        });
+        try {
+            await this.storage.deleteObject(file.objectKey);
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'unknown error';
+            this.logger.warn(`补偿清理物化文件 COS 对象失败（文件 ${file.id}）：${message}`);
+        }
+    }
+
     private async resumeExistingSession(
         session: Prisma.UploadSessionGetPayload<Record<string, never>>,
         fingerprint: string,
