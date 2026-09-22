@@ -3,6 +3,11 @@ import { App as AntdApp, Button, Modal, Select, Space, Spin, Tag } from 'antd';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useI18n } from '../../core/i18n';
+import {
+    connectTencentMeeting,
+    disconnectTencentMeetingConnector,
+    getTencentMeetingStatus,
+} from './tencentMeetingConnector';
 
 const EMPTY_STATUS: DesktopConnectorStatus = {
     state: 'NOT_INSTALLED',
@@ -77,7 +82,10 @@ export default function ConnectorMarketplacePage(): JSX.Element {
             const nextManifests = await connectors.list();
             const statusEntries = await Promise.all(nextManifests.map(async (manifest) => {
                 try {
-                    return [manifest.id, await connectors.status(manifest.id)] as const;
+                    const status = manifest.id === 'tencent-meeting'
+                        ? await getTencentMeetingStatus()
+                        : await connectors.status(manifest.id);
+                    return [manifest.id, status] as const;
                 } catch (error) {
                     return [manifest.id, connectorErrorStatus(error, t('读取连接器状态失败'))] as const;
                 }
@@ -119,6 +127,7 @@ export default function ConnectorMarketplacePage(): JSX.Element {
     const selectedManifest = manifests.find((manifest) => manifest.id === selectedConnectorId);
     const selectedStatus = selectedManifest ? statuses[selectedManifest.id] ?? EMPTY_STATUS : EMPTY_STATUS;
     const selectedDingTalkStatus = toDingTalkStatus(selectedManifest?.id === 'dingtalk' ? selectedStatus : undefined);
+    const selectedTencentMeetingStatus = toTencentMeetingStatus(selectedManifest?.id === 'tencent-meeting' ? selectedStatus : undefined);
     const selectedConnected = selectedStatus.state === 'READY';
 
     const updateStatus = (connectorId: string, status: DesktopConnectorStatus): void => {
@@ -131,11 +140,17 @@ export default function ConnectorMarketplacePage(): JSX.Element {
         if (!connectors) return;
         setConnectingId(selectedManifest.id);
         try {
-            const nextStatus = selectedManifest.id === 'dingtalk'
-                && selectedDingTalkStatus.state === 'PROFILE_REQUIRED'
-                && connectors.dingtalk
-                ? await connectors.dingtalk.selectProfile(selectedProfile ?? '')
-                : await connectors.connect(selectedManifest.id);
+            const nextStatus = selectedManifest.id === 'tencent-meeting'
+                ? await connectTencentMeeting((authorizingStatus) => {
+                    updateStatus(selectedManifest.id, authorizingStatus);
+                    setSelectedConnectorId(undefined);
+                    message.info(t('已打开腾讯会议授权页面，请在系统浏览器中完成授权'));
+                })
+                : selectedManifest.id === 'dingtalk'
+                    && selectedDingTalkStatus.state === 'PROFILE_REQUIRED'
+                    && connectors.dingtalk
+                    ? await connectors.dingtalk.selectProfile(selectedProfile ?? '')
+                    : await connectors.connect(selectedManifest.id);
             updateStatus(selectedManifest.id, nextStatus);
             if (nextStatus.state === 'PROFILE_REQUIRED') return;
             setSelectedConnectorId(undefined);
@@ -236,7 +251,9 @@ export default function ConnectorMarketplacePage(): JSX.Element {
             title: t('解绑{name}连接器', { name: selectedManifest.name }),
             content: selectedManifest.id === 'dingtalk'
                 ? t('解绑会清除本机保存的全部钉钉登录授权，但不会卸载 DWS，也不会删除已导入 CEES 的组织或业务数据。解绑后需要重新授权才能继续使用。')
-                : t('解绑会清除当前连接器保存在本机的授权信息，但不会删除已经写入 CEES 的业务数据。'),
+                : selectedManifest.id === 'tencent-meeting'
+                    ? t('解绑会清除 CEES API 服务端为当前租户成员保存的腾讯会议授权凭据，不会删除腾讯会议中的会议或 CEES 业务数据。')
+                    : t('解绑会清除当前连接器保存的授权信息，但不会删除已经写入 CEES 的业务数据。'),
             okText: t('确认解绑'),
             cancelText: t('取消'),
             okButtonProps: { danger: true },
@@ -245,7 +262,9 @@ export default function ConnectorMarketplacePage(): JSX.Element {
                 if (!connectors) return;
                 setDisconnectingId(selectedManifest.id);
                 try {
-                    const nextStatus = await connectors.disconnect(selectedManifest.id);
+                    const nextStatus = selectedManifest.id === 'tencent-meeting'
+                        ? await disconnectTencentMeetingConnector()
+                        : await connectors.disconnect(selectedManifest.id);
                     updateStatus(selectedManifest.id, nextStatus);
                     if (selectedManifest.id === 'dingtalk') setSelectedProfile(undefined);
                     setSelectedConnectorId(undefined);
@@ -363,10 +382,16 @@ export default function ConnectorMarketplacePage(): JSX.Element {
                 <h2>{t('连接 {name}', { name: selectedManifest.name })}</h2>
                 <p className="connector-connected-description">{t(selectedManifest.description)}</p>
                 <div className="connector-connected-account">
-                    <strong>{selectedManifest.id === 'dingtalk' ? selectedDingTalkStatus.corpName || t('当前钉钉组织') : selectedManifest.name}</strong>
+                    <strong>{selectedManifest.id === 'dingtalk'
+                        ? selectedDingTalkStatus.corpName || t('当前钉钉组织')
+                        : selectedManifest.id === 'tencent-meeting'
+                            ? selectedTencentMeetingStatus.account?.organizationName || t('当前腾讯会议账号')
+                            : selectedManifest.name}</strong>
                     <span>{selectedManifest.id === 'dingtalk'
                         ? selectedDingTalkStatus.externalUserName || selectedDingTalkStatus.profile || t('已完成授权')
-                        : selectedStatus.version || t('已完成授权')}</span>
+                        : selectedManifest.id === 'tencent-meeting'
+                            ? selectedTencentMeetingStatus.account?.displayName || selectedTencentMeetingStatus.account?.externalUserId || t('已完成授权')
+                            : selectedStatus.version || t('已完成授权')}</span>
                 </div>
                 <div className="connector-connected-actions">
                     <Button type="primary" size="large" onClick={tryConnector}>{t('去试试')}</Button>
@@ -478,6 +503,19 @@ function toDingTalkStatus(status?: DesktopConnectorStatus): DingTalkConnectorSta
         ...candidate,
         source: candidate.source === 'MANAGED' || candidate.source === 'SYSTEM' ? candidate.source : null,
         profiles: Array.isArray(candidate.profiles) ? candidate.profiles : [],
+    };
+}
+
+function toTencentMeetingStatus(status?: DesktopConnectorStatus): TencentMeetingConnectorStatus {
+    const candidate = status as Partial<TencentMeetingConnectorStatus> | undefined;
+    return {
+        ...EMPTY_STATUS,
+        ...candidate,
+        account: candidate?.account ?? null,
+        grantedScopes: Array.isArray(candidate?.grantedScopes) ? candidate.grantedScopes : [],
+        tokenStatus: candidate?.tokenStatus ?? 'MISSING',
+        authorizedAt: candidate?.authorizedAt ?? null,
+        tokenExpiresAt: candidate?.tokenExpiresAt ?? null,
     };
 }
 

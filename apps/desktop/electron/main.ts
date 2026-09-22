@@ -66,6 +66,13 @@ app.whenReady().then(() => {
     ipcMain.on('cees:open-devtools', (event) => {
         BrowserWindow.fromWebContents(event.sender)?.webContents.openDevTools({ mode: 'detach', activate: true });
     });
+    ipcMain.handle('cees:open-external', async (_event, value: unknown) => {
+        if (typeof value !== 'string') throw new Error('外部链接无效');
+        const url = new URL(value);
+        if (url.protocol !== 'https:') throw new Error('仅允许打开 HTTPS 外部链接');
+        await shell.openExternal(url.toString());
+        return true;
+    });
     ipcMain.handle('cees:connector-list', () => connectorHost.list());
     ipcMain.handle('cees:connector-status', (_event, connectorId: unknown) =>
         connectorHost.status(assertConnectorId(connectorId)));
