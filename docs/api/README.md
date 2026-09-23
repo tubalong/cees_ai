@@ -185,6 +185,9 @@ POST   /api/v1/platform/ai-credit/capabilities
 GET    /api/v1/platform/ai-credit/capabilities/{capabilityId}
 PATCH  /api/v1/platform/ai-credit/capabilities/{capabilityId}
 DELETE /api/v1/platform/ai-credit/capabilities/{capabilityId}
+
+> `/platform/ai-credit/*` 为契约先行：其中 capabilities 5 个端点已实现（S6，权限码 `platform.aiCredit.read/write`），其余路径（tiers/rate-cards/booster-tiers/billing-config）待后续实现。
+
 GET    /api/v1/platform/ai-credit/tiers
 POST   /api/v1/platform/ai-credit/tiers
 GET    /api/v1/platform/ai-credit/tiers/{tierId}
