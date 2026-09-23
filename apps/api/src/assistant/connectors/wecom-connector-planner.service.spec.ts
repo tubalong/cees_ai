@@ -99,6 +99,39 @@ describe('WeComConnectorPlannerService', () => {
     expect(streamToolTurn.mock.calls[1]![0].tools).toEqual([expect.objectContaining({ name: 'wecom_tool_1' })]);
   });
 
+  it('个人资料意图在大目录中强制保留当前用户复合工具', async () => {
+    const profileTool: WeComConnectorToolInput = {
+      toolId: 'cees.identity.current_user.get',
+      name: '查询当前授权用户企业微信资料',
+      description: '查询当前授权真人用户的企业微信个人资料',
+      parameters: { type: 'object', additionalProperties: false, properties: {} },
+      riskLevel: 'READ',
+      requiresConfirmation: false,
+    };
+    const manyTools = [profileTool, ...Array.from({ length: 32 }, (_, index): WeComConnectorToolInput => ({
+      ...tools[0]!,
+      toolId: `calendar.schedules.list_${index}`,
+      name: `查询日程 ${index}`,
+    }))];
+    const streamToolTurn = jest.fn()
+      .mockResolvedValueOnce(stream([
+        { type: 'tool_calls', tool_calls: [{ id: 'select-1', name: 'select_wecom_tools', arguments: { toolIds: [manyTools[1]!.toolId] } }] },
+        { type: 'completed', latency_ms: 1, finish_reason: 'tool_calls' },
+      ]))
+      .mockResolvedValueOnce(stream([
+        { type: 'tool_calls', tool_calls: [{ id: 'call-1', name: 'wecom_tool_2', arguments: {} }] },
+        { type: 'completed', latency_ms: 1, finish_reason: 'tool_calls' },
+      ]));
+    const service = createService(streamToolTurn);
+
+    await expect(service.plan('查看一下我企业微信的信息', manyTools)).resolves.toEqual({
+      calls: [{ toolId: profileTool.toolId, arguments: {} }],
+    });
+    expect(streamToolTurn.mock.calls[1]![0].tools).toEqual(expect.arrayContaining([
+      expect.objectContaining({ description: expect.stringContaining(profileTool.toolId) }),
+    ]));
+  });
+
   it('上游事件流未完成时拒绝返回不完整计划', async () => {
     const service = createService(jest.fn(async () => stream([
       { type: 'tool_calls', tool_calls: [{ id: 'call-1', name: 'wecom_tool_1', arguments: {} }] },
