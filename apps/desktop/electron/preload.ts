@@ -68,9 +68,5 @@ contextBridge.exposeInMainWorld('cees', {
                 return () => ipcRenderer.removeListener('cees:dingtalk-connector-status-changed', handler);
             },
         },
-        tencentMeeting: {
-            connectWithToken: (token: string): Promise<ConnectorStatus> =>
-                ipcRenderer.invoke('cees:tencent-meeting-connect-token', token),
-        },
     },
 });

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CEES AI API
-  version: 0.39.0
+  version: 0.40.0
   description: 以本文件为唯一事实源的公开 API 契约。资源与操作按 docs/api 约定补充。
 
 servers:
@@ -75,12 +75,12 @@ paths:
 
   /assistant/connectors/tencent-meeting/plan:
     post:
-      summary: Plan Tencent Meeting remote MCP calls for the current question
+      summary: Plan Tencent Meeting official CLI calls for the current question
       description: |
-        Desktop dynamically discovers tools from the official Tencent Meeting remote MCP service. The API only asks the
-        model to select tool names and arguments; Tencent Meeting personal Tokens remain in Electron safeStorage and are
-        never uploaded to CEES API. Desktop must request explicit user confirmation before executing any tool marked as
-        WRITE or DESTRUCTIVE.
+        Desktop installs a pinned official @tencentcloud/tmeet CLI, completes browser OAuth locally, and derives the
+        version-aligned command schema from the installed CLI help. The API only asks the model to select tool names and
+        arguments; OAuth credentials remain in the CLI-owned encrypted Desktop directories and are never uploaded to
+        CEES API. Desktop must request explicit user confirmation before executing any WRITE or DESTRUCTIVE command.
       operationId: planTencentMeetingConnectorQueries
       tags: [Conversation]
       security:
@@ -93,13 +93,13 @@ paths:
               $ref: '#/components/schemas/TencentMeetingConnectorPlanRequest'
       responses:
         '200':
-          description: Up to three local remote-MCP calls; calls is empty when Tencent Meeting data is unnecessary
+          description: Up to three local official-CLI calls; calls is empty when Tencent Meeting data is unnecessary
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/TencentMeetingConnectorPlanResponseEnvelope'
         '400':
-          description: Invalid query or dynamic tool catalog
+          description: Invalid query or version-aligned CLI command catalog
           content:
             application/json:
               schema:
@@ -9985,7 +9985,7 @@ components:
           minLength: 1
           maxLength: 120
           pattern: '^[A-Za-z][A-Za-z0-9._-]{0,119}$'
-          description: Official Tencent Meeting MCP tool name
+          description: Version-aligned Tencent Meeting CLI command ID, for example meeting.list
         name:
           type: string
           minLength: 1
@@ -9997,7 +9997,7 @@ components:
         parameters:
           type: object
           additionalProperties: true
-          description: JSON Schema dynamically returned by tools/list; root must be an object
+          description: JSON Schema derived from the pinned official CLI command help; root must be an object
         riskLevel:
           $ref: '#/components/schemas/TencentMeetingConnectorToolRisk'
         requiresConfirmation:

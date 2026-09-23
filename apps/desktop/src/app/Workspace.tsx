@@ -960,7 +960,7 @@ function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element 
             if (tencentMeetingConnector && mentionsTencentMeeting) {
                 const status = await tencentMeetingConnector.status('tencent-meeting');
                 if (status.state !== 'READY') {
-                    throw new Error(status.error || '请先在连接器页面配置腾讯会议个人 Token');
+                    throw new Error(status.error || '请先在连接器页面安装并授权腾讯会议连接器');
                 }
                 const tools = await tencentMeetingConnector.tools('tencent-meeting') as TencentMeetingConnectorTool[];
                 const plan = await planTencentMeetingConnectorQueries(content, tools);
@@ -972,7 +972,7 @@ function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element 
                         plan.calls,
                         tools,
                         '腾讯会议',
-                        '当前电脑保存的腾讯会议个人 Token',
+                        '当前电脑已授权的腾讯会议账号',
                         modal,
                         t,
                     );

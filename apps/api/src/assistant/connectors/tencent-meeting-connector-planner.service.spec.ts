@@ -15,9 +15,9 @@ describe('TencentMeetingConnectorPlannerService', () => {
     permissions: [],
   };
   const tools: TencentMeetingConnectorToolInput[] = [{
-    toolId: 'list_meetings',
+    toolId: 'meeting.list',
     name: '查询会议列表',
-    description: '查询当前个人 Token 可见的会议列表',
+    description: '查询当前 OAuth 账号可见的会议列表',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -26,7 +26,7 @@ describe('TencentMeetingConnectorPlannerService', () => {
     riskLevel: 'READ',
     requiresConfirmation: false,
   }, {
-    toolId: 'cancel_meeting',
+    toolId: 'meeting.cancel',
     name: '取消会议',
     description: '取消指定会议',
     parameters: {
@@ -41,18 +41,18 @@ describe('TencentMeetingConnectorPlannerService', () => {
 
   it('只返回动态目录内的腾讯会议工具调用', async () => {
     const streamToolTurn = jest.fn(async () => stream([
-      { type: 'tool_calls', tool_calls: [{ id: 'call-1', name: 'list_meetings', arguments: { start_time: '2026-09-23' } }] },
+      { type: 'tool_calls', tool_calls: [{ id: 'call-1', name: 'meeting.list', arguments: { start_time: '2026-09-23' } }] },
       { type: 'completed', latency_ms: 1, finish_reason: 'tool_calls' },
     ]));
     const service = createService(streamToolTurn);
 
     await expect(service.plan('查我今天的腾讯会议', tools)).resolves.toEqual({
-      calls: [{ toolId: 'list_meetings', arguments: { start_time: '2026-09-23' } }],
+      calls: [{ toolId: 'meeting.list', arguments: { start_time: '2026-09-23' } }],
     });
     expect(streamToolTurn).toHaveBeenCalledWith(expect.objectContaining({
       tenant_id: context.tenantId,
       user_id: context.userId,
-      tools: expect.arrayContaining([expect.objectContaining({ name: 'list_meetings' })]),
+      tools: expect.arrayContaining([expect.objectContaining({ name: 'meeting.list' })]),
     }), expect.objectContaining({ membershipId: context.membershipId }));
   });
 
@@ -76,7 +76,7 @@ describe('TencentMeetingConnectorPlannerService', () => {
   it('工具超过 32 个时先选择候选再规划调用', async () => {
     const manyTools = Array.from({ length: 33 }, (_, index): TencentMeetingConnectorToolInput => ({
       ...tools[0]!,
-      toolId: `list_meetings_${index}`,
+      toolId: `meeting.list_${index}`,
       name: `查询会议列表 ${index}`,
     }));
     const selected = manyTools[32]!;
@@ -101,7 +101,7 @@ describe('TencentMeetingConnectorPlannerService', () => {
 
   it('上游事件流未完成时拒绝返回不完整计划', async () => {
     const service = createService(jest.fn(async () => stream([
-      { type: 'tool_calls', tool_calls: [{ id: 'call-1', name: 'list_meetings', arguments: {} }] },
+      { type: 'tool_calls', tool_calls: [{ id: 'call-1', name: 'meeting.list', arguments: {} }] },
     ])));
 
     await expect(service.plan('查询腾讯会议', tools)).rejects.toThrow('规划未正常完成');

@@ -5,13 +5,13 @@
 import type { TencentMeetingConnectorToolRisk } from './TencentMeetingConnectorToolRisk';
 export type TencentMeetingConnectorTool = {
     /**
-     * Official Tencent Meeting MCP tool name
+     * Version-aligned Tencent Meeting CLI command ID, for example meeting.list
      */
     toolId: string;
     name: string;
     description: string;
     /**
-     * JSON Schema dynamically returned by tools/list; root must be an object
+     * JSON Schema derived from the pinned official CLI command help; root must be an object
      */
     parameters: Record<string, any>;
     riskLevel: TencentMeetingConnectorToolRisk;

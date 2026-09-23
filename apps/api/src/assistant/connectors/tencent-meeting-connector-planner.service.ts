@@ -27,7 +27,7 @@ export class TencentMeetingConnectorPlannerService {
   ): Promise<{ calls: TencentMeetingConnectorPlannedCall[] }> {
     const context = this.tenantContext.require();
     if (Buffer.byteLength(JSON.stringify(tools), 'utf8') > MAX_TOOL_CATALOG_BYTES) {
-      throw new BadRequestException('腾讯会议 MCP 工具目录过大');
+      throw new BadRequestException('腾讯会议 CLI 工具目录过大');
     }
     const toolMap = new Map<string, TencentMeetingConnectorToolInput>();
     tools.forEach((tool) => {
@@ -40,7 +40,7 @@ export class TencentMeetingConnectorPlannerService {
       const tool = toolMap.get(toolId)!;
       return {
         name: tool.toolId,
-        description: `[Tencent Meeting MCP; risk=${tool.riskLevel}; confirmation=${tool.requiresConfirmation}] ${tool.name}: ${tool.description}`.slice(0, 4000),
+        description: `[Tencent Meeting official CLI; risk=${tool.riskLevel}; confirmation=${tool.requiresConfirmation}] ${tool.name}: ${tool.description}`.slice(0, 4000),
         parameters: tool.parameters,
       };
     });
@@ -49,12 +49,12 @@ export class TencentMeetingConnectorPlannerService {
       definitions,
       context,
       instructions: [
-        'You plan Tencent Meeting MCP tool calls for a desktop connector.',
+        'You plan Tencent Meeting official CLI calls for a desktop connector.',
         'Call tools only when the user needs current Tencent Meeting data or explicitly requests a Tencent Meeting action.',
         'Use convert_timestamp when relative dates require current time and the tool is available.',
         'Never invent tools, IDs, meeting details, or arguments.',
-        'For update_meeting, cancel_meeting, apply_record_permission_commit, submit_feedback, or any tool marked WRITE/DESTRUCTIVE, plan the exact requested call; Desktop will obtain explicit confirmation before execution.',
-        'Do not call apply_record_permission_commit unless the current user message explicitly confirms a previously previewed permission request.',
+        'For meeting.update, meeting.cancel, record.permission-apply-commit, or any tool marked WRITE/DESTRUCTIVE, plan the exact requested call; Desktop will obtain explicit confirmation before execution.',
+        'Do not call record.permission-apply-commit unless the current user message explicitly confirms a previously previewed permission request.',
         `Return at most ${MAX_PLANNED_CALLS} tool calls. Return no calls when required arguments are missing or the question is unrelated.`,
       ].join(' '),
     });
@@ -72,7 +72,7 @@ export class TencentMeetingConnectorPlannerService {
     const catalog = tools.map((tool) => `[${tool.toolId}] risk=${tool.riskLevel} ${tool.name}: ${tool.description.slice(0, 320)}`).join('\n');
     const selector: ChatToolDefinition = {
       name: SELECTOR_TOOL_NAME,
-      description: 'Select Tencent Meeting MCP tools that may be needed for the current user request.',
+      description: 'Select Tencent Meeting official CLI tools that may be needed for the current user request.',
       parameters: {
         type: 'object',
         additionalProperties: false,
@@ -100,14 +100,14 @@ export class TencentMeetingConnectorPlannerService {
     const selected = new Set<string>();
     for (const call of calls) {
       if (call.name !== SELECTOR_TOOL_NAME || !isRecord(call.arguments) || !Array.isArray(call.arguments.toolIds)) {
-        throw new BadGatewayException('模型返回了无效的腾讯会议 MCP 工具选择结果');
+        throw new BadGatewayException('模型返回了无效的腾讯会议 CLI 工具选择结果');
       }
       for (const value of call.arguments.toolIds) {
         if (typeof value !== 'string' || !tools.some((tool) => tool.toolId === value)) {
-          throw new BadGatewayException('模型选择了目录外的腾讯会议 MCP 工具');
+          throw new BadGatewayException('模型选择了目录外的腾讯会议 CLI 工具');
         }
         selected.add(value);
-        if (selected.size > MAX_SELECTED_TOOLS) throw new BadGatewayException('模型选择的腾讯会议 MCP 工具过多');
+        if (selected.size > MAX_SELECTED_TOOLS) throw new BadGatewayException('模型选择的腾讯会议 CLI 工具过多');
       }
     }
     return [...selected];
@@ -157,13 +157,13 @@ function validateTool(
   tool: TencentMeetingConnectorToolInput,
   existing: Map<string, TencentMeetingConnectorToolInput>,
 ): void {
-  if (!TOOL_ID_PATTERN.test(tool.toolId)) throw new BadRequestException('腾讯会议 MCP 工具 ID 无效');
-  if (existing.has(tool.toolId)) throw new BadRequestException('腾讯会议 MCP 工具 ID 重复');
+  if (!TOOL_ID_PATTERN.test(tool.toolId)) throw new BadRequestException('腾讯会议 CLI 工具 ID 无效');
+  if (existing.has(tool.toolId)) throw new BadRequestException('腾讯会议 CLI 工具 ID 重复');
   if (tool.parameters.type !== 'object' || !isRecord(tool.parameters.properties)) {
-    throw new BadRequestException(`腾讯会议 MCP 工具 ${tool.name} 的参数 Schema 无效`);
+    throw new BadRequestException(`腾讯会议 CLI 工具 ${tool.name} 的参数 Schema 无效`);
   }
   if (tool.requiresConfirmation !== (tool.riskLevel !== 'READ')) {
-    throw new BadRequestException(`腾讯会议 MCP 工具 ${tool.name} 的风险标记不一致`);
+    throw new BadRequestException(`腾讯会议 CLI 工具 ${tool.name} 的风险标记不一致`);
   }
 }
 
@@ -171,8 +171,8 @@ function validatePlannedCall(
   call: ToolCall,
   tools: Map<string, TencentMeetingConnectorToolInput>,
 ): TencentMeetingConnectorPlannedCall {
-  if (!tools.has(call.name)) throw new BadGatewayException('模型返回了目录外的腾讯会议 MCP 工具');
-  if (!isRecord(call.arguments)) throw new BadGatewayException('模型返回了无效的腾讯会议 MCP 工具参数');
+  if (!tools.has(call.name)) throw new BadGatewayException('模型返回了目录外的腾讯会议 CLI 工具');
+  if (!isRecord(call.arguments)) throw new BadGatewayException('模型返回了无效的腾讯会议 CLI 工具参数');
   return { toolId: call.name, arguments: call.arguments };
 }
 

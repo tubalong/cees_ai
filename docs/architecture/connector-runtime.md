@@ -7,8 +7,7 @@
 - 已落地 `LocalCliTransport`，钉钉 DWS 作为 Desktop 本地 CLI 连接器运行；
 - 已落地 `HttpApiTransport`，供固定 API 地址和路径白名单型连接器复用；
 - 已落地 `RemoteMcpTransport`，提供固定 HTTPS 地址、JSON-RPC、动态安全请求头、超时、响应上限、禁止重定向和结构化错误；
-- 已落地腾讯会议官方远程 MCP 接入，个人 Token 仅保存在 Desktop `safeStorage`；
-- 已落地腾讯会议动态工具发现、API 无副作用规划、Desktop 执行和写操作二次确认；
+- 已落地腾讯会议官方 CLI 托管安装、浏览器 OAuth、版本化命令 Schema、API 无副作用规划和 Desktop 确认执行；
 - 已落地企业微信官方 CLI 托管安装、二维码机器人授权、动态 Schema、API 无副作用规划和 Desktop 确认执行；
 - 已删除腾讯会议旧服务端 OAuth、Token 托管、固定工具网关和数据表。
 
@@ -57,23 +56,25 @@ Renderer -> ConnectorHost -> DingTalkConnectorAdapter
 
 ```text
 Renderer -> ConnectorHost -> TencentMeetingConnectorAdapter
-    -> TencentMeetingCredentialStore -> Electron safeStorage
-    -> RemoteMcpTransport -> Tencent Meeting Official Remote MCP
+    -> LocalCliTransport -> Managed @tencentcloud/tmeet
+    -> Browser OAuth -> Tencent Meeting Open API
 
 Renderer -> CEES API TencentMeetingConnectorPlannerService
-    -> 仅规划动态工具调用，不持有 Token，不执行工具
+    -> 仅规划版本化 CLI 工具调用，不持有 OAuth 凭据，不执行工具
 ```
 
 腾讯会议 Manifest：
 
 | 字段 | 值 |
 | --- | --- |
-| `transportType` | `REMOTE_MCP` |
+| `transportType` | `LOCAL_CLI` |
 | `executionLocation` | `DESKTOP` |
-| `authType` | `LOCAL_CREDENTIAL` |
-| `supportsInstall` | `false` |
+| `authType` | `OAUTH` |
+| `supportsInstall` | `true` |
 | `supportsDisconnect` | `true` |
-| `supportsDynamicTools` | `true` |
+| `supportsDynamicTools` | `false` |
+
+Desktop 固定下载 `@tencentcloud/tmeet 1.0.18` 官方 npm 包并校验 SHA-256，只提取当前平台原生二进制。工具目录由 CEES 固定允许列表和已安装 CLI 的 `--help` 共同生成：允许列表控制可暴露命令，CLI 帮助提供当前版本真实参数 Schema。
 
 ### 企业微信
 
@@ -111,7 +112,7 @@ Desktop 固定下载 `@wecom/cli 1.3.2` 平台包并校验 SHA-256，只提取�
 - 统一超时、响应字节上限、JSON 解析、HTTP 错误和 JSON-RPC 错误；
 - Transport 不向模型暴露 URL、Header 或凭据。
 
-腾讯会议 Adapter 固定官方地址和 Skill 版本，通过请求头注入个人 Token。通用 Transport 本身不理解腾讯会议业务。
+`RemoteMcpTransport` 当前不再用于腾讯会议，但继续作为其他固定远程 MCP 连接器的通用能力保留。任何新接入仍需由 Adapter 固定地址、鉴权头和方法范围，不能让模型提供网络目标。
 
 ## 6. 本地凭据
 
@@ -124,15 +125,15 @@ Desktop 固定下载 `@wecom/cli 1.3.2` 平台包并校验 SHA-256，只提取�
 - 解绑删除密文、动态工具缓存和派生状态；
 - 状态接口只能返回是否已配置、验证时间、工具数量和可恢复错误，不返回凭据摘要。
 
-腾讯会议当前密文位置为 Electron `userData/connectors/tencent-meeting/credential.secure`。
+腾讯会议 OAuth 凭据由官方 CLI 加密保存。Desktop 通过 `TMEET_CLI_CONFIG_DIR` 和 `TMEET_CLI_DATA_DIR` 将其隔离在 Electron `userData/connectors/tencent-meeting/config` 与 `data`，Renderer 和 API 不读取目录内容；解绑执行官方 logout 后删除两个专属目录。
 
 企业微信授权由官方 CLI 保存在 Electron `userData/connectors/wecom/config`。该目录只在 Main Process 通过 `WECOM_CLI_CONFIG_DIR` 传给受管 CLI；Renderer 和 API 不读取目录内容。解绑删除本机配置，但企业微信侧已创建的机器人可能仍需用户自行管理。
 
 ## 7. 动态工具与规划
 
-动态工具型连接器按以下边界运行：
+动态工具或版本化命令目录连接器按以下边界运行：
 
-1. Adapter 从官方服务发现工具并规范化名称、描述、参数 Schema 和风险；
+1. Adapter 从官方服务动态发现工具，或从固定允许列表与官方 CLI 帮助生成版本化目录；
 2. Desktop 将用户问题和受限工具目录发送给 API 规划器；
 3. API 把工具描述视为不可信输入，只允许返回目录内工具；
 4. API 不接收凭据，不执行第三方工具；
@@ -151,13 +152,13 @@ Desktop 固定下载 `@wecom/cli 1.3.2` 平台包并校验 SHA-256，只提取�
 - 第三方结果不能作为 CEES 租户、角色、数据范围或正式业务写入依据；
 - 外部数据写入 CEES 正式资源仍必须调用 `apps/api` 版本化业务接口并经过权限、审计和幂等校验；
 - 凭据字段和超大响应在进入模型上下文前移除或拒绝；
-- 各连接器按协议选择凭据位置：需要服务端 Secret 的放 API，本地个人 Token 型放 Desktop，不能一刀切。
+- 各连接器按官方协议选择凭据位置：需要服务端 Secret 的放 API，官方本地 CLI 的 OAuth 凭据由 CLI 在 Desktop 专属目录管理，不能一刀切。
 
 ## 9. UI 约定
 
 连接器市场使用紧凑等高卡片。未连接态使用“+ / 连接”操作并直接进入连接流程；已连接态使用“去对话”操作并新建助手会话；卡片主体打开详情。外层卡片不展示传输协议、安装版本等技术字段，完整描述、账号状态、解绑和重新连接进入详情。
 
-腾讯会议连接时打开官方 AI Skill 页面并显示 Token 输入；连接后只显示 Token 已验证、动态工具数量和验证时间，不回显 Token。
+腾讯会议连接时自动安装固定版官方 CLI 并由 CLI 打开浏览器 OAuth；连接后只显示授权用户、CLI 版本和工具数量，不显示或接收 Token。
 
 ## 10. 演进原则
 

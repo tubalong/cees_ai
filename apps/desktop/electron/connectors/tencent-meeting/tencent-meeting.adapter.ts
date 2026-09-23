@@ -1,12 +1,11 @@
 import type { ConnectorAdapter } from '../core/connector-adapter';
 import {
     configureTencentMeetingConnector,
-    connectTencentMeetingWithToken,
     discoverTencentMeetingTools,
     disconnectTencentMeetingConnector,
     executeTencentMeetingCalls,
     getTencentMeetingConnectorStatus,
-    requestTencentMeetingConnection,
+    installAndAuthorizeTencentMeetingConnector,
     resetTencentMeetingConnectorTools,
     type TencentMeetingConnectorContext,
     type TencentMeetingConnectorPlannedCall,
@@ -19,7 +18,6 @@ export interface TencentMeetingConnectorDependencies {
     configure(userDataPath: string): void;
     status(): Promise<TencentMeetingConnectorStatus>;
     connect(): Promise<TencentMeetingConnectorStatus>;
-    connectWithToken(token: string): Promise<TencentMeetingConnectorStatus>;
     disconnect(): Promise<TencentMeetingConnectorStatus>;
     resetTools(): void;
     discoverTools(): Promise<TencentMeetingConnectorTool[]>;
@@ -29,8 +27,7 @@ export interface TencentMeetingConnectorDependencies {
 const DEFAULT_DEPENDENCIES: TencentMeetingConnectorDependencies = {
     configure: configureTencentMeetingConnector,
     status: getTencentMeetingConnectorStatus,
-    connect: requestTencentMeetingConnection,
-    connectWithToken: connectTencentMeetingWithToken,
+    connect: installAndAuthorizeTencentMeetingConnector,
     disconnect: disconnectTencentMeetingConnector,
     resetTools: resetTencentMeetingConnectorTools,
     discoverTools: discoverTencentMeetingTools,
@@ -57,10 +54,6 @@ export class TencentMeetingConnectorAdapter implements ConnectorAdapter<
 
     connect(): Promise<TencentMeetingConnectorStatus> {
         return this.dependencies.connect();
-    }
-
-    connectWithToken(token: string): Promise<TencentMeetingConnectorStatus> {
-        return this.dependencies.connectWithToken(token);
     }
 
     disconnect(): Promise<TencentMeetingConnectorStatus> {

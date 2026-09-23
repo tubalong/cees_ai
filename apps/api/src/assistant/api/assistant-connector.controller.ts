@@ -35,8 +35,8 @@ export class AssistantConnectorController {
 
   @Post('tencent-meeting/plan')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: '规划本机腾讯会议远程 MCP 调用' })
-  @ApiOkResponse({ description: '返回最多三个本地远程 MCP 调用计划；服务端不接触个人 Token，也不执行工具' })
+  @ApiOperation({ summary: '规划本机腾讯会议官方 CLI 调用' })
+  @ApiOkResponse({ description: '返回最多三个本地 CLI 调用计划；服务端不接触 OAuth 凭据，也不执行工具' })
   async planTencentMeeting(@Body() input: PlanTencentMeetingConnectorRequestDto) {
     try {
       return await this.tencentMeetingPlanner.plan(input.query, input.tools);
