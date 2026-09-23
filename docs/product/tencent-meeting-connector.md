@@ -9,9 +9,9 @@
 - 已落地：公开契约 `0.37.1`，定义成员级 OAuth 授权、回调、状态、解绑、工具发现和批量只读执行，并将官方回调字段修正为 `auth_code`。
 - 已落地：`apps/api` 中的 OAuth State、授权回调、Token 加密托管、刷新租约、解绑和审计。
 - 已落地：腾讯会议五类只读 API 网关、Scope 工具过滤、严格参数校验、字段白名单、分页适配、响应大小限制和执行审计。
-- 待实现：Assistant Tool Loop 直接调用 CEES API 只读网关；Desktop 不建设会议列表或详情业务页面。
+- 已落地：Assistant Tool Loop 通过 CEES API 直接调用只读网关；Desktop 不建设会议列表或详情业务页面。
 
-当前 API 已具备真实 OAuth 和只读查询能力，Desktop 市场卡片已完成授权、状态和解绑闭环。会议查询将在 Assistant Tool Loop 中由后端执行，不在 Desktop 建设独立会议客户端。
+当前 API 已具备真实 OAuth 和只读查询能力，Desktop 市场卡片已完成授权、状态和解绑闭环。用户可直接在 Assistant 会话中查询自己的腾讯会议账号、会议、参会成员和录制元数据；查询全部由 API 后端执行，不在 Desktop 建设独立会议客户端。
 
 ## 2. 目标
 
@@ -61,7 +61,7 @@ Desktop Connector Marketplace
 - `connect` 从 CEES API 获取一次性授权地址，通过受控 Electron IPC 打开 HTTPS 系统浏览器，并轮询至成功、失败或 State 超时；
 - `disconnect` 删除 CEES API 为当前租户成员保存的腾讯会议凭据；
 - Desktop 不保存腾讯会议 Access Token、Refresh Token 或应用 Secret；
-- Desktop 既有工具执行占位不会用于正式会话，后续由 Assistant Tool Loop 在 API 内部直接调用只读网关。
+- Desktop 既有工具执行占位不用于正式会话；Assistant Tool Loop 在 API 内部按当前租户成员身份直接调用只读网关。
 
 ## 5. 第一阶段只读工具
 
@@ -74,6 +74,22 @@ Desktop Connector Marketplace
 | `tencent_meeting.recordings.list` | 查询录制和纪要元数据 | `meetingId` |
 
 所有工具参数 Schema 均设置 `additionalProperties=false`。服务端执行层再次校验时间范围、分页上限、会议 ID、调用数量和腾讯会议授权 Scope；历史空 Scope 记录保持兼容，由提供方继续执行资源权限校验。
+
+Assistant 对模型暴露以下稳定函数名，避免把提供方内部带点号的工具 ID 直接作为函数名：
+
+| Assistant 工具 | 网关工具 ID | 风险等级 |
+| --- | --- | --- |
+| `tencent_meeting_get_profile` | `tencent_meeting.profile.get` | `READ` |
+| `tencent_meeting_list_meetings` | `tencent_meeting.meetings.list` | `READ` |
+| `tencent_meeting_get_meeting` | `tencent_meeting.meetings.get` | `READ` |
+| `tencent_meeting_list_participants` | `tencent_meeting.participants.list` | `READ` |
+| `tencent_meeting_list_recordings` | `tencent_meeting.recordings.list` | `READ` |
+
+这些工具不要求 CEES 业务权限码，因为它们只读取当前成员本人通过 OAuth 授权后可见的第三方资源；TurnRunner 仍会校验当前租户成员有效性，腾讯会议网关继续校验成员级凭据、Scope 和提供方资源权限。工具不支持创建、修改、取消会议或下载录制文件。
+
+会议列表支持 `TODAY`、`TOMORROW`、`THIS_WEEK`、`NEXT_7_DAYS` 以及明确的 ISO 8601 时间范围。相对日期以租户配置的 IANA 时区计算，其中 `THIS_WEEK` 定义为租户本地时间周一 00:00 至下周一 00:00。工具摘要保留 `meeting_id` 供多轮对话继续查询详情、参会成员或录制，但明确要求模型不得在普通回答中主动展示内部 ID。
+
+授权失效、Scope 不足、资源无权访问、限流和提供方不可用等错误会转换为固定用户文案后再回喂模型；腾讯会议原始响应、Token、手机号、邮箱、IP、下载地址和提供方技术错误不会进入模型上下文。
 
 执行结果仅保留会议、参会者和录制的业务摘要字段。参会者标识使用会议 ID 与提供方用户标识生成 SHA-256 稳定键，不返回手机号、邮箱、IP、设备标识或原始用户 ID；录制结果不返回播放或下载 URL。
 
@@ -97,7 +113,7 @@ Desktop Connector Marketplace
 2. 已完成：API 实现 OAuth State、回调、Token 加密托管、刷新租约、解绑和审计。
 3. 已完成：将五类工具映射到固定腾讯会议 Open API，不接受任意 URL，并补齐字段过滤、分页适配、大小限制和审计。
 4. 已完成：Desktop 市场卡片接入 CEES API 授权、状态、轮询和解绑，授权时通过系统浏览器打开服务端返回的地址。
-5. 下一步：Assistant 接入原生 Tool Loop，由 API 直接执行腾讯会议只读工具。
+5. 已完成：Assistant 接入原生 Tool Loop，由 API 按当前租户成员身份直接执行五类腾讯会议只读工具。
 6. 写操作：另行设计创建会议、修改会议等操作的权限和二次确认机制。
 
 ## 8. 验证

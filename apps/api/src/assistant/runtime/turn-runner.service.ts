@@ -38,7 +38,7 @@ import { EventService } from '../conversation/event.service';
 import { AssistantActionDraftService } from '../drafts/assistant-action-draft.service';
 import { ToolPolicyError, ToolPolicyService } from '../tools/tool-policy.service';
 import { ToolRegistryService } from '../tools/tool-registry';
-import { KNOWLEDGE_SEARCH_TOOL_NAME, WEB_SEARCH_TOOL_NAME } from '../tools/tool.types';
+import { KNOWLEDGE_SEARCH_TOOL_NAME, ToolExecutionError, WEB_SEARCH_TOOL_NAME } from '../tools/tool.types';
 import { UserMemoryService } from '../../user-memory/user-memory.service';
 import { ContextBuilderService } from './context-builder.service';
 import { IntentCapabilityService, type AutoEnabledCapability } from './intent-capability.service';
@@ -1158,6 +1158,9 @@ function buildCapabilityGuidance(capabilities: PublicTurnCapabilities): string |
  */
 function toToolFailure(error: unknown): { summary: string; errorMessage: string; code: string } {
   if (error instanceof ToolPolicyError) {
+    return { summary: error.userFacingSummary, errorMessage: error.message, code: error.code };
+  }
+  if (error instanceof ToolExecutionError) {
     return { summary: error.userFacingSummary, errorMessage: error.message, code: error.code };
   }
   if (error instanceof AiServiceInvocationError) {

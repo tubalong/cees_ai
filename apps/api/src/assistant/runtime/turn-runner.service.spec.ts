@@ -10,6 +10,7 @@ import { EventService } from '../conversation/event.service';
 import { AssistantActionDraftService } from '../drafts/assistant-action-draft.service';
 import { ToolPolicyError, ToolPolicyService } from '../tools/tool-policy.service';
 import { ToolRegistryService } from '../tools/tool-registry';
+import { ToolExecutionError } from '../tools/tool.types';
 import type { ToolExecutionResult } from '../tools/tool.types';
 import { AssistantMessageContentService } from './message-content.service';
 import { ContextBuilderService } from './context-builder.service';
@@ -660,6 +661,43 @@ describe('TurnRunnerService', () => {
         expect(harness.state.completeTurn).toHaveBeenCalled();
     });
 
+    it('feeds controlled tool execution summaries back to the model', async () => {
+        const harness = createHarness({
+            allowedTools: [chatTool('tencent_meeting_get_profile')],
+            toolTurnStreams: [toolCallProposalStream(true, 'tencent_meeting_get_profile', {}), () => secondRoundCompletedStream()],
+        });
+        harness.toolPolicy.approve.mockReturnValue({
+            definition: {
+                execute: jest.fn().mockRejectedValue(new ToolExecutionError(
+                    'AUTH_REQUIRED',
+                    '腾讯会议工具执行失败（AUTH_REQUIRED, HTTP 409）',
+                    '请先前往连接器页面连接或重新授权腾讯会议，然后再试',
+                )),
+            },
+            parsedArguments: {},
+        });
+
+        await harness.service.startTurn({
+            conversationId: CONVERSATION_ID,
+            idempotencyKey: 'key-controlled-tool-error',
+            content: '我连接的是哪个腾讯会议账号？',
+            mode: 'standard',
+        });
+        await consumeAll(await harness.service.subscribeTurn({
+            conversationId: CONVERSATION_ID,
+            turnId: TURN_ID,
+            afterSeq: 0,
+        }));
+
+        expect(harness.state.failToolCall).toHaveBeenCalledWith(expect.objectContaining({
+            code: 'AUTH_REQUIRED',
+            summary: '请先前往连接器页面连接或重新授权腾讯会议，然后再试',
+            errorMessage: '腾讯会议工具执行失败（AUTH_REQUIRED, HTTP 409）',
+        }));
+        expect(harness.gateway.streamToolTurn).toHaveBeenCalledTimes(2);
+        expect(harness.state.completeTurn).toHaveBeenCalled();
+    });
+
     it('stops the loop when a terminal tool rejection loses execution ownership', async () => {
         const harness = createHarness({
             allowedTools: [chatTool('generate_image')],
@@ -1289,13 +1327,17 @@ function toolTurnStartedEvent(): ToolTurnStreamEvent {
     } as ToolTurnStreamEvent;
 }
 
-function toolCallProposalStream(withCompleted: boolean): (signal?: AbortSignal) => AsyncGenerator<ToolTurnStreamEvent> {
+function toolCallProposalStream(
+    withCompleted: boolean,
+    name = 'generate_image',
+    argumentsValue: Record<string, unknown> = { prompt: '一只猫' },
+): (signal?: AbortSignal) => AsyncGenerator<ToolTurnStreamEvent> {
     return function streamFactory() {
         return (async function* stream() {
             yield toolTurnStartedEvent();
             yield {
                 type: 'tool_calls',
-                tool_calls: [{ id: 'call_1', name: 'generate_image', arguments: { prompt: '一只猫' } }],
+                tool_calls: [{ id: 'call_1', name, arguments: argumentsValue }],
             } as ToolTurnStreamEvent;
             if (withCompleted) yield { type: 'completed', latency_ms: 1, finish_reason: 'tool_calls' } as ToolTurnStreamEvent;
         })();
