@@ -1524,7 +1524,7 @@ export async function updateConversation(conversationId: string, title: string, 
 export async function deleteConversation(conversationId: string, version: number): Promise<void> { await authorizedRequest<unknown>(`v1/conversations/${encodeURIComponent(conversationId)}?version=${encodeURIComponent(String(version))}`, { method: 'DELETE' }); }
 
 export interface ConnectorContext {
-    provider: 'DINGTALK' | 'TENCENT_MEETING';
+    provider: 'DINGTALK' | 'TENCENT_MEETING' | 'WECOM';
     toolId: string;
     toolName: string;
     fetchedAt: string;
@@ -1564,6 +1564,29 @@ export async function planTencentMeetingConnectorQueries(
     tools: TencentMeetingConnectorTool[],
 ): Promise<TencentMeetingConnectorPlan> {
     return authorizedRequest<TencentMeetingConnectorPlan>('v1/assistant/connectors/tencent-meeting/plan', {
+        method: 'POST',
+        body: JSON.stringify({ query, tools }),
+    });
+}
+
+export interface WeComConnectorTool {
+    toolId: string;
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+    riskLevel: 'READ' | 'WRITE' | 'DESTRUCTIVE';
+    requiresConfirmation: boolean;
+}
+
+export interface WeComConnectorPlan {
+    calls: Array<{ toolId: string; arguments: Record<string, unknown> }>;
+}
+
+export async function planWeComConnectorQueries(
+    query: string,
+    tools: WeComConnectorTool[],
+): Promise<WeComConnectorPlan> {
+    return authorizedRequest<WeComConnectorPlan>('v1/assistant/connectors/wecom/plan', {
         method: 'POST',
         body: JSON.stringify({ query, tools }),
     });

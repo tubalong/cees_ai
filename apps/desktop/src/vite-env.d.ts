@@ -65,7 +65,7 @@ declare global {
                 connect: (connectorId: string) => Promise<ConnectorStatus>;
                 disconnect: (connectorId: string) => Promise<ConnectorStatus>;
                 tools: (connectorId: string) => Promise<ConnectorTool[]>;
-                execute: (connectorId: string, calls: ConnectorPlannedCall[]) => Promise<ConnectorContext<'DINGTALK' | 'TENCENT_MEETING'>[]>;
+                execute: (connectorId: string, calls: ConnectorPlannedCall[]) => Promise<ConnectorContext<'DINGTALK' | 'TENCENT_MEETING' | 'WECOM'>[]>;
                 onStatusChanged: (listener: (event: ConnectorStatusChangedEvent) => void) => () => void;
                 dingtalk: {
                     status: () => Promise<DingTalkConnectorStatus>;
@@ -152,6 +152,15 @@ declare global {
         tokenConfigured: boolean;
         toolCount: number;
         verifiedAt: string | null;
+    }
+
+    interface WeComConnectorStatus extends ConnectorStatus {
+        source: 'MANAGED' | null;
+        installSupported: boolean;
+        authorizationState: 'UNAUTHORIZED' | 'AUTHORIZING' | 'AUTHORIZED';
+        qrCodeDataUrl: string | null;
+        authorizationExpiresAt: string | null;
+        toolCount: number;
     }
 
     interface ConnectorStatusChangedEvent {

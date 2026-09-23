@@ -108,6 +108,7 @@ function normalizeCalls(calls: unknown): ConnectorPlannedCall[] {
         return {
             toolId: call.toolId,
             arguments: { ...call.arguments },
+            ...(call.confirmed === true ? { confirmed: true } : {}),
         };
     });
 }

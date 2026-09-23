@@ -15,6 +15,8 @@ import type { TencentMeetingConnectorPlanResponseEnvelope } from '../models/Tenc
 import type { TurnResponseEnvelope } from '../models/TurnResponseEnvelope';
 import type { TurnStreamEvent } from '../models/TurnStreamEvent';
 import type { UpdateConversationRequest } from '../models/UpdateConversationRequest';
+import type { WeComConnectorPlanRequest } from '../models/WeComConnectorPlanRequest';
+import type { WeComConnectorPlanResponseEnvelope } from '../models/WeComConnectorPlanResponseEnvelope';
 import type { CancelablePromise } from '../core/CancelablePromise';
 import { OpenAPI } from '../core/OpenAPI';
 import { request as __request } from '../core/request';
@@ -64,6 +66,34 @@ export class ConversationService {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/assistant/connectors/tencent-meeting/plan',
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                400: `Invalid query or dynamic tool catalog`,
+                401: `Authentication or tenant membership is invalid`,
+                502: `AI provider returned an invalid plan`,
+                503: `AI service or model is temporarily unavailable`,
+            },
+        });
+    }
+    /**
+     * Plan WeCom official CLI calls for the current question
+     * Desktop installs the pinned official WeCom CLI and dynamically discovers tools after the user authorizes an
+     * intelligent bot by QR code. The API only asks the model to select tool names and arguments; WeCom authorization
+     * remains in the Desktop-managed CLI config directory and is never uploaded to CEES API. Desktop must request
+     * explicit user confirmation before executing any tool marked as WRITE or DESTRUCTIVE.
+     *
+     * @returns WeComConnectorPlanResponseEnvelope Up to three local CLI calls; calls is empty when WeCom data is unnecessary
+     * @throws ApiError
+     */
+    public static planWeComConnectorQueries({
+        requestBody,
+    }: {
+        requestBody: WeComConnectorPlanRequest,
+    }): CancelablePromise<WeComConnectorPlanResponseEnvelope> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/assistant/connectors/wecom/plan',
             body: requestBody,
             mediaType: 'application/json',
             errors: {

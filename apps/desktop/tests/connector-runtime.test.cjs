@@ -166,10 +166,10 @@ test('ConnectorHost 统一委托生命周期、工具和调用，并发布带 ID
     assert.deepEqual(await host.connect('fake'), readyStatus);
     assert.deepEqual(await host.disconnect('fake'), readyStatus);
     assert.deepEqual(await host.tools('fake'), tools);
-    assert.deepEqual(await host.execute('fake', [{ toolId: 'tool-1', arguments: {} }]), [{
+    assert.deepEqual(await host.execute('fake', [{ toolId: 'tool-1', arguments: {}, confirmed: true }]), [{
         provider: 'FAKE', toolId: 'tool-1', toolName: '查询', fetchedAt: '2026-09-21T00:00:00.000Z', data: {},
     }]);
-    assert.deepEqual(calls, ['status', 'connect', 'disconnect', 'tools', ['execute', [{ toolId: 'tool-1', arguments: {} }]]]);
+    assert.deepEqual(calls, ['status', 'connect', 'disconnect', 'tools', ['execute', [{ toolId: 'tool-1', arguments: {}, confirmed: true }]]]);
     assert.equal(events.length, 3);
     assert.equal(events.every((event) => event.connectorId === 'fake'), true);
     assert.equal(events.every((event) => event.status === readyStatus), true);

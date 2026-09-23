@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CEES AI API
-  version: 0.38.0
+  version: 0.39.0
   description: 以本文件为唯一事实源的公开 API 契约。资源与操作按 docs/api 约定补充。
 
 servers:
@@ -98,6 +98,56 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TencentMeetingConnectorPlanResponseEnvelope'
+        '400':
+          description: Invalid query or dynamic tool catalog
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '401':
+          description: Authentication or tenant membership is invalid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '502':
+          description: AI provider returned an invalid plan
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '503':
+          description: AI service or model is temporarily unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+  /assistant/connectors/wecom/plan:
+    post:
+      summary: Plan WeCom official CLI calls for the current question
+      description: |
+        Desktop installs the pinned official WeCom CLI and dynamically discovers tools after the user authorizes an
+        intelligent bot by QR code. The API only asks the model to select tool names and arguments; WeCom authorization
+        remains in the Desktop-managed CLI config directory and is never uploaded to CEES API. Desktop must request
+        explicit user confirmation before executing any tool marked as WRITE or DESTRUCTIVE.
+      operationId: planWeComConnectorQueries
+      tags: [Conversation]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WeComConnectorPlanRequest'
+      responses:
+        '200':
+          description: Up to three local CLI calls; calls is empty when WeCom data is unnecessary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WeComConnectorPlanResponseEnvelope'
         '400':
           description: Invalid query or dynamic tool catalog
           content:
@@ -9890,7 +9940,7 @@ components:
         connectorContexts:
           type: array
           maxItems: 3
-          description: Desktop 从用户已授权的本地连接器读取的本轮只读上下文；不会作为业务事实或写操作权限依据
+          description: Desktop 从用户已授权的本地连接器取得的本轮结构化结果；不会作为业务事实或后续写操作权限依据
           items:
             $ref: '#/components/schemas/ConnectorContext'
 
@@ -9901,13 +9951,13 @@ components:
       properties:
         provider:
           type: string
-          enum: [DINGTALK, TENCENT_MEETING]
+          enum: [DINGTALK, TENCENT_MEETING, WECOM]
         toolId:
           type: string
           minLength: 1
           maxLength: 120
           pattern: '^[A-Za-z][A-Za-z0-9._-]{0,119}$'
-          description: Stable local connector tool ID; DWS uses a derived ID and Tencent Meeting uses the MCP tool name
+          description: Stable local connector tool ID; DWS uses a derived ID while Tencent Meeting and WeCom use provider tool names
         toolName:
           type: string
           minLength: 1
@@ -10005,6 +10055,94 @@ components:
           const: true
         data:
           $ref: '#/components/schemas/TencentMeetingConnectorPlanResult'
+        requestId:
+          type: [string, 'null']
+          description: Public API request trace ID
+
+    WeComConnectorToolRisk:
+      type: string
+      enum: [READ, WRITE, DESTRUCTIVE]
+
+    WeComConnectorTool:
+      type: object
+      additionalProperties: false
+      required: [toolId, name, description, parameters, riskLevel, requiresConfirmation]
+      properties:
+        toolId:
+          type: string
+          minLength: 1
+          maxLength: 120
+          pattern: '^[A-Za-z][A-Za-z0-9._-]{0,119}$'
+          description: Official WeCom CLI method name discovered from schema list/get
+        name:
+          type: string
+          minLength: 1
+          maxLength: 240
+        description:
+          type: string
+          minLength: 1
+          maxLength: 4000
+        parameters:
+          type: object
+          additionalProperties: true
+          description: JSON Schema dynamically returned by the official CLI; root must be an object
+        riskLevel:
+          $ref: '#/components/schemas/WeComConnectorToolRisk'
+        requiresConfirmation:
+          type: boolean
+          description: Desktop must require explicit confirmation before executing this tool
+
+    WeComConnectorPlanRequest:
+      type: object
+      additionalProperties: false
+      required: [query, tools]
+      properties:
+        query:
+          type: string
+          minLength: 1
+          maxLength: 10000
+        tools:
+          type: array
+          minItems: 1
+          maxItems: 256
+          items:
+            $ref: '#/components/schemas/WeComConnectorTool'
+
+    WeComConnectorPlannedCall:
+      type: object
+      additionalProperties: false
+      required: [toolId, arguments]
+      properties:
+        toolId:
+          type: string
+          minLength: 1
+          maxLength: 120
+          pattern: '^[A-Za-z][A-Za-z0-9._-]{0,119}$'
+        arguments:
+          type: object
+          additionalProperties: true
+
+    WeComConnectorPlanResult:
+      type: object
+      additionalProperties: false
+      required: [calls]
+      properties:
+        calls:
+          type: array
+          maxItems: 3
+          items:
+            $ref: '#/components/schemas/WeComConnectorPlannedCall'
+
+    WeComConnectorPlanResponseEnvelope:
+      type: object
+      additionalProperties: false
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: '#/components/schemas/WeComConnectorPlanResult'
         requestId:
           type: [string, 'null']
           description: Public API request trace ID

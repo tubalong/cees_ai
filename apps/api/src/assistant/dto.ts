@@ -25,12 +25,13 @@ import type {
   DingTalkConnectorToolInput,
   PublicTurnMode,
   TencentMeetingConnectorToolInput,
+  WeComConnectorToolInput,
 } from './assistant.types';
 
 export class ConnectorContextDto implements ConnectorContextInput {
-  @ApiProperty({ enum: ['DINGTALK', 'TENCENT_MEETING'] })
-  @IsIn(['DINGTALK', 'TENCENT_MEETING'])
-  provider!: 'DINGTALK' | 'TENCENT_MEETING';
+  @ApiProperty({ enum: ['DINGTALK', 'TENCENT_MEETING', 'WECOM'] })
+  @IsIn(['DINGTALK', 'TENCENT_MEETING', 'WECOM'])
+  provider!: 'DINGTALK' | 'TENCENT_MEETING' | 'WECOM';
 
   @ApiProperty({ maxLength: 120, pattern: '^[A-Za-z][A-Za-z0-9._-]{0,119}$' })
   @IsString()
@@ -139,6 +140,54 @@ export class PlanTencentMeetingConnectorRequestDto {
   @Type(() => TencentMeetingConnectorToolDto)
   @ValidateNested({ each: true })
   tools!: TencentMeetingConnectorToolDto[];
+}
+
+export class WeComConnectorToolDto implements WeComConnectorToolInput {
+  @ApiProperty({ maxLength: 120, pattern: '^[A-Za-z][A-Za-z0-9._-]{0,119}$' })
+  @IsString()
+  @Matches(/^[A-Za-z][A-Za-z0-9._-]{0,119}$/)
+  @MaxLength(120)
+  toolId!: string;
+
+  @ApiProperty({ maxLength: 240 })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(240)
+  name!: string;
+
+  @ApiProperty({ maxLength: 4000 })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(4000)
+  description!: string;
+
+  @ApiProperty({ type: 'object', additionalProperties: true })
+  @IsObject()
+  parameters!: Record<string, unknown>;
+
+  @ApiProperty({ enum: ['READ', 'WRITE', 'DESTRUCTIVE'] })
+  @IsIn(['READ', 'WRITE', 'DESTRUCTIVE'])
+  riskLevel!: 'READ' | 'WRITE' | 'DESTRUCTIVE';
+
+  @ApiProperty()
+  @IsBoolean()
+  requiresConfirmation!: boolean;
+}
+
+export class PlanWeComConnectorRequestDto {
+  @ApiProperty({ maxLength: 10000 })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(10000)
+  query!: string;
+
+  @ApiProperty({ type: [WeComConnectorToolDto], maxItems: 256 })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(256)
+  @Type(() => WeComConnectorToolDto)
+  @ValidateNested({ each: true })
+  tools!: WeComConnectorToolDto[];
 }
 
 export class CreateConversationRequestDto {
