@@ -14,13 +14,13 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiNoContentResponse, ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
-import { randomUUID } from 'node:crypto';
 import { PlatformAuthenticatedPrincipal } from '../platform-auth/platform-auth.types';
 import { PlatformJwtAuthGuard } from '../platform-auth/platform-jwt-auth.guard';
 import {
     PlatformPermissionGuard,
     RequirePlatformPermissions,
 } from '../platform-auth/platform-permission.guard';
+import { getRequestMetadata } from './request-metadata';
 import {
     CreateAICreditCapabilityDto,
     UpdateAICreditCapabilityDto,
@@ -87,17 +87,4 @@ export class AICreditCapabilityController {
     ): Promise<void> {
         return this.capabilityService.deleteCapability(capabilityId, request.user, getRequestMetadata(request));
     }
-}
-
-function getRequestMetadata(request: Request): { requestId: string; ipAddress?: string; userAgent?: string } {
-    return {
-        requestId: getHeader(request, 'x-request-id') ?? randomUUID(),
-        ipAddress: request.ip,
-        userAgent: getHeader(request, 'user-agent'),
-    };
-}
-
-function getHeader(request: Request, name: string): string | undefined {
-    const value = request.headers[name];
-    return Array.isArray(value) ? value[0] : value;
 }
