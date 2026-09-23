@@ -20,9 +20,10 @@ import {
     type ToolExecutionResult,
 } from '../tool.types';
 
-type MeetingRange = 'TODAY' | 'TOMORROW' | 'THIS_WEEK' | 'NEXT_7_DAYS';
+type MeetingRange = 'TODAY' | 'TOMORROW' | 'THIS_WEEK' | 'NEXT_7_DAYS' | 'UPCOMING_7_DAYS';
 
 const MEETING_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
+const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 const SAFE_ERROR_SUMMARIES: Readonly<Record<string, string>> = {
     AUTH_REQUIRED: '请先前往连接器页面连接或重新授权腾讯会议，然后再试',
     TOKEN_REFRESH_FAILED: '请先前往连接器页面连接或重新授权腾讯会议，然后再试',
@@ -52,7 +53,8 @@ export class TencentMeetingTools implements OnModuleInit {
             name: 'tencent_meeting_get_profile',
             version: '1.0.0',
             displayName: '查看腾讯会议账号',
-            description: '查询当前用户已授权的腾讯会议账号资料。用户询问当前连接的是哪个腾讯会议账号或所属组织时使用。',
+            description: '查询当前用户已授权的腾讯会议账号资料。仅用于腾讯会议连接器；用户询问当前连接的是哪个腾讯会议账号或所属组织时使用。'
+                + '若用户询问的是 CEES 内部会议资源且没有提到腾讯会议，不要调用本工具。',
             parameters: objectSchema({}),
             requiredPermissions: [],
             riskLevel: 'READ',
@@ -63,12 +65,14 @@ export class TencentMeetingTools implements OnModuleInit {
             name: 'tencent_meeting_list_meetings',
             version: '1.0.0',
             displayName: '查看腾讯会议列表',
-            description: '查询当前腾讯会议账号可访问的会议列表。支持今天、明天、本周、未来七天或明确 ISO 8601 时间范围。'
-                + '用户问“下一场会议”时优先查询未来七天，并根据查询时间和会议开始时间选择尚未结束且最近的一场。',
+            description: '查询当前腾讯会议账号可访问的会议列表。仅用于腾讯会议连接器，支持今天、明天、本周、未来七天、未来即将开始的会议或明确 ISO 8601 时间范围。'
+                + '用户问“下一场腾讯会议”时必须使用 UPCOMING_7_DAYS；若前文已明确在讨论腾讯会议，后续只说“下一场会议”也继续使用本工具。'
+                + '若用户只询问 CEES 内部会议且当前上下文没有腾讯会议，不要调用本工具。'
+                + '同名会议必须结合时间列出候选让用户选择，不要自行认定。',
             parameters: objectSchema({
                 range: {
                     type: 'string',
-                    enum: ['TODAY', 'TOMORROW', 'THIS_WEEK', 'NEXT_7_DAYS'],
+                    enum: ['TODAY', 'TOMORROW', 'THIS_WEEK', 'NEXT_7_DAYS', 'UPCOMING_7_DAYS'],
                     description: '相对租户时区的查询范围；不能与 start_time/end_time 同时使用',
                 },
                 start_time: { type: 'string', format: 'date-time', description: '明确开始时间，ISO 8601 格式' },
@@ -85,7 +89,7 @@ export class TencentMeetingTools implements OnModuleInit {
             name: 'tencent_meeting_get_meeting',
             version: '1.0.0',
             displayName: '查看腾讯会议详情',
-            description: '根据会议 ID 查询会议主题、状态和时间等详情。meeting_id 必须来自腾讯会议列表工具的结果。',
+            description: '查询腾讯会议的主题、状态和时间等详情。meeting_id 必须来自腾讯会议列表工具的结果；前文已明确腾讯会议时，用户说“这个会议”可继续使用本工具；同名候选未确认时不要自行选择。',
             parameters: objectSchema({
                 meeting_id: { type: 'string', description: '取自 tencent_meeting_list_meetings 结果的会议 ID' },
             }, ['meeting_id']),
@@ -100,7 +104,7 @@ export class TencentMeetingTools implements OnModuleInit {
             name: 'tencent_meeting_list_participants',
             version: '1.0.0',
             displayName: '查看腾讯会议参会人',
-            description: '查询指定会议的参会成员及入会、离会时间。meeting_id 必须来自腾讯会议列表工具的结果。',
+            description: '查询指定腾讯会议的参会成员及入会、离会时间。meeting_id 必须来自腾讯会议列表工具的结果；前文已明确腾讯会议时，用户说“这个会议的参会人”可继续使用本工具；同名候选未确认时不要自行选择。',
             parameters: objectSchema({
                 meeting_id: { type: 'string', description: '取自 tencent_meeting_list_meetings 结果的会议 ID' },
                 page: { type: 'integer', minimum: 1, default: 1 },
@@ -119,7 +123,7 @@ export class TencentMeetingTools implements OnModuleInit {
             name: 'tencent_meeting_list_recordings',
             version: '1.0.0',
             displayName: '查看腾讯会议录制',
-            description: '查询指定会议是否存在录制或 AI 纪要元数据，不返回下载地址。meeting_id 必须来自腾讯会议列表工具的结果。',
+            description: '查询指定腾讯会议是否存在录制或 AI 纪要元数据，不返回下载地址。meeting_id 必须来自腾讯会议列表工具的结果；前文已明确腾讯会议时，用户说“这个会议有没有录制”可继续使用本工具；同名候选未确认时不要自行选择。',
             parameters: objectSchema({
                 meeting_id: { type: 'string', description: '取自 tencent_meeting_list_meetings 结果的会议 ID' },
             }, ['meeting_id']),
@@ -193,7 +197,7 @@ function validateMeetingListArguments(input: unknown): Record<string, unknown> {
         page_size: integerInRange(raw.page_size, 1, 100, 20, 'page_size'),
     };
     if (raw.range !== undefined) {
-        const allowed: MeetingRange[] = ['TODAY', 'TOMORROW', 'THIS_WEEK', 'NEXT_7_DAYS'];
+        const allowed: MeetingRange[] = ['TODAY', 'TOMORROW', 'THIS_WEEK', 'NEXT_7_DAYS', 'UPCOMING_7_DAYS'];
         if (typeof raw.range !== 'string' || !allowed.includes(raw.range as MeetingRange)) {
             throw new Error(`range 只能是 ${allowed.join(' / ')}`);
         }
@@ -241,6 +245,12 @@ function resolveMeetingRange(
     }
     const range = input.range as MeetingRange | undefined;
     if (!range) return {};
+    if (range === 'UPCOMING_7_DAYS') {
+        return {
+            startTime: now.toISOString(),
+            endTime: new Date(now.getTime() + SEVEN_DAYS_MS).toISOString(),
+        };
+    }
     if (range === 'TODAY') {
         return {
             startTime: startOfLocalDay(timeZone, now).toISOString(),
@@ -281,17 +291,23 @@ function profileSummary(data: Record<string, unknown>): string {
 }
 
 function meetingListSummary(data: Record<string, unknown>, queryTime: Date, timeZone: string): string {
+    const meetings = recordArray(data.items)
+        .map(meetingView)
+        .sort(compareMeetingsByStartTime);
+    const nextMeeting = meetings.find((meeting) => isFutureMeeting(meeting, queryTime));
     return JSON.stringify({
         type: 'tencent_meeting_list',
         query_time: queryTime.toISOString(),
         tenant_timezone: timeZone,
-        meetings: recordArray(data.items).map(meetingView),
+        meetings,
+        next_meeting_id: typeof nextMeeting?.meeting_id === 'string' ? nextMeeting.meeting_id : null,
         page: scalar(data.page),
         page_size: scalar(data.pageSize),
         total: scalar(data.total),
         has_more: scalar(data.hasMore),
-        instruction: 'meeting_id 仅供后续详情、参会成员或录制工具使用；回答用户时不要主动展示内部 ID。'
-            + '用户询问下一场会议时，以 query_time 为当前时刻，选择尚未结束且开始时间最近的会议。',
+        instruction: 'meeting_id 与 next_meeting_id 仅供后续详情、参会成员或录制工具使用；回答用户时不要主动展示内部 ID。'
+            + '会议已按 start_time 升序排列；用户询问下一场腾讯会议时使用 next_meeting_id 对应的会议。'
+            + '若多个候选主题相同或用户描述存在歧义，列出主题和开始时间让用户选择，不要自行认定。',
     });
 }
 
@@ -349,6 +365,26 @@ function meetingView(data: Record<string, unknown>): Record<string, unknown> {
         start_time: scalar(data.startTime),
         end_time: scalar(data.endTime),
     };
+}
+
+function compareMeetingsByStartTime(left: Record<string, unknown>, right: Record<string, unknown>): number {
+    const leftTime = timestamp(left.start_time);
+    const rightTime = timestamp(right.start_time);
+    if (leftTime === null && rightTime === null) return 0;
+    if (leftTime === null) return 1;
+    if (rightTime === null) return -1;
+    return leftTime - rightTime;
+}
+
+function isFutureMeeting(meeting: Record<string, unknown>, queryTime: Date): boolean {
+    const startTime = timestamp(meeting.start_time);
+    return startTime !== null && startTime >= queryTime.getTime();
+}
+
+function timestamp(value: unknown): number | null {
+    if (typeof value !== 'string') return null;
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? null : parsed;
 }
 
 function safeTencentMeetingError(error: unknown): ToolExecutionError {

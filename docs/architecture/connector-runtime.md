@@ -63,7 +63,9 @@ Renderer
 
 通用 IPC 当前包括 `list/status/connect/disconnect/tools/execute` 和统一状态事件。市场页根据 Manifest 的安装、解绑、授权与版本管理声明决定通用交互；Profile 选择、版本升级与回滚仍属于钉钉扩展能力，暂不强制所有连接器实现。腾讯会议已完成公开 OpenAPI、Prisma OAuth 托管、API 只读网关、Desktop 市场卡片授权闭环以及 Assistant 原生 Tool Loop 接入。腾讯会议正式查询不通过 Desktop 预执行，而由 Assistant Tool Loop 在 API 内部按当前租户成员身份执行。现有钉钉对话前执行 DWS 并通过 `connectorContexts` 注入结果的流程不变。
 
-腾讯会议验证了 API 执行型连接器的正式会话路径：静态注册给模型的五个只读工具只负责参数校验和结果摘要，实际 OAuth 凭据读取、刷新、Scope 校验、字段过滤、大小限制和审计全部复用 `TencentMeetingGatewayService`。工具调用通过 `TenantContext` 恢复执行时租户与成员身份，相对日期按租户时区计算；安全错误摘要与内部排障信息分离，避免上游响应或 Token 进入模型上下文。会议 ID 仅作为持久化 TOOL 消息中的后续调用引用，不在普通用户回答中主动展示。
+腾讯会议验证了 API 执行型连接器的正式会话路径：静态注册给模型的五个只读工具只负责参数校验和结果摘要，实际 OAuth 凭据读取、刷新、Scope 校验、字段过滤、大小限制和审计全部复用 `TencentMeetingGatewayService`。工具调用通过 `TenantContext` 恢复执行时租户与成员身份，自然日范围按租户时区计算，“下一场会议”使用从查询时刻开始的滚动七天窗口；安全错误摘要与内部排障信息分离，避免上游响应或 Token 进入模型上下文。会议 ID 仅作为持久化 TOOL 消息中的后续调用引用，不在普通用户回答中主动展示。
+
+API 型连接器的集成测试边界固定为 `ToolRegistry -> ToolPolicy -> Assistant Tool -> Provider Gateway`。测试必须使用真实注册表、策略与网关实现，只在外部 Provider、OAuth 凭据存储和网络层使用受控替身，并至少覆盖租户/成员隔离、授权撤销、Scope 不足、敏感字段过滤和多轮资源 ID 传递。真实 OAuth 回调与线上数据作为发布前手工验收，不把第三方账号或 Secret 引入 CI。
 
 ## 4. Manifest
 
@@ -106,4 +108,5 @@ Manifest 描述连接器的静态能力，包括：
 2. 已完成：Desktop 市场卡片与服务端 OAuth 状态联调，验证 API 执行型连接器的授权生命周期。
 3. 按真实需求增加 Remote MCP Transport 和混合执行方式。
 4. 已完成：将腾讯会议连接器五类只读调用接入 Assistant 原生 Tool Loop。
-5. 为写操作增加风险分级、显式二次确认和审计闭环。
+5. 已完成：建立 API 型连接器 Assistant 集成测试边界并对腾讯会议只读链路完成覆盖。
+6. 为写操作增加风险分级、显式二次确认和审计闭环。

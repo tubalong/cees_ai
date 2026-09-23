@@ -58,6 +58,9 @@ describe('TencentMeetingTools', () => {
         for (const name of names) {
             expect(registry.get(name)).toMatchObject({ riskLevel: 'READ', requiredPermissions: [] });
         }
+        expect(registry.get('tencent_meeting_list_meetings')?.description).toContain('CEES 内部会议');
+        expect(registry.get('tencent_meeting_list_meetings')?.description).toContain('前文已明确');
+        expect(registry.get('tencent_meeting_list_meetings')?.description).toContain('同名会议');
     });
 
     it('executes profile lookup inside the current tenant context', async () => {
@@ -145,6 +148,53 @@ describe('TencentMeetingTools', () => {
             page: 1,
             page_size: 50,
         });
+    });
+
+    it('uses an exact current-time boundary and identifies the next meeting', async () => {
+        jest.useFakeTimers().setSystemTime(new Date('2026-09-23T04:30:00.000Z'));
+        gateway.execute.mockResolvedValue(result({
+            items: [
+                {
+                    meetingId: 'meeting-later',
+                    subject: '项目周会',
+                    startTime: '2026-09-23T07:00:00.000Z',
+                    endTime: '2026-09-23T08:00:00.000Z',
+                },
+                {
+                    meetingId: 'meeting-next',
+                    subject: '项目周会',
+                    startTime: '2026-09-23T05:00:00.000Z',
+                    endTime: '2026-09-23T06:00:00.000Z',
+                },
+            ],
+            page: 1,
+            pageSize: 20,
+            total: 2,
+            hasMore: false,
+        }));
+
+        const definition = registry.get('tencent_meeting_list_meetings')!;
+        const response = await definition.execute(context, definition.validate({ range: 'UPCOMING_7_DAYS' }));
+
+        expect(gateway.execute).toHaveBeenCalledWith({
+            calls: [{
+                toolId: 'tencent_meeting.meetings.list',
+                arguments: {
+                    startTime: '2026-09-23T04:30:00.000Z',
+                    endTime: '2026-09-30T04:30:00.000Z',
+                    page: 1,
+                    pageSize: 20,
+                },
+            }],
+        });
+        const summary = JSON.parse(response.summary) as {
+            meetings: Array<{ meeting_id: string }>;
+            next_meeting_id: string;
+            instruction: string;
+        };
+        expect(summary.meetings.map((meeting) => meeting.meeting_id)).toEqual(['meeting-next', 'meeting-later']);
+        expect(summary.next_meeting_id).toBe('meeting-next');
+        expect(summary.instruction).toContain('主题和开始时间让用户选择');
     });
 
     it('maps detail, participant and recording calls to provider tool ids', async () => {
