@@ -193,12 +193,6 @@ app.whenReady().then(() => {
         connectorHost.tools(assertConnectorId(connectorId)));
     ipcMain.handle('cees:connector-execute', (_event, connectorId: unknown, calls: unknown) =>
         connectorHost.execute(assertConnectorId(connectorId), calls));
-    ipcMain.handle('cees:tencent-meeting-connect-token', async (_event, token: unknown) => {
-        if (typeof token !== 'string') throw new Error('腾讯会议 Token 无效');
-        const status = await tencentMeetingConnector.connectWithToken(token);
-        connectorHost.publishStatus('tencent-meeting', status);
-        return status;
-    });
     ipcMain.handle('cees:dingtalk-dws-status', () => connectorHost.status('dingtalk'));
     ipcMain.handle('cees:dingtalk-dws-login', async () => {
         const status = await dingtalkConnector.login();

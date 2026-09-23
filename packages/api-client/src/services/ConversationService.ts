@@ -49,13 +49,13 @@ export class ConversationService {
         });
     }
     /**
-     * Plan Tencent Meeting remote MCP calls for the current question
-     * Desktop dynamically discovers tools from the official Tencent Meeting remote MCP service. The API only asks the
-     * model to select tool names and arguments; Tencent Meeting personal Tokens remain in Electron safeStorage and are
-     * never uploaded to CEES API. Desktop must request explicit user confirmation before executing any tool marked as
-     * WRITE or DESTRUCTIVE.
+     * Plan Tencent Meeting official CLI calls for the current question
+     * Desktop installs a pinned official @tencentcloud/tmeet CLI, completes browser OAuth locally, and derives the
+     * version-aligned command schema from the installed CLI help. The API only asks the model to select tool names and
+     * arguments; OAuth credentials remain in the CLI-owned encrypted Desktop directories and are never uploaded to
+     * CEES API. Desktop must request explicit user confirmation before executing any WRITE or DESTRUCTIVE command.
      *
-     * @returns TencentMeetingConnectorPlanResponseEnvelope Up to three local remote-MCP calls; calls is empty when Tencent Meeting data is unnecessary
+     * @returns TencentMeetingConnectorPlanResponseEnvelope Up to three local official-CLI calls; calls is empty when Tencent Meeting data is unnecessary
      * @throws ApiError
      */
     public static planTencentMeetingConnectorQueries({
@@ -69,7 +69,7 @@ export class ConversationService {
             body: requestBody,
             mediaType: 'application/json',
             errors: {
-                400: `Invalid query or dynamic tool catalog`,
+                400: `Invalid query or version-aligned CLI command catalog`,
                 401: `Authentication or tenant membership is invalid`,
                 502: `AI provider returned an invalid plan`,
                 503: `AI service or model is temporarily unavailable`,

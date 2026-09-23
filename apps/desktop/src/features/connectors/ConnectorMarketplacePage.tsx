@@ -1,10 +1,8 @@
 import { DingdingOutlined, LinkOutlined, MessageOutlined, PlusOutlined, ReloadOutlined, WechatOutlined } from '@ant-design/icons';
-import { App as AntdApp, Button, Input, Modal, Select, Space, Spin, Tag } from 'antd';
+import { App as AntdApp, Button, Modal, Select, Space, Spin, Tag } from 'antd';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useI18n } from '../../core/i18n';
-
-const TENCENT_MEETING_TOKEN_URL = 'https://meeting.tencent.com/ai-skill.html';
 
 const EMPTY_STATUS: DesktopConnectorStatus = {
     state: 'NOT_INSTALLED',
@@ -64,7 +62,6 @@ export default function ConnectorMarketplacePage(): JSX.Element {
     const [disconnectingId, setDisconnectingId] = useState<string>();
     const [selectedConnectorId, setSelectedConnectorId] = useState<string>();
     const [selectedProfile, setSelectedProfile] = useState<string>();
-    const [tencentMeetingToken, setTencentMeetingToken] = useState('');
 
     const refresh = async (): Promise<void> => {
         const connectors = window.cees?.connectors;
@@ -150,21 +147,13 @@ export default function ConnectorMarketplacePage(): JSX.Element {
         if (!connectors) return;
         const currentStatus = statuses[manifest.id] ?? EMPTY_STATUS;
         const currentDingTalkStatus = toDingTalkStatus(manifest.id === 'dingtalk' ? currentStatus : undefined);
-        if (manifest.id === 'tencent-meeting' && !tencentMeetingToken.trim()) {
-            setSelectedConnectorId(manifest.id);
-            const opened = await window.cees?.openExternal(TENCENT_MEETING_TOKEN_URL);
-            if (opened) message.info(t('已打开腾讯会议 AI Skill 专区，请复制个人 Token 后返回 CEES 完成连接'));
-            return;
-        }
         if (manifest.id === 'dingtalk' && currentDingTalkStatus.state === 'PROFILE_REQUIRED' && !selectedProfile) {
             setSelectedConnectorId(manifest.id);
             return;
         }
         setConnectingId(manifest.id);
         try {
-            const nextStatus = manifest.id === 'tencent-meeting'
-                ? await connectors.tencentMeeting.connectWithToken(tencentMeetingToken)
-                : manifest.id === 'dingtalk'
+            const nextStatus = manifest.id === 'dingtalk'
                     && currentDingTalkStatus.state === 'PROFILE_REQUIRED'
                     && connectors.dingtalk
                     ? await connectors.dingtalk.selectProfile(selectedProfile ?? '')
@@ -180,7 +169,6 @@ export default function ConnectorMarketplacePage(): JSX.Element {
                 return;
             }
             setSelectedConnectorId(undefined);
-            if (manifest.id === 'tencent-meeting') setTencentMeetingToken('');
             if (nextStatus.authenticated) {
                 message.success(t('{name}连接器已连接', { name: manifest.name }));
             } else {
@@ -289,7 +277,7 @@ export default function ConnectorMarketplacePage(): JSX.Element {
             content: selectedManifest.id === 'dingtalk'
                 ? t('解绑会清除本机保存的全部钉钉登录授权，但不会卸载 DWS，也不会删除已导入 CEES 的组织或业务数据。解绑后需要重新授权才能继续使用。')
                 : selectedManifest.id === 'tencent-meeting'
-                    ? t('解绑会清除当前电脑安全存储中的腾讯会议个人 Token 和工具缓存，不会删除腾讯会议中的会议或 CEES 业务数据。')
+                    ? t('解绑会退出当前电脑的腾讯会议 CLI OAuth，并清除 CEES 专属凭据目录和工具缓存，不会删除腾讯会议中的会议或 CEES 业务数据。')
                     : selectedManifest.id === 'wecom'
                         ? t('解绑会删除当前电脑中 CEES 专属的企业微信 CLI 授权和工具缓存，不会删除 CEES 业务数据；企业微信侧已创建的智能机器人可能仍需在企业微信中自行管理。')
                         : t('解绑会清除当前连接器保存的授权信息，但不会删除已经写入 CEES 的业务数据。'),
@@ -395,14 +383,14 @@ export default function ConnectorMarketplacePage(): JSX.Element {
                     <strong>{selectedManifest.id === 'dingtalk'
                         ? selectedDingTalkStatus.corpName || t('当前钉钉组织')
                         : selectedManifest.id === 'tencent-meeting'
-                            ? t('个人 Token 已验证')
+                            ? t('腾讯会议账号已授权')
                             : selectedManifest.id === 'wecom'
                                 ? t('智能机器人已授权')
                             : selectedManifest.name}</strong>
                     <span>{selectedManifest.id === 'dingtalk'
                         ? selectedDingTalkStatus.externalUserName || selectedDingTalkStatus.profile || t('已完成授权')
                         : selectedManifest.id === 'tencent-meeting'
-                            ? t('{count} 个官方 MCP 工具可用', { count: selectedTencentMeetingStatus.toolCount })
+                            ? selectedTencentMeetingStatus.authorizedUserName || t('{count} 个腾讯会议 CLI 命令可用', { count: selectedTencentMeetingStatus.toolCount })
                             : selectedManifest.id === 'wecom'
                                 ? t('{count} 个企业微信 CLI 工具可用', { count: selectedWeComStatus.toolCount })
                         : selectedStatus.version || t('已完成授权')}</span>
@@ -440,19 +428,6 @@ export default function ConnectorMarketplacePage(): JSX.Element {
                         t={t}
                     />
                     : null}
-                {selectedManifest.id === 'tencent-meeting' ? <div className="connector-token-form">
-                    <p>{t('腾讯会议使用官方个人 Token 连接。Token 仅加密保存在当前电脑，不会上传到 CEES API。')}</p>
-                    <Button type="link" icon={<LinkOutlined />} onClick={() => void window.cees?.openExternal(TENCENT_MEETING_TOKEN_URL)}>
-                        {t('前往腾讯会议 AI Skill 专区获取 Token')}
-                    </Button>
-                    <Input.Password
-                        value={tencentMeetingToken}
-                        maxLength={8192}
-                        autoComplete="off"
-                        placeholder={t('粘贴腾讯会议个人 Token')}
-                        onChange={(event) => setTencentMeetingToken(event.target.value)}
-                    />
-                </div> : null}
                 {selectedManifest.id === 'wecom' && selectedWeComStatus.authorizationState === 'AUTHORIZING' ? <div className="connector-wecom-authorization">
                     <p>{t('请使用手机企业微信扫描二维码。若尚未创建智能机器人，企业微信会引导你一键创建并确认可用能力。')}</p>
                     {selectedWeComStatus.qrCodeDataUrl
@@ -469,7 +444,6 @@ export default function ConnectorMarketplacePage(): JSX.Element {
                     disabled={(selectedManifest.id === 'dingtalk'
                         && selectedDingTalkStatus.state === 'PROFILE_REQUIRED'
                         && !selectedProfile)
-                        || (selectedManifest.id === 'tencent-meeting' && !tencentMeetingToken.trim())
                         || (selectedManifest.id === 'wecom' && selectedWeComStatus.authorizationState === 'AUTHORIZING')}
                     onClick={() => void connect(selectedManifest)}
                 >
@@ -559,9 +533,12 @@ function toTencentMeetingStatus(status?: DesktopConnectorStatus): TencentMeeting
     return {
         ...EMPTY_STATUS,
         ...candidate,
-        tokenConfigured: candidate?.tokenConfigured === true,
+        source: candidate?.source === 'MANAGED' ? 'MANAGED' : null,
+        installSupported: candidate?.installSupported === true,
+        authorizationState: candidate?.authorizationState === 'AUTHORIZED' ? 'AUTHORIZED' : 'UNAUTHORIZED',
+        authorizedUserName: typeof candidate?.authorizedUserName === 'string' ? candidate.authorizedUserName : null,
+        authorizedOpenId: typeof candidate?.authorizedOpenId === 'string' ? candidate.authorizedOpenId : null,
         toolCount: typeof candidate?.toolCount === 'number' ? candidate.toolCount : 0,
-        verifiedAt: typeof candidate?.verifiedAt === 'string' ? candidate.verifiedAt : null,
     };
 }
 

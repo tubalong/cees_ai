@@ -80,9 +80,6 @@ declare global {
                     rollback: () => Promise<DingTalkConnectorReleaseStatus>;
                     onStatusChanged: (listener: (status: DingTalkConnectorStatus) => void) => () => void;
                 };
-                tencentMeeting: {
-                    connectWithToken: (token: string) => Promise<TencentMeetingConnectorStatus>;
-                };
             };
         };
     }
@@ -149,9 +146,12 @@ declare global {
     type DesktopConnectorStatus = ConnectorStatus;
 
     interface TencentMeetingConnectorStatus extends ConnectorStatus {
-        tokenConfigured: boolean;
+        source: 'MANAGED' | null;
+        installSupported: boolean;
+        authorizationState: 'UNAUTHORIZED' | 'AUTHORIZED';
+        authorizedUserName: string | null;
+        authorizedOpenId: string | null;
         toolCount: number;
-        verifiedAt: string | null;
     }
 
     interface WeComConnectorStatus extends ConnectorStatus {
