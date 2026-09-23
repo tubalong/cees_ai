@@ -77,6 +77,21 @@ export interface ToolExecutionResult {
 }
 
 /**
+ * 工具执行阶段可安全回喂模型的受控错误。内部 message 进入审计与排障，
+ * userFacingSummary 只能使用服务端固定文案，禁止包含上游响应、Token 或权限码。
+ */
+export class ToolExecutionError extends Error {
+  constructor(
+    public readonly code: string,
+    message: string,
+    public readonly userFacingSummary: string,
+  ) {
+    super(message);
+    this.name = 'ToolExecutionError';
+  }
+}
+
+/**
  * 工具定义：注册到统一 ToolRegistry 的统一接口。禁止工具自行实现
  * 权限、循环、审批或额度逻辑；执行器只做校验参数与调用业务 Service。
  */

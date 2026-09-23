@@ -7,6 +7,7 @@ import { OrganizationModule } from '../organization/organization.module';
 import { ProjectModule } from '../project/project.module';
 import { StorageModule } from '../storage/storage.module';
 import { TaskModule } from '../task/task.module';
+import { TencentMeetingModule } from '../tencent-meeting/tencent-meeting.module';
 import { UserMemoryModule } from '../user-memory/user-memory.module';
 import { WebSearchModule } from '../web-search/web-search.module';
 import { AssistantController } from './api/assistant.controller';
@@ -40,6 +41,7 @@ import { SaveToKnowledgeTool } from './tools/executors/save-to-knowledge.tool';
 import { InsertDocumentImageTool } from './tools/executors/insert-document-image.tool';
 import { WebSearchTool } from './tools/executors/web-search.tool';
 import { ListDocumentsTool } from './tools/executors/list-documents.tool';
+import { TencentMeetingTools } from './tools/executors/tencent-meeting.tools';
 
 /**
  * 统一 AI 编排核心。会话事实源、事件重放与唯一 Tool Loop 运行器都在本模块内，
@@ -48,7 +50,7 @@ import { ListDocumentsTool } from './tools/executors/list-documents.tool';
  * 执行器在 onModuleInit 自注册，新增工具只需新增 provider。
  */
 @Module({
-  imports: [AiOrchestrationModule, DocumentModule, ImageModule, KnowledgeModule, OrganizationModule, ProjectModule, StorageModule, TaskModule, UserMemoryModule, WebSearchModule],
+  imports: [AiOrchestrationModule, DocumentModule, ImageModule, KnowledgeModule, OrganizationModule, ProjectModule, StorageModule, TaskModule, TencentMeetingModule, UserMemoryModule, WebSearchModule],
   controllers: [AssistantActionDraftController, AssistantController, AssistantConnectorController],
   providers: [
     ConversationService,
@@ -79,6 +81,7 @@ import { ListDocumentsTool } from './tools/executors/list-documents.tool';
     InsertDocumentImageTool,
     WebSearchTool,
     ListDocumentsTool,
+    TencentMeetingTools,
   ],
 })
 export class AssistantModule { }

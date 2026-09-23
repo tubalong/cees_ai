@@ -17,7 +17,7 @@
 - 已落地：腾讯会议服务端只读 API 网关，提供固定工具发现、顺序执行、Scope 过滤、字段脱敏、分页适配、响应限制和审计。
 - 待实现：远程 MCP Transport 和混合执行方式。
 - 已落地：腾讯会议 Desktop 真实授权接线；Desktop 不保存提供方 Token，也不建设独立会议业务页面。
-- 待实现：连接器进入 Assistant 原生 Tool Loop，以及写操作的二次确认机制。
+- 已落地：腾讯会议连接器进入 Assistant 原生 Tool Loop；连接器写操作及其二次确认机制仍待按具体需求设计。
 
 ## 2. 目标
 
@@ -61,7 +61,9 @@ Renderer
                         -> Tencent Meeting OAuth / Open API
 ```
 
-通用 IPC 当前包括 `list/status/connect/disconnect/tools/execute` 和统一状态事件。市场页根据 Manifest 的安装、解绑、授权与版本管理声明决定通用交互；Profile 选择、版本升级与回滚仍属于钉钉扩展能力，暂不强制所有连接器实现。腾讯会议已完成公开 OpenAPI、Prisma OAuth 托管、API 只读网关以及 Desktop 市场卡片授权闭环。腾讯会议正式查询不通过 Desktop 预执行，而由后续 Assistant Tool Loop 在 API 内部按当前租户成员身份执行。现有钉钉对话前执行 DWS 并通过 `connectorContexts` 注入结果的流程不变。
+通用 IPC 当前包括 `list/status/connect/disconnect/tools/execute` 和统一状态事件。市场页根据 Manifest 的安装、解绑、授权与版本管理声明决定通用交互；Profile 选择、版本升级与回滚仍属于钉钉扩展能力，暂不强制所有连接器实现。腾讯会议已完成公开 OpenAPI、Prisma OAuth 托管、API 只读网关、Desktop 市场卡片授权闭环以及 Assistant 原生 Tool Loop 接入。腾讯会议正式查询不通过 Desktop 预执行，而由 Assistant Tool Loop 在 API 内部按当前租户成员身份执行。现有钉钉对话前执行 DWS 并通过 `connectorContexts` 注入结果的流程不变。
+
+腾讯会议验证了 API 执行型连接器的正式会话路径：静态注册给模型的五个只读工具只负责参数校验和结果摘要，实际 OAuth 凭据读取、刷新、Scope 校验、字段过滤、大小限制和审计全部复用 `TencentMeetingGatewayService`。工具调用通过 `TenantContext` 恢复执行时租户与成员身份，相对日期按租户时区计算；安全错误摘要与内部排障信息分离，避免上游响应或 Token 进入模型上下文。会议 ID 仅作为持久化 TOOL 消息中的后续调用引用，不在普通用户回答中主动展示。
 
 ## 4. Manifest
 
@@ -103,5 +105,5 @@ Manifest 描述连接器的静态能力，包括：
 1. 已完成：在契约和 `apps/api` 中补齐腾讯会议 OAuth、Token 托管和只读 API 网关。
 2. 已完成：Desktop 市场卡片与服务端 OAuth 状态联调，验证 API 执行型连接器的授权生命周期。
 3. 按真实需求增加 Remote MCP Transport 和混合执行方式。
-4. 下一步：将腾讯会议连接器调用接入 Assistant 原生 Tool Loop。
+4. 已完成：将腾讯会议连接器五类只读调用接入 Assistant 原生 Tool Loop。
 5. 为写操作增加风险分级、显式二次确认和审计闭环。

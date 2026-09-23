@@ -9,6 +9,6 @@ import { TencentMeetingService } from './tencent-meeting.service';
 @Module({
     controllers: [TencentMeetingController],
     providers: [TencentMeetingClient, TencentMeetingConfig, TencentMeetingCredentialCipher, TencentMeetingService, TencentMeetingGatewayService],
-    exports: [TencentMeetingService],
+    exports: [TencentMeetingGatewayService, TencentMeetingService],
 })
 export class TencentMeetingModule { }
