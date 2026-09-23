@@ -1,4 +1,4 @@
-import { CheckCircleFilled, DingdingOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
+import { CheckCircleFilled, DingdingOutlined, LinkOutlined, ReloadOutlined } from '@ant-design/icons';
 import { App as AntdApp, Button, Modal, Select, Space, Spin, Tag } from 'antd';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -300,24 +300,24 @@ export default function ConnectorMarketplacePage(): JSX.Element {
                     const status = statuses[manifest.id] ?? EMPTY_STATUS;
                     const connected = status.state === 'READY';
                     const dingtalkStatus = toDingTalkStatus(manifest.id === 'dingtalk' ? status : undefined);
-                    return <article key={manifest.id} className={`connector-card ${connected ? 'is-connected' : ''}`}>
+                    return <article key={manifest.id} className={`connector-card ${connected ? 'is-connected' : 'is-disconnected'}`}>
                         <button
                             className="connector-card-hit-area"
                             type="button"
                             aria-label={connected
                                 ? t('查看{name}连接器详情', { name: manifest.name })
-                                : t('安装或授权{name}连接器', { name: manifest.name })}
+                                : t('连接{name}连接器', { name: manifest.name })}
                             onClick={() => setSelectedConnectorId(manifest.id)}
                         />
                         <span className="connector-card-indicator" aria-hidden="true">
-                            {connected ? <CheckCircleFilled /> : <PlusOutlined />}
+                            {connected ? <CheckCircleFilled /> : <LinkOutlined />}
                         </span>
                         <div className="connector-logo" aria-hidden="true">{connectorGlyph(manifest)}</div>
                         <div className="connector-card-copy">
-                            <div className="connector-card-title"><h3>{t(manifest.name)}</h3><span className={`connector-status ${connected ? 'is-connected' : ''}`}>{connectorStatusText(status, t)}</span></div>
+                            <div className="connector-card-title"><h3>{t(manifest.name)}</h3>{connected ? <span className="connector-status is-connected">{connectorStatusText(status, t)}</span> : null}</div>
                             <p>{t(manifest.description)}</p>
                         </div>
-                        <div className="connector-card-meta">
+                        {connected ? <div className="connector-card-meta">
                             {loading ? <Spin size="small" /> : <>
                                 <span>{manifest.id === 'dingtalk'
                                     ? dingtalkStatus.corpName || dingtalkStatus.profile || t('尚未授权组织')
@@ -326,10 +326,8 @@ export default function ConnectorMarketplacePage(): JSX.Element {
                                     ? dingtalkStatus.externalUserName || status.version || release.version
                                     : status.version || manifest.transportType}</small>
                             </>}
-                        </div>
-                        {status.error && !connected ? <div className="connector-card-error">{status.error}</div> : null}
-                        {status.state === 'ERROR' ? <Button size="small" onClick={() => void refresh()}>{t('重试检查')}</Button> : null}
-                        {manifest.id === 'dingtalk' && manifest.supportsVersionManagement ? <DingTalkVersionPanel
+                        </div> : null}
+                        {connected && manifest.id === 'dingtalk' && manifest.supportsVersionManagement ? <DingTalkVersionPanel
                             release={release}
                             status={dingtalkStatus}
                             checkingUpdate={checkingUpdate}
@@ -347,25 +345,9 @@ export default function ConnectorMarketplacePage(): JSX.Element {
 
         <Modal
             open={Boolean(selectedManifest)}
-            title={selectedConnected || !selectedManifest
-                ? undefined
-                : selectedManifest.id === 'dingtalk' && selectedDingTalkStatus.state === 'PROFILE_REQUIRED'
-                    ? t('选择当前钉钉组织')
-                    : connectorDialogTitle(selectedManifest, t)}
-            footer={selectedConnected ? null : undefined}
-            okText={selectedManifest?.id === 'dingtalk' && selectedDingTalkStatus.state === 'PROFILE_REQUIRED'
-                ? t('使用此组织')
-                : selectedManifest ? connectorActionText(selectedManifest, t) : t('连接')}
-            cancelText={t('取消')}
-            confirmLoading={connectingId === selectedManifest?.id}
-            okButtonProps={{
-                disabled: selectedManifest?.id === 'dingtalk'
-                    ? selectedDingTalkStatus.state === 'PROFILE_REQUIRED'
-                        ? !selectedProfile
-                        : !selectedDingTalkStatus.installSupported && !selectedDingTalkStatus.installed
-                    : false,
-            }}
-            onOk={() => void connect()}
+            title={undefined}
+            footer={null}
+            width={620}
             onCancel={() => !connectingId && !disconnectingId && setSelectedConnectorId(undefined)}
             maskClosable={!connectingId && !disconnectingId}
             closable={!connectingId && !disconnectingId}
@@ -397,27 +379,39 @@ export default function ConnectorMarketplacePage(): JSX.Element {
                     <Button type="primary" size="large" onClick={tryConnector}>{t('去试试')}</Button>
                     {selectedManifest.supportsDisconnect ? <Button danger size="large" loading={disconnectingId === selectedManifest.id} onClick={confirmDisconnect}>{t('解绑')}</Button> : null}
                 </div>
-            </div> : selectedManifest ? <div className="connector-install-dialog">
-                <div className="connector-install-logo">{connectorGlyph(selectedManifest)}</div>
-                <div>
-                    {selectedManifest.id === 'dingtalk'
-                        ? <DingTalkInstallContent
-                            status={selectedDingTalkStatus}
-                            release={release}
-                            selectedProfile={selectedProfile}
-                            onSelectProfile={setSelectedProfile}
-                            t={t}
-                        />
-                        : <>
-                            <p>{t('CEES 将通过当前连接器支持的官方授权方式建立连接，并仅在授权范围内访问数据。')}</p>
-                            <ul>
-                                <li>{selectedManifest.supportsInstall ? t('支持由 CEES 管理本地安装') : t('无需由 CEES 安装本地组件')}</li>
-                                <li>{t('传输方式：{transport}', { transport: selectedManifest.transportType })}</li>
-                                <li>{t('执行位置：{location}', { location: selectedManifest.executionLocation })}</li>
-                                <li>{t('授权方式：{auth}', { auth: selectedManifest.authType })}</li>
-                            </ul>
-                        </>}
+            </div> : selectedManifest ? <div className="connector-connected-dialog connector-disconnected-dialog">
+                <div className="connector-connected-visual" aria-hidden="true">
+                    <div className="connector-connected-node connector-connected-cees">
+                        <img src="./assests/logo.webp" alt="" />
+                    </div>
+                    <div className="connector-connected-dots"><span /><span /><span /></div>
+                    <div className="connector-connected-node connector-connected-provider">{connectorProviderGlyph(selectedManifest)}</div>
                 </div>
+                <h2>{t('连接 {name}', { name: selectedManifest.name })}</h2>
+                <p className="connector-connected-description">{t(selectedManifest.description)}</p>
+                {selectedManifest.id === 'dingtalk' && selectedDingTalkStatus.state === 'PROFILE_REQUIRED'
+                    ? <DingTalkProfileSelector
+                        status={selectedDingTalkStatus}
+                        selectedProfile={selectedProfile}
+                        onSelectProfile={setSelectedProfile}
+                        t={t}
+                    />
+                    : null}
+                <Button
+                    className="connector-connect-button"
+                    type="primary"
+                    size="large"
+                    icon={<LinkOutlined />}
+                    loading={connectingId === selectedManifest.id}
+                    disabled={selectedManifest.id === 'dingtalk'
+                        && selectedDingTalkStatus.state === 'PROFILE_REQUIRED'
+                        && !selectedProfile}
+                    onClick={() => void connect()}
+                >
+                    {selectedManifest.id === 'dingtalk' && selectedDingTalkStatus.state === 'PROFILE_REQUIRED'
+                        ? t('使用此组织')
+                        : t('连接')}
+                </Button>
             </div> : null}
         </Modal>
     </div>;
@@ -451,39 +445,26 @@ function DingTalkVersionPanel(props: {
     </div>;
 }
 
-function DingTalkInstallContent(props: {
+function DingTalkProfileSelector(props: {
     status: DingTalkConnectorStatus;
-    release: DingTalkConnectorReleaseStatus;
     selectedProfile?: string;
     onSelectProfile: (profile: string) => void;
     t: (text: string, values?: Record<string, string | number>) => string;
 }): JSX.Element {
-    const { status, release, selectedProfile, onSelectProfile, t } = props;
-    return <>
-        {status.state === 'PROFILE_REQUIRED'
-            ? <>
-                <p>{t('当前账号已授权多个钉钉组织，请明确选择本次使用的组织。CEES 不会默认选择第一项。')}</p>
-                <Select
-                    style={{ width: '100%', marginBottom: 12 }}
-                    placeholder={t('选择钉钉组织账号')}
-                    value={selectedProfile}
-                    onChange={onSelectProfile}
-                    options={status.profiles.map((profile) => ({
-                        value: profile.profile,
-                        label: `${profile.corpName || profile.corpId || t('未知组织')} · ${profile.externalUserName || profile.externalUserId || t('未知用户')}`,
-                    }))}
-                />
-            </>
-            : <p>{t('CEES 将下载并校验钉钉官方 DWS，然后安装到当前用户的 CEES 数据目录。安装完成后会自动打开钉钉授权流程。')}</p>}
-        {status.state !== 'PROFILE_REQUIRED' ? <ul>
-            <li>{t('固定版本：{version}', { version: release.version })}</li>
-            <li>{t('开源许可：{license}', { license: release.license })}</li>
-            <li>{t('当前版本仅在 Windows 支持自动安装')}</li>
-            <li>{t('授权凭据仅保存在本机，不会上传到 CEES API')}</li>
-            <li>{t('暂不安装 DWS 技能与专家能力')}</li>
-        </ul> : null}
-        {!status.installSupported && !status.installed ? <p className="connector-install-warning">{t('当前系统不支持自动安装，请先手动安装 DWS。')}</p> : null}
-    </>;
+    const { status, selectedProfile, onSelectProfile, t } = props;
+    return <div className="connector-profile-selector">
+        <p>{t('当前账号包含多个钉钉组织，请选择本次连接使用的组织。')}</p>
+        <Select
+            style={{ width: '100%' }}
+            placeholder={t('选择钉钉组织账号')}
+            value={selectedProfile}
+            onChange={onSelectProfile}
+            options={status.profiles.map((profile) => ({
+                value: profile.profile,
+                label: `${profile.corpName || profile.corpId || t('未知组织')} · ${profile.externalUserName || profile.externalUserId || t('未知用户')}`,
+            }))}
+        />
+    </div>;
 }
 
 function connectorErrorStatus(error: unknown, fallback: string): DesktopConnectorStatus {
@@ -536,21 +517,4 @@ function connectorGlyph(manifest: DesktopConnectorManifest): string {
 
 function connectorProviderGlyph(manifest: DesktopConnectorManifest): JSX.Element | string {
     return manifest.id === 'dingtalk' ? <DingdingOutlined /> : connectorGlyph(manifest);
-}
-
-function connectorDialogTitle(
-    manifest: DesktopConnectorManifest,
-    t: (text: string, values?: Record<string, string | number>) => string,
-): string {
-    return manifest.supportsInstall
-        ? t('安装并连接{name}', { name: manifest.name })
-        : t('连接{name}', { name: manifest.name });
-}
-
-function connectorActionText(
-    manifest: DesktopConnectorManifest,
-    t: (text: string, values?: Record<string, string | number>) => string,
-): string {
-    if (manifest.supportsInstall) return manifest.authType === 'NONE' ? t('安装并连接') : t('安装并授权');
-    return manifest.authType === 'NONE' ? t('连接') : t('连接并授权');
 }
