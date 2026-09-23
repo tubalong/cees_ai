@@ -1,6 +1,6 @@
 # AI Credit 计费配置表结构设计草案
 
-> 状态：**已评审通过（S1 完成），并已落地 Prisma schema 与 migration `20260923070447_ai_credit_billing_config`（S2 完成）**。下一步 S3（初始数据 seed）。
+> 状态：**已评审通过（S1 完成），并已落地 Prisma schema 与 migration `20260923070447_ai_credit_billing_config`（S2 完成）、初始数据 seed（S3 完成，`prisma/ai-credit-billing.seed.ts`）**。下一步 S4（超级管理员守卫）。
 > 范围：第一阶段「超级管理员配置模块」所需的全部表。企业购买、企业池、结算扣减、限额等表属后续阶段（A3/A4/A5/B 系列），**本阶段不建**。
 > 规则来源：docs/product/ai-credit-system-design.md 与 docs/product/ai-credit-implementation-checklist.md。
 

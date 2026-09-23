@@ -9,6 +9,7 @@ import * as argon2 from 'argon2';
 import { normalizeAccount } from '../src/auth/account';
 import { ensurePlatformAdministrator } from '../src/platform-auth/platform-administrator.seed';
 import { TENANT_ADMIN_ROLE_CODE, TENANT_PERMISSION_DEFINITIONS } from '../src/rbac/permission-catalog';
+import { seedAiCreditBillingConfig } from './ai-credit-billing.seed';
 
 const prisma = new PrismaClient();
 
@@ -120,6 +121,8 @@ async function main(): Promise<void> {
         password: platformAdminPassword,
         displayName: platformAdminDisplayName,
     });
+
+    await seedAiCreditBillingConfig(prisma);
 }
 
 function assertFullSeedIsNotRunningInProduction(): void {
