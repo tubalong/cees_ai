@@ -2243,3 +2243,29 @@
         grid-template-columns: 84px minmax(0, 1fr);
     }
 }
+.connector-action-confirmation {
+    display: grid;
+    gap: 12px;
+    margin-top: 12px;
+}
+
+.connector-action-confirmation-item {
+    padding: 12px;
+    border: 1px solid var(--color-border-secondary, #e5e7eb);
+    border-radius: 10px;
+    background: var(--color-bg-subtle, #f8fafc);
+}
+
+.connector-action-confirmation-item strong {
+    display: block;
+    margin-bottom: 8px;
+}
+
+.connector-action-confirmation-item pre {
+    max-height: 180px;
+    margin: 0;
+    overflow: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-size: 12px;
+}

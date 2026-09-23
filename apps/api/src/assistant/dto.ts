@@ -20,17 +20,22 @@ import {
   ValidateIf,
   ValidateNested,
 } from 'class-validator';
-import type { ConnectorContextInput, DingTalkConnectorToolInput, PublicTurnMode } from './assistant.types';
+import type {
+  ConnectorContextInput,
+  DingTalkConnectorToolInput,
+  PublicTurnMode,
+  TencentMeetingConnectorToolInput,
+} from './assistant.types';
 
 export class ConnectorContextDto implements ConnectorContextInput {
-  @ApiProperty({ enum: ['DINGTALK'] })
-  @IsIn(['DINGTALK'])
-  provider!: 'DINGTALK';
+  @ApiProperty({ enum: ['DINGTALK', 'TENCENT_MEETING'] })
+  @IsIn(['DINGTALK', 'TENCENT_MEETING'])
+  provider!: 'DINGTALK' | 'TENCENT_MEETING';
 
-  @ApiProperty({ maxLength: 80, pattern: '^dws_read_[a-f0-9]{16}$' })
+  @ApiProperty({ maxLength: 120, pattern: '^[A-Za-z][A-Za-z0-9._-]{0,119}$' })
   @IsString()
-  @Matches(/^dws_read_[a-f0-9]{16}$/)
-  @MaxLength(80)
+  @Matches(/^[A-Za-z][A-Za-z0-9._-]{0,119}$/)
+  @MaxLength(120)
   toolId!: string;
 
   @ApiProperty({ maxLength: 240 })
@@ -86,6 +91,54 @@ export class PlanDingTalkConnectorRequestDto {
   @Type(() => DingTalkConnectorToolDto)
   @ValidateNested({ each: true })
   tools!: DingTalkConnectorToolDto[];
+}
+
+export class TencentMeetingConnectorToolDto implements TencentMeetingConnectorToolInput {
+  @ApiProperty({ maxLength: 120, pattern: '^[A-Za-z][A-Za-z0-9._-]{0,119}$' })
+  @IsString()
+  @Matches(/^[A-Za-z][A-Za-z0-9._-]{0,119}$/)
+  @MaxLength(120)
+  toolId!: string;
+
+  @ApiProperty({ maxLength: 240 })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(240)
+  name!: string;
+
+  @ApiProperty({ maxLength: 4000 })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(4000)
+  description!: string;
+
+  @ApiProperty({ type: 'object', additionalProperties: true })
+  @IsObject()
+  parameters!: Record<string, unknown>;
+
+  @ApiProperty({ enum: ['READ', 'WRITE', 'DESTRUCTIVE'] })
+  @IsIn(['READ', 'WRITE', 'DESTRUCTIVE'])
+  riskLevel!: 'READ' | 'WRITE' | 'DESTRUCTIVE';
+
+  @ApiProperty()
+  @IsBoolean()
+  requiresConfirmation!: boolean;
+}
+
+export class PlanTencentMeetingConnectorRequestDto {
+  @ApiProperty({ maxLength: 10000 })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(10000)
+  query!: string;
+
+  @ApiProperty({ type: [TencentMeetingConnectorToolDto], maxItems: 128 })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(128)
+  @Type(() => TencentMeetingConnectorToolDto)
+  @ValidateNested({ each: true })
+  tools!: TencentMeetingConnectorToolDto[];
 }
 
 export class CreateConversationRequestDto {

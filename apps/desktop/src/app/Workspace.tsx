@@ -15,11 +15,11 @@ import ReactMarkdown, { type Components } from 'react-markdown';
 import { useLocation, useNavigate } from 'react-router-dom';
 import remarkGfm from 'remark-gfm';
 import {
-    cancelActionDraft, cancelTurn, confirmActionDraft, createConversation, createTurn, deleteConversation, exportDocument, getConversation, getDashboardOverview, getDashboardTodos, getDashboardUpcomingMeetings, getDocument, getImage, planDingTalkConnectorQueries, replayTurnEvents, updateConversation, uploadAttachmentFile,
+    cancelActionDraft, cancelTurn, confirmActionDraft, createConversation, createTurn, deleteConversation, exportDocument, getConversation, getDashboardOverview, getDashboardTodos, getDashboardUpcomingMeetings, getDocument, getImage, planDingTalkConnectorQueries, planTencentMeetingConnectorQueries, replayTurnEvents, updateConversation, uploadAttachmentFile,
     getUnreadNotificationCount, hasStoredSession, listConversations, listDocuments, listTenantMembers, logout,
     createKnowledgeDocument, deleteKnowledgeDocument, listWritableKnowledgeBases,
     type Conversation, type ConversationMessage, type DashboardOverview, type DashboardTodoItem, type DashboardUpcomingMeeting, type ImageAccess,
-    type ConnectorContext, type TurnStreamEvent,
+    type ConnectorContext, type TencentMeetingConnectorTool, type TurnStreamEvent,
     type KnowledgeBaseSummary, type KnowledgeSourceType,
     type ManagedDocumentSummary, type MeResult, type TenantMember,
 } from '../core/api';
@@ -605,7 +605,45 @@ const DELETED_CITATIONS_KEY = 'cees.chat.citations.deleted';
 
 interface AssistantNavigationState {
     createNewConversation?: boolean;
-    source?: 'DINGTALK_CONNECTOR' | 'CONNECTOR_MARKETPLACE';
+    source?: 'DINGTALK_CONNECTOR' | 'TENCENT_MEETING_CONNECTOR' | 'CONNECTOR_MARKETPLACE';
+}
+
+async function confirmTencentMeetingCalls(
+    calls: Array<{ toolId: string; arguments: Record<string, unknown> }>,
+    tools: TencentMeetingConnectorTool[],
+    modal: ReturnType<typeof AntdApp.useApp>['modal'],
+    t: (text: string, values?: Record<string, string | number>) => string,
+): Promise<boolean> {
+    const toolMap = new Map(tools.map((tool) => [tool.toolId, tool]));
+    const sensitiveCalls = calls.filter((call) => toolMap.get(call.toolId)?.requiresConfirmation !== false);
+    if (sensitiveCalls.length === 0) return true;
+    const summary = sensitiveCalls.map((call) => {
+        const tool = toolMap.get(call.toolId);
+        return {
+            name: tool?.name || call.toolId,
+            risk: tool?.riskLevel || 'DESTRUCTIVE',
+            arguments: JSON.stringify(call.arguments, null, 2),
+        };
+    });
+    return new Promise((resolve) => {
+        modal.confirm({
+            title: t('确认执行腾讯会议操作'),
+            width: 620,
+            content: <div className="connector-action-confirmation">
+                <p>{t('以下操作将使用当前电脑保存的腾讯会议个人 Token 执行。确认前不会产生任何变更。')}</p>
+                {summary.map((item) => <div key={`${item.name}:${item.arguments}`} className="connector-action-confirmation-item">
+                    <strong>{item.name}</strong>
+                    <Tag color={item.risk === 'DESTRUCTIVE' ? 'red' : 'orange'}>{item.risk}</Tag>
+                    <pre>{item.arguments}</pre>
+                </div>)}
+            </div>,
+            okText: t('确认执行'),
+            cancelText: t('取消'),
+            okButtonProps: { danger: summary.some((item) => item.risk === 'DESTRUCTIVE') },
+            onOk: () => resolve(true),
+            onCancel: () => resolve(false),
+        });
+    });
 }
 
 function readDeletedCitationIds(conversationId: string): Set<string> {
@@ -665,7 +703,7 @@ function ActionConfirmationCard({ confirmation, onResolve }: {
 
 function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element {
     const { t } = useI18n();
-    const { message } = AntdApp.useApp();
+    const { message, modal } = AntdApp.useApp();
     const location = useLocation();
     const navigate = useNavigate();
     const canSaveToKnowledge = permissions.includes('knowledge_base.read');
@@ -695,6 +733,7 @@ function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element 
     const [renameTarget, setRenameTarget] = useState<Conversation>();
     const [renameValue, setRenameValue] = useState('');
     const [dingtalkConnected, setDingtalkConnected] = useState(false);
+    const [preferredConnector, setPreferredConnector] = useState<'dingtalk' | 'tencent-meeting'>();
     const initialConversationLoadStarted = useRef(false);
 
     /** 就地更新某条消息上的确认卡片状态（不重建消息，避免滚动位置跳动）。 */
@@ -736,6 +775,8 @@ function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element 
         initialConversationLoadStarted.current = true;
         const navigationState = location.state as AssistantNavigationState | null;
         const createNewConversation = navigationState?.createNewConversation === true;
+        if (navigationState?.source === 'DINGTALK_CONNECTOR') setPreferredConnector('dingtalk');
+        if (navigationState?.source === 'TENCENT_MEETING_CONNECTOR') setPreferredConnector('tencent-meeting');
         void listConversations()
             .then(async (result) => {
                 setConversations(result.items);
@@ -889,7 +930,7 @@ function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element 
                         if (tools.length > 0) {
                             const plan = await planDingTalkConnectorQueries(content, tools);
                             connectorRequired = plan.calls.length > 0;
-                            connectorContexts = await dingtalkConnector.execute(plan.calls);
+                            connectorContexts.push(...await dingtalkConnector.execute(plan.calls));
                         }
                     } else if (mentionsDingTalk) {
                         if (status.state === 'PROFILE_REQUIRED') {
@@ -903,6 +944,29 @@ function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element 
                     if (mentionsDingTalk || connectorRequired) throw error;
                 }
             }
+            const tencentMeetingConnector = window.cees?.connectors;
+            const mentionsTencentMeeting = /腾讯会议|wemeet|腾讯.*会议/i.test(content)
+                || preferredConnector === 'tencent-meeting';
+            if (tencentMeetingConnector && mentionsTencentMeeting) {
+                const status = await tencentMeetingConnector.status('tencent-meeting');
+                if (status.state !== 'READY') {
+                    throw new Error(status.error || '请先在连接器页面配置腾讯会议个人 Token');
+                }
+                const tools = await tencentMeetingConnector.tools('tencent-meeting') as TencentMeetingConnectorTool[];
+                const plan = await planTencentMeetingConnectorQueries(content, tools);
+                if (plan.calls.length > 0) {
+                    if (connectorContexts.length + plan.calls.length > 3) {
+                        throw new Error('单轮最多执行三个连接器调用，请将钉钉和腾讯会议请求拆成多轮');
+                    }
+                    const confirmed = await confirmTencentMeetingCalls(plan.calls, tools, modal, t);
+                    if (!confirmed) {
+                        message.info(t('已取消腾讯会议操作'));
+                        return;
+                    }
+                    connectorContexts.push(...await tencentMeetingConnector.execute('tencent-meeting', plan.calls));
+                }
+            }
+            if (connectorContexts.length > 3) throw new Error('单轮连接器上下文不能超过三个');
             setInput('');
             setSelectedPrompt(undefined);
             setAttachment(undefined);
@@ -973,7 +1037,7 @@ function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element 
                 const errorMessage = error instanceof Error ? error.message : t('AI 请求失败，请稍后重试');
                 if (errorMessage.includes('连接器页面')) {
                     Modal.confirm({
-                        title: t('需要连接钉钉'),
+                        title: errorMessage.includes('腾讯会议') ? t('需要连接腾讯会议') : t('需要连接钉钉'),
                         content: errorMessage,
                         okText: t('前往连接器'),
                         cancelText: t('取消'),

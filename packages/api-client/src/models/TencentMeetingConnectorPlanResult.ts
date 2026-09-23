@@ -3,7 +3,7 @@
 /* tslint:disable */
 /* eslint-disable */
 import type { TencentMeetingConnectorPlannedCall } from './TencentMeetingConnectorPlannedCall';
-export type TencentMeetingConnectorExecutionRequest = {
+export type TencentMeetingConnectorPlanResult = {
     calls: Array<TencentMeetingConnectorPlannedCall>;
 };
 

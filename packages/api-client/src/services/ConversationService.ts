@@ -10,6 +10,8 @@ import type { CreateConversationRequest } from '../models/CreateConversationRequ
 import type { CreateTurnRequest } from '../models/CreateTurnRequest';
 import type { DingTalkConnectorPlanRequest } from '../models/DingTalkConnectorPlanRequest';
 import type { DingTalkConnectorPlanResponseEnvelope } from '../models/DingTalkConnectorPlanResponseEnvelope';
+import type { TencentMeetingConnectorPlanRequest } from '../models/TencentMeetingConnectorPlanRequest';
+import type { TencentMeetingConnectorPlanResponseEnvelope } from '../models/TencentMeetingConnectorPlanResponseEnvelope';
 import type { TurnResponseEnvelope } from '../models/TurnResponseEnvelope';
 import type { TurnStreamEvent } from '../models/TurnStreamEvent';
 import type { UpdateConversationRequest } from '../models/UpdateConversationRequest';
@@ -38,6 +40,34 @@ export class ConversationService {
             mediaType: 'application/json',
             errors: {
                 400: `Invalid query or tool catalog`,
+                401: `Authentication or tenant membership is invalid`,
+                502: `AI provider returned an invalid plan`,
+                503: `AI service or model is temporarily unavailable`,
+            },
+        });
+    }
+    /**
+     * Plan Tencent Meeting remote MCP calls for the current question
+     * Desktop dynamically discovers tools from the official Tencent Meeting remote MCP service. The API only asks the
+     * model to select tool names and arguments; Tencent Meeting personal Tokens remain in Electron safeStorage and are
+     * never uploaded to CEES API. Desktop must request explicit user confirmation before executing any tool marked as
+     * WRITE or DESTRUCTIVE.
+     *
+     * @returns TencentMeetingConnectorPlanResponseEnvelope Up to three local remote-MCP calls; calls is empty when Tencent Meeting data is unnecessary
+     * @throws ApiError
+     */
+    public static planTencentMeetingConnectorQueries({
+        requestBody,
+    }: {
+        requestBody: TencentMeetingConnectorPlanRequest,
+    }): CancelablePromise<TencentMeetingConnectorPlanResponseEnvelope> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/assistant/connectors/tencent-meeting/plan',
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                400: `Invalid query or dynamic tool catalog`,
                 401: `Authentication or tenant membership is invalid`,
                 502: `AI provider returned an invalid plan`,
                 503: `AI service or model is temporarily unavailable`,

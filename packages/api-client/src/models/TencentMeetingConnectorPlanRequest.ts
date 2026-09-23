@@ -3,7 +3,8 @@
 /* tslint:disable */
 /* eslint-disable */
 import type { TencentMeetingConnectorTool } from './TencentMeetingConnectorTool';
-export type TencentMeetingConnectorToolList = {
+export type TencentMeetingConnectorPlanRequest = {
+    query: string;
     tools: Array<TencentMeetingConnectorTool>;
 };
 

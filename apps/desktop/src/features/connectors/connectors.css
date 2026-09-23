@@ -424,6 +424,30 @@
     line-height: 1.6;
 }
 
+.connector-token-form {
+    width: min(100%, 500px);
+    display: grid;
+    gap: 12px;
+    margin-top: 20px;
+    padding: 16px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--surface-soft);
+    text-align: left;
+}
+
+.connector-token-form p {
+    margin: 0;
+    color: var(--muted);
+    line-height: 1.7;
+}
+
+.connector-token-form .ant-btn-link {
+    width: fit-content;
+    height: auto;
+    padding: 0;
+}
+
 .connector-connect-button.ant-btn {
     min-width: 112px;
     margin-top: 24px;

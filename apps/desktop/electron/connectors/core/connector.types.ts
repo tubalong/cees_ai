@@ -51,6 +51,8 @@ export interface ConnectorTool {
     name: string;
     description: string;
     parameters: Record<string, unknown>;
+    riskLevel?: 'READ' | 'WRITE' | 'DESTRUCTIVE';
+    requiresConfirmation?: boolean;
 }
 
 export interface ConnectorPlannedCall {
