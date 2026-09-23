@@ -61,7 +61,7 @@ Renderer
                         -> Tencent Meeting OAuth / Open API
 ```
 
-通用 IPC 当前包括 `list/status/connect/disconnect/tools/execute` 和统一状态事件。市场页根据 Manifest 的安装、解绑、授权与版本管理声明决定通用交互；市场卡片统一采用紧凑等高布局，描述限制为两行，未连接态使用“+ / 连接”渐进提示，已连接态使用“对话图标 / 去对话”渐进提示并直接创建新的助手会话，卡片主体继续承担详情入口；完整描述和账号信息进入详情弹窗。普通用户不会在外层卡片看到安装版本、传输类型等实现细节，钉钉版本检查、升级与回滚入口当前也暂不展示，实际安装与授权策略仍由 Adapter 和 Manifest 决定。Profile 选择、版本升级与回滚仍属于已保留的钉钉扩展能力，暂不强制所有连接器实现。腾讯会议已完成公开 OpenAPI、Prisma OAuth 托管、API 只读网关、Desktop 市场卡片授权闭环以及 Assistant 原生 Tool Loop 接入。腾讯会议正式查询不通过 Desktop 预执行，而由 Assistant Tool Loop 在 API 内部按当前租户成员身份执行。现有钉钉对话前执行 DWS 并通过 `connectorContexts` 注入结果的流程不变。
+通用 IPC 当前包括 `list/status/connect/disconnect/tools/execute` 和统一状态事件。市场页根据 Manifest 的安装、解绑、授权与版本管理声明决定通用交互；市场卡片统一采用紧凑等高布局，描述限制为两行，未连接态使用“+ / 连接”渐进按钮并直接调用连接流程，只有需要选择钉钉 Profile 时才进入详情补充选择；已连接态使用“对话图标 / 去对话”渐进按钮并直接创建新的助手会话，卡片主体继续承担详情入口。完整描述和账号信息进入详情弹窗。普通用户不会在外层卡片看到安装版本、传输类型等实现细节，钉钉版本检查、升级与回滚入口当前也暂不展示，实际安装与授权策略仍由 Adapter 和 Manifest 决定。Profile 选择、版本升级与回滚仍属于已保留的钉钉扩展能力，暂不强制所有连接器实现。腾讯会议已完成公开 OpenAPI、Prisma OAuth 托管、API 只读网关、Desktop 市场卡片授权闭环以及 Assistant 原生 Tool Loop 接入。腾讯会议正式查询不通过 Desktop 预执行，而由 Assistant Tool Loop 在 API 内部按当前租户成员身份执行。现有钉钉对话前执行 DWS 并通过 `connectorContexts` 注入结果的流程不变。
 
 腾讯会议验证了 API 执行型连接器的正式会话路径：静态注册给模型的五个只读工具只负责参数校验和结果摘要，实际 OAuth 凭据读取、刷新、Scope 校验、字段过滤、大小限制和审计全部复用 `TencentMeetingGatewayService`。工具调用通过 `TenantContext` 恢复执行时租户与成员身份，自然日范围按租户时区计算，“下一场会议”使用从查询时刻开始的滚动七天窗口；安全错误摘要与内部排障信息分离，避免上游响应或 Token 进入模型上下文。会议 ID 仅作为持久化 TOOL 消息中的后续调用引用，不在普通用户回答中主动展示。
 

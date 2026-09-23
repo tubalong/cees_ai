@@ -134,33 +134,42 @@ export default function ConnectorMarketplacePage(): JSX.Element {
         setStatuses((current) => ({ ...current, [connectorId]: status }));
     };
 
-    const connect = async (): Promise<void> => {
-        if (!selectedManifest) return;
+    const connect = async (manifest: DesktopConnectorManifest | undefined = selectedManifest): Promise<void> => {
+        if (!manifest) return;
         const connectors = window.cees?.connectors;
         if (!connectors) return;
-        setConnectingId(selectedManifest.id);
+        const currentStatus = statuses[manifest.id] ?? EMPTY_STATUS;
+        const currentDingTalkStatus = toDingTalkStatus(manifest.id === 'dingtalk' ? currentStatus : undefined);
+        if (manifest.id === 'dingtalk' && currentDingTalkStatus.state === 'PROFILE_REQUIRED' && !selectedProfile) {
+            setSelectedConnectorId(manifest.id);
+            return;
+        }
+        setConnectingId(manifest.id);
         try {
-            const nextStatus = selectedManifest.id === 'tencent-meeting'
+            const nextStatus = manifest.id === 'tencent-meeting'
                 ? await connectTencentMeeting((authorizingStatus) => {
-                    updateStatus(selectedManifest.id, authorizingStatus);
+                    updateStatus(manifest.id, authorizingStatus);
                     setSelectedConnectorId(undefined);
                     message.info(t('已打开腾讯会议授权页面，请在系统浏览器中完成授权'));
                 })
-                : selectedManifest.id === 'dingtalk'
-                    && selectedDingTalkStatus.state === 'PROFILE_REQUIRED'
+                : manifest.id === 'dingtalk'
+                    && currentDingTalkStatus.state === 'PROFILE_REQUIRED'
                     && connectors.dingtalk
                     ? await connectors.dingtalk.selectProfile(selectedProfile ?? '')
-                    : await connectors.connect(selectedManifest.id);
-            updateStatus(selectedManifest.id, nextStatus);
-            if (nextStatus.state === 'PROFILE_REQUIRED') return;
+                    : await connectors.connect(manifest.id);
+            updateStatus(manifest.id, nextStatus);
+            if (nextStatus.state === 'PROFILE_REQUIRED') {
+                setSelectedConnectorId(manifest.id);
+                return;
+            }
             setSelectedConnectorId(undefined);
             if (nextStatus.authenticated) {
-                message.success(t('{name}连接器已连接', { name: selectedManifest.name }));
+                message.success(t('{name}连接器已连接', { name: manifest.name }));
             } else {
                 message.warning(nextStatus.error || t('连接器已安装，请继续完成授权'));
             }
         } catch (error) {
-            message.error(error instanceof Error ? error.message : t('{name}连接器安装或授权失败', { name: selectedManifest.name }));
+            message.error(error instanceof Error ? error.message : t('{name}连接器安装或授权失败', { name: manifest.name }));
         } finally {
             setConnectingId(undefined);
         }
@@ -307,9 +316,7 @@ export default function ConnectorMarketplacePage(): JSX.Element {
                         <button
                             className="connector-card-hit-area"
                             type="button"
-                            aria-label={connected
-                                ? t('查看{name}连接器详情', { name: manifest.name })
-                                : t('连接{name}连接器', { name: manifest.name })}
+                            aria-label={t('查看{name}连接器详情', { name: manifest.name })}
                             onClick={() => setSelectedConnectorId(manifest.id)}
                         />
                         {connected ? <button
@@ -320,10 +327,16 @@ export default function ConnectorMarketplacePage(): JSX.Element {
                         >
                             <MessageOutlined />
                             <span className="connector-card-indicator-label">{t('去对话')}</span>
-                        </button> : <span className="connector-card-indicator" aria-hidden="true">
-                            <PlusOutlined />
-                            <span className="connector-card-indicator-label">{t('连接')}</span>
-                        </span>}
+                        </button> : <button
+                            className="connector-card-indicator connector-card-connect-action"
+                            type="button"
+                            aria-label={t('连接{name}连接器', { name: manifest.name })}
+                            disabled={connectingId === manifest.id}
+                            onClick={() => void connect(manifest)}
+                        >
+                            {connectingId === manifest.id ? <Spin size="small" /> : <PlusOutlined />}
+                            <span className="connector-card-indicator-label">{connectingId === manifest.id ? t('连接中') : t('连接')}</span>
+                        </button>}
                         <div className="connector-logo" aria-hidden="true">{connectorGlyph(manifest)}</div>
                         <div className="connector-card-copy">
                             <div className="connector-card-title"><h3>{t(manifest.name)}</h3></div>
@@ -408,7 +421,7 @@ export default function ConnectorMarketplacePage(): JSX.Element {
                     disabled={selectedManifest.id === 'dingtalk'
                         && selectedDingTalkStatus.state === 'PROFILE_REQUIRED'
                         && !selectedProfile}
-                    onClick={() => void connect()}
+                    onClick={() => void connect(selectedManifest)}
                 >
                     {selectedManifest.id === 'dingtalk' && selectedDingTalkStatus.state === 'PROFILE_REQUIRED'
                         ? t('使用此组织')

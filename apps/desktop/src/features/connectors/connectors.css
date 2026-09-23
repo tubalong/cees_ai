@@ -179,11 +179,19 @@
     opacity: 1;
 }
 
+.connector-card-connect-action,
 .connector-card-conversation-action {
     z-index: 3;
-    color: var(--text);
     cursor: pointer;
     pointer-events: auto;
+}
+
+.connector-card-connect-action:disabled {
+    cursor: wait;
+}
+
+.connector-card-conversation-action {
+    color: var(--text);
 }
 
 .connector-card.is-connected:hover .connector-card-conversation-action,
