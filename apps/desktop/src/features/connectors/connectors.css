@@ -5,8 +5,7 @@
 
 .connector-marketplace-header,
 .connector-section-heading,
-.connector-card-title,
-.connector-card-meta {
+.connector-card-title {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -74,16 +73,20 @@
 .connector-grid {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    align-items: start;
+    grid-auto-rows: 1fr;
+    align-items: stretch;
     gap: 18px;
 }
 
 .connector-card {
     position: relative;
-    min-height: 260px;
-    display: flex;
-    flex-direction: column;
-    padding: 22px;
+    min-height: 106px;
+    display: grid;
+    grid-template-columns: 32px minmax(0, 1fr);
+    align-content: start;
+    align-items: start;
+    gap: 12px;
+    padding: 16px;
     overflow: hidden;
     border: 1px solid var(--line);
     border-radius: 15px;
@@ -105,29 +108,16 @@
 }
 
 .connector-card.is-disconnected {
-    min-height: 132px;
-    display: grid;
-    grid-template-columns: 44px minmax(0, 1fr);
-    align-content: center;
-    align-items: start;
-    gap: 14px;
-    padding: 20px;
+    min-height: 106px;
 }
 
-.connector-card.is-disconnected .connector-logo {
-    width: 44px;
-    height: 44px;
-    border-radius: 12px;
-    font-size: 20px;
-}
-
-.connector-card.is-disconnected .connector-card-copy {
+.connector-card-copy {
     min-width: 0;
     margin-top: 0;
-    padding-right: 34px;
+    padding-right: 70px;
 }
 
-.connector-card.is-disconnected .connector-card-copy p {
+.connector-card-copy p {
     margin-top: 8px;
 }
 
@@ -149,32 +139,76 @@
 
 .connector-card-indicator {
     position: absolute;
-    top: 16px;
-    right: 16px;
+    top: 14px;
+    right: 14px;
     z-index: 2;
-    width: 34px;
-    height: 34px;
-    display: grid;
-    place-items: center;
-    padding: 0;
+    width: 28px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    padding: 0 7px;
+    overflow: hidden;
     color: var(--primary);
-    border: 1px solid rgba(86, 92, 246, .18);
-    border-radius: 50%;
-    background: var(--surface);
-    box-shadow: 0 7px 18px rgba(86, 92, 246, .18);
+    border: 0;
+    border-radius: 7px;
+    background: var(--surface-soft);
     pointer-events: none;
+    transition: width .18s ease, background-color .18s ease;
 }
 
-/* 连接态一律使用状态色令牌族：暗色下 `--success` / `--success-line`
-   会整体换算为高前景亮度 + 暗底，写死 #28a96b 会在深色工作区里发暗。 */
-.connector-card.is-connected .connector-card-indicator {
-    color: var(--success);
-    border-color: var(--success-line);
+.connector-card-indicator-label {
+    max-width: 0;
+    overflow: hidden;
+    opacity: 0;
+    white-space: nowrap;
+    font-size: 12px;
+    transition: max-width .18s ease, opacity .18s ease;
+}
+
+.connector-card.is-disconnected:hover .connector-card-indicator,
+.connector-card.is-disconnected:focus-within .connector-card-indicator {
+    width: 66px;
+    background: rgba(86, 92, 246, .1);
+}
+
+.connector-card.is-disconnected:hover .connector-card-indicator-label,
+.connector-card.is-disconnected:focus-within .connector-card-indicator-label {
+    max-width: 30px;
+    opacity: 1;
+}
+
+.connector-card-connect-action,
+.connector-card-conversation-action {
+    z-index: 3;
+    cursor: pointer;
+    pointer-events: auto;
+}
+
+.connector-card-connect-action:disabled {
+    cursor: wait;
+}
+
+.connector-card-conversation-action {
+    color: var(--text);
+}
+
+.connector-card.is-connected:hover .connector-card-conversation-action,
+.connector-card.is-connected:focus-within .connector-card-conversation-action {
+    width: 78px;
+    color: var(--primary);
+    background: rgba(86, 92, 246, .1);
+}
+
+.connector-card.is-connected:hover .connector-card-conversation-action .connector-card-indicator-label,
+.connector-card.is-connected:focus-within .connector-card-conversation-action .connector-card-indicator-label {
+    max-width: 42px;
+    opacity: 1;
 }
 
 .connector-logo,
 .connector-card-copy,
-.connector-card-meta,
 .connector-card-error {
     position: relative;
     z-index: 2;
@@ -196,53 +230,30 @@
 }
 
 .connector-logo {
-    width: 54px;
-    height: 54px;
+    width: 32px;
+    height: 32px;
     display: grid;
     place-items: center;
     color: #fff;
-    border-radius: 14px;
+    border-radius: 9px;
     background: linear-gradient(145deg, #1687ff, #0866df);
     box-shadow: 0 10px 22px rgba(22, 135, 255, .25);
-    font-size: 24px;
+    font-size: 16px;
     font-weight: 700;
-}
-
-.connector-card-copy {
-    margin-top: 20px;
 }
 
 .connector-card-title h3 {
     margin: 0;
-    font-size: 18px;
-}
-
-.connector-status {
-    color: var(--muted);
-    font-size: 12px;
-}
-
-.connector-status.is-connected {
-    color: var(--success);
-    font-weight: 600;
+    font-size: 14px;
 }
 
 .connector-card-copy p {
-    margin-top: 12px;
-    font-size: 13px;
-}
-
-.connector-card-meta {
-    min-height: 34px;
-    margin-top: auto;
-    padding-top: 18px;
-    border-top: 1px solid var(--line);
-    color: var(--text);
     font-size: 12px;
-}
-
-.connector-card-meta small {
-    color: var(--muted);
+    display: -webkit-box;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
 }
 
 .connector-card-error {
@@ -252,7 +263,7 @@
 }
 
 .connector-version-panel {
-    display: grid;
+    display: none;
     gap: 10px;
     margin-top: 14px;
     padding-top: 14px;
