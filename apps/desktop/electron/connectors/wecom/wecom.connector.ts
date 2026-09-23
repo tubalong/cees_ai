@@ -8,6 +8,7 @@ import type { ConnectorContext, ConnectorPlannedCall, ConnectorStatus, Connector
 import { LocalCliCommandError, LocalCliTransport, decodeLocalCliOutput } from '../transports/local-cli.transport';
 
 export const WECOM_CLI_VERSION = '1.3.2';
+export const WECOM_CURRENT_USER_PROFILE_TOOL_ID = 'cees.identity.current_user.get';
 const MAX_ARCHIVE_BYTES = 20 * 1024 * 1024;
 const MAX_BINARY_BYTES = 24 * 1024 * 1024;
 const MAX_CONTEXT_BYTES = 56 * 1024;
@@ -18,7 +19,10 @@ const AUTHORIZATION_TIMEOUT_MS = 5 * 60 * 1000;
 const QR_CODE_WAIT_MS = 15_000;
 const SENSITIVE_KEY_PATTERN = /(?:token|secret|cookie|authorization|credential|password|bot[_-]?id)/i;
 const LOCAL_PATH_KEY_PATTERN = /(?:file_path|local_path|output_path|output_dir|directory_path)/i;
+const UNTRUSTED_METADATA_KEY_PATTERN = /^(?:security_notice|extra_identity_context)$/i;
 const TOOL_ID_PATTERN = /^[a-z][a-z0-9_-]*(?:\.[a-z][a-z0-9_-]*)+$/;
+const WECOM_IDENTITY_TOOL_ID = 'identity.whoami';
+const WECOM_CONTACT_SEARCH_TOOL_ID = 'contact.users.search';
 
 interface WeComPlatformRelease {
     url: string;
@@ -66,6 +70,12 @@ export interface WeComConnectorStatus extends ConnectorStatus {
 export type WeComConnectorTool = ConnectorTool;
 export type WeComConnectorPlannedCall = ConnectorPlannedCall;
 export type WeComConnectorContext = ConnectorContext<'WECOM'>;
+export type WeComJsonExecutor = (args: string[], timeoutMs: number) => Promise<unknown>;
+
+interface WeComCurrentIdentity {
+    authorizedUserName: string;
+    authorizedUserId: string | null;
+}
 
 let connectorRoot: string | undefined;
 let executablePath: string | undefined;
@@ -170,7 +180,12 @@ export async function discoverWeComTools(): Promise<WeComConnectorTool[]> {
     if (toolCache) return toolCache.map(cloneTool);
     await requireAuthorized();
     const summaries = await discoverMethodSummaries();
-    const tools = await mapWithConcurrency(summaries.slice(0, MAX_TOOL_COUNT), 8, async (summary) => {
+    const supportsCurrentUserProfile = summaries.some((item) => item.method === WECOM_IDENTITY_TOOL_ID)
+        && summaries.some((item) => item.method === WECOM_CONTACT_SEARCH_TOOL_ID);
+    const officialSummaries = summaries
+        .filter((item) => item.method !== WECOM_IDENTITY_TOOL_ID)
+        .slice(0, supportsCurrentUserProfile ? MAX_TOOL_COUNT - 1 : MAX_TOOL_COUNT);
+    const tools = await mapWithConcurrency(officialSummaries, 8, async (summary) => {
         try {
             const payload = await runWeComJson(['schema', 'get', summary.method], 30_000);
             return normalizeWeComToolDefinition(payload, summary.description);
@@ -179,6 +194,7 @@ export async function discoverWeComTools(): Promise<WeComConnectorTool[]> {
         }
     });
     const available = tools.filter((tool): tool is WeComConnectorTool => Boolean(tool));
+    if (supportsCurrentUserProfile) available.unshift(createCurrentUserProfileTool());
     if (available.length === 0) throw new Error('企业微信 CLI 未返回可用工具');
     toolCache = available;
     return available.map(cloneTool);
@@ -197,13 +213,18 @@ export async function executeWeComCalls(calls: WeComConnectorPlannedCall[]): Pro
         if (!tool) throw new Error(`企业微信工具不存在：${call.toolId}`);
         assertWeComCallAllowed(tool, call);
         validateArguments(call.arguments);
-        const args = [...call.toolId.split('.'), '--json', JSON.stringify(call.arguments)];
-        if (call.toolId.endsWith('.download')) {
-            const outputDir = requireDownloadDirectory();
-            await mkdir(outputDir, { recursive: true });
-            args.push('--output-dir', outputDir);
+        let result: unknown;
+        if (call.toolId === WECOM_CURRENT_USER_PROFILE_TOOL_ID) {
+            result = await fetchWeComCurrentUserProfile();
+        } else {
+            const args = [...call.toolId.split('.'), '--json', JSON.stringify(call.arguments)];
+            if (call.toolId.endsWith('.download')) {
+                const outputDir = requireDownloadDirectory();
+                await mkdir(outputDir, { recursive: true });
+                args.push('--output-dir', outputDir);
+            }
+            result = await runWeComJson(args, 60_000);
         }
-        const result = await runWeComJson(args, 60_000);
         contexts.push({
             provider: 'WECOM',
             toolId: tool.toolId,
@@ -245,6 +266,89 @@ export function classifyWeComToolRisk(method: string): 'READ' | 'WRITE' | 'DESTR
     if (/^(?:get|list|search|query|whoami|download|read|check|show)$/.test(action)) return 'READ';
     if (/^(?:create|update|send|reply|forward|append|import|upload|add|finish|rename|write|set)$/.test(action)) return 'WRITE';
     return 'DESTRUCTIVE';
+}
+
+export async function fetchWeComCurrentUserProfile(
+    executeJson: WeComJsonExecutor = runWeComJson,
+): Promise<Record<string, unknown>> {
+    const identityPayload = await executeJson(['identity', 'whoami', '--json', '{}'], 30_000);
+    const identity = parseWeComCurrentIdentity(identityPayload);
+    let contactPayload: unknown;
+    try {
+        contactPayload = await executeJson([
+            'contact', 'users', 'search', '--json', JSON.stringify({
+                keywords: [identity.authorizedUserName],
+                search_mode: 'list',
+            }),
+        ], 30_000);
+    } catch (error) {
+        const permissionResult = normalizeWeComContactPermissionError(identity, error);
+        if (permissionResult) return permissionResult;
+        throw error;
+    }
+    return normalizeWeComCurrentUserProfile(identity, contactPayload);
+}
+
+export function parseWeComCurrentIdentity(value: unknown): WeComCurrentIdentity {
+    if (!isRecord(value)) throw new Error('企业微信身份信息无效');
+    const context = stringValue(value.extra_identity_context);
+    if (!context) throw new Error('企业微信未返回授权用户身份');
+    const section = context.match(/授权真人用户身份[：:]([\s\S]*?)(?:CLI\s*调用|$)/i)?.[1] ?? '';
+    const authorizedUserName = readIdentityField(section, '名字');
+    const authorizedUserId = readIdentityField(section, 'ID');
+    if (!authorizedUserName) throw new Error('企业微信未返回授权用户姓名');
+    return { authorizedUserName, authorizedUserId };
+}
+
+export function normalizeWeComCurrentUserProfile(
+    identity: WeComCurrentIdentity,
+    contactPayload: unknown,
+): Record<string, unknown> {
+    const users = isRecord(contactPayload) && Array.isArray(contactPayload.users)
+        ? contactPayload.users.filter(isRecord)
+        : [];
+    const matched = users.find((user) => identity.authorizedUserId && stringValue(user.userid) === identity.authorizedUserId)
+        ?? users.find((user) => stringValue(user.name) === identity.authorizedUserName);
+    if (!matched) {
+        return {
+            currentUser: { name: identity.authorizedUserName },
+            profileComplete: false,
+            notice: '已确认当前授权用户身份，但通讯录未返回匹配的个人资料',
+        };
+    }
+    const departments = Array.isArray(matched.departments)
+        ? matched.departments.filter((item): item is string => typeof item === 'string' && Boolean(item.trim())).map((item) => item.trim())
+        : [];
+    return {
+        currentUser: compactRecord({
+            name: stringValue(matched.name) ?? identity.authorizedUserName,
+            alias: stringValue(matched.alias),
+            departments,
+            position: stringValue(matched.position),
+            email: stringValue(matched.email),
+        }),
+        profileComplete: true,
+        notice: '资料范围以当前企业微信机器人授权和通讯录可见范围为准',
+    };
+}
+
+export function normalizeWeComContactPermissionError(
+    identity: WeComCurrentIdentity,
+    error: unknown,
+): Record<string, unknown> | null {
+    if (!(error instanceof LocalCliCommandError)) return null;
+    const payload = parseJsonRecord(error.stderr || error.stdout);
+    if (payload?.errcode !== 850002) return null;
+    const helpMessage = stringValue(payload.help_message)?.replace(/\\n/g, '\n') ?? '';
+    const permissionGrantUrl = helpMessage.match(/\]\((https:\/\/[^)\s]+)\)/)?.[1] ?? null;
+    return {
+        currentUser: { name: identity.authorizedUserName },
+        profileComplete: false,
+        permissionRequired: true,
+        missingPermission: '通讯录',
+        notice: '已确认当前授权用户身份，但企业微信机器人尚未获得通讯录使用权限，授权后即可查询部门、职务和邮箱等个人资料',
+        ...(permissionGrantUrl ? { permissionGrantUrl } : {}),
+    };
 }
 
 export function assertWeComCallAllowed(tool: WeComConnectorTool, call: WeComConnectorPlannedCall): void {
@@ -466,7 +570,7 @@ function sanitizeValue(value: unknown, depth: number): unknown {
     if (!isRecord(value)) return typeof value === 'string' && value.length > 20_000 ? `${value.slice(0, 20_000)}…` : value;
     const result: Record<string, unknown> = {};
     for (const [key, item] of Object.entries(value)) {
-        if (SENSITIVE_KEY_PATTERN.test(key)) continue;
+        if (SENSITIVE_KEY_PATTERN.test(key) || UNTRUSTED_METADATA_KEY_PATTERN.test(key)) continue;
         result[key] = sanitizeValue(item, depth + 1);
     }
     return result;
@@ -608,6 +712,43 @@ function safeError(error: unknown): string {
 
 function cloneTool(tool: WeComConnectorTool): WeComConnectorTool {
     return { ...tool, parameters: structuredClone(tool.parameters) };
+}
+
+function createCurrentUserProfileTool(): WeComConnectorTool {
+    return {
+        toolId: WECOM_CURRENT_USER_PROFILE_TOOL_ID,
+        name: '查询当前授权用户企业微信资料',
+        description: '查询当前扫码授权真人用户的企业微信个人资料，包括姓名、部门、职务、邮箱和英文名；用户询问“我是谁”“我的企业微信信息”或“我的个人资料”时优先使用。',
+        parameters: { type: 'object', additionalProperties: false, properties: {} },
+        riskLevel: 'READ',
+        requiresConfirmation: false,
+    };
+}
+
+function readIdentityField(section: string, field: string): string | null {
+    const escaped = field.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const match = section.match(new RegExp(`(?:^|\\n)\\s*${escaped}[：:]\\s*([^\\n<]+)`, 'i'));
+    return match?.[1]?.trim() || null;
+}
+
+function compactRecord(value: Record<string, unknown>): Record<string, unknown> {
+    return Object.fromEntries(Object.entries(value).filter(([, item]) => {
+        if (item === null || item === undefined || item === '') return false;
+        return !Array.isArray(item) || item.length > 0;
+    }));
+}
+
+function parseJsonRecord(value: string): Record<string, unknown> | null {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const start = trimmed.indexOf('{');
+    if (start < 0) return null;
+    try {
+        const parsed = JSON.parse(trimmed.slice(start)) as unknown;
+        return isRecord(parsed) ? parsed : null;
+    } catch {
+        return null;
+    }
 }
 
 function stringValue(value: unknown): string | null {
