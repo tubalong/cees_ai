@@ -30,12 +30,12 @@
 | 字段 | 类型 | 约束/说明 |
 | --- | --- | --- |
 | id | String @db.Uuid | 主键 |
-| code | String | 能力 code（chat / rag / image-gen / doc-gen / pdf-gen / ppt-gen / workflow）；唯一性由迁移手写的部分唯一索引保证（`WHERE deleted_at IS NULL`，软删除后允许重建） |
+| code | String | 能力 code（chat / rag / image-gen / doc-gen / pdf-gen / ppt-gen / workflow / web-search / tool-calling）；唯一性由迁移手写的部分唯一索引保证（`WHERE deleted_at IS NULL`，软删除后允许重建）；通用能力（chat / tool-calling / web-search）全档开放、不参与档位功能集 |
 | name | String | 显示名 |
 | description | String? | — |
 | meterType | AICreditMeterType | @default(TOKEN) |
 | capabilityKind | AICreditCapabilityKind | @default(TIER_GATED) |
-| permissionCode | String? | **映射现有 permissions.code**（能力 code ↔ 权限码的桥）；通用能力也配置对应权限码，可空表示无需权限。现有可映射码：rag→`knowledge_base.query`、image-gen→`ai.image.generate`、doc-gen→`ai.document.generate`、web-search→`ai.web.search`；chat/tool-calling 现有目录无独立码（对话工具集默认可用）→ 留空；pdf-gen/ppt-gen/workflow 现有目录暂无码 → S3 seed 时在 permissions 表注册后回填 |
+| permissionCode | String? | **映射现有 permissions.code**（能力 code ↔ 权限码的桥）；通用能力也配置对应权限码，可空表示无需权限。现有可映射码：rag→`knowledge_base.query`、image-gen→`ai.image.generate`、doc-gen→`ai.document.generate`、web-search→`ai.web.search`；chat、tool-calling 现有目录无独立码（对话工具集默认可用）→ 留空；pdf-gen/ppt-gen/workflow 的权限码已随 S3 seed 在 permissions 表注册 |
 | sortOrder | Int | @default(0)，后台排序 |
 | status | AICreditConfigStatus | @default(ACTIVE) |
 | 公共字段 | — | createdAt/updatedAt/createdBy/updatedBy/deletedAt/version |
@@ -96,8 +96,8 @@
 | capabilityId | String @db.Uuid | 外键 → ai_credit_capabilities |
 | modelGroup | String | @default("default")；模型组维度，初始统一 "default"，模型池丰富后再分 |
 | dimension | AICreditRateDimension | TOKEN_INPUT / TOKEN_OUTPUT / PER_REQUEST |
-| tokenMultiplier | Decimal? @db.Decimal(10,4) | **token 倍率**（上游 token → 计费 token），初始 1；仅 TOKEN 维度填写 |
-| creditPerToken | Decimal? @db.Decimal(10,4) | **token→credit 比例**（计费 token → credit），初始 1；仅 TOKEN 维度填写 |
+| tokenMultiplier | Decimal? @db.Decimal(10,4) | **token 倍率**（上游 token → 计费 token），初始 1；仅 TOKEN 维度填写（输入/输出各自独立配置） |
+| creditPerToken | Decimal? @db.Decimal(10,4) | **token→credit 比例**（计费 token → credit），初始 1；仅 TOKEN 维度填写（输入/输出各自独立配置） |
 | perRequestCredits | Decimal? @db.Decimal(18,2) | **按次 credit**，仅 PER_REQUEST 维度填写（图像 500 / 文档 800 / PDF 500 / PPT 1000） |
 | rateVersion | Int | @default(1)；**业务版本号**（调价新增版本行），与公共字段乐观锁 `version` 区分，命名 `rateVersion` |
 | status | AICreditConfigStatus | @default(ACTIVE) |
@@ -144,10 +144,10 @@
 | 现有表 | 衔接方式 |
 | --- | --- |
 | Tenant.timezone | 额度重置时区取企业本地时区（后续 A3 使用） |
-| Permission | 能力 code 通过 `AICreditCapability.permissionCode` 映射（现有码：rag→`knowledge_base.query`、image-gen→`ai.image.generate`、doc-gen→`ai.document.generate`、web-search→`ai.web.search`）；pdf-gen/ppt-gen/workflow 的权限码尚不存在，S3 seed 时注册；档位码（如 TIER_PREMIUM）同样在 permissions 表注册同 code 行（S4/S7 落地） |
+| Permission | 能力 code 通过 `AICreditCapability.permissionCode` 映射（现有码：rag→`knowledge_base.query`、image-gen→`ai.image.generate`、doc-gen→`ai.document.generate`、web-search→`ai.web.search`）；pdf-gen/ppt-gen/workflow 的权限码已随 S3 seed 注册；档位码（如 TIER_PREMIUM）同样在 permissions 表注册同 code 行（后续订阅阶段 A4 落地，S7 只做档位配置管理） |
 | PlatformAdministrator | 超级管理员身份（S4 守卫复用） |
 | AIInvocationLog | 结算事实源（A5，本阶段不涉及） |
-| PlatformAuditLog | 配置操作的审计（S12 界面阶段接入，本阶段不涉及） |
+| PlatformAuditLog | 配置操作的审计（S6 能力目录、S7 档位管理已写入平台审计：创建/修改/删除事件） |
 
 ## 五、本阶段明确不建（预留）
 

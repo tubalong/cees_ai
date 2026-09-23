@@ -14,7 +14,7 @@ import {
  * 商务性数值（档位价格、单位单价、加油包价格、费率）只做兜底创建，不覆盖超管在后台的调整。
  */
 
-/** 能力目录种子：code 与现有权限码的映射（chat 无独立权限码，对话工具集对每个账号默认可用）。 */
+/** 能力目录种子：code 与现有权限码的映射（chat / tool-calling 无独立权限码，对话工具集对每个账号默认可用）。 */
 const AI_CREDIT_CAPABILITY_SEEDS = [
     {
         code: 'chat',
@@ -72,6 +72,22 @@ const AI_CREDIT_CAPABILITY_SEEDS = [
         permissionCode: 'ai.workflow.use',
         sortOrder: 7,
     },
+    {
+        code: 'web-search',
+        name: 'AI 联网搜索',
+        meterType: AICreditMeterType.TOKEN,
+        capabilityKind: AICreditCapabilityKind.UNIVERSAL,
+        permissionCode: 'ai.web.search',
+        sortOrder: 8,
+    },
+    {
+        code: 'tool-calling',
+        name: 'AI 工具调用',
+        meterType: AICreditMeterType.TOKEN,
+        capabilityKind: AICreditCapabilityKind.UNIVERSAL,
+        permissionCode: null,
+        sortOrder: 9,
+    },
 ] as const;
 
 /** 费率种子：TOKEN 能力按输入/输出分开配置（倍率与比例初始均为 1），PER_REQUEST 能力按次配置。 */
@@ -82,6 +98,10 @@ const AI_CREDIT_RATE_SEEDS = [
     { capabilityCode: 'rag', dimension: AICreditRateDimension.TOKEN_OUTPUT, tokenMultiplier: '1', creditPerToken: '1' },
     { capabilityCode: 'workflow', dimension: AICreditRateDimension.TOKEN_INPUT, tokenMultiplier: '1', creditPerToken: '1' },
     { capabilityCode: 'workflow', dimension: AICreditRateDimension.TOKEN_OUTPUT, tokenMultiplier: '1', creditPerToken: '1' },
+    { capabilityCode: 'web-search', dimension: AICreditRateDimension.TOKEN_INPUT, tokenMultiplier: '1', creditPerToken: '1' },
+    { capabilityCode: 'web-search', dimension: AICreditRateDimension.TOKEN_OUTPUT, tokenMultiplier: '1', creditPerToken: '1' },
+    { capabilityCode: 'tool-calling', dimension: AICreditRateDimension.TOKEN_INPUT, tokenMultiplier: '1', creditPerToken: '1' },
+    { capabilityCode: 'tool-calling', dimension: AICreditRateDimension.TOKEN_OUTPUT, tokenMultiplier: '1', creditPerToken: '1' },
     { capabilityCode: 'image-gen', dimension: AICreditRateDimension.PER_REQUEST, perRequestCredits: '500' },
     { capabilityCode: 'doc-gen', dimension: AICreditRateDimension.PER_REQUEST, perRequestCredits: '800' },
     { capabilityCode: 'pdf-gen', dimension: AICreditRateDimension.PER_REQUEST, perRequestCredits: '500' },
