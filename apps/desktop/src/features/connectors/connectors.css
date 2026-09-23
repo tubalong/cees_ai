@@ -448,6 +448,34 @@
     padding: 0;
 }
 
+.connector-wecom-authorization {
+    width: min(100%, 500px);
+    display: grid;
+    justify-items: center;
+    gap: 14px;
+    margin-top: 20px;
+    padding: 16px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--surface-soft);
+    text-align: center;
+}
+
+.connector-wecom-authorization p,
+.connector-wecom-authorization small {
+    margin: 0;
+    color: var(--muted);
+    line-height: 1.7;
+}
+
+.connector-wecom-authorization img {
+    width: 220px;
+    height: 220px;
+    border-radius: 12px;
+    background: #fff;
+    object-fit: contain;
+}
+
 .connector-connect-button.ant-btn {
     min-width: 112px;
     margin-top: 24px;

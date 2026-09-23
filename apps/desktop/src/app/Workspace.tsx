@@ -15,11 +15,11 @@ import ReactMarkdown, { type Components } from 'react-markdown';
 import { useLocation, useNavigate } from 'react-router-dom';
 import remarkGfm from 'remark-gfm';
 import {
-    cancelActionDraft, cancelTurn, confirmActionDraft, createConversation, createTurn, deleteConversation, exportDocument, getConversation, getDashboardOverview, getDashboardTodos, getDashboardUpcomingMeetings, getDocument, getImage, planDingTalkConnectorQueries, planTencentMeetingConnectorQueries, replayTurnEvents, updateConversation, uploadAttachmentFile,
+    cancelActionDraft, cancelTurn, confirmActionDraft, createConversation, createTurn, deleteConversation, exportDocument, getConversation, getDashboardOverview, getDashboardTodos, getDashboardUpcomingMeetings, getDocument, getImage, planDingTalkConnectorQueries, planTencentMeetingConnectorQueries, planWeComConnectorQueries, replayTurnEvents, updateConversation, uploadAttachmentFile,
     getUnreadNotificationCount, hasStoredSession, listConversations, listDocuments, listTenantMembers, logout,
     createKnowledgeDocument, deleteKnowledgeDocument, listWritableKnowledgeBases,
     type Conversation, type ConversationMessage, type DashboardOverview, type DashboardTodoItem, type DashboardUpcomingMeeting, type ImageAccess,
-    type ConnectorContext, type TencentMeetingConnectorTool, type TurnStreamEvent,
+    type ConnectorContext, type TencentMeetingConnectorTool, type TurnStreamEvent, type WeComConnectorTool,
     type KnowledgeBaseSummary, type KnowledgeSourceType,
     type ManagedDocumentSummary, type MeResult, type TenantMember,
 } from '../core/api';
@@ -605,12 +605,21 @@ const DELETED_CITATIONS_KEY = 'cees.chat.citations.deleted';
 
 interface AssistantNavigationState {
     createNewConversation?: boolean;
-    source?: 'DINGTALK_CONNECTOR' | 'TENCENT_MEETING_CONNECTOR' | 'CONNECTOR_MARKETPLACE';
+    source?: 'DINGTALK_CONNECTOR' | 'TENCENT_MEETING_CONNECTOR' | 'WECOM_CONNECTOR' | 'CONNECTOR_MARKETPLACE';
 }
 
-async function confirmTencentMeetingCalls(
+interface ConfirmableConnectorTool {
+    toolId: string;
+    name: string;
+    riskLevel: 'READ' | 'WRITE' | 'DESTRUCTIVE';
+    requiresConfirmation: boolean;
+}
+
+async function confirmConnectorCalls(
     calls: Array<{ toolId: string; arguments: Record<string, unknown> }>,
-    tools: TencentMeetingConnectorTool[],
+    tools: ConfirmableConnectorTool[],
+    connectorName: string,
+    credentialDescription: string,
     modal: ReturnType<typeof AntdApp.useApp>['modal'],
     t: (text: string, values?: Record<string, string | number>) => string,
 ): Promise<boolean> {
@@ -627,10 +636,10 @@ async function confirmTencentMeetingCalls(
     });
     return new Promise((resolve) => {
         modal.confirm({
-            title: t('确认执行腾讯会议操作'),
+            title: t('确认执行{connectorName}操作', { connectorName }),
             width: 620,
             content: <div className="connector-action-confirmation">
-                <p>{t('以下操作将使用当前电脑保存的腾讯会议个人 Token 执行。确认前不会产生任何变更。')}</p>
+                <p>{t('以下操作将使用{credentialDescription}执行。确认前不会产生任何变更。', { credentialDescription })}</p>
                 {summary.map((item) => <div key={`${item.name}:${item.arguments}`} className="connector-action-confirmation-item">
                     <strong>{item.name}</strong>
                     <Tag color={item.risk === 'DESTRUCTIVE' ? 'red' : 'orange'}>{item.risk}</Tag>
@@ -733,7 +742,7 @@ function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element 
     const [renameTarget, setRenameTarget] = useState<Conversation>();
     const [renameValue, setRenameValue] = useState('');
     const [dingtalkConnected, setDingtalkConnected] = useState(false);
-    const [preferredConnector, setPreferredConnector] = useState<'dingtalk' | 'tencent-meeting'>();
+    const [preferredConnector, setPreferredConnector] = useState<'dingtalk' | 'tencent-meeting' | 'wecom'>();
     const initialConversationLoadStarted = useRef(false);
 
     /** 就地更新某条消息上的确认卡片状态（不重建消息，避免滚动位置跳动）。 */
@@ -777,6 +786,7 @@ function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element 
         const createNewConversation = navigationState?.createNewConversation === true;
         if (navigationState?.source === 'DINGTALK_CONNECTOR') setPreferredConnector('dingtalk');
         if (navigationState?.source === 'TENCENT_MEETING_CONNECTOR') setPreferredConnector('tencent-meeting');
+        if (navigationState?.source === 'WECOM_CONNECTOR') setPreferredConnector('wecom');
         void listConversations()
             .then(async (result) => {
                 setConversations(result.items);
@@ -958,12 +968,53 @@ function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element 
                     if (connectorContexts.length + plan.calls.length > 3) {
                         throw new Error('单轮最多执行三个连接器调用，请将钉钉和腾讯会议请求拆成多轮');
                     }
-                    const confirmed = await confirmTencentMeetingCalls(plan.calls, tools, modal, t);
+                    const confirmed = await confirmConnectorCalls(
+                        plan.calls,
+                        tools,
+                        '腾讯会议',
+                        '当前电脑保存的腾讯会议个人 Token',
+                        modal,
+                        t,
+                    );
                     if (!confirmed) {
                         message.info(t('已取消腾讯会议操作'));
                         return;
                     }
-                    connectorContexts.push(...await tencentMeetingConnector.execute('tencent-meeting', plan.calls));
+                    connectorContexts.push(...await tencentMeetingConnector.execute(
+                        'tencent-meeting',
+                        plan.calls.map((call) => ({ ...call, confirmed: true })),
+                    ));
+                }
+            }
+            const weComConnector = window.cees?.connectors;
+            const mentionsWeCom = /企业微信|企微|wecom/i.test(content) || preferredConnector === 'wecom';
+            if (weComConnector && mentionsWeCom) {
+                const status = await weComConnector.status('wecom');
+                if (status.state !== 'READY') {
+                    throw new Error(status.error || '请先在连接器页面安装并扫码授权企业微信连接器');
+                }
+                const tools = await weComConnector.tools('wecom') as WeComConnectorTool[];
+                const plan = await planWeComConnectorQueries(content, tools);
+                if (plan.calls.length > 0) {
+                    if (connectorContexts.length + plan.calls.length > 3) {
+                        throw new Error('单轮最多执行三个连接器调用，请将多个连接器请求拆成多轮');
+                    }
+                    const confirmed = await confirmConnectorCalls(
+                        plan.calls,
+                        tools,
+                        '企业微信',
+                        '当前电脑中企业微信官方 CLI 保存的机器人授权',
+                        modal,
+                        t,
+                    );
+                    if (!confirmed) {
+                        message.info(t('已取消企业微信操作'));
+                        return;
+                    }
+                    connectorContexts.push(...await weComConnector.execute(
+                        'wecom',
+                        plan.calls.map((call) => ({ ...call, confirmed: true })),
+                    ));
                 }
             }
             if (connectorContexts.length > 3) throw new Error('单轮连接器上下文不能超过三个');

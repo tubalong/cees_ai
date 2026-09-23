@@ -9,6 +9,7 @@
 - 已落地 `RemoteMcpTransport`，提供固定 HTTPS 地址、JSON-RPC、动态安全请求头、超时、响应上限、禁止重定向和结构化错误；
 - 已落地腾讯会议官方远程 MCP 接入，个人 Token 仅保存在 Desktop `safeStorage`；
 - 已落地腾讯会议动态工具发现、API 无副作用规划、Desktop 执行和写操作二次确认；
+- 已落地企业微信官方 CLI 托管安装、二维码机器人授权、动态 Schema、API 无副作用规划和 Desktop 确认执行；
 - 已删除腾讯会议旧服务端 OAuth、Token 托管、固定工具网关和数据表。
 
 ## 2. 目标
@@ -74,6 +75,30 @@ Renderer -> CEES API TencentMeetingConnectorPlannerService
 | `supportsDisconnect` | `true` |
 | `supportsDynamicTools` | `true` |
 
+### 企业微信
+
+```text
+Renderer -> ConnectorHost -> WeComConnectorAdapter
+    -> LocalCliTransport -> Managed @wecom/cli
+    -> WeCom intelligent bot authorization
+
+Renderer -> CEES API WeComConnectorPlannerService
+    -> 仅规划动态工具调用，不持有授权，不执行 CLI
+```
+
+企业微信 Manifest：
+
+| 字段 | 值 |
+| --- | --- |
+| `transportType` | `LOCAL_CLI` |
+| `executionLocation` | `DESKTOP` |
+| `authType` | `QR_CODE` |
+| `supportsInstall` | `true` |
+| `supportsDisconnect` | `true` |
+| `supportsDynamicTools` | `true` |
+
+Desktop 固定下载 `@wecom/cli 1.3.2` 平台包并校验 SHA-256，只提取目标二进制。官方 CLI 的独立配置目录为 `userData/connectors/wecom/config`，不会上传 CEES API。企业微信能力由官方 CLI 动态目录和机器人实际授权决定，不承诺考勤、OA 审批或完整组织同步。
+
 ## 5. Remote MCP Transport
 
 `RemoteMcpTransport` 只接受 Adapter 在代码中提供的固定地址和动态凭据解析器，统一提供：
@@ -100,6 +125,8 @@ Renderer -> CEES API TencentMeetingConnectorPlannerService
 - 状态接口只能返回是否已配置、验证时间、工具数量和可恢复错误，不返回凭据摘要。
 
 腾讯会议当前密文位置为 Electron `userData/connectors/tencent-meeting/credential.secure`。
+
+企业微信授权由官方 CLI 保存在 Electron `userData/connectors/wecom/config`。该目录只在 Main Process 通过 `WECOM_CLI_CONFIG_DIR` 传给受管 CLI；Renderer 和 API 不读取目录内容。解绑删除本机配置，但企业微信侧已创建的机器人可能仍需用户自行管理。
 
 ## 7. 动态工具与规划
 

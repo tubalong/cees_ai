@@ -58,6 +58,7 @@ export interface ConnectorTool {
 export interface ConnectorPlannedCall {
     toolId: string;
     arguments: Record<string, unknown>;
+    confirmed?: boolean;
 }
 
 export interface ConnectorContext<Provider extends string = string> {

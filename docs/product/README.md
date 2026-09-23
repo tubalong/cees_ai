@@ -20,6 +20,7 @@
 - [钉钉组织架构与人员同步](dingtalk-organization-sync.md)：兼容企业应用凭证和 DWS/MCP 可见组织快照，完成外部部门和人员镜像及管理员确认映射。
 - [钉钉 DWS/MCP 连接器](dingtalk-mcp-connector.md)：DWS 本地授权、可见范围导入、租户管理员边界和快照安全语义。
 - [腾讯会议连接器](tencent-meeting-connector.md)：API 执行型连接器基础、服务端 OAuth/Token 托管边界和第一阶段只读工具。
+- [企业微信 CLI 连接器](wecom-cli-connector.md)：Desktop 托管官方 CLI、二维码机器人授权、动态工具发现与写操作确认。
 - [分配策略与人财法](assignment-and-hr-finance-legal.md)：AssignmentPolicy、完整 HR 与 Finance 已实现；Legal 契约已冻结待实现。
 - [AI 助手业务写操作](assistant-business-tools.md)：聊天式部门与知识库写入、待确认草稿与确认卡片、缺参追问与同名消歧、确认前无副作用。
 

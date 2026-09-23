@@ -1,4 +1,4 @@
-import { DingdingOutlined, LinkOutlined, MessageOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
+import { DingdingOutlined, LinkOutlined, MessageOutlined, PlusOutlined, ReloadOutlined, WechatOutlined } from '@ant-design/icons';
 import { App as AntdApp, Button, Input, Modal, Select, Space, Spin, Tag } from 'antd';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -124,7 +124,21 @@ export default function ConnectorMarketplacePage(): JSX.Element {
     const selectedStatus = selectedManifest ? statuses[selectedManifest.id] ?? EMPTY_STATUS : EMPTY_STATUS;
     const selectedDingTalkStatus = toDingTalkStatus(selectedManifest?.id === 'dingtalk' ? selectedStatus : undefined);
     const selectedTencentMeetingStatus = toTencentMeetingStatus(selectedManifest?.id === 'tencent-meeting' ? selectedStatus : undefined);
+    const selectedWeComStatus = toWeComStatus(selectedManifest?.id === 'wecom' ? selectedStatus : undefined);
     const selectedConnected = selectedStatus.state === 'READY';
+
+    useEffect(() => {
+        if (selectedManifest?.id !== 'wecom' || selectedWeComStatus.authorizationState !== 'AUTHORIZING') return;
+        const connectors = window.cees?.connectors;
+        if (!connectors) return;
+        const timer = window.setInterval(() => {
+            void connectors.status('wecom').then((status) => {
+                updateStatus('wecom', status);
+                if (status.state === 'READY') message.success(t('企业微信连接器已连接'));
+            }).catch(() => undefined);
+        }, 1500);
+        return () => window.clearInterval(timer);
+    }, [selectedManifest?.id, selectedWeComStatus.authorizationState]);
 
     const updateStatus = (connectorId: string, status: DesktopConnectorStatus): void => {
         setStatuses((current) => ({ ...current, [connectorId]: status }));
@@ -158,6 +172,11 @@ export default function ConnectorMarketplacePage(): JSX.Element {
             updateStatus(manifest.id, nextStatus);
             if (nextStatus.state === 'PROFILE_REQUIRED') {
                 setSelectedConnectorId(manifest.id);
+                return;
+            }
+            if (manifest.id === 'wecom' && toWeComStatus(nextStatus).authorizationState === 'AUTHORIZING') {
+                setSelectedConnectorId(manifest.id);
+                message.info(t('请使用手机企业微信扫描二维码并确认机器人授权'));
                 return;
             }
             setSelectedConnectorId(undefined);
@@ -251,6 +270,8 @@ export default function ConnectorMarketplacePage(): JSX.Element {
                     ? 'DINGTALK_CONNECTOR'
                     : manifest.id === 'tencent-meeting'
                         ? 'TENCENT_MEETING_CONNECTOR'
+                        : manifest.id === 'wecom'
+                            ? 'WECOM_CONNECTOR'
                         : 'CONNECTOR_MARKETPLACE',
             },
         });
@@ -269,7 +290,9 @@ export default function ConnectorMarketplacePage(): JSX.Element {
                 ? t('解绑会清除本机保存的全部钉钉登录授权，但不会卸载 DWS，也不会删除已导入 CEES 的组织或业务数据。解绑后需要重新授权才能继续使用。')
                 : selectedManifest.id === 'tencent-meeting'
                     ? t('解绑会清除当前电脑安全存储中的腾讯会议个人 Token 和工具缓存，不会删除腾讯会议中的会议或 CEES 业务数据。')
-                    : t('解绑会清除当前连接器保存的授权信息，但不会删除已经写入 CEES 的业务数据。'),
+                    : selectedManifest.id === 'wecom'
+                        ? t('解绑会删除当前电脑中 CEES 专属的企业微信 CLI 授权和工具缓存，不会删除 CEES 业务数据；企业微信侧已创建的智能机器人可能仍需在企业微信中自行管理。')
+                        : t('解绑会清除当前连接器保存的授权信息，但不会删除已经写入 CEES 的业务数据。'),
             okText: t('确认解绑'),
             cancelText: t('取消'),
             okButtonProps: { danger: true },
@@ -373,11 +396,15 @@ export default function ConnectorMarketplacePage(): JSX.Element {
                         ? selectedDingTalkStatus.corpName || t('当前钉钉组织')
                         : selectedManifest.id === 'tencent-meeting'
                             ? t('个人 Token 已验证')
+                            : selectedManifest.id === 'wecom'
+                                ? t('智能机器人已授权')
                             : selectedManifest.name}</strong>
                     <span>{selectedManifest.id === 'dingtalk'
                         ? selectedDingTalkStatus.externalUserName || selectedDingTalkStatus.profile || t('已完成授权')
                         : selectedManifest.id === 'tencent-meeting'
                             ? t('{count} 个官方 MCP 工具可用', { count: selectedTencentMeetingStatus.toolCount })
+                            : selectedManifest.id === 'wecom'
+                                ? t('{count} 个企业微信 CLI 工具可用', { count: selectedWeComStatus.toolCount })
                         : selectedStatus.version || t('已完成授权')}</span>
                 </div>
                 {selectedManifest.id === 'dingtalk' && selectedManifest.supportsVersionManagement ? <DingTalkVersionPanel
@@ -426,6 +453,13 @@ export default function ConnectorMarketplacePage(): JSX.Element {
                         onChange={(event) => setTencentMeetingToken(event.target.value)}
                     />
                 </div> : null}
+                {selectedManifest.id === 'wecom' && selectedWeComStatus.authorizationState === 'AUTHORIZING' ? <div className="connector-wecom-authorization">
+                    <p>{t('请使用手机企业微信扫描二维码。若尚未创建智能机器人，企业微信会引导你一键创建并确认可用能力。')}</p>
+                    {selectedWeComStatus.qrCodeDataUrl
+                        ? <img src={selectedWeComStatus.qrCodeDataUrl} alt={t('企业微信机器人授权二维码')} />
+                        : <Spin />}
+                    <small>{t('授权完成后页面会自动更新，二维码约五分钟内有效。')}</small>
+                </div> : null}
                 <Button
                     className="connector-connect-button"
                     type="primary"
@@ -435,11 +469,14 @@ export default function ConnectorMarketplacePage(): JSX.Element {
                     disabled={(selectedManifest.id === 'dingtalk'
                         && selectedDingTalkStatus.state === 'PROFILE_REQUIRED'
                         && !selectedProfile)
-                        || (selectedManifest.id === 'tencent-meeting' && !tencentMeetingToken.trim())}
+                        || (selectedManifest.id === 'tencent-meeting' && !tencentMeetingToken.trim())
+                        || (selectedManifest.id === 'wecom' && selectedWeComStatus.authorizationState === 'AUTHORIZING')}
                     onClick={() => void connect(selectedManifest)}
                 >
                     {selectedManifest.id === 'dingtalk' && selectedDingTalkStatus.state === 'PROFILE_REQUIRED'
                         ? t('使用此组织')
+                        : selectedManifest.id === 'wecom' && selectedWeComStatus.authorizationState === 'AUTHORIZING'
+                            ? t('等待扫码授权')
                         : t('连接')}
                 </Button>
             </div> : null}
@@ -528,10 +565,26 @@ function toTencentMeetingStatus(status?: DesktopConnectorStatus): TencentMeeting
     };
 }
 
+function toWeComStatus(status?: DesktopConnectorStatus): WeComConnectorStatus {
+    const candidate = status as Partial<WeComConnectorStatus> | undefined;
+    return {
+        ...EMPTY_STATUS,
+        ...candidate,
+        source: candidate?.source === 'MANAGED' ? 'MANAGED' : null,
+        installSupported: candidate?.installSupported === true,
+        authorizationState: candidate?.authorizationState === 'AUTHORIZED' || candidate?.authorizationState === 'AUTHORIZING'
+            ? candidate.authorizationState
+            : 'UNAUTHORIZED',
+        qrCodeDataUrl: typeof candidate?.qrCodeDataUrl === 'string' ? candidate.qrCodeDataUrl : null,
+        authorizationExpiresAt: typeof candidate?.authorizationExpiresAt === 'string' ? candidate.authorizationExpiresAt : null,
+        toolCount: typeof candidate?.toolCount === 'number' ? candidate.toolCount : 0,
+    };
+}
+
 function connectorGlyph(manifest: DesktopConnectorManifest): string {
-    return manifest.id === 'dingtalk' ? '钉' : manifest.name.trim().slice(0, 1).toUpperCase();
+    return manifest.id === 'dingtalk' ? '钉' : manifest.id === 'wecom' ? '企' : manifest.name.trim().slice(0, 1).toUpperCase();
 }
 
 function connectorProviderGlyph(manifest: DesktopConnectorManifest): JSX.Element | string {
-    return manifest.id === 'dingtalk' ? <DingdingOutlined /> : connectorGlyph(manifest);
+    return manifest.id === 'dingtalk' ? <DingdingOutlined /> : manifest.id === 'wecom' ? <WechatOutlined /> : connectorGlyph(manifest);
 }

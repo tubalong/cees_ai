@@ -5,8 +5,9 @@ import { TenantContextInterceptor } from '../../tenant/tenant-context.intercepto
 import { TenantGuard } from '../../tenant/tenant.guard';
 import { DingTalkConnectorPlannerService } from '../connectors/dingtalk-connector-planner.service';
 import { TencentMeetingConnectorPlannerService } from '../connectors/tencent-meeting-connector-planner.service';
+import { WeComConnectorPlannerService } from '../connectors/wecom-connector-planner.service';
 import { toAssistantHttpException } from '../assistant.errors';
-import { PlanDingTalkConnectorRequestDto, PlanTencentMeetingConnectorRequestDto } from '../dto';
+import { PlanDingTalkConnectorRequestDto, PlanTencentMeetingConnectorRequestDto, PlanWeComConnectorRequestDto } from '../dto';
 
 @ApiTags('Conversation')
 @ApiBearerAuth()
@@ -17,6 +18,7 @@ export class AssistantConnectorController {
   constructor(
     private readonly planner: DingTalkConnectorPlannerService,
     private readonly tencentMeetingPlanner: TencentMeetingConnectorPlannerService,
+    private readonly weComPlanner: WeComConnectorPlannerService,
   ) {}
 
   @Post('dingtalk/plan')
@@ -38,6 +40,18 @@ export class AssistantConnectorController {
   async planTencentMeeting(@Body() input: PlanTencentMeetingConnectorRequestDto) {
     try {
       return await this.tencentMeetingPlanner.plan(input.query, input.tools);
+    } catch (error) {
+      throw toAssistantHttpException(error);
+    }
+  }
+
+  @Post('wecom/plan')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: '规划本机企业微信官方 CLI 调用' })
+  @ApiOkResponse({ description: '返回最多三个本地 CLI 调用计划；服务端不接触机器人授权，也不执行工具' })
+  async planWeCom(@Body() input: PlanWeComConnectorRequestDto) {
+    try {
+      return await this.weComPlanner.plan(input.query, input.tools);
     } catch (error) {
       throw toAssistantHttpException(error);
     }
