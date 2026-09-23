@@ -65,7 +65,7 @@ declare global {
                 connect: (connectorId: string) => Promise<ConnectorStatus>;
                 disconnect: (connectorId: string) => Promise<ConnectorStatus>;
                 tools: (connectorId: string) => Promise<ConnectorTool[]>;
-                execute: (connectorId: string, calls: ConnectorPlannedCall[]) => Promise<ConnectorContext[]>;
+                execute: (connectorId: string, calls: ConnectorPlannedCall[]) => Promise<ConnectorContext<'DINGTALK' | 'TENCENT_MEETING'>[]>;
                 onStatusChanged: (listener: (event: ConnectorStatusChangedEvent) => void) => () => void;
                 dingtalk: {
                     status: () => Promise<DingTalkConnectorStatus>;
@@ -79,6 +79,9 @@ declare global {
                     upgrade: (targetVersion?: string) => Promise<DingTalkConnectorReleaseStatus>;
                     rollback: () => Promise<DingTalkConnectorReleaseStatus>;
                     onStatusChanged: (listener: (status: DingTalkConnectorStatus) => void) => () => void;
+                };
+                tencentMeeting: {
+                    connectWithToken: (token: string) => Promise<TencentMeetingConnectorStatus>;
                 };
             };
         };
@@ -146,16 +149,9 @@ declare global {
     type DesktopConnectorStatus = ConnectorStatus;
 
     interface TencentMeetingConnectorStatus extends ConnectorStatus {
-        account: {
-            externalUserId: string;
-            displayName: string | null;
-            organizationId: string | null;
-            organizationName: string | null;
-        } | null;
-        grantedScopes: string[];
-        tokenStatus: 'MISSING' | 'VALID' | 'EXPIRING' | 'REFRESH_FAILED' | 'REVOKED';
-        authorizedAt: string | null;
-        tokenExpiresAt: string | null;
+        tokenConfigured: boolean;
+        toolCount: number;
+        verifiedAt: string | null;
     }
 
     interface ConnectorStatusChangedEvent {

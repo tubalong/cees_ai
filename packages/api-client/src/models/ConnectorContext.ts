@@ -5,7 +5,7 @@
 export type ConnectorContext = {
     provider: ConnectorContext.provider;
     /**
-     * Stable local tool ID derived from the DWS canonical_path
+     * Stable local connector tool ID; DWS uses a derived ID and Tencent Meeting uses the MCP tool name
      */
     toolId: string;
     /**
@@ -21,6 +21,7 @@ export type ConnectorContext = {
 export namespace ConnectorContext {
     export enum provider {
         DINGTALK = 'DINGTALK',
+        TENCENT_MEETING = 'TENCENT_MEETING',
     }
 }
 

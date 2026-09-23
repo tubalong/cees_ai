@@ -2,6 +2,8 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
-export enum TencentMeetingConnectorProvider {
-    TENCENT_MEETING = 'TENCENT_MEETING',
+export enum TencentMeetingConnectorToolRisk {
+    READ = 'READ',
+    WRITE = 'WRITE',
+    DESTRUCTIVE = 'DESTRUCTIVE',
 }

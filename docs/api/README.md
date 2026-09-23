@@ -7,7 +7,8 @@
 
 ### 契约版本与迁移
 
-- **0.37.1**：当前开发基线。腾讯会议 OAuth 回调使用官方 `auth_code`，保留 `code` 废弃兼容别名；API 已实现成员级授权、State 防重放、Token 加密托管、刷新租约、状态查询、幂等解绑和审计。只读工具网关与 Desktop 真实授权接线仍待后续分支实现。
+- **0.38.0**：当前开发基线。腾讯会议切换为 Desktop 本地个人 Token + 官方远程 MCP；删除 `/connectors/tencent-meeting/*` OAuth、状态、解绑、工具和执行接口，新增无副作用的 `POST /assistant/connectors/tencent-meeting/plan`。旧服务端凭据不迁移，升级后用户需在每台设备重新连接；详见 [腾讯会议连接器 API 与迁移说明](tencent-meeting-connector-api.md)。
+- **0.37.1**：历史版本。腾讯会议使用 CEES 服务端 OAuth 和 Token 托管；该方案已在 `0.38.0` 删除。
 - **0.37.0**：新增腾讯会议个人 OAuth 授权、公开回调、连接状态、幂等解绑、只读工具发现和批量只读执行契约；授权按 `tenantId + membershipId` 隔离，第三方 Token 只允许服务端托管。
 - **0.19.0**：删除 `/api/v1/chat/*` 旧对话接口（invoke / stream / compact），以 `/api/v1/conversations/*` 会话、轮次、事件重放资源重建，并新增工具循环（generate_image / generate_document）与公开图片访问 `GET /api/v1/images/{imageId}`。旧客户端迁移到 `createConversation` / `createTurn` / `replayTurnEvents`；`chat` 相关生成模型与客户端已移除。
 - **0.20.0**：新增知识库 CRUD、知识库成员管理和 `READER`/`EDITOR`/`MANAGER` 权限契约；新增 `KnowledgeBase*` Schema 和 9 个公开操作。客户端需要重新生成；文档上传、解析、切片、向量化和 RAG 仍不在本版本范围内。

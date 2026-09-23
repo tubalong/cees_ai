@@ -1,40 +1,44 @@
 import type { ConnectorAdapter } from '../core/connector-adapter';
 import {
-    connectTencentMeetingConnector,
-    discoverTencentMeetingReadTools,
+    configureTencentMeetingConnector,
+    connectTencentMeetingWithToken,
+    discoverTencentMeetingTools,
     disconnectTencentMeetingConnector,
-    executeTencentMeetingReadCalls,
+    executeTencentMeetingCalls,
     getTencentMeetingConnectorStatus,
+    requestTencentMeetingConnection,
     resetTencentMeetingConnectorTools,
     type TencentMeetingConnectorContext,
     type TencentMeetingConnectorPlannedCall,
+    type TencentMeetingConnectorStatus,
     type TencentMeetingConnectorTool,
 } from './tencent-meeting.connector';
 import { TENCENT_MEETING_CONNECTOR_MANIFEST } from './tencent-meeting.manifest';
-import type { ConnectorStatus } from '../core/connector.types';
 
 export interface TencentMeetingConnectorDependencies {
     configure(userDataPath: string): void;
-    status(): Promise<ConnectorStatus>;
-    connect(): Promise<ConnectorStatus>;
-    disconnect(): Promise<ConnectorStatus>;
+    status(): Promise<TencentMeetingConnectorStatus>;
+    connect(): Promise<TencentMeetingConnectorStatus>;
+    connectWithToken(token: string): Promise<TencentMeetingConnectorStatus>;
+    disconnect(): Promise<TencentMeetingConnectorStatus>;
     resetTools(): void;
     discoverTools(): Promise<TencentMeetingConnectorTool[]>;
     execute(calls: TencentMeetingConnectorPlannedCall[]): Promise<TencentMeetingConnectorContext[]>;
 }
 
 const DEFAULT_DEPENDENCIES: TencentMeetingConnectorDependencies = {
-    configure: () => undefined,
+    configure: configureTencentMeetingConnector,
     status: getTencentMeetingConnectorStatus,
-    connect: connectTencentMeetingConnector,
+    connect: requestTencentMeetingConnection,
+    connectWithToken: connectTencentMeetingWithToken,
     disconnect: disconnectTencentMeetingConnector,
     resetTools: resetTencentMeetingConnectorTools,
-    discoverTools: discoverTencentMeetingReadTools,
-    execute: executeTencentMeetingReadCalls,
+    discoverTools: discoverTencentMeetingTools,
+    execute: executeTencentMeetingCalls,
 };
 
 export class TencentMeetingConnectorAdapter implements ConnectorAdapter<
-    ConnectorStatus,
+    TencentMeetingConnectorStatus,
     TencentMeetingConnectorTool,
     TencentMeetingConnectorPlannedCall,
     TencentMeetingConnectorContext
@@ -47,15 +51,19 @@ export class TencentMeetingConnectorAdapter implements ConnectorAdapter<
         this.dependencies.configure(userDataPath);
     }
 
-    status(): Promise<ConnectorStatus> {
+    status(): Promise<TencentMeetingConnectorStatus> {
         return this.dependencies.status();
     }
 
-    connect(): Promise<ConnectorStatus> {
+    connect(): Promise<TencentMeetingConnectorStatus> {
         return this.dependencies.connect();
     }
 
-    disconnect(): Promise<ConnectorStatus> {
+    connectWithToken(token: string): Promise<TencentMeetingConnectorStatus> {
+        return this.dependencies.connectWithToken(token);
+    }
+
+    disconnect(): Promise<TencentMeetingConnectorStatus> {
         return this.dependencies.disconnect();
     }
 

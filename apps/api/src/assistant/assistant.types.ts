@@ -10,7 +10,7 @@ export type PublicTurnMode = 'standard' | 'ultra';
 export type PublicTurnPhase = 'reasoning' | 'answering' | 'tool_executing';
 
 export interface ConnectorContextInput {
-  provider: 'DINGTALK';
+  provider: 'DINGTALK' | 'TENCENT_MEETING';
   toolId: string;
   toolName: string;
   fetchedAt: string;
@@ -25,6 +25,20 @@ export interface DingTalkConnectorToolInput {
 }
 
 export interface DingTalkConnectorPlannedCall {
+  toolId: string;
+  arguments: Record<string, unknown>;
+}
+
+export interface TencentMeetingConnectorToolInput {
+  toolId: string;
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+  riskLevel: 'READ' | 'WRITE' | 'DESTRUCTIVE';
+  requiresConfirmation: boolean;
+}
+
+export interface TencentMeetingConnectorPlannedCall {
   toolId: string;
   arguments: Record<string, unknown>;
 }

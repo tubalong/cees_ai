@@ -5,70 +5,95 @@ const {
     TencentMeetingConnectorAdapter,
 } = require('../dist-electron/connectors/tencent-meeting/tencent-meeting.adapter.js');
 const {
-    discoverTencentMeetingReadTools,
-    executeTencentMeetingReadCalls,
-    getTencentMeetingConnectorStatus,
+    classifyTencentMeetingToolRisk,
+    normalizeTencentMeetingToolDefinition,
+    normalizeTencentMeetingToolResult,
+    TENCENT_MEETING_MCP_ENDPOINT,
+    TENCENT_MEETING_SKILL_VERSION,
 } = require('../dist-electron/connectors/tencent-meeting/tencent-meeting.connector.js');
 const {
     TENCENT_MEETING_CONNECTOR_MANIFEST,
 } = require('../dist-electron/connectors/tencent-meeting/tencent-meeting.manifest.js');
 
-test('腾讯会议声明为服务端 OAuth 的 HTTP API 连接器', () => {
-    assert.deepEqual(TENCENT_MEETING_CONNECTOR_MANIFEST, {
-        id: 'tencent-meeting',
-        name: '腾讯会议',
-        description: '连接腾讯会议后查询当前用户、会议列表、会议详情、参会成员以及可访问的录制和纪要元数据。',
-        icon: 'tencent-meeting',
-        transportType: 'HTTP_API',
-        executionLocation: 'API',
-        authType: 'OAUTH',
-        supportsInstall: false,
-        supportsDisconnect: true,
-        supportsProfiles: false,
-        supportsDynamicTools: true,
-        supportsVersionManagement: false,
+test('腾讯会议声明为 Desktop 本地凭据驱动的远程 MCP 连接器', () => {
+    assert.equal(TENCENT_MEETING_CONNECTOR_MANIFEST.transportType, 'REMOTE_MCP');
+    assert.equal(TENCENT_MEETING_CONNECTOR_MANIFEST.executionLocation, 'DESKTOP');
+    assert.equal(TENCENT_MEETING_CONNECTOR_MANIFEST.authType, 'LOCAL_CREDENTIAL');
+    assert.equal(TENCENT_MEETING_CONNECTOR_MANIFEST.supportsDynamicTools, true);
+    assert.equal(TENCENT_MEETING_CONNECTOR_MANIFEST.supportsDisconnect, true);
+    assert.equal(TENCENT_MEETING_MCP_ENDPOINT, 'https://mcp.meeting.tencent.com/mcp/wemeet-open/v1');
+    assert.equal(TENCENT_MEETING_SKILL_VERSION, 'v1.0.11');
+});
+
+test('腾讯会议动态工具按注解和名称标记风险', () => {
+    assert.equal(classifyTencentMeetingToolRisk('get_meeting'), 'READ');
+    assert.equal(classifyTencentMeetingToolRisk('schedule_meeting'), 'WRITE');
+    assert.equal(classifyTencentMeetingToolRisk('cancel_meeting'), 'DESTRUCTIVE');
+    assert.equal(classifyTencentMeetingToolRisk('future_unknown_tool'), 'DESTRUCTIVE');
+    assert.equal(classifyTencentMeetingToolRisk('schedule_meeting', { readOnlyHint: true }), 'READ');
+    assert.equal(classifyTencentMeetingToolRisk('get_meeting', { destructiveHint: true }), 'DESTRUCTIVE');
+});
+
+test('腾讯会议工具定义保留动态 Schema 并要求写操作确认', () => {
+    const tool = normalizeTencentMeetingToolDefinition({
+        name: 'schedule_meeting',
+        title: '创建会议',
+        description: '创建一场腾讯会议',
+        inputSchema: {
+            type: 'object',
+            additionalProperties: false,
+            properties: { subject: { type: 'string' } },
+            required: ['subject'],
+        },
     });
-});
 
-test('腾讯会议基础连接器公开五类只读工具', async () => {
-    const tools = await discoverTencentMeetingReadTools();
-    assert.deepEqual(tools.map((tool) => tool.toolId), [
-        'tencent_meeting.profile.get',
-        'tencent_meeting.meetings.list',
-        'tencent_meeting.meetings.get',
-        'tencent_meeting.participants.list',
-        'tencent_meeting.recordings.list',
-    ]);
-    assert.equal(tools.every((tool) => tool.parameters.additionalProperties === false), true);
-});
-
-test('服务端 OAuth 未接入时不伪造腾讯会议授权或查询结果', async () => {
-    const status = await getTencentMeetingConnectorStatus();
-    assert.equal(status.state, 'AUTH_REQUIRED');
-    assert.equal(status.authenticated, false);
-    assert.equal(status.issueCode, 'SERVER_OAUTH_REQUIRED');
-    assert.match(status.error, /CEES API 服务端/);
-
-    await assert.rejects(
-        executeTencentMeetingReadCalls([{ toolId: 'tencent_meeting.profile.get', arguments: {} }]),
-        /CEES API 服务端/,
-    );
-    await assert.rejects(
-        executeTencentMeetingReadCalls([{ toolId: 'tencent_meeting.unknown', arguments: {} }]),
-        /只读工具不存在/,
+    assert.deepEqual(tool, {
+        toolId: 'schedule_meeting',
+        name: '创建会议',
+        description: '创建一场腾讯会议',
+        parameters: {
+            type: 'object',
+            additionalProperties: false,
+            properties: { subject: { type: 'string' } },
+            required: ['subject'],
+        },
+        riskLevel: 'WRITE',
+        requiresConfirmation: true,
+    });
+    assert.throws(
+        () => normalizeTencentMeetingToolDefinition({ name: 'bad/tool', description: 'invalid', inputSchema: { type: 'object', properties: {} } }),
+        /工具名称或描述无效/,
     );
 });
 
-test('腾讯会议 Adapter 委托连接器生命周期和工具能力', async () => {
+test('腾讯会议工具结果移除凭据字段并解析文本 JSON', () => {
+    assert.deepEqual(normalizeTencentMeetingToolResult({
+        content: [{
+            type: 'text',
+            text: JSON.stringify({ meetingId: 'meeting-1', accessToken: 'secret', nested: { password: 'hidden', title: '周会' } }),
+        }],
+    }), {
+        meetingId: 'meeting-1',
+        nested: { title: '周会' },
+    });
+    assert.throws(
+        () => normalizeTencentMeetingToolResult({ isError: true, content: [{ type: 'text', text: '权限不足' }] }),
+        /权限不足/,
+    );
+});
+
+test('腾讯会议 Adapter 委托本地 Token 生命周期和动态工具能力', async () => {
     const calls = [];
     const status = {
-        state: 'READY', installed: true, authenticated: true, version: null,
-        checkedAt: '2026-09-22T00:00:00.000Z', issueCode: null, recoveryAction: 'NONE', error: null,
+        state: 'READY', installed: true, authenticated: true, version: 'v1.0.11',
+        checkedAt: '2026-09-23T00:00:00.000Z', issueCode: null, recoveryAction: 'NONE', error: null,
+        tokenConfigured: true, toolCount: 1, verifiedAt: '2026-09-23T00:00:00.000Z',
     };
     const dependencies = {
         configure: (value) => calls.push(['configure', value]),
         status: async () => { calls.push(['status']); return status; },
         connect: async () => { calls.push(['connect']); return status; },
+        connectWithToken: async (token) => { calls.push(['connectWithToken', token]); return status; },
         disconnect: async () => { calls.push(['disconnect']); return status; },
         resetTools: () => calls.push(['resetTools']),
         discoverTools: async () => { calls.push(['discoverTools']); return []; },
@@ -79,6 +104,7 @@ test('腾讯会议 Adapter 委托连接器生命周期和工具能力', async ()
     adapter.configure('user-data');
     await adapter.status();
     await adapter.connect();
+    await adapter.connectWithToken('personal-token-value');
     await adapter.disconnect();
     adapter.resetTools();
     await adapter.discoverTools();
@@ -86,6 +112,6 @@ test('腾讯会议 Adapter 委托连接器生命周期和工具能力', async ()
 
     assert.equal(adapter.manifest.id, 'tencent-meeting');
     assert.deepEqual(calls.map(([name]) => name), [
-        'configure', 'status', 'connect', 'disconnect', 'resetTools', 'discoverTools', 'execute',
+        'configure', 'status', 'connect', 'connectWithToken', 'disconnect', 'resetTools', 'discoverTools', 'execute',
     ]);
 });
