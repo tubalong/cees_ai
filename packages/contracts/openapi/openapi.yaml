@@ -7639,6 +7639,704 @@ paths:
         '401': { description: 登录状态无效或已过期 }
         '403': { description: 缺少 tenant.update 权限 }
 
+  /platform/ai-credit/capabilities:
+    get:
+      summary: 查询 AI 计费能力目录
+      description: |
+        返回全部未删除的能力（按 sortOrder 升序），供超级管理员后台维护档位功能集与费率表。
+      operationId: aiCreditCapabilityList
+      tags: [AI Credit Config]
+      security:
+        - platformBearerAuth: []
+      responses:
+        "200":
+          description: 能力目录列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AICreditCapabilityListResponseEnvelope"
+        "403":
+          description: 平台权限不足
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+    post:
+      summary: 创建 AI 计费能力
+      description: |
+        注册新的可计费能力。meterType / capabilityKind / sortOrder 省略时使用默认值
+        （TOKEN / TIER_GATED / 0）；permissionCode 映射现有权限码，通用能力可留空。
+      operationId: aiCreditCapabilityCreate
+      tags: [AI Credit Config]
+      security:
+        - platformBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AICreditCapabilityCreateRequest"
+      responses:
+        "200":
+          description: 创建成功的能力
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AICreditCapabilityResponseEnvelope"
+        "400":
+          description: 请求字段校验失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "403":
+          description: 平台权限不足
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "409":
+          description: code 已被现有能力占用
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /platform/ai-credit/capabilities/{capabilityId}:
+    get:
+      summary: 获取 AI 计费能力详情
+      operationId: aiCreditCapabilityGet
+      tags: [AI Credit Config]
+      security:
+        - platformBearerAuth: []
+      parameters:
+        - { name: capabilityId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 能力详情
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AICreditCapabilityResponseEnvelope"
+        "403":
+          description: 平台权限不足
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "404":
+          description: 能力不存在或已删除
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+    patch:
+      summary: 修改 AI 计费能力
+      description: |
+        修改能力资料。code 修改后部分唯一索引仍保证未删除记录不冲突；
+        permissionCode 变更不影响已授权成员的历史权限。
+      operationId: aiCreditCapabilityUpdate
+      tags: [AI Credit Config]
+      security:
+        - platformBearerAuth: []
+      parameters:
+        - { name: capabilityId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AICreditCapabilityUpdateRequest"
+      responses:
+        "200":
+          description: 修改后的能力
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AICreditCapabilityResponseEnvelope"
+        "400":
+          description: 请求字段校验失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "403":
+          description: 平台权限不足
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "404":
+          description: 能力不存在或已删除
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "409":
+          description: code 已被现有能力占用，或乐观锁版本冲突
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+    delete:
+      summary: 删除 AI 计费能力（软删除）
+      description: |
+        软删除能力。被档位功能集或费率表引用的能力不可删除，需先移除引用。
+      operationId: aiCreditCapabilityDelete
+      tags: [AI Credit Config]
+      security:
+        - platformBearerAuth: []
+      parameters:
+        - { name: capabilityId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204":
+          description: 已删除
+        "403":
+          description: 平台权限不足
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "404":
+          description: 能力不存在或已删除
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "409":
+          description: 能力仍被档位功能集或费率表引用
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /platform/ai-credit/tiers:
+    get:
+      summary: 查询 AI 计费档位列表
+      description: |
+        返回全部未删除的档位，含功能集（capabilityCodes）与各持续时间的价格。
+      operationId: aiCreditTierList
+      tags: [AI Credit Config]
+      security:
+        - platformBearerAuth: []
+      responses:
+        "200":
+          description: 档位列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AICreditTierListResponseEnvelope"
+        "403":
+          description: 平台权限不足
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+    post:
+      summary: 创建 AI 计费档位
+      description: |
+        创建档位：功能集（功能开关类能力 code 列表）、每订阅单位基础额度、
+        各持续时间档位价格与单位单价。code 兼作档位权限码，创建后不可修改。
+      operationId: aiCreditTierCreate
+      tags: [AI Credit Config]
+      security:
+        - platformBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AICreditTierCreateRequest"
+      responses:
+        "200":
+          description: 创建成功的档位
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AICreditTierResponseEnvelope"
+        "400":
+          description: 请求字段校验失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "403":
+          description: 平台权限不足
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "409":
+          description: code 已被现有档位占用
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /platform/ai-credit/tiers/{tierId}:
+    get:
+      summary: 获取 AI 计费档位详情
+      operationId: aiCreditTierGet
+      tags: [AI Credit Config]
+      security:
+        - platformBearerAuth: []
+      parameters:
+        - { name: tierId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 档位详情
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AICreditTierResponseEnvelope"
+        "403":
+          description: 平台权限不足
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "404":
+          description: 档位不存在或已删除
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+    patch:
+      summary: 修改 AI 计费档位
+      description: |
+        修改档位资料、基础额度、状态、功能集或价格。prices / capabilityCodes
+        传入时整体替换对应子集；code 创建后不可修改。
+      operationId: aiCreditTierUpdate
+      tags: [AI Credit Config]
+      security:
+        - platformBearerAuth: []
+      parameters:
+        - { name: tierId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AICreditTierUpdateRequest"
+      responses:
+        "200":
+          description: 修改后的档位
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AICreditTierResponseEnvelope"
+        "400":
+          description: 请求字段校验失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "403":
+          description: 平台权限不足
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "404":
+          description: 档位不存在或已删除
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "409":
+          description: 乐观锁版本冲突
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+    delete:
+      summary: 删除 AI 计费档位（软删除）
+      operationId: aiCreditTierDelete
+      tags: [AI Credit Config]
+      security:
+        - platformBearerAuth: []
+      parameters:
+        - { name: tierId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204":
+          description: 已删除
+        "403":
+          description: 平台权限不足
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "404":
+          description: 档位不存在或已删除
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /platform/ai-credit/rate-cards:
+    get:
+      summary: 查询 AI 计费费率表
+      description: |
+        默认返回每个 能力 × 模型组 × 计量维度 的当前版本行（含 INACTIVE 状态行，便于后台显示已停用）。
+        includeHistory=true 时返回全部历史版本行（调价不追溯历史账目，历史行仅作审计展示）。
+      operationId: aiCreditRateCardList
+      tags: [AI Credit Config]
+      security:
+        - platformBearerAuth: []
+      parameters:
+        - in: query
+          name: includeHistory
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "200":
+          description: 费率列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AICreditRateCardListResponseEnvelope"
+        "403":
+          description: 平台权限不足
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+    post:
+      summary: 创建 AI 计费费率行
+      description: |
+        为 能力 × 模型组 × 计量维度 创建首个费率版本行。TOKEN_INPUT / TOKEN_OUTPUT 维度
+        填写 tokenMultiplier 与 creditPerToken；PER_REQUEST 维度填写 perRequestCredits。
+        同一组合已存在未删除行时返回 409。
+      operationId: aiCreditRateCardCreate
+      tags: [AI Credit Config]
+      security:
+        - platformBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AICreditRateCardCreateRequest"
+      responses:
+        "200":
+          description: 创建成功的费率行
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AICreditRateCardResponseEnvelope"
+        "400":
+          description: 请求字段校验失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "403":
+          description: 平台权限不足
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "409":
+          description: 同一能力 × 模型组 × 计量维度已存在费率行
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /platform/ai-credit/rate-cards/{rateCardId}:
+    get:
+      summary: 获取 AI 计费费率行详情
+      operationId: aiCreditRateCardGet
+      tags: [AI Credit Config]
+      security:
+        - platformBearerAuth: []
+      parameters:
+        - { name: rateCardId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 费率行详情
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AICreditRateCardResponseEnvelope"
+        "403":
+          description: 平台权限不足
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "404":
+          description: 费率行不存在或已删除
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+    patch:
+      summary: 修改 AI 计费费率行（调价版本化）
+      description: |
+        修改费率。计量字段（tokenMultiplier / creditPerToken / perRequestCredits）任一变更时，
+        服务端插入新版本行（rateVersion + 1），原行保留为历史、不追溯历史账目；
+        仅修改 status 时更新原行。
+      operationId: aiCreditRateCardUpdate
+      tags: [AI Credit Config]
+      security:
+        - platformBearerAuth: []
+      parameters:
+        - { name: rateCardId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AICreditRateCardUpdateRequest"
+      responses:
+        "200":
+          description: 修改后（或新版本）的费率行
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AICreditRateCardResponseEnvelope"
+        "400":
+          description: 请求字段校验失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "403":
+          description: 平台权限不足
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "404":
+          description: 费率行不存在或已删除
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "409":
+          description: 乐观锁版本冲突
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /platform/ai-credit/booster-tiers:
+    get:
+      summary: 查询 AI 计费加油包档位列表
+      description: |
+        返回全部未删除的加油包档位。加油包永久有效，只零售（买多个单价相同）。
+      operationId: aiCreditBoosterTierList
+      tags: [AI Credit Config]
+      security:
+        - platformBearerAuth: []
+      responses:
+        "200":
+          description: 加油包档位列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AICreditBoosterTierListResponseEnvelope"
+        "403":
+          description: 平台权限不足
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+    post:
+      summary: 创建 AI 计费加油包档位
+      operationId: aiCreditBoosterTierCreate
+      tags: [AI Credit Config]
+      security:
+        - platformBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AICreditBoosterTierCreateRequest"
+      responses:
+        "200":
+          description: 创建成功的加油包档位
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AICreditBoosterTierResponseEnvelope"
+        "400":
+          description: 请求字段校验失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "403":
+          description: 平台权限不足
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /platform/ai-credit/booster-tiers/{boosterTierId}:
+    get:
+      summary: 获取 AI 计费加油包档位详情
+      operationId: aiCreditBoosterTierGet
+      tags: [AI Credit Config]
+      security:
+        - platformBearerAuth: []
+      parameters:
+        - { name: boosterTierId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 加油包档位详情
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AICreditBoosterTierResponseEnvelope"
+        "403":
+          description: 平台权限不足
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "404":
+          description: 加油包档位不存在或已删除
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+    patch:
+      summary: 修改 AI 计费加油包档位
+      operationId: aiCreditBoosterTierUpdate
+      tags: [AI Credit Config]
+      security:
+        - platformBearerAuth: []
+      parameters:
+        - { name: boosterTierId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AICreditBoosterTierUpdateRequest"
+      responses:
+        "200":
+          description: 修改后的加油包档位
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AICreditBoosterTierResponseEnvelope"
+        "400":
+          description: 请求字段校验失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "403":
+          description: 平台权限不足
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "404":
+          description: 加油包档位不存在或已删除
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "409":
+          description: 乐观锁版本冲突
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+    delete:
+      summary: 删除 AI 计费加油包档位（软删除）
+      operationId: aiCreditBoosterTierDelete
+      tags: [AI Credit Config]
+      security:
+        - platformBearerAuth: []
+      parameters:
+        - { name: boosterTierId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204":
+          description: 已删除
+        "403":
+          description: 平台权限不足
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "404":
+          description: 加油包档位不存在或已删除
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /platform/ai-credit/billing-config:
+    get:
+      summary: 获取全局 AI 计费配置
+      description: |
+        全局计费配置为单行资源：最小计量单位、每月重置日与企业本地时区模式、
+        未配置费率拒绝开关、订阅持续时间选项、半年/一年折扣、订阅单位上限。
+      operationId: aiCreditBillingConfigGet
+      tags: [AI Credit Config]
+      security:
+        - platformBearerAuth: []
+      responses:
+        "200":
+          description: 全局计费配置
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AICreditBillingConfigResponseEnvelope"
+        "403":
+          description: 平台权限不足
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+    patch:
+      summary: 修改全局 AI 计费配置
+      description: |
+        修改全局计费配置（订阅参数与重置/拒绝策略均在此资源）。
+        subscriptionDurations 传入时整体替换；未配置费率的调用按 rejectUnconfiguredRate 拒绝。
+      operationId: aiCreditBillingConfigUpdate
+      tags: [AI Credit Config]
+      security:
+        - platformBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AICreditBillingConfigUpdateRequest"
+      responses:
+        "200":
+          description: 修改后的全局计费配置
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AICreditBillingConfigResponseEnvelope"
+        "400":
+          description: 请求字段校验失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "403":
+          description: 平台权限不足
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "409":
+          description: 乐观锁版本冲突
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
 components:
   securitySchemes:
     bearerAuth:
@@ -15311,3 +16009,361 @@ components:
           type:
             - string
             - "null"
+
+    AICreditConfigStatus:
+      type: string
+      enum:
+        - ACTIVE
+        - INACTIVE
+
+    AICreditMeterType:
+      type: string
+      enum:
+        - TOKEN
+        - PER_REQUEST
+
+    AICreditCapabilityKind:
+      type: string
+      enum:
+        - TIER_GATED
+        - UNIVERSAL
+
+    AICreditRateDimension:
+      type: string
+      enum:
+        - TOKEN_INPUT
+        - TOKEN_OUTPUT
+        - PER_REQUEST
+
+    AICreditSubscriptionDuration:
+      type: string
+      enum:
+        - ONE_MONTH
+        - SIX_MONTHS
+        - TWELVE_MONTHS
+
+    AICreditCapability:
+      type: object
+      required: [id, code, name, meterType, capabilityKind, sortOrder, status, version, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string, maxLength: 40 }
+        name: { type: string, maxLength: 100 }
+        description: { type: [string, "null"], maxLength: 500 }
+        meterType: { $ref: "#/components/schemas/AICreditMeterType" }
+        capabilityKind: { $ref: "#/components/schemas/AICreditCapabilityKind" }
+        permissionCode: { type: [string, "null"], maxLength: 100 }
+        sortOrder: { type: integer, minimum: 0 }
+        status: { $ref: "#/components/schemas/AICreditConfigStatus" }
+        version: { type: integer, minimum: 1 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    AICreditCapabilityCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [code, name]
+      properties:
+        code:
+          type: string
+          pattern: '^[a-z][a-z0-9-]*$'
+          maxLength: 40
+        name:
+          type: string
+          maxLength: 100
+        description: { type: [string, "null"], maxLength: 500 }
+        meterType: { $ref: "#/components/schemas/AICreditMeterType", default: TOKEN }
+        capabilityKind: { $ref: "#/components/schemas/AICreditCapabilityKind", default: TIER_GATED }
+        permissionCode: { type: [string, "null"], maxLength: 100 }
+        sortOrder: { type: integer, minimum: 0, default: 0 }
+
+    AICreditCapabilityUpdateRequest:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        code: { type: string, pattern: '^[a-z][a-z0-9-]*$', maxLength: 40 }
+        name: { type: string, maxLength: 100 }
+        description: { type: [string, "null"], maxLength: 500 }
+        meterType: { $ref: "#/components/schemas/AICreditMeterType" }
+        capabilityKind: { $ref: "#/components/schemas/AICreditCapabilityKind" }
+        permissionCode: { type: [string, "null"], maxLength: 100 }
+        sortOrder: { type: integer, minimum: 0 }
+        status: { $ref: "#/components/schemas/AICreditConfigStatus" }
+        version: { type: integer, minimum: 1 }
+
+    AICreditCapabilityListResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/AICreditCapability" }
+        requestId: { type: [string, "null"] }
+
+    AICreditCapabilityResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: "#/components/schemas/AICreditCapability" }
+        requestId: { type: [string, "null"] }
+
+    AICreditTierPriceInput:
+      type: object
+      additionalProperties: false
+      required: [duration, tierPrice, unitPrice]
+      properties:
+        duration: { $ref: "#/components/schemas/AICreditSubscriptionDuration" }
+        tierPrice:
+          type: string
+          pattern: '^\d{1,16}(\.\d{1,2})?$'
+          description: 档位价格（该持续时间），十进制字符串，最多两位小数
+        unitPrice:
+          type: string
+          pattern: '^\d{1,16}(\.\d{1,2})?$'
+          description: 单位单价（该持续时间），订阅总价 = (档位价格 + 单位单价 × 单位数) × 折扣
+
+    AICreditTierPrice:
+      type: object
+      required: [duration, tierPrice, unitPrice]
+      properties:
+        duration: { $ref: "#/components/schemas/AICreditSubscriptionDuration" }
+        tierPrice: { type: string, pattern: '^\d{1,16}(\.\d{1,2})?$' }
+        unitPrice: { type: string, pattern: '^\d{1,16}(\.\d{1,2})?$' }
+
+    AICreditTier:
+      type: object
+      required: [id, code, name, monthlyBaseCredits, status, prices, capabilityCodes, version, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string, maxLength: 40 }
+        name: { type: string, maxLength: 100 }
+        description: { type: [string, "null"], maxLength: 500 }
+        monthlyBaseCredits: { type: string, pattern: '^\d{1,16}(\.\d{1,2})?$' }
+        status: { $ref: "#/components/schemas/AICreditConfigStatus" }
+        prices:
+          type: array
+          items: { $ref: "#/components/schemas/AICreditTierPrice" }
+        capabilityCodes:
+          type: array
+          items: { type: string, maxLength: 40 }
+        version: { type: integer, minimum: 1 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    AICreditTierCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [code, name, monthlyBaseCredits, prices]
+      properties:
+        code:
+          type: string
+          pattern: '^[A-Za-z0-9][A-Za-z0-9_-]*$'
+          maxLength: 40
+          description: 档位 code，兼作档位权限码值，创建后不可修改
+        name: { type: string, maxLength: 100 }
+        description: { type: [string, "null"], maxLength: 500 }
+        monthlyBaseCredits: { type: string, pattern: '^\d{1,16}(\.\d{1,2})?$' }
+        prices:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/AICreditTierPriceInput" }
+        capabilityCodes:
+          type: array
+          items: { type: string, maxLength: 40 }
+          description: 功能开关类能力 code 列表（通用能力全档开放，不写入）
+
+    AICreditTierUpdateRequest:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        name: { type: string, maxLength: 100 }
+        description: { type: [string, "null"], maxLength: 500 }
+        monthlyBaseCredits: { type: string, pattern: '^\d{1,16}(\.\d{1,2})?$' }
+        status: { $ref: "#/components/schemas/AICreditConfigStatus" }
+        prices:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/AICreditTierPriceInput" }
+        capabilityCodes:
+          type: array
+          items: { type: string, maxLength: 40 }
+        version: { type: integer, minimum: 1 }
+
+    AICreditTierListResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/AICreditTier" }
+        requestId: { type: [string, "null"] }
+
+    AICreditTierResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: "#/components/schemas/AICreditTier" }
+        requestId: { type: [string, "null"] }
+
+    AICreditRateCard:
+      type: object
+      required: [id, capabilityId, capabilityCode, modelGroup, dimension, rateVersion, status, version, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        capabilityId: { type: string, format: uuid }
+        capabilityCode: { type: string, maxLength: 40 }
+        modelGroup: { type: string, maxLength: 50 }
+        dimension: { $ref: "#/components/schemas/AICreditRateDimension" }
+        tokenMultiplier: { type: [string, "null"], pattern: '^\d{1,6}(\.\d{1,4})?$', description: token 倍率（上游 token → 计费 token），仅 TOKEN 维度填写 }
+        creditPerToken: { type: [string, "null"], pattern: '^\d{1,6}(\.\d{1,4})?$', description: token→credit 比例（计费 token → credit），仅 TOKEN 维度填写 }
+        perRequestCredits: { type: [string, "null"], pattern: '^\d{1,16}(\.\d{1,2})?$', description: 按次 credit，仅 PER_REQUEST 维度填写 }
+        rateVersion: { type: integer, minimum: 1, description: 业务版本号，调价插入新版本行 }
+        status: { $ref: "#/components/schemas/AICreditConfigStatus" }
+        version: { type: integer, minimum: 1 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    AICreditRateCardCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [capabilityId, dimension]
+      properties:
+        capabilityId: { type: string, format: uuid }
+        modelGroup: { type: string, pattern: '^[a-z0-9][a-z0-9-]*$', maxLength: 50, default: default }
+        dimension: { $ref: "#/components/schemas/AICreditRateDimension" }
+        tokenMultiplier: { type: [string, "null"], pattern: '^\d{1,6}(\.\d{1,4})?$' }
+        creditPerToken: { type: [string, "null"], pattern: '^\d{1,6}(\.\d{1,4})?$' }
+        perRequestCredits: { type: [string, "null"], pattern: '^\d{1,16}(\.\d{1,2})?$' }
+
+    AICreditRateCardUpdateRequest:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        tokenMultiplier: { type: [string, "null"], pattern: '^\d{1,6}(\.\d{1,4})?$' }
+        creditPerToken: { type: [string, "null"], pattern: '^\d{1,6}(\.\d{1,4})?$' }
+        perRequestCredits: { type: [string, "null"], pattern: '^\d{1,16}(\.\d{1,2})?$' }
+        status: { $ref: "#/components/schemas/AICreditConfigStatus" }
+        version: { type: integer, minimum: 1 }
+
+    AICreditRateCardListResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/AICreditRateCard" }
+        requestId: { type: [string, "null"] }
+
+    AICreditRateCardResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: "#/components/schemas/AICreditRateCard" }
+        requestId: { type: [string, "null"] }
+
+    AICreditBoosterTier:
+      type: object
+      required: [id, name, credits, price, status, version, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, maxLength: 100 }
+        credits: { type: string, pattern: '^\d{1,16}(\.\d{1,2})?$', description: 加油包额度（credit），十进制字符串，最多两位小数 }
+        price: { type: string, pattern: '^\d{1,16}(\.\d{1,2})?$', description: 加油包价格，十进制字符串，最多两位小数 }
+        description: { type: [string, "null"], maxLength: 500 }
+        status: { $ref: "#/components/schemas/AICreditConfigStatus" }
+        version: { type: integer, minimum: 1 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    AICreditBoosterTierCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [name, credits, price]
+      properties:
+        name: { type: string, maxLength: 100 }
+        credits: { type: string, pattern: '^\d{1,16}(\.\d{1,2})?$' }
+        price: { type: string, pattern: '^\d{1,16}(\.\d{1,2})?$' }
+        description: { type: [string, "null"], maxLength: 500 }
+
+    AICreditBoosterTierUpdateRequest:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        name: { type: string, maxLength: 100 }
+        credits: { type: string, pattern: '^\d{1,16}(\.\d{1,2})?$' }
+        price: { type: string, pattern: '^\d{1,16}(\.\d{1,2})?$' }
+        description: { type: [string, "null"], maxLength: 500 }
+        status: { $ref: "#/components/schemas/AICreditConfigStatus" }
+        version: { type: integer, minimum: 1 }
+
+    AICreditBoosterTierListResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/AICreditBoosterTier" }
+        requestId: { type: [string, "null"] }
+
+    AICreditBoosterTierResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: "#/components/schemas/AICreditBoosterTier" }
+        requestId: { type: [string, "null"] }
+
+    AICreditBillingConfig:
+      type: object
+      required: [id, minCreditUnit, resetDay, resetTimezoneMode, rejectUnconfiguredRate, subscriptionDurations, halfYearlyDiscountRate, yearlyDiscountRate, maxSubscriptionUnits, updatedAt, version]
+      properties:
+        id: { type: string, description: 固定主键 default }
+        minCreditUnit: { type: string, pattern: '^\d{1,3}(\.\d)?$', description: 最小计量单位（credit），如 0.1 }
+        resetDay: { type: integer, minimum: 1, maximum: 28, description: 每月重置日（企业本地时区） }
+        resetTimezoneMode: { type: string, enum: [TENANT_LOCAL], description: 重置时区模式（企业本地时区，值预留扩展） }
+        rejectUnconfiguredRate: { type: boolean, description: 未配置费率的调用一律拒绝 }
+        subscriptionDurations:
+          type: array
+          items: { $ref: "#/components/schemas/AICreditSubscriptionDuration" }
+          description: 可配置的订阅持续时间选项
+        halfYearlyDiscountRate: { type: string, pattern: '^0\.\d{1,2}$', description: 半年折扣率（0.01-0.99） }
+        yearlyDiscountRate: { type: string, pattern: '^0\.\d{1,2}$', description: 一年折扣率（0.01-0.99） }
+        maxSubscriptionUnits: { type: integer, minimum: 1 }
+        updatedAt: { type: string, format: date-time }
+        version: { type: integer, minimum: 1 }
+
+    AICreditBillingConfigUpdateRequest:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        minCreditUnit: { type: string, pattern: '^\d{1,3}(\.\d)?$' }
+        resetDay: { type: integer, minimum: 1, maximum: 28 }
+        resetTimezoneMode: { type: string, enum: [TENANT_LOCAL] }
+        rejectUnconfiguredRate: { type: boolean }
+        subscriptionDurations:
+          type: array
+          items: { $ref: "#/components/schemas/AICreditSubscriptionDuration" }
+        halfYearlyDiscountRate: { type: string, pattern: '^0\.\d{1,2}$' }
+        yearlyDiscountRate: { type: string, pattern: '^0\.\d{1,2}$' }
+        maxSubscriptionUnits: { type: integer, minimum: 1 }
+        version: { type: integer, minimum: 1 }
+
+    AICreditBillingConfigResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: "#/components/schemas/AICreditBillingConfig" }
+        requestId: { type: [string, "null"] }

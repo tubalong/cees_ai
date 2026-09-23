@@ -180,6 +180,28 @@ GET    /api/v1/platform/tenants/{tenantId}/administrators
 POST   /api/v1/platform/tenants/{tenantId}/administrators
 DELETE /api/v1/platform/tenants/{tenantId}/administrators/{membershipId}
 
+GET    /api/v1/platform/ai-credit/capabilities
+POST   /api/v1/platform/ai-credit/capabilities
+GET    /api/v1/platform/ai-credit/capabilities/{capabilityId}
+PATCH  /api/v1/platform/ai-credit/capabilities/{capabilityId}
+DELETE /api/v1/platform/ai-credit/capabilities/{capabilityId}
+GET    /api/v1/platform/ai-credit/tiers
+POST   /api/v1/platform/ai-credit/tiers
+GET    /api/v1/platform/ai-credit/tiers/{tierId}
+PATCH  /api/v1/platform/ai-credit/tiers/{tierId}
+DELETE /api/v1/platform/ai-credit/tiers/{tierId}
+GET    /api/v1/platform/ai-credit/rate-cards
+POST   /api/v1/platform/ai-credit/rate-cards
+GET    /api/v1/platform/ai-credit/rate-cards/{rateCardId}
+PATCH  /api/v1/platform/ai-credit/rate-cards/{rateCardId}
+GET    /api/v1/platform/ai-credit/booster-tiers
+POST   /api/v1/platform/ai-credit/booster-tiers
+GET    /api/v1/platform/ai-credit/booster-tiers/{boosterTierId}
+PATCH  /api/v1/platform/ai-credit/booster-tiers/{boosterTierId}
+DELETE /api/v1/platform/ai-credit/booster-tiers/{boosterTierId}
+GET    /api/v1/platform/ai-credit/billing-config
+PATCH  /api/v1/platform/ai-credit/billing-config
+
 GET    /api/v1/tenants/current/invitations
 POST   /api/v1/tenants/current/invitations
 DELETE /api/v1/tenants/current/invitations/{invitationId}
