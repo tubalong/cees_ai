@@ -1,4 +1,4 @@
-import { CheckCircleFilled, DingdingOutlined, LinkOutlined, ReloadOutlined } from '@ant-design/icons';
+import { DingdingOutlined, LinkOutlined, MessageOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import { App as AntdApp, Button, Modal, Select, Space, Spin, Tag } from 'antd';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -234,15 +234,19 @@ export default function ConnectorMarketplacePage(): JSX.Element {
         });
     };
 
-    const tryConnector = (): void => {
-        if (!selectedManifest) return;
+    const openConnectorConversation = (manifest: DesktopConnectorManifest): void => {
         setSelectedConnectorId(undefined);
         navigate('/assistant', {
             state: {
                 createNewConversation: true,
-                source: selectedManifest.id === 'dingtalk' ? 'DINGTALK_CONNECTOR' : 'CONNECTOR_MARKETPLACE',
+                source: manifest.id === 'dingtalk' ? 'DINGTALK_CONNECTOR' : 'CONNECTOR_MARKETPLACE',
             },
         });
+    };
+
+    const tryConnector = (): void => {
+        if (!selectedManifest) return;
+        openConnectorConversation(selectedManifest);
     };
 
     const confirmDisconnect = (): void => {
@@ -299,7 +303,6 @@ export default function ConnectorMarketplacePage(): JSX.Element {
                 {manifests.map((manifest) => {
                     const status = statuses[manifest.id] ?? EMPTY_STATUS;
                     const connected = status.state === 'READY';
-                    const dingtalkStatus = toDingTalkStatus(manifest.id === 'dingtalk' ? status : undefined);
                     return <article key={manifest.id} className={`connector-card ${connected ? 'is-connected' : 'is-disconnected'}`}>
                         <button
                             className="connector-card-hit-area"
@@ -309,35 +312,23 @@ export default function ConnectorMarketplacePage(): JSX.Element {
                                 : t('连接{name}连接器', { name: manifest.name })}
                             onClick={() => setSelectedConnectorId(manifest.id)}
                         />
-                        <span className="connector-card-indicator" aria-hidden="true">
-                            {connected ? <CheckCircleFilled /> : <LinkOutlined />}
-                        </span>
+                        {connected ? <button
+                            className="connector-card-indicator connector-card-conversation-action"
+                            type="button"
+                            aria-label={t('使用{name}开始新对话', { name: manifest.name })}
+                            onClick={() => openConnectorConversation(manifest)}
+                        >
+                            <MessageOutlined />
+                            <span className="connector-card-indicator-label">{t('去对话')}</span>
+                        </button> : <span className="connector-card-indicator" aria-hidden="true">
+                            <PlusOutlined />
+                            <span className="connector-card-indicator-label">{t('连接')}</span>
+                        </span>}
                         <div className="connector-logo" aria-hidden="true">{connectorGlyph(manifest)}</div>
                         <div className="connector-card-copy">
-                            <div className="connector-card-title"><h3>{t(manifest.name)}</h3>{connected ? <span className="connector-status is-connected">{connectorStatusText(status, t)}</span> : null}</div>
+                            <div className="connector-card-title"><h3>{t(manifest.name)}</h3></div>
                             <p>{t(manifest.description)}</p>
                         </div>
-                        {connected ? <div className="connector-card-meta">
-                            {loading ? <Spin size="small" /> : <>
-                                <span>{manifest.id === 'dingtalk'
-                                    ? dingtalkStatus.corpName || dingtalkStatus.profile || t('尚未授权组织')
-                                    : status.authenticated ? t('已完成授权') : t('尚未授权账号')}</span>
-                                <small>{manifest.id === 'dingtalk'
-                                    ? dingtalkStatus.externalUserName || status.version || release.version
-                                    : status.version || manifest.transportType}</small>
-                            </>}
-                        </div> : null}
-                        {connected && manifest.id === 'dingtalk' && manifest.supportsVersionManagement ? <DingTalkVersionPanel
-                            release={release}
-                            status={dingtalkStatus}
-                            checkingUpdate={checkingUpdate}
-                            upgrading={upgrading}
-                            rollingBack={rollingBack}
-                            onCheckForUpdates={() => void checkForUpdates()}
-                            onUpgrade={confirmUpgrade}
-                            onRollback={confirmRollback}
-                            t={t}
-                        /> : null}
                     </article>;
                 })}
             </div>
@@ -373,8 +364,19 @@ export default function ConnectorMarketplacePage(): JSX.Element {
                         ? selectedDingTalkStatus.externalUserName || selectedDingTalkStatus.profile || t('已完成授权')
                         : selectedManifest.id === 'tencent-meeting'
                             ? selectedTencentMeetingStatus.account?.displayName || selectedTencentMeetingStatus.account?.externalUserId || t('已完成授权')
-                            : selectedStatus.version || t('已完成授权')}</span>
+                        : selectedStatus.version || t('已完成授权')}</span>
                 </div>
+                {selectedManifest.id === 'dingtalk' && selectedManifest.supportsVersionManagement ? <DingTalkVersionPanel
+                    release={release}
+                    status={selectedDingTalkStatus}
+                    checkingUpdate={checkingUpdate}
+                    upgrading={upgrading}
+                    rollingBack={rollingBack}
+                    onCheckForUpdates={() => void checkForUpdates()}
+                    onUpgrade={confirmUpgrade}
+                    onRollback={confirmRollback}
+                    t={t}
+                /> : null}
                 <div className="connector-connected-actions">
                     <Button type="primary" size="large" onClick={tryConnector}>{t('去试试')}</Button>
                     {selectedManifest.supportsDisconnect ? <Button danger size="large" loading={disconnectingId === selectedManifest.id} onClick={confirmDisconnect}>{t('解绑')}</Button> : null}
@@ -498,17 +500,6 @@ function toTencentMeetingStatus(status?: DesktopConnectorStatus): TencentMeeting
         authorizedAt: candidate?.authorizedAt ?? null,
         tokenExpiresAt: candidate?.tokenExpiresAt ?? null,
     };
-}
-
-function connectorStatusText(
-    status: DesktopConnectorStatus,
-    t: (text: string, values?: Record<string, string | number>) => string,
-): string {
-    if (status.state === 'READY') return t('已连接');
-    if (status.state === 'PROFILE_REQUIRED') return t('需要选择组织');
-    if (status.state === 'AUTH_REQUIRED') return t('待授权');
-    if (status.state === 'ERROR') return t('连接异常');
-    return status.installed ? t('已安装') : t('未安装');
 }
 
 function connectorGlyph(manifest: DesktopConnectorManifest): string {
