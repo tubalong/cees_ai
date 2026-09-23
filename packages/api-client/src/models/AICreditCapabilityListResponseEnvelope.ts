@@ -2,10 +2,10 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
-import type { AICreditCapability } from './AICreditCapability';
+import type { AICreditCapabilityList } from './AICreditCapabilityList';
 export type AICreditCapabilityListResponseEnvelope = {
     success: boolean;
-    data: Array<AICreditCapability>;
+    data: AICreditCapabilityList;
     requestId?: string | null;
 };
 

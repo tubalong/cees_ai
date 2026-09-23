@@ -16059,6 +16059,14 @@ components:
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
 
+    AICreditCapabilityList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/AICreditCapability" }
+
     AICreditCapabilityCreateRequest:
       type: object
       additionalProperties: false
@@ -16097,9 +16105,7 @@ components:
       required: [success, data]
       properties:
         success: { type: boolean, const: true }
-        data:
-          type: array
-          items: { $ref: "#/components/schemas/AICreditCapability" }
+        data: { $ref: "#/components/schemas/AICreditCapabilityList" }
         requestId: { type: [string, "null"] }
 
     AICreditCapabilityResponseEnvelope:
@@ -16153,6 +16159,14 @@ components:
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
 
+    AICreditTierList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/AICreditTier" }
+
     AICreditTierCreateRequest:
       type: object
       additionalProperties: false
@@ -16198,9 +16212,7 @@ components:
       required: [success, data]
       properties:
         success: { type: boolean, const: true }
-        data:
-          type: array
-          items: { $ref: "#/components/schemas/AICreditTier" }
+        data: { $ref: "#/components/schemas/AICreditTierList" }
         requestId: { type: [string, "null"] }
 
     AICreditTierResponseEnvelope:
@@ -16228,6 +16240,14 @@ components:
         version: { type: integer, minimum: 1 }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+
+    AICreditRateCardList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/AICreditRateCard" }
 
     AICreditRateCardCreateRequest:
       type: object
@@ -16257,9 +16277,7 @@ components:
       required: [success, data]
       properties:
         success: { type: boolean, const: true }
-        data:
-          type: array
-          items: { $ref: "#/components/schemas/AICreditRateCard" }
+        data: { $ref: "#/components/schemas/AICreditRateCardList" }
         requestId: { type: [string, "null"] }
 
     AICreditRateCardResponseEnvelope:
@@ -16283,6 +16301,14 @@ components:
         version: { type: integer, minimum: 1 }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+
+    AICreditBoosterTierList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/AICreditBoosterTier" }
 
     AICreditBoosterTierCreateRequest:
       type: object
@@ -16311,9 +16337,7 @@ components:
       required: [success, data]
       properties:
         success: { type: boolean, const: true }
-        data:
-          type: array
-          items: { $ref: "#/components/schemas/AICreditBoosterTier" }
+        data: { $ref: "#/components/schemas/AICreditBoosterTierList" }
         requestId: { type: [string, "null"] }
 
     AICreditBoosterTierResponseEnvelope:
