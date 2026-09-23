@@ -2556,8 +2556,9 @@ enum AICreditSubscriptionDuration {
 /// 平台级 AI 计费能力目录；code 为能力标识，permissionCode 桥接现有 permissions.code。
 model AICreditCapability {
   id               String                    @id @default(uuid()) @db.Uuid
-  /// 能力 code（chat / rag / image-gen / doc-gen / pdf-gen / ppt-gen / workflow）。
-  code             String                    @unique
+  /// 能力 code（chat / rag / image-gen / doc-gen / pdf-gen / ppt-gen / workflow）；
+  /// 唯一性由迁移中的部分唯一索引保证（WHERE deleted_at IS NULL，软删除后允许重建）。
+  code             String
   name             String
   description      String?
   /// 计量类型：按 token 或按次。
@@ -2584,8 +2585,9 @@ model AICreditCapability {
 /// 订阅档位；code 兼作档位权限码（实现阶段在 permissions 表注册同 code 行）。
 model AICreditTier {
   id                 String                    @id @default(uuid()) @db.Uuid
-  /// 档位 code，兼作档位权限码值（如 TIER_BASIC / TIER_PREMIUM）。
-  code               String                    @unique
+  /// 档位 code，兼作档位权限码值（如 TIER_BASIC / TIER_PREMIUM）；
+  /// 唯一性由迁移中的部分唯一索引保证（WHERE deleted_at IS NULL，软删除后允许重建）。
+  code               String
   name               String
   description        String?
   /// 每订阅单位基础额度（订阅单位倍率）。

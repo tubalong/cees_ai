@@ -30,7 +30,7 @@
 | 字段 | 类型 | 约束/说明 |
 | --- | --- | --- |
 | id | String @db.Uuid | 主键 |
-| code | String | **@unique**；能力 code（chat / rag / image-gen / doc-gen / pdf-gen / ppt-gen / workflow） |
+| code | String | 能力 code（chat / rag / image-gen / doc-gen / pdf-gen / ppt-gen / workflow）；唯一性由迁移手写的部分唯一索引保证（`WHERE deleted_at IS NULL`，软删除后允许重建） |
 | name | String | 显示名 |
 | description | String? | — |
 | meterType | AICreditMeterType | @default(TOKEN) |
@@ -40,7 +40,7 @@
 | status | AICreditConfigStatus | @default(ACTIVE) |
 | 公共字段 | — | createdAt/updatedAt/createdBy/updatedBy/deletedAt/version |
 
-索引：`@@index([status, sortOrder])`。
+索引：`@@index([status, sortOrder])`；`code` 的唯一性由迁移手写的部分唯一索引保证（`WHERE deleted_at IS NULL`，软删除后允许重建）。
 
 ### 2. ai_credit_tiers（档位）
 
@@ -49,7 +49,7 @@
 | 字段 | 类型 | 约束/说明 |
 | --- | --- | --- |
 | id | String @db.Uuid | 主键 |
-| code | String | **@unique**；档位 code，兼作档位权限码值 |
+| code | String | 档位 code，兼作档位权限码值；唯一性由迁移手写的部分唯一索引保证（`WHERE deleted_at IS NULL`，软删除后允许重建） |
 | name | String | 显示名（基础版/高级版） |
 | description | String? | — |
 | monthlyBaseCredits | Decimal @db.Decimal(18,2) | **每订阅单位基础额度**（订阅单位倍率）；seed 初值：基础版 5,000 / 高级版 10,000（每档各填本档值） |
@@ -160,4 +160,4 @@
 2. 档位价格与单位单价拆独立子表 `ai_credit_tier_prices`（每档 × 每持续时间一行）——是否认可；
 3. S9 + S11 合并为单行配置表 `ai_credit_billing_configs`——是否认可；
 4. 全局配置表的 `subscriptionDurations` 用 enum 数组存（Postgres 标量列表）——是否认可；
-5. 配置表沿用项目惯例软删除（deletedAt）；现有惯例是唯一约束不含 deletedAt（如 roles、tenants.code），因此软删后同 code 会被占坑、不可重建同名。取舍：**下架优先用 status=INACTIVE（主路径）**，删除仅限未被引用时；确需重建同名时复活旧行而非新建——是否认可。
+5. 配置表沿用项目惯例软删除（deletedAt）；`code` 唯一约束采用**部分唯一索引（`WHERE deleted_at IS NULL`）**——沿用 assignment_policies 先例，软删除后可直接重建同 code，无需复活旧行；下架优先用 status=INACTIVE（主路径）。已按此落地（20260923071550_ai_credit_billing_config_refine）。
