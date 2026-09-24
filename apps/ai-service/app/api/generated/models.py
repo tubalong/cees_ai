@@ -28,6 +28,25 @@ class ChatContextBudgets(BaseModel):
     ultra: conint(ge=1) | None = None
 
 
+class Backend(StrEnum):
+    memory = 'memory'
+    pgvector = 'pgvector'
+
+
+class KnowledgeIndexStatus(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    backend: Backend
+    durable: bool = Field(
+        ..., description='索引是否跨进程重启持久化。memory 后端为 false。'
+    )
+    epoch: str = Field(
+        ...,
+        description='索引实例标识。同一进程内恒定、重启后变化；持久化后端固定为 "persistent"。',
+    )
+
+
 class ModelRole(StrEnum):
     default = 'default'
     structured = 'structured'
@@ -657,6 +676,57 @@ class ComposeDocumentRequest(BaseModel):
     max_output_tokens: conint(ge=1, le=32768) | None = None
 
 
+class SpreadsheetSheet(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    name: constr(min_length=1, max_length=31) = Field(
+        ..., description='Excel worksheet name. Reserved characters are rejected.'
+    )
+    columns: list[constr(max_length=200)] | None = Field(None, max_length=60)
+    rows: list[list[constr(max_length=500) | float | None]] = Field(
+        ..., max_length=2000
+    )
+
+
+class SpreadsheetSpec(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    title: constr(max_length=200) | None = None
+    sheets: list[SpreadsheetSheet] = Field(..., max_length=5, min_length=1)
+
+
+class ComposeSpreadsheetRequest(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    request_id: constr(min_length=1, max_length=128)
+    tenant_id: constr(min_length=1, max_length=128)
+    user_id: constr(min_length=1, max_length=128)
+    instruction: constr(min_length=1, max_length=8192)
+    source_materials: list[DocumentSourceMaterial] = Field(
+        ..., max_length=8, min_length=1
+    )
+    title: constr(max_length=200) | None = None
+    llm_profile: constr(min_length=1, max_length=128) | None = None
+    temperature: confloat(ge=0.0, le=2.0) | None = None
+    max_output_tokens: conint(ge=1, le=32768) | None = None
+
+
+class RenderXlsxRequest(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    request_id: constr(min_length=1, max_length=128)
+    tenant_id: constr(min_length=1, max_length=128)
+    user_id: constr(min_length=1, max_length=128)
+    spreadsheet: SpreadsheetSpec
+    filename: constr(max_length=200) | None = Field(
+        None, description='Desired filename without the extension.'
+    )
+
+
 class RenderDocxRequest(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
@@ -1163,6 +1233,7 @@ class ReadinessResponse(BaseModel):
     configured_roles: list[ModelRole]
     configured_chat_modes: list[ChatMode]
     errors: list[str]
+    knowledge_index: KnowledgeIndexStatus | None = None
     chat_context_budgets: ChatContextBudgets | None = Field(
         None,
         description='各聊天模式的输入 Token 预算（config/models.toml 的 chat.modes.*.context_budget_tokens）。调用方在组装上下文前据此决定 是否触发历史压缩，避免与 ai-service 的模型调用前裁剪上限漂移。',
@@ -1313,6 +1384,15 @@ class ComposeDocumentResponse(BaseModel):
     document: DocumentSpec
     plan: DocumentPlan | None = None
     planning_execution: ExecutionMetadata | None = None
+    execution: ExecutionMetadata
+
+
+class ComposeSpreadsheetResponse(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    request_id: str
+    spreadsheet: SpreadsheetSpec
     execution: ExecutionMetadata
 
 

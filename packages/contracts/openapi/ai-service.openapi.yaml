@@ -746,6 +746,84 @@ paths:
           $ref: "#/components/responses/ValidationError"
         "500":
           $ref: "#/components/responses/InternalError"
+  /internal/v1/documents/render-xlsx:
+    post:
+      tags: [documents]
+      operationId: renderDocumentXlsx
+      summary: Render a SpreadsheetSpec as XLSX
+      description: >-
+        Deterministically renders a validated SpreadsheetSpec without invoking an LLM.
+        Cell values are written as text, numbers, or blanks; formulas are not accepted.
+      security:
+        - internalToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RenderXlsxRequest"
+      responses:
+        "200":
+          description: XLSX workbook rendered
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Content-Disposition:
+              description: Attachment filename with ASCII fallback and RFC 5987 UTF-8 filename.
+              schema:
+                type: string
+            X-Request-Id:
+              schema:
+                type: string
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /internal/v1/documents/compose-spreadsheet:
+    post:
+      tags: [documents]
+      operationId: composeSpreadsheet
+      summary: Compose a structured spreadsheet draft
+      description: >-
+        Uses the configured structured-output model to convert instructions and
+        untrusted source materials into a bounded SpreadsheetSpec. It does not
+        create or persist a file.
+      security:
+        - internalToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ComposeSpreadsheetRequest"
+      responses:
+        "200":
+          description: Spreadsheet draft composed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ComposeSpreadsheetResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "502":
+          $ref: "#/components/responses/InvalidProviderOutput"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
   /internal/v1/documents/render-pptx:
     post:
       tags: [documents]
@@ -1069,6 +1147,8 @@ components:
           type: array
           items:
             type: string
+        knowledge_index:
+          $ref: "#/components/schemas/KnowledgeIndexStatus"
         chat_context_budgets:
           type: object
           additionalProperties: false
@@ -1083,6 +1163,27 @@ components:
             ultra:
               type: integer
               minimum: 1
+    KnowledgeIndexStatus:
+      type: object
+      additionalProperties: false
+      description: >-
+        知识库向量索引的运行时身份。NestJS 的索引 Worker 据此判断「已标 READY 的
+        文档其向量是否仍然存在」：`durable=false` 表示索引只活在 ai-service 进程内，
+        进程重启即全部丢失，此时 `epoch` 变化即代表索引已被清空，必须把文档重新排队
+        重建，否则检索会静默返回空结果而文档仍显示 READY。
+      required: [backend, durable, epoch]
+      properties:
+        backend:
+          type: string
+          enum: [memory, pgvector]
+        durable:
+          type: boolean
+          description: 索引是否跨进程重启持久化。memory 后端为 false。
+        epoch:
+          type: string
+          description: >-
+            索引实例标识。同一进程内恒定、重启后变化；持久化后端固定为
+            "persistent"。
     ModelRole:
       type: string
       enum: [default, structured, reasoning, rag, orchestrator]
@@ -2307,6 +2408,126 @@ components:
           $ref: "#/components/schemas/ExecutionMetadata"
         execution:
           $ref: "#/components/schemas/ExecutionMetadata"
+    SpreadsheetCell:
+      oneOf:
+        - type: string
+          maxLength: 500
+        - type: number
+        - type: "null"
+    SpreadsheetSheet:
+      type: object
+      additionalProperties: false
+      required: [name, rows]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 31
+          description: Excel worksheet name. Reserved characters are rejected.
+        columns:
+          type: [array, "null"]
+          maxItems: 60
+          items:
+            type: string
+            maxLength: 200
+        rows:
+          type: array
+          maxItems: 2000
+          items:
+            type: array
+            maxItems: 60
+            items:
+              $ref: "#/components/schemas/SpreadsheetCell"
+    SpreadsheetSpec:
+      type: object
+      additionalProperties: false
+      required: [sheets]
+      properties:
+        title:
+          type: [string, "null"]
+          maxLength: 200
+        sheets:
+          type: array
+          minItems: 1
+          maxItems: 5
+          items:
+            $ref: "#/components/schemas/SpreadsheetSheet"
+    ComposeSpreadsheetRequest:
+      type: object
+      additionalProperties: false
+      required: [request_id, tenant_id, user_id, instruction, source_materials]
+      properties:
+        request_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        tenant_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        user_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        instruction:
+          type: string
+          minLength: 1
+          maxLength: 8192
+        source_materials:
+          type: array
+          minItems: 1
+          maxItems: 8
+          items:
+            $ref: "#/components/schemas/DocumentSourceMaterial"
+        title:
+          type: [string, "null"]
+          maxLength: 200
+        llm_profile:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 128
+        temperature:
+          type: [number, "null"]
+          minimum: 0
+          maximum: 2
+        max_output_tokens:
+          type: [integer, "null"]
+          minimum: 1
+          maximum: 32768
+    ComposeSpreadsheetResponse:
+      type: object
+      additionalProperties: false
+      required: [request_id, spreadsheet, execution]
+      properties:
+        request_id:
+          type: string
+        spreadsheet:
+          $ref: "#/components/schemas/SpreadsheetSpec"
+        execution:
+          $ref: "#/components/schemas/ExecutionMetadata"
+    RenderXlsxRequest:
+      type: object
+      additionalProperties: false
+      required: [request_id, tenant_id, user_id, spreadsheet]
+      properties:
+        request_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        tenant_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        user_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        spreadsheet:
+          $ref: "#/components/schemas/SpreadsheetSpec"
+        filename:
+          type: [string, "null"]
+          maxLength: 200
+          description: Desired filename without the extension.
     RenderDocxRequest:
       type: object
       additionalProperties: false

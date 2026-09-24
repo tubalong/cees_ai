@@ -68,8 +68,11 @@ export type { AssignmentPolicyResponseEnvelope } from './models/AssignmentPolicy
 export type { AssignmentPolicySourceTrace } from './models/AssignmentPolicySourceTrace';
 export type { AssignPlatformTenantAdministratorRequest } from './models/AssignPlatformTenantAdministratorRequest';
 export type { AssignTenantMemberDepartmentRequest } from './models/AssignTenantMemberDepartmentRequest';
+export type { AssistantActionDraftList } from './models/AssistantActionDraftList';
+export type { AssistantActionDraftListEnvelope } from './models/AssistantActionDraftListEnvelope';
 export { AssistantActionDraftResolution } from './models/AssistantActionDraftResolution';
 export type { AssistantActionDraftResolutionEnvelope } from './models/AssistantActionDraftResolutionEnvelope';
+export type { AssistantActionDraftSummary } from './models/AssistantActionDraftSummary';
 export type { AuditEvent } from './models/AuditEvent';
 export type { AuditEventList } from './models/AuditEventList';
 export type { AuditEventListResponseEnvelope } from './models/AuditEventListResponseEnvelope';

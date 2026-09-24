@@ -15,6 +15,7 @@ export type ReadinessResponse = {
     configured_roles: Array<ModelRole>;
     configured_chat_modes: Array<ChatMode>;
     errors: Array<string>;
+    knowledge_index?: KnowledgeIndexStatus;
     /**
      * 各聊天模式的输入 Token 预算（config/models.toml 的 chat.modes.*.context_budget_tokens）。调用方在组装上下文前据此决定 是否触发历史压缩，避免与 ai-service 的模型调用前裁剪上限漂移。
      */
@@ -22,6 +23,21 @@ export type ReadinessResponse = {
         standard?: number;
         ultra?: number;
     };
+};
+
+/**
+ * 知识库向量索引的运行时身份。NestJS 的索引 Worker 据此判断「已标 READY 的 文档其向量是否仍然存在」：`durable=false` 表示索引只活在 ai-service 进程内， 进程重启即全部丢失，此时 `epoch` 变化即代表索引已被清空，必须把文档重新排队 重建，否则检索会静默返回空结果而文档仍显示 READY。
+ */
+export type KnowledgeIndexStatus = {
+    backend: 'memory' | 'pgvector';
+    /**
+     * 索引是否跨进程重启持久化。memory 后端为 false。
+     */
+    durable: boolean;
+    /**
+     * 索引实例标识。同一进程内恒定、重启后变化；持久化后端固定为 "persistent"。
+     */
+    epoch: string;
 };
 
 export type ModelRole = 'default' | 'structured' | 'reasoning' | 'rag' | 'orchestrator';
@@ -557,6 +573,51 @@ export type ComposeDocumentResponse = {
     plan?: DocumentPlan;
     planning_execution?: ExecutionMetadata;
     execution: ExecutionMetadata;
+};
+
+export type SpreadsheetCell = string | number | null;
+
+export type SpreadsheetSheet = {
+    /**
+     * Excel worksheet name. Reserved characters are rejected.
+     */
+    name: string;
+    columns?: Array<string> | null;
+    rows: Array<Array<SpreadsheetCell>>;
+};
+
+export type SpreadsheetSpec = {
+    title?: string | null;
+    sheets: Array<SpreadsheetSheet>;
+};
+
+export type ComposeSpreadsheetRequest = {
+    request_id: string;
+    tenant_id: string;
+    user_id: string;
+    instruction: string;
+    source_materials: Array<DocumentSourceMaterial>;
+    title?: string | null;
+    llm_profile?: string | null;
+    temperature?: number | null;
+    max_output_tokens?: number | null;
+};
+
+export type ComposeSpreadsheetResponse = {
+    request_id: string;
+    spreadsheet: SpreadsheetSpec;
+    execution: ExecutionMetadata;
+};
+
+export type RenderXlsxRequest = {
+    request_id: string;
+    tenant_id: string;
+    user_id: string;
+    spreadsheet: SpreadsheetSpec;
+    /**
+     * Desired filename without the extension.
+     */
+    filename?: string | null;
 };
 
 export type RenderDocxRequest = {
@@ -1549,6 +1610,84 @@ export type RenderDocumentPdfResponses = {
 };
 
 export type RenderDocumentPdfResponse = RenderDocumentPdfResponses[keyof RenderDocumentPdfResponses];
+
+export type RenderDocumentXlsxData = {
+    body: RenderXlsxRequest;
+    path?: never;
+    query?: never;
+    url: '/internal/v1/documents/render-xlsx';
+};
+
+export type RenderDocumentXlsxErrors = {
+    /**
+     * Internal authentication failed
+     */
+    401: ErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ErrorResponse;
+    /**
+     * Unexpected internal service error
+     */
+    500: ErrorResponse;
+};
+
+export type RenderDocumentXlsxError = RenderDocumentXlsxErrors[keyof RenderDocumentXlsxErrors];
+
+export type RenderDocumentXlsxResponses = {
+    /**
+     * XLSX workbook rendered
+     */
+    200: Blob | File;
+};
+
+export type RenderDocumentXlsxResponse = RenderDocumentXlsxResponses[keyof RenderDocumentXlsxResponses];
+
+export type ComposeSpreadsheetData = {
+    body: ComposeSpreadsheetRequest;
+    path?: never;
+    query?: never;
+    url: '/internal/v1/documents/compose-spreadsheet';
+};
+
+export type ComposeSpreadsheetErrors = {
+    /**
+     * Invalid profile or unsupported output mode
+     */
+    400: ErrorResponse;
+    /**
+     * Internal authentication failed
+     */
+    401: ErrorResponse;
+    /**
+     * Request validation failed
+     */
+    422: ErrorResponse;
+    /**
+     * Unexpected internal service error
+     */
+    500: ErrorResponse;
+    /**
+     * Provider output did not match the requested schema
+     */
+    502: ErrorResponse;
+    /**
+     * Service or configured providers unavailable
+     */
+    503: ErrorResponse;
+};
+
+export type ComposeSpreadsheetError = ComposeSpreadsheetErrors[keyof ComposeSpreadsheetErrors];
+
+export type ComposeSpreadsheetResponses = {
+    /**
+     * Spreadsheet draft composed
+     */
+    200: ComposeSpreadsheetResponse;
+};
+
+export type ComposeSpreadsheetResponse2 = ComposeSpreadsheetResponses[keyof ComposeSpreadsheetResponses];
 
 export type RenderDocumentPptxData = {
     body: RenderPptxRequest;

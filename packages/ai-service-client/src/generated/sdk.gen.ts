@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, ServerSentEventsResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { AnswerKnowledgeData, AnswerKnowledgeErrors, AnswerKnowledgeResponses, CompactChatData, CompactChatErrors, CompactChatResponses, ComposeDocumentData, ComposeDocumentErrors, ComposeDocumentResponses, DeleteKnowledgeIndexData, DeleteKnowledgeIndexErrors, DeleteKnowledgeIndexResponses, EditImageData, EditImageErrors, EditImageResponses, ExtractFileData, ExtractFileErrors, ExtractFileResponses, GenerateDocumentDocxData, GenerateDocumentDocxErrors, GenerateDocumentDocxResponses, GenerateImageData, GenerateImageErrors, GenerateImageResponses, GetHealthData, GetHealthResponses, GetReadinessData, GetReadinessErrors, GetReadinessResponses, IndexKnowledgeDocumentData, IndexKnowledgeDocumentErrors, IndexKnowledgeDocumentResponses, InvokeChatData, InvokeChatErrors, InvokeChatResponses, InvokeLlmData, InvokeLlmErrors, InvokeLlmResponses, PreviewImageData, PreviewImageErrors, PreviewImageResponses, RenderDocumentDocxData, RenderDocumentDocxErrors, RenderDocumentDocxResponses, RenderDocumentPdfData, RenderDocumentPdfErrors, RenderDocumentPdfResponses, RenderDocumentPptxData, RenderDocumentPptxErrors, RenderDocumentPptxResponses, RetrieveKnowledgeData, RetrieveKnowledgeErrors, RetrieveKnowledgeResponses, StreamChatData, StreamChatErrors, StreamChatResponse, StreamChatResponses, StreamChatToolTurnData, StreamChatToolTurnErrors, StreamChatToolTurnResponse, StreamChatToolTurnResponses, StreamLlmData, StreamLlmErrors, StreamLlmResponse, StreamLlmResponses } from './types.gen';
+import type { AnswerKnowledgeData, AnswerKnowledgeErrors, AnswerKnowledgeResponses, CompactChatData, CompactChatErrors, CompactChatResponses, ComposeDocumentData, ComposeDocumentErrors, ComposeDocumentResponses, ComposeSpreadsheetData, ComposeSpreadsheetErrors, ComposeSpreadsheetResponses, DeleteKnowledgeIndexData, DeleteKnowledgeIndexErrors, DeleteKnowledgeIndexResponses, EditImageData, EditImageErrors, EditImageResponses, ExtractFileData, ExtractFileErrors, ExtractFileResponses, GenerateDocumentDocxData, GenerateDocumentDocxErrors, GenerateDocumentDocxResponses, GenerateImageData, GenerateImageErrors, GenerateImageResponses, GetHealthData, GetHealthResponses, GetReadinessData, GetReadinessErrors, GetReadinessResponses, IndexKnowledgeDocumentData, IndexKnowledgeDocumentErrors, IndexKnowledgeDocumentResponses, InvokeChatData, InvokeChatErrors, InvokeChatResponses, InvokeLlmData, InvokeLlmErrors, InvokeLlmResponses, PreviewImageData, PreviewImageErrors, PreviewImageResponses, RenderDocumentDocxData, RenderDocumentDocxErrors, RenderDocumentDocxResponses, RenderDocumentPdfData, RenderDocumentPdfErrors, RenderDocumentPdfResponses, RenderDocumentPptxData, RenderDocumentPptxErrors, RenderDocumentPptxResponses, RenderDocumentXlsxData, RenderDocumentXlsxErrors, RenderDocumentXlsxResponses, RetrieveKnowledgeData, RetrieveKnowledgeErrors, RetrieveKnowledgeResponses, StreamChatData, StreamChatErrors, StreamChatResponse, StreamChatResponses, StreamChatToolTurnData, StreamChatToolTurnErrors, StreamChatToolTurnResponse, StreamChatToolTurnResponses, StreamLlmData, StreamLlmErrors, StreamLlmResponse, StreamLlmResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -233,6 +233,36 @@ export const generateDocumentDocx = <ThrowOnError extends boolean = false>(optio
 export const renderDocumentPdf = <ThrowOnError extends boolean = false>(options: Options<RenderDocumentPdfData, ThrowOnError>): RequestResult<RenderDocumentPdfResponses, RenderDocumentPdfErrors, ThrowOnError> => (options.client ?? client).post<RenderDocumentPdfResponses, RenderDocumentPdfErrors, ThrowOnError>({
     security: [{ name: 'X-AI-Internal-Token', type: 'apiKey' }],
     url: '/internal/v1/documents/render-pdf',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Render a SpreadsheetSpec as XLSX
+ *
+ * Deterministically renders a validated SpreadsheetSpec without invoking an LLM. Cell values are written as text, numbers, or blanks; formulas are not accepted.
+ */
+export const renderDocumentXlsx = <ThrowOnError extends boolean = false>(options: Options<RenderDocumentXlsxData, ThrowOnError>): RequestResult<RenderDocumentXlsxResponses, RenderDocumentXlsxErrors, ThrowOnError> => (options.client ?? client).post<RenderDocumentXlsxResponses, RenderDocumentXlsxErrors, ThrowOnError>({
+    security: [{ name: 'X-AI-Internal-Token', type: 'apiKey' }],
+    url: '/internal/v1/documents/render-xlsx',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Compose a structured spreadsheet draft
+ *
+ * Uses the configured structured-output model to convert instructions and untrusted source materials into a bounded SpreadsheetSpec. It does not create or persist a file.
+ */
+export const composeSpreadsheet = <ThrowOnError extends boolean = false>(options: Options<ComposeSpreadsheetData, ThrowOnError>): RequestResult<ComposeSpreadsheetResponses, ComposeSpreadsheetErrors, ThrowOnError> => (options.client ?? client).post<ComposeSpreadsheetResponses, ComposeSpreadsheetErrors, ThrowOnError>({
+    security: [{ name: 'X-AI-Internal-Token', type: 'apiKey' }],
+    url: '/internal/v1/documents/compose-spreadsheet',
     ...options,
     headers: {
         'Content-Type': 'application/json',

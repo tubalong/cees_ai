@@ -222,6 +222,21 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponseEnvelope'
 
+  /assistant/action-drafts:
+    get:
+      summary: 列出当前成员待确认的 AI 写操作草稿
+      description: |
+        返回当前成员名下**仍未决策**的写操作草稿（PENDING_CONFIRMATION 且未过期），
+        按创建时间倒序。用途：客户端在对话页以常驻入口（如输入框上方的抽屉）统一展示
+        待确认项，避免「模型一次提出多个写操作时只有一个可见」以及「刷新页面后待确认项
+        凭空消失、用户只能重复发起」。
+        已过期草稿不返回；它们仍可由确认/取消接口按 409 语义处理。
+      operationId: listAssistantActionDrafts
+      tags: [Conversation]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: 待确认草稿列表, content: { application/json: { schema: { $ref: '#/components/schemas/AssistantActionDraftListEnvelope' } } } }
+
   /assistant/action-drafts/{draftId}/confirm:
     post:
       summary: 确认并执行 AI 写操作草稿
@@ -10693,8 +10708,11 @@ components:
           description: 本轮是否允许联网搜索；省略时默认关闭。关闭时 AI 不获得联网检索工具；若用户消息明确提到需要联网，服务端可为本轮自动临时启用并在 started 事件回传（见 TurnCapabilities.autoEnabled）
         connectorContexts:
           type: array
-          maxItems: 3
-          description: Desktop 从用户已授权的本地连接器取得的本轮结构化结果；不会作为业务事实或后续写操作权限依据
+          maxItems: 5
+          description: >-
+            Desktop 从用户已授权的本地连接器或本机工具读取的本轮只读上下文；
+            不会作为业务事实或写操作权限依据。
+            上限 5 = 连接器计划调用（最多 3）+ 本机操作结果（1）+ 本机能力声明（1）。
           items:
             $ref: '#/components/schemas/ConnectorContext'
 
@@ -10705,18 +10723,23 @@ components:
       properties:
         provider:
           type: string
-          enum: [DINGTALK, TENCENT_MEETING, WECOM, GITHUB]
+          enum: [DINGTALK, TENCENT_MEETING, WECOM, GITHUB, LOCAL_SYSTEM]
         toolId:
           type: string
           minLength: 1
           maxLength: 120
           pattern: '^[A-Za-z][A-Za-z0-9._-]{0,119}$'
-          description: Stable local connector tool ID; DWS uses a derived ID while Tencent Meeting and WeCom use provider tool names
+          description: >-
+            Stable local connector tool ID。DWS 使用派生 ID，腾讯会议与企业微信使用 provider 工具名；
+            `LOCAL_SYSTEM` 上下文只使用固定白名单（`disk_scan_volumes` / `disk_scan_directory` /
+            `local_quarantine` / `local_restore` / `local_cleanup` / `local_capabilities`），
+            其中 `local_capabilities` 仅声明客户端本机能力（如可将生成产物另存到用户选择的位置），
+            不构成任何执行授权。
         toolName:
           type: string
           minLength: 1
           maxLength: 240
-          description: DWS Schema canonical_path, retained for source display and audit context
+          description: Read-only tool display name retained for source display and audit context
         fetchedAt:
           type: string
           format: date-time
@@ -11961,6 +11984,40 @@ components:
       properties:
         success: { type: boolean, const: true }
         data: { $ref: '#/components/schemas/AssistantActionDraftResolution' }
+        requestId: { type: [string, 'null'] }
+
+    AssistantActionDraftSummary:
+      type: object
+      additionalProperties: false
+      description: >-
+        待确认草稿的展示视图。只含用户核对所需的业务值，不含工具参数快照与内部 ID。
+      required: [draftId, toolName, title, fields, expiresAt, conversationId, createdAt]
+      properties:
+        draftId: { type: string, format: uuid }
+        toolName: { type: string, description: 产生草稿的工具名；客户端用于选择图标与文案 }
+        title: { type: string, description: 动作标题，例如「新建部门」 }
+        fields:
+          type: array
+          items: { $ref: '#/components/schemas/ToolResultConfirmationField' }
+        expiresAt: { type: string, format: date-time }
+        conversationId: { type: string, format: uuid }
+        createdAt: { type: string, format: date-time }
+
+    AssistantActionDraftList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/AssistantActionDraftSummary' }
+
+    AssistantActionDraftListEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: '#/components/schemas/AssistantActionDraftList' }
         requestId: { type: [string, 'null'] }
 
     FinanceLedgerEntryListResponseEnvelope:

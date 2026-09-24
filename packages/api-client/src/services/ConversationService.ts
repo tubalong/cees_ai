@@ -2,6 +2,7 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
+import type { AssistantActionDraftListEnvelope } from '../models/AssistantActionDraftListEnvelope';
 import type { AssistantActionDraftResolutionEnvelope } from '../models/AssistantActionDraftResolutionEnvelope';
 import type { ConversationDetailResponseEnvelope } from '../models/ConversationDetailResponseEnvelope';
 import type { ConversationListResponseEnvelope } from '../models/ConversationListResponseEnvelope';
@@ -131,6 +132,23 @@ export class ConversationService {
                 502: `AI provider returned an invalid plan`,
                 503: `AI service or model is temporarily unavailable`,
             },
+        });
+    }
+    /**
+     * 列出当前成员待确认的 AI 写操作草稿
+     * 返回当前成员名下**仍未决策**的写操作草稿（PENDING_CONFIRMATION 且未过期），
+     * 按创建时间倒序。用途：客户端在对话页以常驻入口（如输入框上方的抽屉）统一展示
+     * 待确认项，避免「模型一次提出多个写操作时只有一个可见」以及「刷新页面后待确认项
+     * 凭空消失、用户只能重复发起」。
+     * 已过期草稿不返回；它们仍可由确认/取消接口按 409 语义处理。
+     *
+     * @returns AssistantActionDraftListEnvelope 待确认草稿列表
+     * @throws ApiError
+     */
+    public static listAssistantActionDrafts(): CancelablePromise<AssistantActionDraftListEnvelope> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/assistant/action-drafts',
         });
     }
     /**
