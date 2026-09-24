@@ -2520,3 +2520,191 @@ model PlatformAuditLog {
   @@index([resourceType, resourceId])
   @@map("platform_audit_logs")
 }
+
+/// AI 计费配置项上下架状态。
+enum AICreditConfigStatus {
+  ACTIVE
+  INACTIVE
+}
+
+/// 能力计量类型：按 token 或按次。
+enum AICreditMeterType {
+  TOKEN
+  PER_REQUEST
+}
+
+/// 能力类型：功能开关类（参与档位差异化）或通用类（全档开放，仅计费差异化）。
+enum AICreditCapabilityKind {
+  TIER_GATED
+  UNIVERSAL
+}
+
+/// 费率表计量维度：token 输入 / token 输出 / 按次。
+enum AICreditRateDimension {
+  TOKEN_INPUT
+  TOKEN_OUTPUT
+  PER_REQUEST
+}
+
+/// 订阅持续时间。
+enum AICreditSubscriptionDuration {
+  ONE_MONTH
+  SIX_MONTHS
+  TWELVE_MONTHS
+}
+
+/// 平台级 AI 计费能力目录；code 为能力标识，permissionCode 桥接现有 permissions.code。
+model AICreditCapability {
+  id               String                    @id @default(uuid()) @db.Uuid
+  /// 能力 code（chat / rag / image-gen / doc-gen / pdf-gen / ppt-gen / workflow / web-search / tool-calling）；
+  /// 唯一性由迁移中的部分唯一索引保证（WHERE deleted_at IS NULL，软删除后允许重建）。
+  code             String
+  name             String
+  description      String?
+  /// 计量类型：按 token 或按次。
+  meterType        AICreditMeterType         @default(TOKEN) @map("meter_type")
+  /// 能力类型：功能开关类（参与档位差异化）或通用类（全档开放，仅计费差异化）。
+  capabilityKind   AICreditCapabilityKind    @default(TIER_GATED) @map("capability_kind")
+  /// 映射现有 permissions.code；通用能力留空表示无需权限。
+  permissionCode   String?                   @map("permission_code")
+  sortOrder        Int                       @default(0) @map("sort_order")
+  status           AICreditConfigStatus      @default(ACTIVE)
+  tierCapabilities AICreditTierCapability[]
+  rateCards        AICreditRateCard[]
+  createdAt        DateTime                  @default(now()) @map("created_at")
+  updatedAt        DateTime                  @updatedAt @map("updated_at")
+  createdBy        String?                   @map("created_by") @db.Uuid
+  updatedBy        String?                   @map("updated_by") @db.Uuid
+  deletedAt        DateTime?                 @map("deleted_at")
+  version          Int                       @default(1)
+
+  @@index([status, sortOrder])
+  @@map("ai_credit_capabilities")
+}
+
+/// 订阅档位；code 兼作档位权限码（实现阶段在 permissions 表注册同 code 行）。
+model AICreditTier {
+  id                 String                    @id @default(uuid()) @db.Uuid
+  /// 档位 code，兼作档位权限码值（如 TIER_BASIC / TIER_PREMIUM）；
+  /// 唯一性由迁移中的部分唯一索引保证（WHERE deleted_at IS NULL，软删除后允许重建）。
+  code               String
+  name               String
+  description        String?
+  /// 每订阅单位基础额度（订阅单位倍率）。
+  monthlyBaseCredits Decimal                   @map("monthly_base_credits") @db.Decimal(18, 2)
+  status             AICreditConfigStatus      @default(ACTIVE)
+  prices             AICreditTierPrice[]
+  capabilities       AICreditTierCapability[]
+  createdAt          DateTime                  @default(now()) @map("created_at")
+  updatedAt          DateTime                  @updatedAt @map("updated_at")
+  createdBy          String?                   @map("created_by") @db.Uuid
+  updatedBy          String?                   @map("updated_by") @db.Uuid
+  deletedAt          DateTime?                 @map("deleted_at")
+  version            Int                       @default(1)
+
+  @@map("ai_credit_tiers")
+}
+
+/// 档位价格与单位单价，按订阅持续时间分别配置（每档 × 每持续时间一行）。
+model AICreditTierPrice {
+  id        String                     @id @default(uuid()) @db.Uuid
+  tierId    String                     @map("tier_id") @db.Uuid
+  tier      AICreditTier               @relation(fields: [tierId], references: [id], onDelete: Cascade)
+  duration  AICreditSubscriptionDuration
+  /// 档位价格（该持续时间）。
+  tierPrice Decimal                    @map("tier_price") @db.Decimal(18, 2)
+  /// 单位单价（该持续时间）；订阅总价 = (tierPrice + unitPrice × N) × 折扣。
+  unitPrice Decimal                    @map("unit_price") @db.Decimal(18, 2)
+  createdAt DateTime                   @default(now()) @map("created_at")
+  updatedAt DateTime                   @updatedAt @map("updated_at")
+
+  @@unique([tierId, duration])
+  @@map("ai_credit_tier_prices")
+}
+
+/// 档位功能集勾选关系；只关联功能开关类能力（通用能力全档开放、不写此表）。
+model AICreditTierCapability {
+  id           String             @id @default(uuid()) @db.Uuid
+  tierId       String             @map("tier_id") @db.Uuid
+  tier         AICreditTier       @relation(fields: [tierId], references: [id], onDelete: Cascade)
+  capabilityId String             @map("capability_id") @db.Uuid
+  capability   AICreditCapability @relation(fields: [capabilityId], references: [id])
+  createdAt    DateTime           @default(now()) @map("created_at")
+
+  @@unique([tierId, capabilityId])
+  @@index([capabilityId])
+  @@map("ai_credit_tier_capabilities")
+}
+
+/// 费率表：能力 × 模型组 × 计量维度；调价插入新 rateVersion 行，历史版本保留不删除、账目不追溯历史。
+model AICreditRateCard {
+  id                String               @id @default(uuid()) @db.Uuid
+  capabilityId      String               @map("capability_id") @db.Uuid
+  capability        AICreditCapability   @relation(fields: [capabilityId], references: [id])
+  /// 模型组维度，初始统一 "default"，模型池丰富后再分。
+  modelGroup        String               @default("default") @map("model_group")
+  dimension         AICreditRateDimension
+  /// token 倍率（上游 token → 计费 token）；仅 TOKEN 维度填写（输入/输出各自独立配置）。
+  tokenMultiplier   Decimal?             @map("token_multiplier") @db.Decimal(10, 4)
+  /// token→credit 比例（计费 token → credit）；仅 TOKEN 维度填写（输入/输出各自独立配置）。
+  creditPerToken    Decimal?             @map("credit_per_token") @db.Decimal(10, 4)
+  /// 按次 credit；仅 PER_REQUEST 维度填写。
+  perRequestCredits Decimal?             @map("per_request_credits") @db.Decimal(18, 2)
+  /// 业务版本号（调价新增版本行）；与公共字段乐观锁 version 区分。
+  rateVersion       Int                  @default(1) @map("rate_version")
+  status            AICreditConfigStatus @default(ACTIVE)
+  createdAt         DateTime             @default(now()) @map("created_at")
+  updatedAt         DateTime             @updatedAt @map("updated_at")
+  createdBy         String?              @map("created_by") @db.Uuid
+  updatedBy         String?              @map("updated_by") @db.Uuid
+  deletedAt         DateTime?            @map("deleted_at")
+  version           Int                  @default(1)
+
+  @@unique([capabilityId, modelGroup, dimension, rateVersion])
+  @@index([capabilityId, modelGroup, dimension])
+  @@map("ai_credit_rate_cards")
+}
+
+/// 加油包档位；永久有效（策略已定，不设有效期字段）。
+model AICreditBoosterTier {
+  id          String               @id @default(uuid()) @db.Uuid
+  name        String
+  credits     Decimal              @db.Decimal(18, 2)
+  price       Decimal              @db.Decimal(18, 2)
+  description String?
+  status      AICreditConfigStatus @default(ACTIVE)
+  createdAt   DateTime             @default(now()) @map("created_at")
+  updatedAt   DateTime             @updatedAt @map("updated_at")
+  createdBy   String?              @map("created_by") @db.Uuid
+  updatedBy   String?              @map("updated_by") @db.Uuid
+  deletedAt   DateTime?            @map("deleted_at")
+  version     Int                  @default(1)
+
+  @@map("ai_credit_booster_tiers")
+}
+
+/// 全局计费配置（单行表，固定主键 "default"）。
+model AICreditBillingConfig {
+  id                     String                        @id
+  /// 最小计量单位（credit）。
+  minCreditUnit          Decimal                       @default(0.1) @map("min_credit_unit") @db.Decimal(4, 1)
+  /// 每月重置日（企业本地时区）。
+  resetDay               Int                           @default(1) @map("reset_day")
+  /// 重置时区模式（已定企业本地时区，值预留扩展）。
+  resetTimezoneMode      String                        @default("TENANT_LOCAL") @map("reset_timezone_mode")
+  /// 未配置费率的调用一律拒绝。
+  rejectUnconfiguredRate Boolean                       @default(true) @map("reject_unconfigured_rate")
+  /// 可配置的订阅持续时间选项。
+  subscriptionDurations  AICreditSubscriptionDuration[] @default([]) @map("subscription_durations")
+  /// 半年折扣（9 折）。
+  halfYearlyDiscountRate Decimal                       @default(0.90) @map("half_yearly_discount_rate") @db.Decimal(4, 2)
+  /// 一年折扣（8 折）。
+  yearlyDiscountRate     Decimal                       @default(0.80) @map("yearly_discount_rate") @db.Decimal(4, 2)
+  /// 订阅单位数量上限。
+  maxSubscriptionUnits   Int                           @default(500) @map("max_subscription_units")
+  updatedAt              DateTime                      @updatedAt @map("updated_at")
+  updatedBy              String?                       @map("updated_by") @db.Uuid
+  version                Int                           @default(1)
+
+  @@map("ai_credit_billing_configs")
+}

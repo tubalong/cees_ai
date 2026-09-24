@@ -7,7 +7,8 @@
 
 ### 契约版本与迁移
 
-- **0.42.0**：当前开发基线。新增 GitHub 官方远程 MCP `POST /assistant/connectors/github/plan`，并将 `ConnectorContext.provider` 新增 `GITHUB`；客户端需重新生成。详见 [GitHub 连接器 API](github-connector-api.md)。
+- **0.43.0**：当前开发基线。新增平台 AI Credit 配置管理 API：`/platform/ai-credit/*` 共 21 个操作（能力目录、档位、费率、订阅参数、加油包、全局计费配置），列表响应统一为 `{ items }` 信封，权限码 `platform.aiCredit.read/write`。客户端需要重新生成。详见 [AI 计费系统设计](../product/ai-credit-system-design.md)。
+- **0.42.0**：新增 GitHub 官方远程 MCP `POST /assistant/connectors/github/plan`，并将 `ConnectorContext.provider` 新增 `GITHUB`；客户端需重新生成。详见 [GitHub 连接器 API](github-connector-api.md)。
 - **0.41.0**：`ConversationMessage` 新增必填但默认空数组的 `connectorContexts`，用于恢复企业微信业务权限授权提示；旧客户端可忽略，新客户端需重新生成。连接器上下文仍不构成 CEES 权限或业务事实。详见 [企业微信连接器 API](wecom-connector-api.md)。
 - **0.40.0**：腾讯会议从 Desktop 个人 Token + 远程 MCP 修正为托管官方 `@tencentcloud/tmeet` CLI + 浏览器 OAuth；保留无副作用的 `POST /assistant/connectors/tencent-meeting/plan` Schema，更新工具目录语义并删除 Desktop Token IPC。旧个人 Token 不迁移，升级后用户需重新完成 OAuth；详见 [腾讯会议连接器 API 与迁移说明](tencent-meeting-connector-api.md)。
 - **0.39.0**：新增 Desktop 托管企业微信官方 CLI、二维码智能机器人授权和无副作用的 `POST /assistant/connectors/wecom/plan`；`ConnectorContext.provider` 新增 `WECOM`，客户端需重新生成。详见 [企业微信连接器 API](wecom-connector-api.md)。
@@ -179,6 +180,31 @@ POST   /api/v1/platform/tenants/{tenantId}/restore
 GET    /api/v1/platform/tenants/{tenantId}/administrators
 POST   /api/v1/platform/tenants/{tenantId}/administrators
 DELETE /api/v1/platform/tenants/{tenantId}/administrators/{membershipId}
+
+GET    /api/v1/platform/ai-credit/capabilities
+POST   /api/v1/platform/ai-credit/capabilities
+GET    /api/v1/platform/ai-credit/capabilities/{capabilityId}
+PATCH  /api/v1/platform/ai-credit/capabilities/{capabilityId}
+DELETE /api/v1/platform/ai-credit/capabilities/{capabilityId}
+
+> `/platform/ai-credit/*` 为契约先行：其中 capabilities 5 个端点已实现（S6）、tiers 5 个端点已实现（S7），权限码 `platform.aiCredit.read/write`；其余路径（rate-cards/booster-tiers/billing-config）待后续实现。
+
+GET    /api/v1/platform/ai-credit/tiers
+POST   /api/v1/platform/ai-credit/tiers
+GET    /api/v1/platform/ai-credit/tiers/{tierId}
+PATCH  /api/v1/platform/ai-credit/tiers/{tierId}
+DELETE /api/v1/platform/ai-credit/tiers/{tierId}
+GET    /api/v1/platform/ai-credit/rate-cards
+POST   /api/v1/platform/ai-credit/rate-cards
+GET    /api/v1/platform/ai-credit/rate-cards/{rateCardId}
+PATCH  /api/v1/platform/ai-credit/rate-cards/{rateCardId}
+GET    /api/v1/platform/ai-credit/booster-tiers
+POST   /api/v1/platform/ai-credit/booster-tiers
+GET    /api/v1/platform/ai-credit/booster-tiers/{boosterTierId}
+PATCH  /api/v1/platform/ai-credit/booster-tiers/{boosterTierId}
+DELETE /api/v1/platform/ai-credit/booster-tiers/{boosterTierId}
+GET    /api/v1/platform/ai-credit/billing-config
+PATCH  /api/v1/platform/ai-credit/billing-config
 
 GET    /api/v1/tenants/current/invitations
 POST   /api/v1/tenants/current/invitations

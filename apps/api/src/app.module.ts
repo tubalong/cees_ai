@@ -6,6 +6,7 @@ import { DatabaseModule } from './database/database.module';
 import { TenantModule } from './tenant/tenant.module';
 import { AuthModule } from './auth/auth.module';
 import { PlatformTenantModule } from './platform-tenant/platform-tenant.module';
+import { PlatformAICreditModule } from './platform-ai-credit/platform-ai-credit.module';
 import { RedisModule } from './redis/redis.module';
 import { BusinessModules } from './modules';
 
@@ -20,6 +21,7 @@ import { BusinessModules } from './modules';
         TenantModule,
         AuthModule,
         PlatformTenantModule,
+        PlatformAICreditModule,
         ...BusinessModules,
     ],
     controllers: [HealthController],
