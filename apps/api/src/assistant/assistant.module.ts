@@ -15,6 +15,7 @@ import { AssistantConnectorController } from './api/assistant-connector.controll
 import { DingTalkConnectorPlannerService } from './connectors/dingtalk-connector-planner.service';
 import { TencentMeetingConnectorPlannerService } from './connectors/tencent-meeting-connector-planner.service';
 import { WeComConnectorPlannerService } from './connectors/wecom-connector-planner.service';
+import { GitHubConnectorPlannerService } from './connectors/github-connector-planner.service';
 import { ConversationService } from './conversation/conversation.service';
 import { EventService } from './conversation/event.service';
 import { AssistantActionDraftService } from './drafts/assistant-action-draft.service';
@@ -57,6 +58,7 @@ import { ListDocumentsTool } from './tools/executors/list-documents.tool';
     DingTalkConnectorPlannerService,
     TencentMeetingConnectorPlannerService,
     WeComConnectorPlannerService,
+    GitHubConnectorPlannerService,
     EventService,
     ContextBuilderService,
     IntentCapabilityService,

@@ -6,8 +6,9 @@ import { TenantGuard } from '../../tenant/tenant.guard';
 import { DingTalkConnectorPlannerService } from '../connectors/dingtalk-connector-planner.service';
 import { TencentMeetingConnectorPlannerService } from '../connectors/tencent-meeting-connector-planner.service';
 import { WeComConnectorPlannerService } from '../connectors/wecom-connector-planner.service';
+import { GitHubConnectorPlannerService } from '../connectors/github-connector-planner.service';
 import { toAssistantHttpException } from '../assistant.errors';
-import { PlanDingTalkConnectorRequestDto, PlanTencentMeetingConnectorRequestDto, PlanWeComConnectorRequestDto } from '../dto';
+import { PlanDingTalkConnectorRequestDto, PlanGitHubConnectorRequestDto, PlanTencentMeetingConnectorRequestDto, PlanWeComConnectorRequestDto } from '../dto';
 
 @ApiTags('Conversation')
 @ApiBearerAuth()
@@ -19,6 +20,7 @@ export class AssistantConnectorController {
     private readonly planner: DingTalkConnectorPlannerService,
     private readonly tencentMeetingPlanner: TencentMeetingConnectorPlannerService,
     private readonly weComPlanner: WeComConnectorPlannerService,
+    private readonly githubPlanner: GitHubConnectorPlannerService,
   ) {}
 
   @Post('dingtalk/plan')
@@ -52,6 +54,18 @@ export class AssistantConnectorController {
   async planWeCom(@Body() input: PlanWeComConnectorRequestDto) {
     try {
       return await this.weComPlanner.plan(input.query, input.tools);
+    } catch (error) {
+      throw toAssistantHttpException(error);
+    }
+  }
+
+  @Post('github/plan')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: '规划本机 GitHub 官方远程 MCP 调用' })
+  @ApiOkResponse({ description: '返回最多三个本地执行的 MCP 调用计划；服务端不接触 GitHub OAuth 凭据，也不执行工具' })
+  async planGitHub(@Body() input: PlanGitHubConnectorRequestDto) {
+    try {
+      return await this.githubPlanner.plan(input.query, input.tools);
     } catch (error) {
       throw toAssistantHttpException(error);
     }

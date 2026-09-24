@@ -342,7 +342,7 @@ function toPublicConnectorContexts(value: Prisma.JsonValue): ConnectorContextInp
     const fetchedAt = item.fetchedAt;
     const data = item.data;
     if (
-      (rawProvider !== 'DINGTALK' && rawProvider !== 'TENCENT_MEETING' && rawProvider !== 'WECOM')
+      (rawProvider !== 'DINGTALK' && rawProvider !== 'TENCENT_MEETING' && rawProvider !== 'WECOM' && rawProvider !== 'GITHUB')
       || typeof toolId !== 'string'
       || typeof toolName !== 'string'
       || typeof fetchedAt !== 'string'

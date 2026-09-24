@@ -7,7 +7,8 @@
 
 ### 契约版本与迁移
 
-- **0.41.0**：当前开发基线。`ConversationMessage` 新增必填但默认空数组的 `connectorContexts`，用于恢复企业微信业务权限授权提示；旧客户端可忽略，新客户端需重新生成。连接器上下文仍不构成 CEES 权限或业务事实。详见 [企业微信连接器 API](wecom-connector-api.md)。
+- **0.42.0**：当前开发基线。新增 GitHub 官方远程 MCP `POST /assistant/connectors/github/plan`，并将 `ConnectorContext.provider` 新增 `GITHUB`；客户端需重新生成。详见 [GitHub 连接器 API](github-connector-api.md)。
+- **0.41.0**：`ConversationMessage` 新增必填但默认空数组的 `connectorContexts`，用于恢复企业微信业务权限授权提示；旧客户端可忽略，新客户端需重新生成。连接器上下文仍不构成 CEES 权限或业务事实。详见 [企业微信连接器 API](wecom-connector-api.md)。
 - **0.40.0**：腾讯会议从 Desktop 个人 Token + 远程 MCP 修正为托管官方 `@tencentcloud/tmeet` CLI + 浏览器 OAuth；保留无副作用的 `POST /assistant/connectors/tencent-meeting/plan` Schema，更新工具目录语义并删除 Desktop Token IPC。旧个人 Token 不迁移，升级后用户需重新完成 OAuth；详见 [腾讯会议连接器 API 与迁移说明](tencent-meeting-connector-api.md)。
 - **0.39.0**：新增 Desktop 托管企业微信官方 CLI、二维码智能机器人授权和无副作用的 `POST /assistant/connectors/wecom/plan`；`ConnectorContext.provider` 新增 `WECOM`，客户端需重新生成。详见 [企业微信连接器 API](wecom-connector-api.md)。
 - **0.38.0**：删除 `/connectors/tencent-meeting/*` 服务端 OAuth、状态、解绑、工具和执行接口，新增无副作用的 `POST /assistant/connectors/tencent-meeting/plan`。

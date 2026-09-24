@@ -23,6 +23,7 @@ export namespace ConnectorContext {
         DINGTALK = 'DINGTALK',
         TENCENT_MEETING = 'TENCENT_MEETING',
         WECOM = 'WECOM',
+        GITHUB = 'GITHUB',
     }
 }
 

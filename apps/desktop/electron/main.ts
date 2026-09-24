@@ -8,6 +8,7 @@ import { ConnectorRegistry } from './connectors/core/connector-registry';
 import { DingTalkConnectorAdapter } from './connectors/dingtalk/dingtalk.adapter';
 import { TencentMeetingConnectorAdapter } from './connectors/tencent-meeting/tencent-meeting.adapter';
 import { WeComConnectorAdapter } from './connectors/wecom/wecom.adapter';
+import { GitHubConnectorAdapter } from './connectors/github/github.adapter';
 import {
     installContentSecurityPolicy,
     installIpcSenderGuard,
@@ -19,9 +20,11 @@ const connectorRegistry = new ConnectorRegistry();
 const dingtalkConnector = new DingTalkConnectorAdapter();
 const tencentMeetingConnector = new TencentMeetingConnectorAdapter();
 const weComConnector = new WeComConnectorAdapter();
+const githubConnector = new GitHubConnectorAdapter();
 connectorRegistry.register(dingtalkConnector);
 connectorRegistry.register(tencentMeetingConnector);
 connectorRegistry.register(weComConnector);
+connectorRegistry.register(githubConnector);
 const connectorHost = new ConnectorHost(connectorRegistry, publishConnectorStatus);
 
 function getDingTalkConnector(): DingTalkConnectorAdapter {
@@ -157,6 +160,7 @@ app.whenReady().then(() => {
     dingtalkConnector.configure(userDataPath);
     tencentMeetingConnector.configure(userDataPath);
     weComConnector.configure(userDataPath);
+    githubConnector.configure(userDataPath);
     // 安全基线：IPC 来源校验必须最先安装，保证后续注册的所有通道都受保护。
     installIpcSenderGuard();
     installContentSecurityPolicy(session.defaultSession);
