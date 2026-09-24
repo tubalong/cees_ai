@@ -1,6 +1,6 @@
 # AI Credit 计费配置表结构设计草案
 
-> 状态：**已评审通过（S1 完成），并已落地 Prisma schema 与 migration `20260923070447_ai_credit_billing_config`（S2 完成）、初始数据 seed（S3 完成，`prisma/ai-credit-billing.seed.ts`）、配置接口契约（S5 完成，`openapi.yaml` 0.40.0 的 `/platform/ai-credit/*` 共 21 个操作）、能力目录管理接口（S6 完成，`platform-ai-credit` 模块 5 端点 + 权限码 `platform.aiCredit.read/write`）、档位管理接口（S7 完成，tiers 5 端点：功能集只接受功能开关类能力、价格 duration 唯一、乐观锁 version、软删除）**。鉴权复用现有 PlatformJwtAuthGuard（无独立 S4）；下一步 S8（费率表管理）。
+> 状态：**已评审通过（S1 完成），并已落地 Prisma schema 与 migration `20260923070447_ai_credit_billing_config`（S2 完成）、初始数据 seed（S3 完成，`prisma/ai-credit-billing.seed.ts`）、配置接口契约（S5 完成，`openapi.yaml` 0.43.0 的 `/platform/ai-credit/*` 共 21 个操作）、能力目录管理接口（S6 完成，`platform-ai-credit` 模块 5 端点 + 权限码 `platform.aiCredit.read/write`）、档位管理接口（S7 完成，tiers 5 端点：功能集只接受功能开关类能力、价格 duration 唯一、乐观锁 version、软删除）**。鉴权复用现有 PlatformJwtAuthGuard（无独立 S4）；下一步 S8（费率表管理）。
 > 范围：第一阶段「超级管理员配置模块」所需的全部表。企业购买、企业池、结算扣减、限额等表属后续阶段（A3/A4/A5/B 系列），**本阶段不建**。
 > 规则来源：docs/product/ai-credit-system-design.md 与 docs/product/ai-credit-implementation-checklist.md。
 
