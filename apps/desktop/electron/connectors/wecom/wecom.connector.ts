@@ -217,13 +217,7 @@ export async function executeWeComCalls(calls: WeComConnectorPlannedCall[]): Pro
         if (call.toolId === WECOM_CURRENT_USER_PROFILE_TOOL_ID) {
             result = await fetchWeComCurrentUserProfile();
         } else {
-            const args = [...call.toolId.split('.'), '--json', JSON.stringify(call.arguments)];
-            if (call.toolId.endsWith('.download')) {
-                const outputDir = requireDownloadDirectory();
-                await mkdir(outputDir, { recursive: true });
-                args.push('--output-dir', outputDir);
-            }
-            result = await runWeComJson(args, 60_000);
+            result = await executeWeComOfficialToolCall(call);
         }
         contexts.push({
             provider: 'WECOM',
@@ -234,6 +228,25 @@ export async function executeWeComCalls(calls: WeComConnectorPlannedCall[]): Pro
         });
     }
     return contexts;
+}
+
+export async function executeWeComOfficialToolCall(
+    call: WeComConnectorPlannedCall,
+    executeJson: WeComJsonExecutor = runWeComJson,
+): Promise<unknown> {
+    const args = [...call.toolId.split('.'), '--json', JSON.stringify(call.arguments)];
+    if (call.toolId.endsWith('.download')) {
+        const outputDir = requireDownloadDirectory();
+        await mkdir(outputDir, { recursive: true });
+        args.push('--output-dir', outputDir);
+    }
+    try {
+        return await executeJson(args, 60_000);
+    } catch (error) {
+        const permissionResult = normalizeWeComPermissionError(call.toolId, error);
+        if (permissionResult) return permissionResult;
+        throw error;
+    }
 }
 
 export function normalizeWeComToolDefinition(value: unknown, fallbackDescription = ''): WeComConnectorTool {
@@ -336,19 +349,83 @@ export function normalizeWeComContactPermissionError(
     identity: WeComCurrentIdentity,
     error: unknown,
 ): Record<string, unknown> | null {
-    if (!(error instanceof LocalCliCommandError)) return null;
-    const payload = parseJsonRecord(error.stderr || error.stdout);
-    if (payload?.errcode !== 850002) return null;
-    const helpMessage = stringValue(payload.help_message)?.replace(/\\n/g, '\n') ?? '';
-    const permissionGrantUrl = helpMessage.match(/\]\((https:\/\/[^)\s]+)\)/)?.[1] ?? null;
-    return {
+    return normalizeWeComPermissionError(WECOM_CONTACT_SEARCH_TOOL_ID, error, {
         currentUser: { name: identity.authorizedUserName },
         profileComplete: false,
+    });
+}
+
+export function normalizeWeComPermissionError(
+    toolId: string,
+    error: unknown,
+    baseData: Record<string, unknown> = {},
+): Record<string, unknown> | null {
+    if (!(error instanceof LocalCliCommandError)) return null;
+    const payload = parseJsonRecord(error.stderr) ?? parseJsonRecord(error.stdout);
+    if (!payload) return null;
+    const permissionCode = typeof payload.errcode === 'number'
+        ? payload.errcode
+        : Number.parseInt(stringValue(payload.errcode) ?? '', 10);
+    const helpMessage = stringValue(payload.help_message)?.replace(/\\n/g, '\n') ?? '';
+    const errorMessage = [stringValue(payload.errmsg), stringValue(payload.message), helpMessage]
+        .filter(Boolean)
+        .join('\n');
+    const permissionGrantUrl = extractWeComPermissionGrantUrl(helpMessage);
+    const isPermissionError = permissionCode === 850001
+        || permissionCode === 850002
+        || Boolean(permissionGrantUrl && /(?:未授权|无权限|权限不足|no authorization|permission)/i.test(errorMessage));
+    if (!isPermissionError) return null;
+    const capability = inferWeComCapability(toolId, helpMessage);
+    return {
+        ...baseData,
         permissionRequired: true,
-        missingPermission: '通讯录',
-        notice: '已确认当前授权用户身份，但企业微信机器人尚未获得通讯录使用权限，授权后即可查询部门、职务和邮箱等个人资料',
+        ...(Number.isFinite(permissionCode) ? { permissionCode } : {}),
+        capability,
+        missingPermission: capability,
+        creatorRequired: true,
+        notice: `当前企业微信机器人尚未获得${capability}使用权限。机器人创建者完成官方授权后即可重新查询`,
         ...(permissionGrantUrl ? { permissionGrantUrl } : {}),
     };
+}
+
+export function normalizeWeComPermissionGrantUrl(value: string): string | null {
+    try {
+        const url = new URL(value);
+        if (url.protocol !== 'https:' || url.hostname !== 'work.weixin.qq.com') return null;
+        if (!url.pathname.startsWith('/ai/aiHelper/')) return null;
+        url.username = '';
+        url.password = '';
+        url.hash = '';
+        return url.toString();
+    } catch {
+        return null;
+    }
+}
+
+function extractWeComPermissionGrantUrl(helpMessage: string): string | null {
+    const candidate = helpMessage.match(/\]\((https:\/\/[^)\s]+)\)/)?.[1]
+        ?? helpMessage.match(/https:\/\/[^\s)\]}]+/)?.[0]
+        ?? '';
+    return normalizeWeComPermissionGrantUrl(candidate);
+}
+
+function inferWeComCapability(toolId: string, helpMessage: string): string {
+    const explicit = helpMessage.match(/[「“"]([^」”"]{1,20})[」”"](?:使用)?权限/)?.[1]?.trim();
+    if (explicit) return explicit;
+    const namespace = toolId.split('.')[0];
+    return ({
+        contact: '通讯录',
+        mail: '邮箱',
+        email: '邮箱',
+        doc: '文档',
+        document: '文档',
+        drive: '微盘',
+        calendar: '日历',
+        meeting: '会议',
+        chat: '消息',
+        message: '消息',
+        todo: '待办',
+    } as Record<string, string>)[namespace] ?? '对应业务';
 }
 
 export function assertWeComCallAllowed(tool: WeComConnectorTool, call: WeComConnectorPlannedCall): void {

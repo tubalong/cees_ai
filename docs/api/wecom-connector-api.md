@@ -2,7 +2,7 @@
 
 ## 1. 契约版本
 
-公开契约 `0.39.0` 新增企业微信官方 CLI 动态工具规划，并扩展会话连接器上下文的 provider。该版本是兼容新增，但客户端必须重新生成以获得企业微信模型和规划方法。
+公开契约 `0.39.0` 新增企业微信官方 CLI 动态工具规划，并扩展会话连接器上下文的 provider。`0.41.0` 在 `ConversationMessage` 增加 `connectorContexts`，用于从历史用户消息恢复业务权限授权提示。两次变更均为兼容新增，但客户端必须重新生成以获得对应模型。
 
 ## 2. 规划接口
 
@@ -78,6 +78,27 @@ Desktop 提交用户问题和从本机官方 CLI 动态发现、过滤后的工�
 ```
 
 每轮所有连接器上下文合计最多三项。该数据只用于生成本轮回答，不是 CEES 权限、身份或正式业务事实，也不能作为后续写操作授权。
+
+会话详情会在原 USER 消息上回传 `connectorContexts`，其他角色返回空数组。Desktop 可据此恢复确定性的授权卡片；不得仅依赖模型文本判断是否需要授权。
+
+企业微信 CLI 返回业务域缺权时，Desktop 归一化为：
+
+```json
+{
+  "permissionRequired": true,
+  "permissionCode": 850002,
+  "capability": "邮箱",
+  "missingPermission": "邮箱",
+  "creatorRequired": true,
+  "notice": "当前企业微信机器人尚未获得邮箱使用权限。机器人创建者完成官方授权后即可重新查询",
+  "permissionGrantUrl": "https://work.weixin.qq.com/ai/aiHelper/authorizationList?..."
+}
+```
+
+- 授权地址必须是 `https://work.weixin.qq.com/ai/aiHelper/*`，Main Process 与 Renderer 均需校验；
+- 不返回原始 `help_message`、机器人 ID、授权用户 ID 或其他身份上下文；
+- 创建者点击官方入口授权，非创建者联系机器人创建者；
+- 授权完成后可重试原问题，无需重装或重新扫码连接器。
 
 ## 4. 执行责任
 

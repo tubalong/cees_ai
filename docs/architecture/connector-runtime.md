@@ -98,7 +98,7 @@ Renderer -> CEES API WeComConnectorPlannerService
 | `supportsDisconnect` | `true` |
 | `supportsDynamicTools` | `true` |
 
-Desktop 固定下载 `@wecom/cli 1.3.2` 平台包并校验 SHA-256，只提取目标二进制。官方 CLI 的独立配置目录为 `userData/connectors/wecom/config`，不会上传 CEES API。企业微信能力由官方 CLI 动态目录和机器人实际授权决定，不承诺考勤、OA 审批或完整组织同步。
+Desktop 固定下载 `@wecom/cli 1.3.2` 平台包并校验 SHA-256，只提取目标二进制。官方 CLI 的独立配置目录为 `userData/connectors/wecom/config`，不会上传 CEES API。企业微信能力由官方 CLI 动态目录和机器人实际授权决定，不承诺考勤、OA 审批或完整组织同步。动态工具缺少业务权限时，Adapter 返回结构化授权上下文，Renderer 展示官方授权入口并支持重新执行原问题。
 
 ## 5. Remote MCP Transport
 
@@ -155,6 +155,12 @@ Desktop 固定下载 `@wecom/cli 1.3.2` 平台包并校验 SHA-256，只提取�
 - 各连接器按官方协议选择凭据位置：需要服务端 Secret 的放 API，官方本地 CLI 的 OAuth 凭据由 CLI 在 Desktop 专属目录管理，不能一刀切。
 
 ## 9. UI 约定
+
+- 连接成功只表示基础身份授权有效，不表示所有业务域均已授权；
+- 企业微信业务缺权必须展示确定性授权卡片，不允许只依赖模型文本；
+- 官方授权 URL 必须由 Main Process 和 Renderer 双重限制为 `https://work.weixin.qq.com/ai/aiHelper/*`；
+- 授权卡片需区分机器人创建者与普通使用者，并提供授权完成后的原问题重试；
+- USER 消息的 `connectorContexts` 随会话详情回传，用于刷新后恢复卡片，不得被解释为 CEES 权限事实。
 
 连接器市场使用紧凑等高卡片。未连接态使用“+ / 连接”操作并直接进入连接流程；已连接态使用“去对话”操作并新建助手会话；卡片主体打开详情。外层卡片不展示传输协议、安装版本等技术字段，完整描述、账号状态、解绑和重新连接进入详情。
 

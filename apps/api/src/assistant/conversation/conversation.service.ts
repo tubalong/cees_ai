@@ -13,6 +13,7 @@ import {
 import { PrismaService } from '../../database/prisma.service';
 import { TenantContext } from '../../tenant/tenant-context';
 import type {
+  ConnectorContextInput,
   PublicConversation,
   PublicConversationDetail,
   PublicConversationListResult,
@@ -142,6 +143,7 @@ export class ConversationService {
         content: true,
         imageFileIds: true,
         documentFileIds: true,
+        connectorContexts: true,
         createdAt: true,
         turnId: true,
         toolCallId: true,
@@ -158,6 +160,9 @@ export class ConversationService {
         content: message.content,
         imageFileIds: message.imageFileIds,
         documentFileIds: message.documentFileIds,
+        connectorContexts: message.role === ConversationMessageRole.USER
+          ? toPublicConnectorContexts(message.connectorContexts)
+          : [],
         resources:
           message.toolCall?.executedResourceType && message.toolCall.executedResourceId
             ? [
@@ -325,6 +330,29 @@ export class ConversationService {
       data: { title, version: { increment: 1 } },
     });
   }
+}
+
+function toPublicConnectorContexts(value: Prisma.JsonValue): ConnectorContextInput[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
+    const rawProvider = item.provider;
+    const toolId = item.toolId;
+    const toolName = item.toolName;
+    const fetchedAt = item.fetchedAt;
+    const data = item.data;
+    if (
+      (rawProvider !== 'DINGTALK' && rawProvider !== 'TENCENT_MEETING' && rawProvider !== 'WECOM')
+      || typeof toolId !== 'string'
+      || typeof toolName !== 'string'
+      || typeof fetchedAt !== 'string'
+      || !data
+      || typeof data !== 'object'
+      || Array.isArray(data)
+    ) return [];
+    const provider: ConnectorContextInput['provider'] = rawProvider;
+    return [{ provider, toolId, toolName, fetchedAt, data: data as Record<string, unknown> }];
+  }).slice(0, 3);
 }
 
 function toPublicConversation(conversation: {

@@ -11,9 +11,12 @@ const {
     WECOM_CLI_VERSION,
     assertWeComCallAllowed,
     classifyWeComToolRisk,
+    executeWeComOfficialToolCall,
     extractWeComBinaryArchive,
     fetchWeComCurrentUserProfile,
     normalizeWeComContactPermissionError,
+    normalizeWeComPermissionError,
+    normalizeWeComPermissionGrantUrl,
     normalizeWeComToolDefinition,
     parseWeComCurrentIdentity,
 } = require('../dist-electron/connectors/wecom/wecom.connector.js');
@@ -102,11 +105,68 @@ test('企业微信通讯录未授权时返回可操作授权提示而不是声�
         currentUser: { name: '张三' },
         profileComplete: false,
         permissionRequired: true,
+        permissionCode: 850002,
+        capability: '通讯录',
         missingPermission: '通讯录',
-        notice: '已确认当前授权用户身份，但企业微信机器人尚未获得通讯录使用权限，授权后即可查询部门、职务和邮箱等个人资料',
+        creatorRequired: true,
+        notice: '当前企业微信机器人尚未获得通讯录使用权限。机器人创建者完成官方授权后即可重新查询',
         permissionGrantUrl: permissionUrl,
     });
     assert.equal(JSON.stringify(normalized).includes('internal-user-id'), false);
+});
+
+test('企业微信普通工具缺权时转换为结构化授权结果', async () => {
+    const permissionUrl = 'https://work.weixin.qq.com/ai/aiHelper/authorizationList?type=mail';
+    const error = new LocalCliCommandError({
+        message: 'Command failed',
+        command: 'wecom-cli',
+        args: ['mail', 'messages', 'list'],
+        stderr: JSON.stringify({
+            errcode: 850001,
+            errmsg: 'permission denied',
+            help_message: `当前机器人未被授权「邮箱」使用权限\\n[前往授权](${permissionUrl})`,
+        }),
+        exitCode: 1,
+    });
+
+    const result = await executeWeComOfficialToolCall({
+        toolId: 'mail.messages.list',
+        arguments: { limit: 20 },
+    }, async () => { throw error; });
+
+    assert.deepEqual(result, {
+        permissionRequired: true,
+        permissionCode: 850001,
+        capability: '邮箱',
+        missingPermission: '邮箱',
+        creatorRequired: true,
+        notice: '当前企业微信机器人尚未获得邮箱使用权限。机器人创建者完成官方授权后即可重新查询',
+        permissionGrantUrl: permissionUrl,
+    });
+});
+
+test('企业微信授权入口只接受官方 HTTPS 地址', () => {
+    assert.equal(
+        normalizeWeComPermissionGrantUrl('https://work.weixin.qq.com/ai/aiHelper/authorizationList?type=4#fragment'),
+        'https://work.weixin.qq.com/ai/aiHelper/authorizationList?type=4',
+    );
+    assert.equal(normalizeWeComPermissionGrantUrl('https://example.com/ai/aiHelper/authorizationList'), null);
+    assert.equal(normalizeWeComPermissionGrantUrl('http://work.weixin.qq.com/ai/aiHelper/authorizationList'), null);
+    assert.equal(normalizeWeComPermissionGrantUrl('https://work.weixin.qq.com/evil'), null);
+
+    const unsafeError = new LocalCliCommandError({
+        message: 'Command failed',
+        command: 'wecom-cli',
+        args: ['mail', 'messages', 'list'],
+        stderr: JSON.stringify({
+            errcode: 850002,
+            help_message: '当前机器人未被授权「邮箱」使用权限 [前往授权](https://example.com/phishing)',
+        }),
+        exitCode: 1,
+    });
+    const normalized = normalizeWeComPermissionError('mail.messages.list', unsafeError);
+    assert.equal(normalized.permissionGrantUrl, undefined);
+    assert.equal(normalized.capability, '邮箱');
 });
 
 test('企业微信工具解析 Schema 引用并压缩为安全对象参数', () => {

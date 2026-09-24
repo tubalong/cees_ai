@@ -110,6 +110,7 @@ describe('ConversationService', () => {
       role: 'USER',
       content: '你好',
       imageFileIds: [],
+      connectorContexts: [],
       resources: [],
       sources: [],
       citations: [],
@@ -121,10 +122,42 @@ describe('ConversationService', () => {
         role: true,
         content: true,
         imageFileIds: true,
+        connectorContexts: true,
         turn: { select: { seq: true } },
         toolCall: { select: { executedResourceType: true, executedResourceId: true, result: true } },
       }),
     });
+  });
+
+  it('returns persisted connector contexts only on the owning message', async () => {
+    const prisma = createPrismaMock();
+    prisma.conversation.findFirst.mockResolvedValue(conversationRecord());
+    const connectorContexts = [{
+      provider: 'WECOM',
+      toolId: 'mail.messages.list',
+      toolName: 'mail.messages.list',
+      fetchedAt: '2026-09-23T08:00:00.000Z',
+      data: {
+        permissionRequired: true,
+        capability: '邮箱',
+        authorizationUrl: 'https://work.weixin.qq.com/ai/aiHelper/authorizationList?type=4',
+      },
+    }];
+    prisma.conversationMessage.findMany.mockResolvedValue([
+      messageRecord({ connectorContexts }),
+      messageRecord({
+        id: '70000000-0000-4000-8000-000000000099',
+        role: ConversationMessageRole.ASSISTANT,
+        connectorContexts,
+        createdAt: new Date('2026-09-01T00:00:02.000Z'),
+      }),
+    ]);
+    const service = createService(prisma);
+
+    const result = await service.getDetail(CONVERSATION_ID);
+
+    expect(result.messages[0].connectorContexts).toEqual(connectorContexts);
+    expect(result.messages[1].connectorContexts).toEqual([]);
   });
 
   it('orders messages by turn seq and fills stable resources for TOOL messages', async () => {
@@ -432,6 +465,8 @@ function messageRecord(overrides: Record<string, unknown> = {}): Record<string, 
     role: ConversationMessageRole.USER,
     content: '你好',
     imageFileIds: [],
+    documentFileIds: [],
+    connectorContexts: [],
     toolCallId: null,
     createdAt: new Date('2026-09-01T00:00:01.000Z'),
     ...overrides,
