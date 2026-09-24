@@ -1,21 +1,28 @@
 import { DocumentVisibility } from '@prisma/client';
 import { DocumentService } from '../../../document/document.service';
+import { AssistantMessageContentService } from '../../runtime/message-content.service';
 import { ToolRegistryService } from '../tool-registry';
 import { GenerateDocumentTool } from './generate-document.tool';
 
 describe('GenerateDocumentTool', () => {
     let registry: ToolRegistryService;
-    let documentService: jest.Mocked<Pick<DocumentService, 'createGeneratedDocument'>>;
+    let documentService: jest.Mocked<Pick<DocumentService, 'createGeneratedDocument' | 'createGeneratedSpreadsheet'>>;
+    let messageContent: jest.Mocked<Pick<AssistantMessageContentService, 'resolveTurnDocumentSourceMaterials'>>;
 
     beforeEach(() => {
         registry = new ToolRegistryService();
-        documentService = { createGeneratedDocument: jest.fn() };
-        const tool = new GenerateDocumentTool(registry, documentService as unknown as DocumentService);
+        documentService = { createGeneratedDocument: jest.fn(), createGeneratedSpreadsheet: jest.fn() };
+        messageContent = { resolveTurnDocumentSourceMaterials: jest.fn().mockResolvedValue([]) };
+        const tool = new GenerateDocumentTool(
+            registry,
+            documentService as unknown as DocumentService,
+            messageContent as unknown as AssistantMessageContentService,
+        );
         tool.onModuleInit();
     });
 
-    it('self-registers three format tools with the ai.document.generate permission', () => {
-        for (const name of ['generate_docx', 'generate_pdf', 'generate_pptx']) {
+    it('self-registers four format tools with the ai.document.generate permission', () => {
+        for (const name of ['generate_docx', 'generate_pdf', 'generate_pptx', 'generate_xlsx']) {
             const definition = registry.get(name);
             expect(definition).toBeDefined();
             expect(definition?.requiredPermissions).toEqual(['ai.document.generate']);
@@ -89,5 +96,37 @@ describe('GenerateDocumentTool', () => {
         // 回喂模型的摘要不携带系统内部信息：文档 ID 与模型名不得进入模型答复。
         expect(result.summary).not.toContain('doc-1');
         expect(result.summary).not.toContain('doc-model');
+    });
+
+    it('rebuilds current-turn attachments before generating XLSX', async () => {
+        const definition = registry.get('generate_xlsx');
+        messageContent.resolveTurnDocumentSourceMaterials.mockResolvedValue([
+            { id: 'file-1', title: '收入.xlsx', content: '工作表：收入\n项目,金额\n华东,100' },
+        ]);
+        documentService.createGeneratedSpreadsheet.mockResolvedValue({
+            documentId: 'sheet-1',
+            title: '收入调整表',
+            contentLength: 48,
+            provider: 'openai_compatible',
+            model: 'sheet-model',
+        });
+
+        const result = await definition!.execute({
+            tenantId: 't-1', userId: 'u-1', membershipId: 'm-1', requestId: 'r-1',
+            conversationId: 'c-1', turnId: 'turn-1', toolCallId: 'tc-1',
+            executionOwner: 'api:test', executionToken: 'execution-token-1',
+            permissions: ['ai.document.generate'], knowledgeBaseEnabled: false, webSearchEnabled: false,
+        }, { instruction: '把金额提高 10%', visibility: 'PRIVATE' });
+
+        expect(messageContent.resolveTurnDocumentSourceMaterials).toHaveBeenCalledWith(
+            'turn-1',
+            expect.objectContaining({ tenantId: 't-1', userId: 'u-1' }),
+        );
+        expect(documentService.createGeneratedSpreadsheet).toHaveBeenCalledWith(expect.objectContaining({
+            instruction: '把金额提高 10%',
+            sourceMaterials: [expect.objectContaining({ title: '收入.xlsx' })],
+        }));
+        expect(result).toEqual(expect.objectContaining({ resourceType: 'DOCUMENT', resourceId: 'sheet-1' }));
+        expect(result.summary).toContain('XLSX 表格已生成');
     });
 });

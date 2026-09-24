@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from app.api.generated.models import (
+    Backend,
     KnowledgeIndexRequest,
     KnowledgeRetrieveRequest,
     KnowledgeRetrieveScope,
@@ -17,6 +18,17 @@ from app.knowledge.ingestion import index_document
 from app.knowledge.retrieval import retrieve_chunks
 from app.knowledge.stores import InMemoryVectorStore
 
+
+def test_memory_store_reports_a_volatile_index_identity() -> None:
+    # memory 后端只活在进程内：backend/durable 面向调用方声明这一事实，
+    # epoch 在同一实例内恒定、换实例即变化，上层据此判定存量向量已丢失。
+    store = InMemoryVectorStore()
+    status = store.describe()
+    assert status.backend == Backend.memory
+    assert status.durable is False
+    assert status.epoch
+    assert store.describe().epoch == status.epoch
+    assert InMemoryVectorStore().describe().epoch != status.epoch
 DOC_ID = "doc-1"
 VERSION_ID = "docv-1"
 

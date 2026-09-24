@@ -10,6 +10,14 @@ import {
 
 const HEADERS = ['发生日期', '方向', '金额', '币种', '科目编码', '科目名称', '部门ID', '项目ID', '交易对方', '摘要', '凭证号'];
 const PAGE_SIZE = 20;
+/** 系统内部 ID 的格式（UUID v1-v5）：8-4-4-4-12 十六进制。可选列填入其它值（如 D003）无法关联。 */
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+interface IgnoredLedgerReference {
+    rowNumber: number;
+    column: '部门ID' | '项目ID';
+    value: string;
+}
 
 const IMPORT_STATUS_LABELS: Record<string, { text: string; color?: string }> = {
     PENDING: { text: '待处理' },
@@ -45,37 +53,50 @@ function LedgerUploadTab({ canManage, onImported }: { canManage: boolean; onImpo
     const [keepSource, setKeepSource] = useState(false);
     const [result, setResult] = useState<FinanceLedgerImport>();
     const [busy, setBusy] = useState(false);
+    /** 表格里填了但无法关联的部门/项目值；导入时会被忽略而不是让整批失败。 */
+    const [ignoredRefs, setIgnoredRefs] = useState<IgnoredLedgerReference[]>([]);
 
     const parseFile = async (file: File): Promise<void> => {
-        setBusy(true); setResult(undefined);
+        setBusy(true); setResult(undefined); setIgnoredRefs([]);
         try {
             const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array' });
-            const sheet = workbook.Sheets[workbook.SheetNames[0]];
-            const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: '', raw: false });
-            const headerIndex = matrix.findIndex((line) => HEADERS.every((header) => line.map(String).includes(header)));
-            if (headerIndex < 0) throw new Error('未找到标准台账表头，请先下载模板');
+            // 选取**含标准表头的工作表**，而不是固定第一个：台账文件常带汇总/说明等附表，
+            // 固定读第一张会让「手动上传」与助手侧解析（按表头定位）出现不一致。
+            const located = locateLedgerSheet(workbook);
+            if (!located) throw new Error('未找到标准台账表头，请先下载模板');
+            const { matrix, headerIndex } = located;
             const headers = matrix[headerIndex].map((value) => String(value).trim());
+            const ignored: IgnoredLedgerReference[] = [];
             const parsed = matrix.slice(headerIndex + 1).map((line, index) => ({ line, rowNumber: headerIndex + index + 2 })).filter(({ line }) => line.some((value) => String(value).trim())).map(({ line, rowNumber }) => {
-                const read = (header: string): string => String(line[headers.indexOf(header)] ?? '').trim();
+                const readValue = (header: string): unknown => line[headers.indexOf(header)] ?? '';
+                const read = (header: string): string => String(readValue(header)).trim();
                 const directionText = read('方向').toUpperCase();
                 const direction = ['收入', 'INCOME'].includes(directionText) ? 'INCOME' : ['支出', 'EXPENSE'].includes(directionText) ? 'EXPENSE' : undefined;
                 if (!direction) throw new Error(`第 ${rowNumber} 行方向只能是收入或支出`);
-                const amount = Number(read('金额'));
-                if (!Number.isFinite(amount) || amount <= 0) throw new Error(`第 ${rowNumber} 行金额必须大于 0`);
-                const occurredOn = excelDate(read('发生日期'));
+                const amount = parseLedgerAmount(readValue('金额'), rowNumber);
+                const occurredOn = excelDate(readValue('发生日期'));
                 if (!/^\d{4}-\d{2}-\d{2}$/.test(occurredOn)) throw new Error(`第 ${rowNumber} 行发生日期格式不正确`);
                 const voucherNo = read('凭证号');
                 if (!voucherNo) throw new Error(`第 ${rowNumber} 行凭证号不能为空`);
+                // 部门/项目是**可选**关联列，且必须是系统内部 UUID。历史表格常填部门编码（如 D003），
+                // 直接上报会被服务端 DTO 校验整批拒绝、只回一个看不懂的 400；这里改成忽略并明确告知，
+                // 与助手侧 import_finance_ledger 的处理一致。
+                const departmentRef = read('部门ID');
+                const projectRef = read('项目ID');
+                if (departmentRef && !UUID_PATTERN.test(departmentRef)) ignored.push({ rowNumber, column: '部门ID', value: departmentRef });
+                if (projectRef && !UUID_PATTERN.test(projectRef)) ignored.push({ rowNumber, column: '项目ID', value: projectRef });
                 return {
                     rowNumber, occurredOn, direction, amount, currency: (read('币种') || 'CNY').toUpperCase(),
                     categoryCode: read('科目编码') || null, categoryName: read('科目名称') || null,
-                    departmentId: read('部门ID') || null, projectId: read('项目ID') || null,
+                    departmentId: UUID_PATTERN.test(departmentRef) ? departmentRef : null,
+                    projectId: UUID_PATTERN.test(projectRef) ? projectRef : null,
                     counterparty: read('交易对方') || null, summary: read('摘要') || null, voucherNo,
                 } satisfies FinanceLedgerRow;
             });
             if (!parsed.length) throw new Error('台账中没有可导入记录');
-            setFileName(file.name); setRows(parsed); setSourceFile(file); message.success(`已解析 ${parsed.length} 行`);
-        } catch (error) { setRows([]); setSourceFile(undefined); message.error(error instanceof Error ? error.message : '解析失败'); } finally { setBusy(false); }
+            setFileName(file.name); setRows(parsed); setSourceFile(file); setIgnoredRefs(ignored);
+            message.success(`已解析 ${parsed.length} 行`);
+        } catch (error) { setRows([]); setSourceFile(undefined); setIgnoredRefs([]); message.error(error instanceof Error ? error.message : '解析失败'); } finally { setBusy(false); }
     };
 
     const submit = async (): Promise<void> => {
@@ -95,7 +116,17 @@ function LedgerUploadTab({ canManage, onImported }: { canManage: boolean; onImpo
 
     return <>
         <Card title="收支台账上传" extra={<Space><Button icon={<DownloadOutlined />} onClick={downloadTemplate}>下载模板</Button>{canManage && <Upload accept=".xlsx,.xls,.csv" showUploadList={false} beforeUpload={(file) => { void parseFile(file); return false; }}><Button icon={<UploadOutlined />} loading={busy}>选择台账</Button></Upload>}<Button type="primary" disabled={!canManage || !rows.length} loading={busy} onClick={() => void submit()}>确认导入</Button></Space>}>
-            <Alert type="info" showIcon message="财务首页按昨日和上月展示收支；导入后系统会自动重算日/月快照。相同日期、方向和凭证号重复上传时自动跳过。回滚在「导入历史」页签按批次整批撤销。" />
+            <Alert type="info" showIcon message="财务首页按昨日和上月展示收支；导入后系统会自动重算日/月快照。相同日期、方向和凭证号重复上传时自动跳过。回滚在「导入历史」页签按批次整批撤销。「部门ID」「项目ID」为可选列，需填系统内部 ID；留空不影响金额导入。" />
+            {ignoredRefs.length > 0 && <Alert
+                type="warning"
+                showIcon
+                message={`有 ${ignoredRefs.length} 处「部门ID / 项目ID」不是系统内部 ID，导入时将不建立关联（金额与凭证不受影响）`}
+                description={<>
+                    <div>被忽略的值：{[...new Set(ignoredRefs.map((item) => `${item.column}=${item.value}`))].slice(0, 10).join('、')}</div>
+                    <div>涉及行号：{ignoredRefs.slice(0, 12).map((item) => item.rowNumber).join('、')}{ignoredRefs.length > 12 ? ' 等' : ''}</div>
+                    <div>系统内部 ID 形如 <code>4e78c20b-11d0-48de-b256-2471fc9fd2cd</code>（36 位，8-4-4-4-12 分段）。若需要按部门/项目统计，请在表格中改填系统里的真实 ID；部门编码、项目编号（如 D003、PRJ-001）无法直接关联。</div>
+                </>}
+            />}
             {rows.length > 0 && <div className="finance-ledger-options">
                 <Checkbox checked={keepSource} disabled={!canManage} onChange={(event) => setKeepSource(event.target.checked)}>
                     留档原始文件（便于事后核对与审计，会占用对象存储空间）
@@ -212,11 +243,62 @@ function LedgerEntriesTab(): JSX.Element {
     </Card>;
 }
 
+/**
+ * 定位台账表：返回第一个含标准表头的工作表及其矩阵与表头行号，找不到时返回 undefined。
+ * 与助手侧解析口径一致（都按表头定位台账表），避免同一份文件两条路径结果不同。
+ */
+function locateLedgerSheet(workbook: XLSX.WorkBook): { matrix: unknown[][]; headerIndex: number } | undefined {
+    for (const name of workbook.SheetNames) {
+        const sheet = workbook.Sheets[name];
+        if (!sheet) continue;
+        const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: '', raw: true });
+        const headerIndex = matrix.findIndex((line) => HEADERS.every((header) => line.map(String).includes(header)));
+        if (headerIndex >= 0) return { matrix, headerIndex };
+    }
+    return undefined;
+}
+
 function downloadTemplate(): void {
     const workbook = XLSX.utils.book_new();
     const sheet = XLSX.utils.aoa_to_sheet([HEADERS, ['2026-09-20', '收入', 10000, 'CNY', '6001', '主营业务收入', '', '', '示例客户', '项目回款', 'V20260920001']]);
     XLSX.utils.book_append_sheet(workbook, sheet, '收支台账');
+    // 说明页放在第二个：导入只读取第一个工作表，多一张说明不会影响解析。
+    const guide = XLSX.utils.aoa_to_sheet([
+        ['列名', '是否必填', '填写说明'],
+        ['发生日期', '必填', '日期格式，如 2026-09-20；也可以是 Excel 日期单元格'],
+        ['方向', '必填', '只能填「收入」或「支出」'],
+        ['金额', '必填', '大于 0 的数字；可带千分位与货币符号，如 15,000.00'],
+        ['币种', '可选', '三位货币代码，留空默认 CNY'],
+        ['科目编码', '可选', '自定义科目编码，如 6001'],
+        ['科目名称', '可选', '自定义科目名称，如 主营业务收入'],
+        ['部门ID', '可选', '必须是系统中的部门 UUID，形如 4e78c20b-11d0-48de-b256-2471fc9fd2cd；填部门编码（如 D003）无法关联，导入时会被忽略'],
+        ['项目ID', '可选', '必须是系统中的项目 UUID；填项目编号（如 PRJ-001）无法关联，导入时会被忽略'],
+        ['交易对方', '可选', '往来单位或个人'],
+        ['摘要', '可选', '业务说明'],
+        ['凭证号', '必填', '同一「方向 + 日期 + 凭证号」重复上传会自动跳过'],
+        [],
+        ['说明', '', '只有第一个工作表「收支台账」会被导入；本说明页可以删除。'],
+    ]);
+    XLSX.utils.book_append_sheet(workbook, guide, '填写说明');
     XLSX.writeFile(workbook, 'CEES-财务收支台账模板.xlsx');
 }
 
-function excelDate(value: string): string { const match = /^(\d{4})[/-](\d{1,2})[/-](\d{1,2})$/.exec(value); return match ? `${match[1]}-${match[2].padStart(2, '0')}-${match[3].padStart(2, '0')}` : value; }
+function parseLedgerAmount(value: unknown, rowNumber: number): number {
+    const normalized = typeof value === 'number'
+        ? value
+        : String(value).trim().replace(/[\s,，]/g, '').replace(/^[¥￥$€£]/, '');
+    const amount = typeof normalized === 'number' ? normalized : Number(normalized);
+    if (!Number.isFinite(amount)) throw new Error(`第 ${rowNumber} 行金额格式无法识别`);
+    if (amount <= 0) throw new Error(`第 ${rowNumber} 行金额必须大于 0`);
+    return amount;
+}
+
+function excelDate(value: unknown): string {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+        const parsed = XLSX.SSF.parse_date_code(value);
+        if (parsed) return `${parsed.y}-${String(parsed.m).padStart(2, '0')}-${String(parsed.d).padStart(2, '0')}`;
+    }
+    const text = String(value).trim();
+    const match = /^(\d{4})[/-](\d{1,2})[/-](\d{1,2})$/.exec(text);
+    return match ? `${match[1]}-${match[2].padStart(2, '0')}-${match[3].padStart(2, '0')}` : text;
+}

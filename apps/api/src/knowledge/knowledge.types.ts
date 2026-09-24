@@ -35,11 +35,24 @@ export interface AssistantKnowledgeBaseCandidate extends KnowledgeBaseResult {
     /** 当前用户对该库的成员权限；manage_all 权限短路时统一标为 MANAGER。 */
     myPermission: KnowledgeBaseMemberPermission;
     /**
-     * 是否参与助手知识库检索（search_knowledge）：真实成员库与全租户特权
+     * 是否参与助手知识库检索（knowledge_search）：真实成员库与全租户特权
      * （manage_all/read_all）短路下的库为 true；锚点人群虚拟 READER 库仅可见、
      * 不可检索（其库内 PRIVATE 文档无法按锚点身份过滤），恒为 false。
      */
     retrievable: boolean;
+}
+
+/**
+ * 助手文档清单项：回答「我的知识库里有哪些文档」。
+ * 只携带展示与定位所需的业务字段，不含文件对象 ID、COS 对象键等内部标识。
+ */
+export interface AssistantKnowledgeDocumentCandidate {
+    documentId: string;
+    name: string;
+    status: KnowledgeDocumentStatus;
+    knowledgeBaseId: string;
+    knowledgeBaseName: string;
+    updatedAt: string;
 }
 
 export interface KnowledgeBaseMemberResult {

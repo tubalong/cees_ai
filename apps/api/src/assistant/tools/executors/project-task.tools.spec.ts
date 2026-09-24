@@ -34,6 +34,7 @@ const context = {
 
 const confirmationContext = {
     tenantId: TENANT_ID, userId: 'u-1', membershipId: 'm-1', requestId: 'r-1',
+    turnId: context.turnId,
     permissions: context.permissions, roles: context.roles,
 };
 

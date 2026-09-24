@@ -1,5 +1,6 @@
 import {
     Controller,
+    Get,
     HttpCode,
     HttpStatus,
     Param,
@@ -27,6 +28,15 @@ import { AssistantActionDraftService, type ActionDraftResolution } from '../draf
 @UseInterceptors(TenantContextInterceptor)
 export class AssistantActionDraftController {
     constructor(private readonly drafts: AssistantActionDraftService) { }
+
+    @Get()
+    @ApiOperation({ summary: '列出当前成员待确认的 AI 写操作草稿' })
+    @ApiOkResponse({ description: '待确认草稿列表（不含参数快照）' })
+    async list(): Promise<{ items: unknown[] }> {
+        // 必须包成 `{ items }`：契约 AssistantActionDraftList 是对象。
+        // 直接返回数组会让客户端按 `data.items` 解构时拿到 undefined 并在渲染期抛错。
+        return { items: await this.drafts.listPending() };
+    }
 
     @Post(':draftId/confirm')
     @HttpCode(HttpStatus.OK)

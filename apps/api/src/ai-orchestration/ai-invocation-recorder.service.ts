@@ -43,7 +43,8 @@ export type AiInvocationOperation =
   | 'chat.tool_turn'
   | 'chat.related_questions'
   | 'image.generate'
-  | 'document.compose';
+  | 'document.compose'
+  | 'spreadsheet.compose';
 
 export interface RecordAiInvocationInput {
   tenantId: string;
@@ -66,7 +67,7 @@ export interface RecordAiInvocationInput {
  */
 @Injectable()
 export class AiInvocationRecorderService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) { }
 
   async record(input: RecordAiInvocationInput): Promise<void> {
     const { execution } = input;

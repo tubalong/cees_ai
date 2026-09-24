@@ -873,7 +873,9 @@ model ManagedDocument {
   content               String             @db.Text
   /// ai-service compose 返回的结构化 DocumentSpec（导出 DOCX 的事实源）；人工创建或内容被手工修改的文档为空。
   documentSpec          Json?              @map("document_spec")
-  /// 生成时落盘的文件字节（DOCX/PDF/PPTX）；人工创建文档为空。
+  /// ai-service compose-spreadsheet 返回的 SpreadsheetSpec；仅 AI 生成 XLSX 使用。
+  spreadsheetSpec       Json?              @map("spreadsheet_spec")
+  /// 生成时落盘的文件字节（DOCX/PDF/PPTX/XLSX）；人工创建文档为空。
   fileObjectId          String?            @unique @map("file_object_id") @db.Uuid
   fileObject            FileObject?        @relation(fields: [fileObjectId], references: [id], onDelete: Restrict)
   visibility            DocumentVisibility @default(PRIVATE)

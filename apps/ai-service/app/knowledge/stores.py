@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import math
+import uuid
 from dataclasses import dataclass, field
 from typing import Protocol
 
 from llama_index.core.schema import TextNode
 
-from app.api.generated.models import KnowledgeRetrieveScope
+from app.api.generated.models import (
+    Backend,
+    KnowledgeIndexStatus,
+    KnowledgeRetrieveScope,
+)
 
 
 class VectorStoreGateway(Protocol):
@@ -57,6 +62,13 @@ class VectorStoreGateway(Protocol):
     async def health_check(self) -> bool:
         """返回后端是否可用。"""
 
+    def describe(self) -> KnowledgeIndexStatus:
+        """返回索引身份（后端名、是否持久、实例 epoch）。
+
+        调用方据此判断「已索引的向量是否仍然存在」：非持久化后端的
+        epoch 在进程重启后变化，意味着存量向量已丢失。
+        """
+
 
 @dataclass
 class ScoredNode:
@@ -74,6 +86,13 @@ class InMemoryVectorStore:
     """
 
     _buckets: dict[tuple[str, str, str], list[TextNode]] = field(default_factory=dict)
+    # 进程级实例标识：同进程内恒定，重启后变化。上层据此判断存量向量是否已丢失。
+    _epoch: str = field(default_factory=lambda: str(uuid.uuid4()))
+
+    def describe(self) -> KnowledgeIndexStatus:
+        return KnowledgeIndexStatus(
+            backend=Backend.memory, durable=False, epoch=self._epoch
+        )
 
     async def upsert_nodes(
         self,

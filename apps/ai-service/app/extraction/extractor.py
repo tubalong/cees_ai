@@ -67,7 +67,7 @@ def extract_text(
     if normalized == _PPTX_CONTENT_TYPE:
         return ExtractionResult(text=formats.extract_pptx_text(data), engine="stdlib-zip-xml")
     if normalized == _XLSX_CONTENT_TYPE:
-        return ExtractionResult(text=formats.extract_xlsx_text(data), engine="stdlib-zip-xml")
+        return ExtractionResult(text=formats.extract_xlsx_text(data), engine="openpyxl")
     if normalized == _PDF_CONTENT_TYPE:
         try:
             text = pdf_extractor.extract_pdf_text(data)

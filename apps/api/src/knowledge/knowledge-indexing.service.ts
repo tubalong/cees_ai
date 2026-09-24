@@ -21,6 +21,10 @@ const LOCK_KEY = 'jobs:knowledge-document-indexer';
 const DEFAULT_INTERVAL_SECONDS = 15;
 const DEFAULT_MAX_RETRIES = 3;
 const BATCH_SIZE = 10;
+/** 记录最近观测到的向量索引 epoch；用于识别「向量已随 ai-service 重启丢失」。 */
+const INDEX_EPOCH_KEY = 'jobs:knowledge-index-epoch';
+/** 索引丢失后自动重排的原因说明，写回 lastError 便于排查。 */
+const VOLATILE_INDEX_LOST_MESSAGE = '向量索引随 ai-service 重启丢失，已自动重新排队索引';
 
 interface PendingDocumentRow {
     id: string;
@@ -142,6 +146,7 @@ export class KnowledgeIndexingService implements OnModuleInit, OnModuleDestroy {
         try {
             // 先回收孤儿状态（进程崩溃时卡在 PARSING/INDEXING 的文档），再处理 PENDING 队列。
             await this.recoverStalledDocuments();
+            await this.rebuildLostVolatileIndex();
             const pending = await this.prisma.knowledgeDocument.findMany({
                 where: { status: KnowledgeDocumentStatus.PENDING, deletedAt: null },
                 select: {
@@ -167,6 +172,39 @@ export class KnowledgeIndexingService implements OnModuleInit, OnModuleDestroy {
         } finally {
             await this.redis.deleteIfValue(LOCK_KEY, lockToken);
         }
+    }
+
+    /**
+     * 对账向量索引与文档状态，重建随 ai-service 重启丢失的索引。
+     *
+     * memory 后端（`durable=false`）的向量只活在 ai-service 进程内：进程重启后
+     * 向量全部清空，而业务库里的文档仍是 READY，检索会静默返回空结果——用户看到
+     * 「文档都在、检索却什么都查不到」。这里以 ai-service 上报的索引身份为准：
+     * 非持久化后端且 epoch 变化（含首次观测）时，把全部 READY 文档回退到 PENDING
+     * 重新索引。索引写入本身是幂等 upsert，重建期间检索只会命中旧向量或新向量，
+     * 不会出现半截结果。
+     *
+     * 持久化后端（pgvector）epoch 恒定，只在首次观测时写一次基线，不触发重建。
+     * 读取失败时跳过本轮：把「读不到索引身份」当成「索引已丢」会造成无意义的全量重建。
+     */
+    private async rebuildLostVolatileIndex(): Promise<void> {
+        const status = await this.gateway.fetchKnowledgeIndexStatus();
+        if (!status) return;
+        const previousEpoch = await this.redis.get(INDEX_EPOCH_KEY);
+        if (previousEpoch === status.epoch) return;
+        await this.redis.set(INDEX_EPOCH_KEY, status.epoch);
+        if (status.durable) return;
+        const result = await this.prisma.knowledgeDocument.updateMany({
+            where: { status: KnowledgeDocumentStatus.READY, deletedAt: null },
+            data: {
+                status: KnowledgeDocumentStatus.PENDING,
+                lastError: VOLATILE_INDEX_LOST_MESSAGE,
+            },
+        });
+        if (result.count === 0) return;
+        this.logger.warn(
+            `知识库向量索引后端为 ${status.backend}（非持久化），epoch 变化后已重新排队 ${result.count} 篇文档重建索引。`,
+        );
     }
 
     /**

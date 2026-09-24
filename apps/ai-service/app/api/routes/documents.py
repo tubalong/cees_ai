@@ -7,12 +7,15 @@ from fastapi import APIRouter, Depends, Request, Response
 from app.api.generated.models import (
     ComposeDocumentRequest,
     ComposeDocumentResponse,
+    ComposeSpreadsheetRequest,
+    ComposeSpreadsheetResponse,
     ErrorResponse,
     ExecutionMetadata,
     Provider,
     RenderDocxRequest,
     RenderPdfRequest,
     RenderPptxRequest,
+    RenderXlsxRequest,
     TokenUsage,
 )
 from app.core.errors import AIServiceError
@@ -27,6 +30,8 @@ from app.documents.docx_renderer import (
 )
 from app.documents.pdf_renderer import PDF_MEDIA_TYPE, PdfRenderer, RenderedPdf
 from app.documents.pptx_renderer import PPTX_MEDIA_TYPE, PptxRenderer, RenderedPptx
+from app.documents.spreadsheet_composer import SpreadsheetComposer
+from app.documents.xlsx_renderer import XLSX_MEDIA_TYPE, RenderedXlsx, XlsxRenderer
 from app.llm.router import LLMRouter, RoutingResult
 
 router = APIRouter(
@@ -93,6 +98,11 @@ PPTX_RESPONSE = {
     "headers": DOCX_HEADERS,
     "content": {PPTX_MEDIA_TYPE: {"schema": {"type": "string", "format": "binary"}}},
 }
+XLSX_RESPONSE = {
+    "description": "XLSX workbook rendered",
+    "headers": DOCX_HEADERS,
+    "content": {XLSX_MEDIA_TYPE: {"schema": {"type": "string", "format": "binary"}}},
+}
 
 
 @router.post(
@@ -118,6 +128,27 @@ async def compose_document(
             if composition.planning_routing is not None
             else None
         ),
+        execution=_execution_metadata(composition.routing),
+    )
+
+
+@router.post(
+    "/compose-spreadsheet",
+    response_model=ComposeSpreadsheetResponse,
+    operation_id="composeSpreadsheet",
+    summary="Compose a structured spreadsheet draft",
+    response_description="Spreadsheet draft composed",
+    responses=LLM_ERROR_RESPONSES,
+)
+async def compose_spreadsheet(
+    payload: ComposeSpreadsheetRequest, request: Request
+) -> ComposeSpreadsheetResponse:
+    composition = await SpreadsheetComposer(
+        _require_router(request, payload.request_id)
+    ).compose(payload)
+    return ComposeSpreadsheetResponse(
+        request_id=payload.request_id,
+        spreadsheet=composition.spreadsheet,
         execution=_execution_metadata(composition.routing),
     )
 
@@ -156,6 +187,24 @@ async def render_document_pdf(payload: RenderPdfRequest) -> Response:
         request_id=payload.request_id,
     )
     return _pdf_response(rendered, payload.request_id)
+
+
+@router.post(
+    "/render-xlsx",
+    response_class=Response,
+    response_model=None,
+    operation_id="renderDocumentXlsx",
+    summary="Render a SpreadsheetSpec as XLSX",
+    response_description="XLSX workbook rendered",
+    responses={200: XLSX_RESPONSE, **RENDER_ERROR_RESPONSES},
+)
+async def render_document_xlsx(payload: RenderXlsxRequest) -> Response:
+    rendered = XlsxRenderer().render(
+        payload.spreadsheet,
+        filename=payload.filename,
+        request_id=payload.request_id,
+    )
+    return _xlsx_response(rendered, payload.request_id)
 
 
 @router.post(
@@ -285,6 +334,18 @@ def _pptx_response(rendered: RenderedPptx, request_id: str) -> Response:
         headers={
             "Cache-Control": "no-store",
             "Content-Disposition": _content_disposition(rendered.filename, "presentation.pptx"),
+            "X-Request-Id": _header_value(request_id),
+        },
+    )
+
+
+def _xlsx_response(rendered: RenderedXlsx, request_id: str) -> Response:
+    return Response(
+        content=rendered.content,
+        media_type=XLSX_MEDIA_TYPE,
+        headers={
+            "Cache-Control": "no-store",
+            "Content-Disposition": _content_disposition(rendered.filename, "spreadsheet.xlsx"),
             "X-Request-Id": _header_value(request_id),
         },
     )

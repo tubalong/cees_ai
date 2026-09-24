@@ -9,7 +9,7 @@ import {
     ToolCallStatus,
 } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
-import type { ComposeDocumentRequest, DocumentBlock, DocumentSection, DocumentSpec, ImageBlock, PptxBlock, PptxSlide, PptxSpec, RenderDocxRequest, RenderPdfRequest, RenderPptxRequest } from '@cees/ai-service-client';
+import type { ComposeDocumentRequest, ComposeSpreadsheetRequest, DocumentBlock, DocumentSection, DocumentSourceMaterial, DocumentSpec, ImageBlock, PptxBlock, PptxSlide, PptxSpec, RenderDocxRequest, RenderPdfRequest, RenderPptxRequest, SpreadsheetSpec } from '@cees/ai-service-client';
 import { AiServiceGateway } from '../ai-orchestration/ai-service-gateway.service';
 import { PrismaService } from '../database/prisma.service';
 import {
@@ -41,8 +41,9 @@ const DOCUMENT_FORMAT_MEDIA_TYPES: Record<DocumentFormat, string> = {
     pdf: 'application/pdf',
     pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
 };
+const XLSX_MEDIA_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
-export interface GenerateDocumentCommand {
+interface GenerateResourceCommand {
     tenantId: string;
     userId: string;
     membershipId: string;
@@ -55,10 +56,17 @@ export interface GenerateDocumentCommand {
     instruction: string;
     title?: string;
     visibility: DocumentVisibility;
+}
+
+export interface GenerateDocumentCommand extends GenerateResourceCommand {
     format: DocumentFormat;
 }
 
 export type DocumentFormat = 'docx' | 'pdf' | 'pptx';
+
+export interface GenerateSpreadsheetCommand extends GenerateResourceCommand {
+    sourceMaterials: DocumentSourceMaterial[];
+}
 
 export interface GeneratedDocument {
     documentId: string;
@@ -375,6 +383,183 @@ export class DocumentService {
             return {
                 documentId,
                 title: upstream.document.title,
+                contentLength: content.length,
+                provider: upstream.execution.provider,
+                model: upstream.execution.model,
+            };
+        } catch (error) {
+            const replay = await this.findExecutedDocument(command.tenantId, command.turnId, command.toolCallId).catch(() => null);
+            if (replay) return replay;
+            await this.recordGenerationFailure(command, error).catch(() => undefined);
+            throw error;
+        }
+    }
+
+    /**
+     * 基于本轮上传表格的确定性提取文本生成一个新的 XLSX。原文件永不覆盖；
+     * 同一 toolCallId 通过 ManagedDocument + AIActionDraft 回放，避免重试重复生成。
+     */
+    async createGeneratedSpreadsheet(command: GenerateSpreadsheetCommand): Promise<GeneratedDocument> {
+        const existing = await this.findExecutedDocument(command.tenantId, command.turnId, command.toolCallId);
+        if (existing) return existing;
+        if (command.sourceMaterials.length === 0) {
+            throw new BadRequestException({
+                code: 'SPREADSHEET_SOURCE_REQUIRED',
+                message: '请先在当前消息中上传需要修改的 Excel 或 CSV 文件',
+            });
+        }
+        await this.requireGenerationClaim(command);
+        const reserved = await this.reserveGeneratedDocument(command);
+        if (!reserved) {
+            const replay = await this.findExecutedDocument(command.tenantId, command.turnId, command.toolCallId);
+            if (replay) return replay;
+            throw new Error(`表格工具调用 ${command.toolCallId} 已在执行或需要恢复，禁止并发重复生成`);
+        }
+
+        try {
+            const request: ComposeSpreadsheetRequest = {
+                request_id: command.requestId,
+                tenant_id: command.tenantId,
+                user_id: command.userId,
+                instruction: command.instruction,
+                source_materials: command.sourceMaterials,
+                title: command.title ?? null,
+                max_output_tokens: 16384,
+            };
+            await this.requireGenerationClaim(command);
+            const upstream = await this.gateway.composeSpreadsheet(request, {
+                membershipId: command.membershipId,
+                conversationId: command.conversationId,
+                turnId: command.turnId,
+                toolCallId: command.toolCallId,
+            });
+            await this.requireGenerationClaim(command);
+            const bytes = await this.gateway.renderDocumentXlsx({
+                request_id: command.requestId,
+                tenant_id: command.tenantId,
+                user_id: command.userId,
+                spreadsheet: upstream.spreadsheet,
+                filename: upstream.spreadsheet.title ?? command.title ?? null,
+            });
+            const objectKey = this.objectKeys.buildGeneratedDocumentKey({
+                tenantId: command.tenantId,
+                toolCallId: command.toolCallId,
+                format: 'xlsx',
+            });
+            const stored = await this.storage.putObject({
+                objectKey,
+                body: bytes,
+                contentType: XLSX_MEDIA_TYPE,
+            });
+            const documentId = randomUUID();
+            const fileObjectId = randomUUID();
+            const title = upstream.spreadsheet.title?.trim() || command.title?.trim() || '生成表格';
+            const content = spreadsheetSpecToMarkdown(upstream.spreadsheet);
+
+            await this.prisma.$transaction(async (transaction) => {
+                const now = new Date();
+                const claim = await transaction.toolCall.findFirst({
+                    where: {
+                        id: command.toolCallId,
+                        tenantId: command.tenantId,
+                        turnId: command.turnId,
+                        status: ToolCallStatus.EXECUTING,
+                        executionToken: command.executionToken,
+                        leaseExpiresAt: { gt: now },
+                        turn: {
+                            is: {
+                                status: 'RUNNING',
+                                executionOwner: command.executionOwner,
+                                leaseExpiresAt: { gt: now },
+                            },
+                        },
+                    },
+                    select: { id: true },
+                });
+                if (!claim) throw new Error('表格生成完成时工具执行权已失效');
+                await transaction.resource.create({
+                    data: {
+                        id: documentId,
+                        tenantId: command.tenantId,
+                        type: ResourceType.DOCUMENT,
+                        ownerMembershipId: command.membershipId,
+                        createdBy: command.userId,
+                        updatedBy: command.userId,
+                    },
+                });
+                await transaction.fileObject.create({
+                    data: {
+                        id: fileObjectId,
+                        tenantId: command.tenantId,
+                        originalName: `generated-${documentId}.xlsx`,
+                        purpose: FilePurpose.GENERATED_DOCUMENT,
+                        storageProvider: 'TENCENT_COS',
+                        bucket: this.storageSettings.bucket,
+                        region: this.storageSettings.region,
+                        objectKey,
+                        mimeType: XLSX_MEDIA_TYPE,
+                        sizeBytes: BigInt(stored.sizeBytes),
+                        etag: stored.etag,
+                        createdBy: command.userId,
+                        updatedBy: command.userId,
+                    },
+                });
+                await transaction.managedDocument.create({
+                    data: {
+                        id: documentId,
+                        tenantId: command.tenantId,
+                        generatedByToolCallId: command.toolCallId,
+                        title,
+                        content,
+                        spreadsheetSpec: upstream.spreadsheet as unknown as Prisma.InputJsonObject,
+                        fileObjectId,
+                        visibility: command.visibility,
+                        createdBy: command.userId,
+                        updatedBy: command.userId,
+                    },
+                });
+                await transaction.aIActionDraft.update({
+                    where: { toolCallId: command.toolCallId },
+                    data: {
+                        payload: {
+                            instruction: command.instruction,
+                            requestedTitle: command.title ?? null,
+                            visibility: command.visibility,
+                            format: 'xlsx',
+                            sourceCount: command.sourceMaterials.length,
+                            provider: upstream.execution.provider,
+                            model: upstream.execution.model,
+                            contentLength: content.length,
+                            sheetCount: upstream.spreadsheet.sheets.length,
+                        } satisfies Prisma.InputJsonObject,
+                        status: DraftStatus.EXECUTED,
+                        executedResourceType: 'DOCUMENT',
+                        executedResourceId: documentId,
+                        updatedBy: command.userId,
+                    },
+                });
+                await transaction.auditLog.create({
+                    data: {
+                        tenantId: command.tenantId,
+                        actorUserId: command.userId,
+                        actorMembershipId: command.membershipId,
+                        action: 'SPREADSHEET_GENERATED',
+                        outcome: AuditOutcome.SUCCESS,
+                        resourceType: 'DOCUMENT',
+                        resourceId: documentId,
+                        requestId: command.requestId,
+                        metadata: {
+                            toolCallId: command.toolCallId,
+                            title,
+                            sheetCount: upstream.spreadsheet.sheets.length,
+                            sourceCount: command.sourceMaterials.length,
+                        },
+                    },
+                });
+            });
+            return {
+                documentId,
+                title,
                 contentLength: content.length,
                 provider: upstream.execution.provider,
                 model: upstream.execution.model,
@@ -830,12 +1015,12 @@ export class DocumentService {
         if (!record) throw new Error(message);
     }
 
-    private requireGenerationClaim(command: GenerateDocumentCommand): Promise<void> {
+    private requireGenerationClaim(command: GenerateResourceCommand): Promise<void> {
         return this.requireLiveToolCall(command, '文档工具执行权已失效，拒绝调用外部模型');
     }
 
     /** AIActionDraft 的唯一 toolCallId 在调用 Provider 前完成原子抢占。 */
-    private async reserveGeneratedDocument(command: GenerateDocumentCommand): Promise<boolean> {
+    private async reserveGeneratedDocument(command: GenerateResourceCommand): Promise<boolean> {
         try {
             await this.prisma.aIActionDraft.create({
                 data: {
@@ -860,7 +1045,7 @@ export class DocumentService {
         }
     }
 
-    private async recordGenerationFailure(command: GenerateDocumentCommand, error: unknown): Promise<void> {
+    private async recordGenerationFailure(command: GenerateResourceCommand, error: unknown): Promise<void> {
         const message = error instanceof Error ? error.message : '文档生成失败';
         await this.prisma.$transaction(async (transaction) => {
             const failed = await transaction.aIActionDraft.updateMany({
@@ -1302,9 +1487,22 @@ function extensionOfMimeType(mimeType: string): string {
             return 'pptx';
         case 'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
             return 'docx';
+        case XLSX_MEDIA_TYPE:
+            return 'xlsx';
         default:
             return 'bin';
     }
+}
+
+/** 文档详情中的只读预览；正式表格内容以 spreadsheetSpec 与 XLSX 文件为事实源。 */
+function spreadsheetSpecToMarkdown(spreadsheet: SpreadsheetSpec): string {
+    const lines = [`# ${spreadsheet.title?.trim() || '生成表格'}`];
+    for (const sheet of spreadsheet.sheets) {
+        lines.push('', `## ${sheet.name}`);
+        if (sheet.columns?.length) lines.push(`列：${sheet.columns.join('、')}`);
+        lines.push(`数据行：${sheet.rows.length}`);
+    }
+    return lines.join('\n');
 }
 
 /**

@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import base64
 import zipfile
+from datetime import date
 from io import BytesIO
 
 import pymupdf
 from docx import Document as WordDocument
 from fastapi.testclient import TestClient
+from openpyxl import Workbook
 
 from app.core.config import ExtractionConfig, ModelCatalog, Settings
 from app.core.runtime import AppRuntime
@@ -96,31 +98,35 @@ def test_extract_pptx_text() -> None:
 
 
 def _xlsx_bytes() -> bytes:
-    shared_xml = """<?xml version="1.0" encoding="UTF-8"?>
-<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="2" uniqueCount="2">
-  <si><t>Hello</t></si>
-  <si><t>World</t></si>
-</sst>"""
-    sheet_xml = """<?xml version="1.0" encoding="UTF-8"?>
-<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-  <sheetData>
-    <row r="1">
-      <c r="A1" t="s"><v>0</v></c>
-      <c r="B1" t="s"><v>1</v></c>
-    </row>
-  </sheetData>
-</worksheet>"""
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["Hello", "World"])
     buffer = BytesIO()
-    with zipfile.ZipFile(buffer, "w") as archive:
-        archive.writestr("xl/sharedStrings.xml", shared_xml)
-        archive.writestr("xl/worksheets/sheet1.xml", sheet_xml)
+    workbook.save(buffer)
     return buffer.getvalue()
 
 
 def test_extract_xlsx_text() -> None:
     result = extract_text(content_type=XLSX_CONTENT_TYPE, data=_xlsx_bytes())
+    assert "[Sheet: Sheet]" in result.text
     assert "Hello\tWorld" in result.text
-    assert result.engine == "stdlib-zip-xml"
+    assert result.engine == "openpyxl"
+
+
+def test_extract_xlsx_preserves_empty_columns_and_formats_dates() -> None:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "收支台账"
+    sheet.append(["发生日期", "方向", "金额", "币种", "部门ID", "项目ID", "凭证号"])
+    sheet.append([date(2026, 1, 5), "支出", 15000, "CNY", "D003", None, "V2026010501"])
+    sheet["A2"].number_format = "yyyy-mm-dd"
+    sheet["C2"].number_format = "#,##0.00"
+    buffer = BytesIO()
+    workbook.save(buffer)
+
+    result = extract_text(content_type=XLSX_CONTENT_TYPE, data=buffer.getvalue())
+
+    assert "2026-01-05\t支出\t15000\tCNY\tD003\t\tV2026010501" in result.text
 
 
 # ---- unit: best-effort PDF ----

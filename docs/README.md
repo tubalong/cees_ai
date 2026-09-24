@@ -37,6 +37,7 @@
 | [生成文档落 COS 与附件注入](architecture/generated-document-storage-and-attachment-injection.md) | 生成文件直传 COS、FileObject 关联与对话文档附件文本注入 |
 | [file-upload](architecture/file-upload.md) | 已落地的 COS 基础直传接口与后续权限、额度、扫描设计 |
 | [redis-foundation](architecture/redis-foundation.md) | NestJS Redis 基础 CRUD、命名空间和使用边界 |
+| [本机工具与 Excel 读写实现](architecture/local-tools-and-excel-io-plan.md) | 聊天上传并生成 Excel、本机只读扫描、隔离/恢复/永久清理的实现边界与风险登记 |
 | [api](api/README.md) | 公开与内部契约及生成客户端约定 |
 | [项目管理 API](api/project-management-api.md) | 项目、成员、负责人和状态命令接口 |
 | [知识库管理 API](api/knowledge-base-api.md) | 知识库 CRUD、成员权限、文档上传和公开查询接口 |

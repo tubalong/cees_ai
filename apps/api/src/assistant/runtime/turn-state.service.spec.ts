@@ -220,6 +220,47 @@ describe('TurnStateService', () => {
       data: expect.objectContaining({ relatedQuestions: null }),
     }));
   });
+
+  it('keeps the detailed failure reason in the row and event while the model only sees the friendly summary', async () => {
+    // 复现真实事故：台账附件解析失败（附表被当成台账行）时，确认预览生成失败，
+    // 服务端此前把详细原因一并丢掉，「回喂模型」与「落库/事件」都只剩通用文案，
+    // 于是用户只被告知「操作未完成」，无法知道到底哪一行不合法。
+    const harness = createHarness();
+
+    await expect(harness.service.rejectToolCall({
+      toolCallId: TOOL_CALL_ID,
+      turnId: TURN_ID,
+      tenantId: TENANT_ID,
+      conversationId: CONVERSATION_ID,
+      executionOwner: EXECUTION_OWNER,
+      code: 'TOOL_EXECUTION_FAILED',
+      summary: '该操作未能完成，请告知用户稍后重试或换一种方式表达',
+      errorMessage: '第 172 行方向只能是收入或支出',
+    })).resolves.toBe(true);
+
+    expect(harness.tx.toolCall.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ errorMessage: '第 172 行方向只能是收入或支出' }),
+    }));
+    // 客户端据此能告诉用户具体原因。
+    expect(harness.events.appendInTransaction).toHaveBeenCalledWith(
+      harness.tx,
+      TURN_ID,
+      TENANT_ID,
+      AssistantEventType.TOOL_RESULT,
+      expect.objectContaining({
+        status: 'rejected',
+        error: { code: 'TOOL_EXECUTION_FAILED', message: '第 172 行方向只能是收入或支出' },
+      }),
+    );
+    // 回喂模型的 TOOL 消息不得携带动态详情。
+    expect(harness.tx.conversationMessage.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        content: expect.stringContaining('该操作未能完成'),
+      }),
+    });
+    const toolMessage = harness.tx.conversationMessage.create.mock.calls.at(-1)?.[0]?.data?.content ?? '';
+    expect(toolMessage).not.toContain('第 172 行');
+  });
 });
 
 function createHarness(options: {
@@ -234,11 +275,11 @@ function createHarness(options: {
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       findUnique: jest.fn().mockResolvedValue(options.staleTurn
         ? {
-            tenantId: TENANT_ID,
-            status: AssistantTurnStatus.RUNNING,
-            leaseExpiresAt: new Date('2026-09-14T09:59:00.000Z'),
-            toolCalls: interruptedCalls.map((call) => ({ status: call.status })),
-          }
+          tenantId: TENANT_ID,
+          status: AssistantTurnStatus.RUNNING,
+          leaseExpiresAt: new Date('2026-09-14T09:59:00.000Z'),
+          toolCalls: interruptedCalls.map((call) => ({ status: call.status })),
+        }
         : null),
     },
     toolCall: {

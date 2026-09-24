@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { FinanceLedgerImportStatus, FinanceLedgerSource, Prisma } from '@prisma/client';
 import { dateKeyToUtcMidnight } from '../common/tenant-time';
 import { PrismaService } from '../database/prisma.service';
@@ -108,8 +108,12 @@ export class FinanceLedgerService {
 
     async rollbackImport(importId: string): Promise<void> {
         const context = this.tenantContext.require();
-        const batch = await this.prisma.financeLedgerImport.findFirst({ where: { id: importId, tenantId: context.tenantId, deletedAt: null } });
+        // 刻意不加 deletedAt 过滤：已回滚的批次仍然「存在」，只是已撤销。
+        // 若按 deletedAt: null 查询，重复点击回滚会返回「台账导入批次不存在」，
+        // 让用户以为数据丢了；这里改为明确告知「已回滚」，并让回滚本身幂等。
+        const batch = await this.prisma.financeLedgerImport.findFirst({ where: { id: importId, tenantId: context.tenantId } });
         if (!batch) throw new NotFoundException({ code: 'FINANCE_LEDGER_IMPORT_NOT_FOUND', message: '台账导入批次不存在' });
+        if (batch.deletedAt) throw new ConflictException({ code: 'FINANCE_LEDGER_IMPORT_ALREADY_ROLLED_BACK', message: '该批次已回滚，无需重复操作' });
         const entries = await this.prisma.financeLedgerEntry.findMany({ where: { tenantId: context.tenantId, importId, deletedAt: null }, select: { occurredOn: true } });
         await this.prisma.$transaction([
             this.prisma.financeLedgerEntry.updateMany({ where: { tenantId: context.tenantId, importId, deletedAt: null }, data: { deletedAt: new Date(), updatedBy: context.userId, version: { increment: 1 } } }),

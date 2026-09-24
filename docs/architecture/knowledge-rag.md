@@ -1,7 +1,7 @@
 # 知识库 RAG（MinerU + LlamaIndex）
 
-> 状态：分块实施中。块 1（本文档与内部契约 `index`/`retrieve`）、块 2（ai-service 内存闭环 + HTTP 路由）、块 3（NestJS 文档状态机与上传触发索引）、块 4（真实 pgvector Gateway + `index/delete`）、块 5（公开 Query API + `answer` 契约与引用校验 + 索引删除 NestJS 接线）、块 6（MinerU 真机联调验收）、块 7a（解析器格式分流 + pgvector HNSW 索引）、块 7b（Assistant RAG 工具接入：`knowledge_search` 工具 + 对话级知识库开关 + 权限折叠检索）、块 7c（对话数据转知识库：双层入口 + 助手工具）、块 8（知识库归属锚点管理与自动授权 + 权限码收敛 + 知识管理页面与文档管理面板）、块 9（文档删除：公开 DELETE 端点 + 软删/审计/异步向量清理 + 索引删除竞态 + 对话引用卡片 deletable 删除入口）已落地；块 7d（助手人设功能告知）部分落地，按第 8 节分块计划推进。
-> 最后同步：2026-09-18
+> 状态：分块实施中。块 1（本文档与内部契约 `index`/`retrieve`）、块 2（ai-service 内存闭环 + HTTP 路由）、块 3（NestJS 文档状态机与上传触发索引）、块 4（真实 pgvector Gateway + `index/delete`）、块 5（公开 Query API + `answer` 契约与引用校验 + 索引删除 NestJS 接线）、块 6（MinerU 真机联调验收）、块 7a（解析器格式分流 + pgvector HNSW 索引）、块 7b（Assistant RAG 工具接入：`knowledge_search` 工具 + 对话级知识库开关 + 权限折叠检索）、块 7c（对话数据转知识库：双层入口 + 助手工具）、块 8（知识库归属锚点管理与自动授权 + 权限码收敛 + 知识管理页面与文档管理面板）、块 9（文档删除：公开 DELETE 端点 + 软删/审计/异步向量清理 + 索引删除竞态 + 对话引用卡片 deletable 删除入口）、块 10（易失向量索引治理：`/ready` 上报 `knowledge_index` + epoch 对账 + READY 文档自动重建）已落地；块 7d（助手人设功能告知）部分落地，按第 8 节分块计划推进。
+> 最后同步：2026-09-23
 > 内部契约版本：`0.5.0`
 > 公开契约版本：`0.31.0`（公开知识库管理/查询 API）
 
@@ -84,6 +84,8 @@ NestJS API   = 业务事实、权限、状态与审计层（apps/api）
 
 选择**独立 pgvector database**（建议名 `cees_ai_vectors`，与业务库同 PostgreSQL 实例），不使用 Qdrant 或腾讯云 VectorDB：
 
+> 本地开发若未配置真实 embedding provider（`EMBEDDING_API_KEY` 缺失 → 回落到内置 `deterministic`），则 `KNOWLEDGE_VECTOR_STORE` 只能保持默认 `memory`（pgvector 模式会前置拒绝 `deterministic`）：索引不持久、重启即清空，但由 3.1.1 的对账机制自动重建；召回质量受哈希向量限制，仅用于验证链路而非评估效果。
+
 - 业务库已启用 pgvector 扩展，新开独立 database 不新增任何基础设施；
 - 独立 database 保证 ai-service 不接触业务表，边界清晰；
 - LlamaIndex 官方 `PGVectorStore` 支持 metadata filter、批量 upsert、按 filter 删除；
@@ -95,6 +97,17 @@ NestJS API   = 业务事实、权限、状态与审计层（apps/api）
 - **表**：`knowledge_chunks` 由 ai-service 首次使用时自动创建（PGVectorStore 初始化时建表并启用 vector 扩展），向量维度由 `KNOWLEDGE_VECTOR_DIMENSION` 决定；LlamaIndex PGVectorStore（0.9.x）会在传入表名前加 `data_` 前缀，数据实际落在 `data_knowledge_chunks`（索引名与检索 SQL 同理按 `data_` 前缀处理）；
 - **HNSW 索引**：PGVectorStore 初始化时声明 `hnsw_kwargs`（`m=16`、`ef_construction=64`、`ef_search=64`、`vector_cosine_ops`）自动建 HNSW 索引，索引名 `data_knowledge_chunks_embedding_idx`；存量表由管理脚本补建索引（`manage-db.sh <env> create-vector-indexes`，建在 `data_knowledge_chunks` 上）。小数据量下与 IVFFlat 差异不大，HNSW 的查询性能优势随知识库规模增长体现（块 7a 已落地）；
 - **版本治理**：向量表结构不原地迁移——切换 embedding 模型或切分策略时创建新 `index_version` 并行重建，旧版本由 `index/delete` 清理（见 3.4），避免重建期间读请求落在半迁移表上。
+
+#### 3.1.1 非持久化后端的索引丢失与自动重建
+
+`KNOWLEDGE_VECTOR_STORE=memory`（`InMemoryVectorStore`）时向量只活在 ai-service 进程内，**进程重启即全部清空**；而业务库里的文档状态仍是 `READY`。此时检索会静默返回空结果——用户看到「文档都在、检索却什么都查不到」，且没有任何报错。这是一个必须显式治理的失效模式：
+
+- ai-service 在 `/ready` 上报 `knowledge_index`（`backend` / `durable` / `epoch`）：`epoch` 是索引实例标识，同一进程内恒定、重启后变化；pgvector 后端 `durable=true`、`epoch` 固定为 `persistent`；
+- NestJS 索引 Worker（`KnowledgeIndexingService.rebuildLostVolatileIndex`）在每次 `runOnce` 前对账：若 `durable=false` 且 `epoch` 与 Redis 中记录的基线不同（含首次观测），把全部 `READY` 文档回退到 `PENDING` 重新索引，`lastError` 写明原因；
+- 读不到索引身份时**跳过本轮对账**：把「读不到」当成「索引已丢」会造成无意义的全量重建；
+- 索引写入是幂等 upsert，重建期间检索只会命中旧向量或新向量，不存在半截结果。
+
+因此 `memory` 后端可用于开发/测试，但**不能作为生产存储**：生产必须使用 pgvector 并配置真实 embedding provider（内置 `deterministic` 是哈希向量，语义召回质量有限，且 pgvector 模式会前置拒绝它）。
 
 `DocumentChunk` 表保留为业务侧引用定位事实源（citation 映射 document / page / bbox 时由 NestJS 查询），其 `embedding` 字段已在块 3 迁移 0026 中删除。
 
@@ -337,6 +350,7 @@ PENDING -> PARSING -> PARSED -> INDEXING -> READY
 | 7d | 助手人设功能告知与交流层边界（3.9 节） | 块 7b | ✅ 已落地 |
 | 8 | 知识库归属锚点管理与自动授权（3.6 节：项目/部门/公司级分类、锚点人群虚拟 READER、悬挂处理）+ 权限码收敛与知识管理页面 | 块 5 | ✅ 已落地 |
 | 9 | 文档删除（公开 DELETE 端点 + 软删/审计/异步向量清理 + 索引删除竞态处理 + 对话引用卡片 deletable 删除入口） | 块 4、7b、8 | ✅ 已落地 |
+| 10 | 易失向量索引治理（3.1.1 节：`/ready` 上报 `knowledge_index` + epoch 对账 + READY 文档自动重建） | 块 3、4 | ✅ 已落地 |
 
 每块独立可验证、可提交；块 2 使用内存向量库与假解析产物，不依赖 GPU 服务器。
 

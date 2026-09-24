@@ -189,12 +189,21 @@ export class AssistantActionDraftService {
 
         try {
             const result = await definition.execute(context, draft.arguments as Record<string, unknown>);
-            const summary = truncate(result.summary);
-            await this.settleExecuted(draft, DraftStatus.EXECUTED, summary, result.resourceType, result.resourceId);
+            const modelSummary = truncate(result.summary);
+            const userSummary = truncate(result.userSummary ?? result.summary);
+            await this.settleExecuted(
+                draft,
+                DraftStatus.EXECUTED,
+                userSummary,
+                result.resourceType,
+                result.resourceId,
+                undefined,
+                modelSummary,
+            );
             return {
                 draftId: draft.id,
                 status: 'EXECUTED',
-                summary,
+                summary: userSummary,
                 resource: result.resourceId && result.resourceType ? { type: result.resourceType, id: result.resourceId } : null,
             };
         } catch (error) {
@@ -204,6 +213,58 @@ export class AssistantActionDraftService {
             await this.settleExecuted(draft, DraftStatus.FAILED, summary, null, null, 'ACTION_EXECUTION_FAILED');
             return { draftId: draft.id, status: 'FAILED', summary, resource: null };
         }
+    }
+
+    /**
+     * 列出当前成员待确认的草稿（未过期、未决策），按创建时间倒序。
+     *
+     * 存在的理由：确认卡片此前只随流式事件推给客户端，一旦刷新页面就消失，而服务端草稿
+     * 仍在等待确认；用户看不到待确认项，只会重复发起，表现为「一次只能建一个」。
+     * 这里提供常驻列表，客户端在输入框上方以抽屉统一展示与批量确认。
+     *
+     * 只返回展示字段（标题、预览字段、过期时间、所属会话），**不含**参数快照：
+     * 参数只保存在服务端，确认时仍以快照为准，客户端无法借列表接口替换业务参数。
+     */
+    async listPending(): Promise<Array<{
+        draftId: string;
+        toolName: string;
+        title: string;
+        fields: ToolConfirmationRequest['fields'];
+        expiresAt: Date;
+        conversationId: string;
+        createdAt: Date;
+    }>> {
+        const context = this.tenantContext.require();
+        const rows = await this.prisma.assistantActionDraft.findMany({
+            where: {
+                tenantId: context.tenantId,
+                membershipId: context.membershipId,
+                status: DraftStatus.PENDING_CONFIRMATION,
+                expiresAt: { gt: new Date() },
+            },
+            select: {
+                id: true,
+                toolName: true,
+                preview: true,
+                expiresAt: true,
+                conversationId: true,
+                createdAt: true,
+            },
+            orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+            take: 50,
+        });
+        return rows.map((row) => {
+            const preview = (row.preview ?? {}) as { title?: unknown; fields?: unknown };
+            return {
+                draftId: row.id,
+                toolName: row.toolName,
+                title: typeof preview.title === 'string' ? preview.title : '待确认操作',
+                fields: Array.isArray(preview.fields) ? preview.fields as ToolConfirmationRequest['fields'] : [],
+                expiresAt: row.expiresAt,
+                conversationId: row.conversationId,
+                createdAt: row.createdAt,
+            };
+        });
     }
 
     /** 用户取消：草稿进入 REJECTED 终态，事件与消息留痕，需重新发起对话才能再做同样的事。 */
@@ -258,7 +319,8 @@ export class AssistantActionDraftService {
 
     /**
      * 执行结束（成功 / 失败 / 用户取消）的统一收口：草稿终态、ToolCall 终态、
-     * TOOL_RESULT 事件与一条助手消息在同一事务提交，保证刷新与重放后状态一致。
+     * TOOL_RESULT 事件与历史消息在同一事务提交，保证刷新与重放后状态一致。
+     * 成功时内部模型摘要写 TOOL 消息，用户摘要写 ASSISTANT 消息；客户端会隐藏 TOOL 正文。
      */
     private async settleExecuted(
         draft: DraftRow,
@@ -267,6 +329,7 @@ export class AssistantActionDraftService {
         resourceType: 'IMAGE' | 'DOCUMENT' | null,
         resourceId: string | null,
         errorCode?: string,
+        modelSummary = summary,
     ): Promise<void> {
         const actorUserId = this.tenantContext.require().userId;
         const succeeded = status === DraftStatus.EXECUTED;
@@ -292,7 +355,8 @@ export class AssistantActionDraftService {
                 data: {
                     status: turnStatus,
                     completedAt: new Date(),
-                    result: { summary, resourceType, resourceId, sources: [], citations: [] } as unknown as Prisma.InputJsonObject,
+                    // ToolCall 保留模型摘要，供后续轮次继续引用内部资源；用户消息只使用 summary。
+                    result: { summary: modelSummary, resourceType, resourceId, sources: [], citations: [] } as unknown as Prisma.InputJsonObject,
                     executedResourceType: resourceType,
                     executedResourceId: resourceId,
                     errorCode: succeeded ? null : errorCode ?? 'ACTION_NOT_EXECUTED',
@@ -300,6 +364,18 @@ export class AssistantActionDraftService {
                 },
             });
 
+            if (succeeded) {
+                await transaction.conversationMessage.create({
+                    data: {
+                        tenantId: draft.tenantId,
+                        conversationId: draft.conversationId,
+                        turnId: draft.turnId,
+                        role: 'TOOL',
+                        toolCallId: draft.toolCallId,
+                        content: modelSummary,
+                    },
+                });
+            }
             await transaction.conversationMessage.create({
                 data: {
                     tenantId: draft.tenantId,

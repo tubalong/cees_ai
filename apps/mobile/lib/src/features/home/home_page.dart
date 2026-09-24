@@ -4,6 +4,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:dio/dio.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/auth_controller.dart';
 import '../../core/l10n.dart';
@@ -39,11 +41,12 @@ class _PendingActionConfirmation {
 }
 
 class _ChatResource {
-    const _ChatResource({required this.id, required this.type, this.url, this.content});
+    const _ChatResource({required this.id, required this.type, this.url, this.content, this.format});
     final String id;
     final String type;
     final String? url;
     final String? content;
+    final String? format;
 }
 
 class _ChatSource {
@@ -76,6 +79,7 @@ class _HomePageState extends ConsumerState<HomePage> {
         final lastSeq = <AssistantMode, int>{};
         final cancelTokens = <AssistantMode, CancelToken>{};
         final selectedPrompt = <AssistantMode, String?>{};
+        PlatformFile? selectedDocument;
 
     @override
     void initState() {
@@ -119,7 +123,7 @@ class _HomePageState extends ConsumerState<HomePage> {
             final box = Hive.box<dynamic>('settings');
             for (final chatMode in AssistantMode.values) {
                 final raw = box.get(_cacheKey(chatMode));
-                if (raw is List) conversations[chatMode] = raw.map((item) { final map = Map<String, dynamic>.from(item as Map); final rawResources = map['resources']; final rawSources = map['sources']; return _ChatMessage(id: map['id'].toString(), role: map['role'].toString(), content: map['content'].toString(), resources: rawResources is List ? rawResources.map((resource) { final value = Map<String, dynamic>.from(resource as Map); return _ChatResource(id: (value['id'] ?? value['resourceId'] ?? '').toString(), type: value['type']?.toString() ?? 'DOCUMENT', url: value['url']?.toString() ?? value['resourceUrl']?.toString(), content: value['content']?.toString()); }).toList() : const [], sources: rawSources is List ? rawSources.map((source) { final value = Map<String, dynamic>.from(source as Map); return _ChatSource(id: (value['id'] ?? '').toString(), title: (value['title'] ?? '').toString(), url: (value['url'] ?? '').toString(), domain: (value['domain'] ?? '').toString(), snippet: (value['snippet'] ?? '').toString()); }).toList() : const []); }).toList();
+                if (raw is List) conversations[chatMode] = raw.map((item) { final map = Map<String, dynamic>.from(item as Map); final rawResources = map['resources']; final rawSources = map['sources']; return _ChatMessage(id: map['id'].toString(), role: map['role'].toString(), content: map['content'].toString(), resources: rawResources is List ? rawResources.map((resource) { final value = Map<String, dynamic>.from(resource as Map); return _ChatResource(id: (value['id'] ?? value['resourceId'] ?? '').toString(), type: value['type']?.toString() ?? 'DOCUMENT', url: value['url']?.toString() ?? value['resourceUrl']?.toString(), content: value['content']?.toString(), format: value['format']?.toString()); }).toList() : const [], sources: rawSources is List ? rawSources.map((source) { final value = Map<String, dynamic>.from(source as Map); return _ChatSource(id: (value['id'] ?? '').toString(), title: (value['title'] ?? '').toString(), url: (value['url'] ?? '').toString(), domain: (value['domain'] ?? '').toString(), snippet: (value['snippet'] ?? '').toString()); }).toList() : const []); }).toList();
             }
             if (mounted) setState(() {});
         } catch (error) {
@@ -129,7 +133,7 @@ class _HomePageState extends ConsumerState<HomePage> {
 
     Future<void> _saveMessages(AssistantMode chatMode) async {
         final box = Hive.box<dynamic>('settings');
-        await box.put(_cacheKey(chatMode), _messagesOf(chatMode).map((item) => {'id': item.id, 'role': item.role, 'content': item.content, 'resources': item.resources.map((resource) => {'id': resource.id, 'type': resource.type, 'url': resource.url, 'content': resource.content}).toList(), 'sources': item.sources.map((source) => {'id': source.id, 'title': source.title, 'url': source.url, 'domain': source.domain, 'snippet': source.snippet}).toList()}).toList());
+        await box.put(_cacheKey(chatMode), _messagesOf(chatMode).map((item) => {'id': item.id, 'role': item.role, 'content': item.content, 'resources': item.resources.map((resource) => {'id': resource.id, 'type': resource.type, 'url': resource.url, 'content': resource.content, 'format': resource.format}).toList(), 'sources': item.sources.map((source) => {'id': source.id, 'title': source.title, 'url': source.url, 'domain': source.domain, 'snippet': source.snippet}).toList()}).toList());
     }
 
     /// 确认或取消写操作草稿。只提交 draftId：服务端重新鉴权并重新校验参数，
@@ -192,6 +196,9 @@ class _HomePageState extends ConsumerState<HomePage> {
                 controller: composer, casual: casual, onSend: sendMessage,
                 pending: pending[mode] ?? false, onCancel: cancelMessage,
                 prompt: selectedPrompt[mode],
+                documentName: selectedDocument?.name,
+                onPickDocument: pickDocument,
+                onClearDocument: () => setState(() => selectedDocument = null),
                 onPromptChanged: (value) => setState(() => selectedPrompt[mode] = value)),
             // 键盘弹出时收起工具条，避免输入区被挤出可视范围。
             if (!casual && !keyboardOpen) const _ToolStrip(),
@@ -200,19 +207,36 @@ class _HomePageState extends ConsumerState<HomePage> {
     );
   }
 
+    Future<void> pickDocument() async {
+        final result = await FilePicker.platform.pickFiles(
+            type: FileType.custom,
+            allowedExtensions: const ['xlsx', 'csv'],
+            withData: true,
+        );
+        final file = result?.files.single;
+        if (file == null) return;
+        if (file.bytes == null) {
+            if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('无法读取所选文件')));
+            return;
+        }
+        if (mounted) setState(() => selectedDocument = file);
+    }
+
     Future<void> sendMessage() async {
     // 新消息提交时清掉已处理的卡片，避免历史动作堆在输入区上方。
     pendingConfirmations.removeWhere((item) => item.resolved != null);
     final prompt = selectedPrompt[mode];
     final text = composer.text.trim();
         final content = [prompt, text].where((e) => e != null && e.isNotEmpty).join('\n');
-        if (content.isEmpty || (pending[mode] ?? false)) return;
+        if ((content.isEmpty && selectedDocument == null) || (pending[mode] ?? false)) return;
         final activeMode = mode;
         final emptyAnswerMessage = context.tr('home.emptyAnswer');
         final answerTooLongMessage = context.tr('home.answerTooLong');
         final connectionInterruptedMessage = context.tr('home.connectionInterrupted');
         final now = DateTime.now().millisecondsSinceEpoch;
-                final userMessage = _ChatMessage(id: 'm$now', role: 'user', content: content);
+                final effectiveContent = content.isNotEmpty ? content : '请识别这个表格，并说明可以进行哪些修改。';
+                final file = selectedDocument;
+                final userMessage = _ChatMessage(id: 'm$now', role: 'user', content: file == null ? effectiveContent : '$effectiveContent\n附件：${file.name}');
                 setState(() {
                     _messagesOf(activeMode).add(userMessage);
                     pending[activeMode] = true;
@@ -220,8 +244,18 @@ class _HomePageState extends ConsumerState<HomePage> {
                 });
                 composer.clear();
                 selectedPrompt[activeMode] = null;
+                selectedDocument = null;
                 final api = ref.read(mobileApiProvider);
-                final createdConversation = conversationIds[activeMode] == null ? await api.createConversation(title: content) : null;
+                final fileIds = <String>[];
+                if (file?.bytes != null) {
+                    final extension = file!.extension?.toLowerCase();
+                    fileIds.add(await api.uploadAttachment(
+                        name: file.name,
+                        bytes: file.bytes!,
+                        contentType: extension == 'csv' ? 'text/csv' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                    ));
+                }
+                final createdConversation = conversationIds[activeMode] == null ? await api.createConversation(title: effectiveContent) : null;
                 final conversationId = conversationIds[activeMode] ?? createdConversation?['id']?.toString();
                 if (conversationId == null) throw StateError('创建会话失败');
                 conversationIds[activeMode] = conversationId;
@@ -232,6 +266,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                 final resources = <_ChatResource>[];
                 final sources = <_ChatSource>[];
                 final toolTypes = <String, String>{};
+                final toolFormats = <String, String>{};
                 var terminal = false;
                 Future<void> consume(Stream<Map<String, dynamic>> stream) async {
                     await for (final event in stream) {
@@ -244,7 +279,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                             answer += event['text']?.toString() ?? '';
                             if (mounted) setState(() { _messagesOf(activeMode).removeWhere((item) => item.id == 'streaming'); _messagesOf(activeMode).add(_ChatMessage(id: 'streaming', role: 'assistant', content: answer, resources: List.of(resources), sources: List.of(sources))); });
                         }
-                        if (type == 'tool_call') { final name = event['name']?.toString() ?? ''; final toolCallId = event['toolCallId']?.toString() ?? ''; if (name == 'generate_document') { toolTypes[toolCallId] = 'DOCUMENT'; } else if (name == 'generate_image') { toolTypes[toolCallId] = 'IMAGE'; } }
+                        if (type == 'tool_call') { final name = event['name']?.toString() ?? ''; final toolCallId = event['toolCallId']?.toString() ?? ''; if (name == 'generate_document' || name == 'generate_docx' || name == 'generate_pdf' || name == 'generate_pptx' || name == 'generate_xlsx') { toolTypes[toolCallId] = 'DOCUMENT'; if (name.startsWith('generate_') && name != 'generate_document') toolFormats[toolCallId] = name.substring('generate_'.length); } else if (name == 'generate_image') { toolTypes[toolCallId] = 'IMAGE'; } }
                         if (type == 'tool_result' && event['status'] == 'awaiting_confirmation') {
                             // 写操作：服务端已落待确认草稿，副作用尚未发生。
                             // 用户点击确认后本页只提交 draftId，参数快照留在服务端。
@@ -276,14 +311,14 @@ class _HomePageState extends ConsumerState<HomePage> {
                             final resourceId = (resource['id'] ?? event['resourceId'])?.toString();
                             final resourceType = (resource['type'] ?? toolTypes[event['toolCallId']?.toString() ?? ''])?.toString() ?? 'IMAGE';
                             final resourceUrl = (event['resourceUrl'] ?? resource['url'])?.toString();
-                            if (resourceId != null && resourceId.isNotEmpty) { resources.add(_ChatResource(id: resourceId, type: resourceType, url: resourceUrl)); if (mounted) setState(() { _messagesOf(activeMode).removeWhere((item) => item.id == 'streaming'); _messagesOf(activeMode).add(_ChatMessage(id: 'streaming', role: 'assistant', content: answer, resources: List.of(resources), sources: List.of(sources))); }); }
+                            if (resourceId != null && resourceId.isNotEmpty) { resources.add(_ChatResource(id: resourceId, type: resourceType, url: resourceUrl, format: toolFormats[event['toolCallId']?.toString() ?? ''])); if (mounted) setState(() { _messagesOf(activeMode).removeWhere((item) => item.id == 'streaming'); _messagesOf(activeMode).add(_ChatMessage(id: 'streaming', role: 'assistant', content: answer, resources: List.of(resources), sources: List.of(sources))); }); }
                         }
                         if (type == 'error') { terminal = true; throw StateError((event['error'] as Map?)?['message']?.toString() ?? emptyAnswerMessage); }
                         if (type == 'completed') { terminal = true; if (event['finishReason'] == 'length' && mounted) setState(() => errors[activeMode] = answerTooLongMessage); }
                     }
                 }
                 try {
-                    await consume(api.createTurnStream(conversationId, content, idempotencyKey, activeMode == AssistantMode.casual ? 'standard' : 'ultra', cancelToken: cancelToken));
+                    await consume(api.createTurnStream(conversationId, effectiveContent, idempotencyKey, activeMode == AssistantMode.casual ? 'standard' : 'ultra', fileIds: fileIds, cancelToken: cancelToken));
                     for (var attempt = 0; attempt < 3 && !terminal && turnIds[activeMode] != null; attempt += 1) {
                         await consume(api.replayTurnStream(conversationId, turnIds[activeMode]!, lastSeq[activeMode] ?? 0, cancelToken: cancelToken));
                     }
@@ -680,17 +715,35 @@ class _AssistantBubble extends StatelessWidget {
       );
 }
 
-class _ResourcePreview extends StatelessWidget {
+class _ResourcePreview extends ConsumerWidget {
     const _ResourcePreview({required this.resource});
     final _ChatResource resource;
 
     @override
-    Widget build(BuildContext context) {
+    Widget build(BuildContext context, WidgetRef ref) {
         if (resource.type == 'IMAGE' && resource.url != null && resource.url!.isNotEmpty) {
             return Padding(padding: const EdgeInsets.only(top: 10), child: ClipRRect(borderRadius: BorderRadius.circular(10), child: Image.network(resource.url!, fit: BoxFit.contain, errorBuilder: (_, __, ___) => const Text('图片加载失败'))));
         }
         if (resource.content != null && resource.content!.isNotEmpty) {
             return Padding(padding: const EdgeInsets.only(top: 10), child: SelectableText(resource.content!, style: const TextStyle(fontSize: 12, height: 1.45)));
+        }
+        if (resource.type == 'DOCUMENT') {
+            final label = resource.format == null ? '下载文件' : '下载 ${resource.format!.toUpperCase()}';
+            return Padding(
+                padding: const EdgeInsets.only(top: 10),
+                child: OutlinedButton.icon(
+                    onPressed: () async {
+                        try {
+                            final url = await ref.read(mobileApiProvider).generatedDocumentFileUrl(resource.id);
+                            if (!await launchUrl(url, mode: LaunchMode.externalApplication)) throw StateError('无法打开下载地址');
+                        } catch (error) {
+                            if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(apiErrorMessage(error))));
+                        }
+                    },
+                    icon: const Icon(Icons.download_outlined),
+                    label: Text(label),
+                ),
+            );
         }
         return const SizedBox.shrink();
     }
@@ -738,6 +791,9 @@ class _Composer extends StatelessWidget {
             required this.pending,
             required this.onCancel,
             required this.prompt,
+            required this.documentName,
+            required this.onPickDocument,
+            required this.onClearDocument,
             required this.onPromptChanged});
   final TextEditingController controller;
   final bool casual;
@@ -745,6 +801,9 @@ class _Composer extends StatelessWidget {
     final bool pending;
     final VoidCallback onCancel;
     final String? prompt;
+    final String? documentName;
+    final VoidCallback onPickDocument;
+    final VoidCallback onClearDocument;
     final ValueChanged<String?> onPromptChanged;
 
     static const _prompts = ['总结文档要点', '翻译内容', '生成代码'];
@@ -772,6 +831,15 @@ class _Composer extends StatelessWidget {
                                     visualDensity: VisualDensity.compact,
                                 ),
                             ),
+                        if (documentName != null)
+                            Padding(
+                                padding: const EdgeInsets.only(bottom: 8),
+                                child: InputChip(
+                                    avatar: const Icon(Icons.table_chart_outlined, size: 17),
+                                    label: Text(documentName!, overflow: TextOverflow.ellipsis),
+                                    onDeleted: pending ? null : onClearDocument,
+                                ),
+                            ),
                         ConstrainedBox(
                             constraints: const BoxConstraints(
                                 minHeight: kComposerMinHeight,
@@ -788,8 +856,10 @@ class _Composer extends StatelessWidget {
                                     hintText: casual ? '聊点轻松的…' : '告诉 AI 你要处理的工作…',
                                     hintStyle:
                                             const TextStyle(fontSize: 14, color: Color(0xff9ca4b4)),
-                                    prefixIcon: const Icon(Icons.add_circle_outline,
-                                            size: 21, color: Color(0xff7f8898)),
+                                    prefixIcon: IconButton(
+                                        tooltip: '上传 Excel 或 CSV',
+                                        onPressed: pending ? null : onPickDocument,
+                                        icon: const Icon(Icons.add_circle_outline, size: 21, color: Color(0xff7f8898))),
                                     prefixIconConstraints:
                                             const BoxConstraints(minWidth: 46, minHeight: 52),
                                     suffixIcon: IconButton(

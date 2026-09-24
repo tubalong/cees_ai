@@ -3,6 +3,7 @@ import {
   answerKnowledge as requestKnowledgeAnswer,
   compactChat as requestChatCompaction,
   composeDocument as requestComposeDocument,
+  composeSpreadsheet as requestComposeSpreadsheet,
   createClient,
   deleteKnowledgeIndex as requestKnowledgeIndexDelete,
   extractFile as requestFileExtraction,
@@ -15,6 +16,7 @@ import {
   renderDocumentDocx as requestRenderDocumentDocx,
   renderDocumentPdf as requestRenderDocumentPdf,
   renderDocumentPptx as requestRenderDocumentPptx,
+  renderDocumentXlsx as requestRenderDocumentXlsx,
   streamChat as requestChatStream,
   streamChatToolTurn as requestToolTurnStream,
   type ChatInvokeResponse,
@@ -26,6 +28,8 @@ import {
   type CompactChatResponse,
   type ComposeDocumentRequest,
   type ComposeDocumentResponse,
+  type ComposeSpreadsheetRequest,
+  type ComposeSpreadsheetResponse,
   type ErrorResponse,
   type ExecutionMetadata,
   type FileExtractionRequest,
@@ -41,9 +45,11 @@ import {
   type KnowledgeIndexDeleteResponse,
   type KnowledgeIndexRequest,
   type KnowledgeIndexResponse,
+  type KnowledgeIndexStatus,
   type RenderDocxRequest,
   type RenderPdfRequest,
   type RenderPptxRequest,
+  type RenderXlsxRequest,
   type StreamExecutionMetadata,
   type TokenUsage,
   type ToolTurnRequest,
@@ -141,6 +147,24 @@ export class AiServiceGateway {
         fetchedAt: now,
       };
       return result.data.chat_context_budgets;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * 拉取 ai-service 上报的知识库向量索引身份。
+   *
+   * `durable=false`（memory 后端）表示向量只活在 ai-service 进程内，进程重启即
+   * 全部清空；调用方据此把已标 READY 的文档重新排队重建，避免检索静默返回空结果。
+   * 读取失败或 ai-service 未就绪时返回 null，调用方必须跳过本轮对账——把「读不到」
+   * 当成「索引已丢」会造成无意义的全量重建。
+   */
+  async fetchKnowledgeIndexStatus(): Promise<KnowledgeIndexStatus | null> {
+    try {
+      const result = await getReadiness({ client: this.getClient() });
+      if (result.error) return null;
+      return result.data?.knowledge_index ?? null;
     } catch {
       return null;
     }
@@ -381,6 +405,29 @@ export class AiServiceGateway {
     return response;
   }
 
+  async composeSpreadsheet(
+    input: ComposeSpreadsheetRequest,
+    tracking: ChatInvocationTracking & { toolCallId: string },
+  ): Promise<ComposeSpreadsheetResponse> {
+    const result = await requestComposeSpreadsheet({ client: this.getClient(), body: input });
+    if (result.error) throw this.toInvocationError(result.error, result.response?.status);
+    if (!result.data) throw this.emptyResponseError();
+    const response = result.data;
+    await this.invocationRecorder.record({
+      tenantId: input.tenant_id,
+      userId: input.user_id,
+      membershipId: tracking.membershipId,
+      conversationId: tracking.conversationId ?? null,
+      turnId: tracking.turnId,
+      requestId: input.request_id,
+      toolCallId: tracking.toolCallId,
+      operation: 'spreadsheet.compose',
+      execution: toRecordedExecution(response.execution),
+      metadata: { outcome: 'completed', instructionLength: input.instruction.length },
+    });
+    return response;
+  }
+
   /**
    * 调用 ai-service 文档 DOCX 渲染路由：DocxRenderer 对结构化 DocumentSpec 做
    * 确定性渲染，不调用 LLM、不产生 Token 指标，返回 DOCX 文件字节；不落库、
@@ -410,6 +457,13 @@ export class AiServiceGateway {
    */
   async renderDocumentPptx(input: RenderPptxRequest): Promise<Buffer> {
     const result = await requestRenderDocumentPptx({ client: this.getClient(), body: input });
+    if (result.error) throw this.toInvocationError(result.error, result.response?.status);
+    if (!result.data) throw this.emptyResponseError();
+    return Buffer.from(await result.data.arrayBuffer());
+  }
+
+  async renderDocumentXlsx(input: RenderXlsxRequest): Promise<Buffer> {
+    const result = await requestRenderDocumentXlsx({ client: this.getClient(), body: input });
     if (result.error) throw this.toInvocationError(result.error, result.response?.status);
     if (!result.data) throw this.emptyResponseError();
     return Buffer.from(await result.data.arrayBuffer());

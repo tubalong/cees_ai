@@ -68,8 +68,13 @@ export interface ToolExecutionResult {
   /** Read-only or side-effect tools may not produce a formal Resource. */
   resourceType: 'IMAGE' | 'DOCUMENT' | null;
   resourceId: string | null;
-  /** 回喂模型的工具结果摘要。 */
+  /** 回喂模型的工具结果摘要；可包含后续工具调用所需的内部引用，不得直接展示给用户。 */
   summary: string;
+  /**
+   * 用户可见摘要。省略时沿用 summary；当 summary 含内部 ID、权限枚举或模型指令时必须提供。
+   * 确认结果、助手历史消息和客户端提示只允许使用此字段。
+   */
+  userSummary?: string;
   /** 非资源型工具（例如联网搜索）的结构化来源。 */
   sources?: ToolSource[];
   /** 知识库检索命中的文档引用；与 sources 互斥，进公开事件的 citations 字段。 */
@@ -131,7 +136,7 @@ export interface ToolDefinition {
  */
 export type ToolConfirmationContext = Pick<
   ToolExecutionContext,
-  'tenantId' | 'userId' | 'membershipId' | 'requestId' | 'permissions' | 'roles'
+  'tenantId' | 'userId' | 'membershipId' | 'requestId' | 'turnId' | 'permissions' | 'roles'
 >;
 
 /** 待确认草稿的预览字段；只放用户能核对的业务值，不放内部 ID 与权限枚举。 */

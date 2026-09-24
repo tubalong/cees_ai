@@ -30,9 +30,9 @@ import type {
 } from './assistant.types';
 
 export class ConnectorContextDto implements ConnectorContextInput {
-  @ApiProperty({ enum: ['DINGTALK', 'TENCENT_MEETING', 'WECOM', 'GITHUB'] })
-  @IsIn(['DINGTALK', 'TENCENT_MEETING', 'WECOM', 'GITHUB'])
-  provider!: 'DINGTALK' | 'TENCENT_MEETING' | 'WECOM' | 'GITHUB';
+  @ApiProperty({ enum: ['DINGTALK', 'TENCENT_MEETING', 'WECOM', 'GITHUB', 'LOCAL_SYSTEM'] })
+  @IsIn(['DINGTALK', 'TENCENT_MEETING', 'WECOM', 'GITHUB', 'LOCAL_SYSTEM'])
+  provider!: ConnectorContextInput['provider'];
 
   @ApiProperty({ maxLength: 120, pattern: '^[A-Za-z][A-Za-z0-9._-]{0,119}$' })
   @IsString()
@@ -344,11 +344,11 @@ export class CreateTurnRequestDto {
   @ApiPropertyOptional({
     description: 'Desktop 从本地已授权连接器读取的本轮只读上下文；服务端仅用于回答，不作为业务写入和权限依据',
     type: [ConnectorContextDto],
-    maxItems: 3,
+    maxItems: 5,
   })
   @IsOptional()
   @IsArray()
-  @ArrayMaxSize(3)
+  @ArrayMaxSize(5)
   @Type(() => ConnectorContextDto)
   @ValidateNested({ each: true })
   connectorContexts?: ConnectorContextDto[];

@@ -86,18 +86,44 @@ const result = await runAsTenant(this.tenantContext, context, () =>
 - 上下文里的 `roles` 与 `permissions` 取**执行瞬间**的实时解析结果，不沿用生成工具清单时的快照；
 - 需要额外能力时仍推荐提供显式入口（如 `createDepartmentForContext`），二者可共存。
 
-### 2.5 已接入工具全清单（18 个）
+### 2.5 已接入工具全清单（21 个）
 
 | 风险 | 工具 |
 | --- | --- |
-| READ（有权限直接执行） | `knowledge_search`、`list_departments`、`list_documents`、`list_knowledge_bases`、`list_projects`、`list_tasks`、`web_search` |
-| WRITE + 待确认草稿 | `create_department`、`create_knowledge_base`、`create_project`、`create_task`、`update_task_status` |
+| READ（有权限直接执行） | `knowledge_search`、`list_departments`、`list_documents`、`list_knowledge_bases`、`list_knowledge_documents`、`list_projects`、`list_tasks`、`web_search` |
+| WRITE + 待确认草稿 | `create_department`、`create_knowledge_base`、`create_project`、`create_task`、`update_task_status`、`import_finance_ledger` |
 | WRITE + 专属 UI 确认 | `save_to_knowledge`（目标知识库由用户在专门弹窗里选，不走草稿）、`insert_document_image`（在用户指定的文档章节末尾追加，不重写正文） |
-| EXTERNAL（生成新资产，直接执行） | `generate_docx`、`generate_pdf`、`generate_pptx`、`generate_image` |
+| EXTERNAL（生成新资产，直接执行） | `generate_docx`、`generate_pdf`、`generate_pptx`、`generate_xlsx`、`generate_image` |
 
 > 两个「WRITE 但不走草稿」的工具是**有意的例外**：它们的副作用是「把已有内容挂到用户指定的容器上」，
 > 既不创建新的组织级对象也不覆写既有数据，且确认动作由专属 UI 承担。新增工具若想走这条例外，
 > 必须在评审中说清“为何不需要草稿”。
+
+> `list_knowledge_bases` 与 `list_knowledge_documents` 的分工：前者回答「我有哪些知识库」，
+> 后者回答「某个库里有哪些文档」。两者都只覆盖**真实成员库**（或 `manage_all`/`read_all`
+> 短路下的租户库），刻意不含锚点人群虚拟 READER 库——锚点只给页面可见性，若允许列清单
+> 就会出现「列得出来、检索不到」的不一致（内容触达必须真实成员或全读权限码）。
+> `list_knowledge_documents` 的存在也是为了让模型能区分「库里真的没有」与「检索没命中」：
+> `knowledge_search` 只按问题召回片段，无命中时无法自证库内状况。
+
+> `import_finance_ledger` 不接收模型生成的行数据：调用参数必须为空对象，行数据由服务端
+> 从本轮唯一 XLSX/CSV 附件确定性重建，避免模型转抄上百行台账时出现金额或列错位。
+
+### 2.6 不在工具清单里的本机能力
+
+桌面端有一部分能力**刻意不注册成 AI 工具**，而是走「只读上下文 + 客户端动作」两条路径。
+它们不在上表内，评审新增本机能力前必须先读本节：
+
+| 能力 | 通道 | 为什么不算工具 |
+| --- | --- | --- |
+| 磁盘容量 / 目录大小扫描 | 客户端按消息触发后作为 `LOCAL_SYSTEM` 只读上下文上报 | 路径只能来自系统选择器，模型不参与决策，也没有可传参数 |
+| 隔离 / 恢复 / 永久清理 | 同上；确认由 Electron 原生对话框与清单 hash 承担 | 副作用只作用于用户当面选中的对象，不进模型可调用面 |
+| 生成产物**另存到本机** | 用户在资源卡片点「保存到…」，由系统保存对话框决定路径 | 纯客户端动作；模型只知道「可另存」这一事实（`local_capabilities` 上下文），无法指定路径 |
+
+共同点：**模型不能传路径、不能传命令、不能替用户确认**。这与云端写工具形成互补——
+云端写操作靠草稿 + 权限复核，本机操作靠原生对话框 + 路径不入模型上下文。
+`local_capabilities` 只用于让模型正确引导用户（不再回答「我无法保存到你的电脑」），
+其契约语义仍是「仅作只读参考，不作为业务事实或写权限依据」。
 
 ## 3. 写操作确认机制
 
@@ -177,14 +203,24 @@ approve(工具存在 → 权限 → 参数校验)
 
 - 审计只记 `toolName` / `toolVersion` / `toolCallId` / `executedResourceId` / `errorCode`；
   **不落参数快照**（可能含业务敏感信息）。
-- 执行失败时，用户的 `summary` 是固定的安全文案，原始错误（含主机名等）只进日志与 `errorCode`，
-  避免被模型转述出去。
+- **执行失败时**，回喂模型的 `summary` 是固定的安全文案（不得携带权限码、错误码、动态错误详情），
+  而**真实失败原因落库与公开事件**（`toolCall.errorMessage`、`tool_result` 事件的 `error.message`）。
+  客户端据此告知用户具体原因——例如台账附件「第 172 行方向只能是收入或支出」。
+  该分工是硬要求：只把友好文案给模型、只把具体原因给用户，两边都不能少。
+  > 教训：此前的实现把确认预览失败的原因一并丢弃（`rejectToolCall` 未传 `errorMessage`，
+  > 客户端也完全不渲染 `failed/rejected` 事件），结果是用户只被告知「操作未完成」、
+  > 反复重试同一个错误，而排障所需的行号/字段名根本无处可查。
+- **模型摘要与用户摘要必须分离**：工具若需要在后续调用中保留内部 ID、权限枚举或结构化指令，
+  可将其放入仅回喂模型的 `ToolExecutionResult.summary`；确认接口、助手历史消息和客户端结果必须使用
+  `ToolExecutionResult.userSummary`。`userSummary` 省略时才允许兼容回退到 `summary`，新增会暴露内部数据的工具不得省略。
+  例如创建知识库后，模型可继续用内部 `knowledge_base_id` 调用 `save_to_knowledge`，用户只应看到
+  「知识库“名称”已创建，你是该知识库的管理员」。提示词中的“不要展示内部字段”不是安全边界，服务端字段分流才是。
 
 ## 4. 客户端
 
 两端共用同一套服务端工具与确认机制（工具在 NestJS，客户端只负责渲染）：
 
-- **桌面端**：`apps/desktop/src/core/api.ts` 的 `confirmActionDraft` / `cancelActionDraft`；
+- **桌面端**：`apps/desktop/src/core/api.ts` 的 `confirmActionDraft` / `cancelActionDraft` / `listAssistantActionDrafts`；
   `TurnStreamEvent` 增加 `awaiting_confirmation` 与 `confirmation`；
   `apps/desktop/src/app/Workspace.tsx` 的 `ActionConfirmationCard` 展示预览字段与「确认执行 / 取消」，
   确认后立即转终态文案（避免重复点击），过期草稿不再提供确认按钮。
@@ -195,9 +231,23 @@ approve(工具存在 → 权限 → 参数校验)
   放在气泡里的卡片会被重建丢掎；体验上也更像一个紧贴输入区上方的待办动作条。
   卡片按 Apple 最小触控目标以 44pt 高实现确认/取消两个按钮。
 
-> 两端一致的行为：待确认卡片是**会话内瞬态**（不持久化到本地缓存），刷新页面后卡片会消失，
-> 但助手已经在回答里说明了「请确认」，且服务端草稿仍在 15 分钟内可确认。
-> 若要刷新后仍能继续确认，需要新增「查询会话内待确认草稿」接口——属后续项。
+### 4.1 待办列表与抽屉（桌面端）
+
+桌面端待确认项**不挂在消息上**，而是放在页面级列表 `pendingDrafts` + 输入框上方向上的抽屉：
+
+- 事实源是 `GET /assistant/action-drafts`（PENDING_CONFIRMATION 且未过期），
+  进入对话页与每轮结束后各刷新一次；流式事件只做即时插入。
+- 列表项**不含参数快照**：确认时仍以服务端快照为准，客户端无法借列表接口替换业务参数。
+- 抽屉提供逐项「确认执行 / 取消」与「全部确认」；批量确认**串行**执行，
+  让部分失败能如实归因，而不是并发失败后互相掩盖。
+- 待办数量以按钮形式常驻输入框上方，避免「有待办但用户不知道」。
+
+> 为何必须改成常驻列表：此前确认卡片只随流式事件到达，且消息只展示**最后一条**确认项
+> （`.at(-1)`），同时刷新页面即消失。后果是模型一次产出多个写操作（例如同时新建三个部门）时
+> 用户只能看到最后一个、确认完以为已经完成，其余草稿静默过期——表现为「一次只能建一个」。
+
+> 待办列表是**服务端事实源**，因此刷新后仍然可见；模型一次提出多个写操作时全部可见、
+> 可逐项或一次性确认。
 
 ## 5. 失败与边界
 
