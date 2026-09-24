@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -171,9 +172,40 @@ class MobileApi {
       if (dataLines.isNotEmpty && dataLines != '[DONE]') yield Map<String, dynamic>.from(jsonDecode(dataLines) as Map);
     }
   }
-  Stream<Map<String, dynamic>> createTurnStream(String conversationId, String content, String idempotencyKey, String mode, {CancelToken? cancelToken}) => _sse('v1/conversations/$conversationId/turns', method: 'POST', data: {'content': content, 'mode': mode}, headers: {'Idempotency-Key': idempotencyKey}, cancelToken: cancelToken);
+  Stream<Map<String, dynamic>> createTurnStream(String conversationId, String content, String idempotencyKey, String mode, {List<String> fileIds = const [], CancelToken? cancelToken}) => _sse('v1/conversations/$conversationId/turns', method: 'POST', data: {'content': content, 'mode': mode, if (fileIds.isNotEmpty) 'fileIds': fileIds}, headers: {'Idempotency-Key': idempotencyKey}, cancelToken: cancelToken);
   Stream<Map<String, dynamic>> replayTurnStream(String conversationId, String turnId, int afterSeq, {CancelToken? cancelToken}) => _sse('v1/conversations/$conversationId/turns/$turnId/events?afterSeq=$afterSeq', cancelToken: cancelToken);
   Future<Map<String, dynamic>> cancelTurn(String conversationId, String turnId) => _postMap('v1/conversations/$conversationId/turns/$turnId/cancel', {});
+
+  Future<String> uploadAttachment({required String name, required Uint8List bytes, required String contentType}) async {
+    final idempotencyKey = 'mobile-${DateTime.now().microsecondsSinceEpoch}';
+    final created = await _dio.post<Map<String, dynamic>>(
+      'v1/upload-sessions',
+      data: {'purpose': 'attachment', 'fileName': name, 'contentType': contentType, 'sizeBytes': bytes.length},
+      options: Options(headers: {'Idempotency-Key': idempotencyKey}),
+    );
+    final data = created.data ?? const <String, dynamic>{};
+    final uploadUrl = data['uploadUrl']?.toString() ?? '';
+    final sessionId = (data['uploadSessionId'] ?? data['id'])?.toString() ?? '';
+    final fileId = (data['fileId'] ?? data['fileObjectId'])?.toString() ?? '';
+    if (uploadUrl.isEmpty || sessionId.isEmpty) throw StateError('上传会话无效');
+    final rawHeaders = data['uploadHeaders'];
+    final headers = rawHeaders is Map
+        ? rawHeaders.map((key, value) => MapEntry(key.toString(), value.toString()))
+        : <String, String>{};
+    await Dio().put<void>(uploadUrl, data: Stream.value(bytes), options: Options(headers: headers, contentType: contentType));
+    final completed = await _postMap('v1/upload-sessions/$sessionId/complete', {});
+    return (completed['id'] ?? completed['fileObjectId'] ?? fileId).toString();
+  }
+
+  Future<Uri> generatedDocumentFileUrl(String documentId) async {
+    final response = await _dio.get<void>(
+      'v1/documents/$documentId/file',
+      options: Options(followRedirects: false, validateStatus: (status) => status != null && status >= 300 && status < 400),
+    );
+    final location = response.headers.value('location');
+    if (location == null || location.isEmpty) throw StateError('下载地址无效');
+    return Uri.parse(location);
+  }
 
   /// 确认并执行写操作草稿。只提交 draftId：参数快照存在服务端，
   /// 客户端无法在确认时替换业务参数（服务端会重新鉴权并重新校验）。

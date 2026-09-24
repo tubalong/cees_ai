@@ -18,7 +18,9 @@ dependencies:
   json_annotation: ^4.9.0
   hive_flutter: ^1.1.0
   connectivity_plus: ^6.1.1
+  file_picker: ^10.3.3
   flutter_markdown_plus: ^1.0.5
+  url_launcher: ^6.3.2
 
 dependency_overrides:
   # objective_c 9.6.1 references Architecture.arm64e, which is unavailable in
