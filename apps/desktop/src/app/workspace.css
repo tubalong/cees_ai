@@ -2237,6 +2237,43 @@
     font-size: 12px;
 }
 
+.wecom-authorization-card {
+    width: min(520px, 100%);
+    margin-top: 10px;
+    padding: 14px 16px;
+    border: 1px solid color-mix(in srgb, var(--primary) 30%, var(--line));
+    border-radius: var(--platform-panel-radius, 10px);
+    background: var(--primary-soft);
+}
+
+.wecom-authorization-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text);
+}
+
+.wecom-authorization-head .anticon {
+    color: var(--primary);
+}
+
+.wecom-authorization-card p {
+    margin: 10px 0 0;
+    color: var(--text);
+}
+
+.wecom-authorization-card .wecom-authorization-hint {
+    color: var(--muted);
+    font-size: 11px;
+}
+
+.wecom-authorization-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 14px;
+}
+
 /* 窄窗口（含 macOS 1040px 最小窗口）：标签列收紧，避免长值把标签列挤到换行。 */
 @media (max-width: 1180px) {
     .action-confirmation-fields>div {

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CEES AI API
-  version: 0.40.0
+  version: 0.41.0
   description: 以本文件为唯一事实源的公开 API 契约。资源与操作按 docs/api 约定补充。
 
 servers:
@@ -9800,7 +9800,7 @@ components:
     ConversationMessage:
       type: object
       additionalProperties: false
-      required: [id, role, content, imageFileIds, resources, createdAt]
+      required: [id, role, content, imageFileIds, connectorContexts, resources, createdAt]
       properties:
         id:
           type: string
@@ -9820,6 +9820,13 @@ components:
           items:
             type: string
             format: uuid
+        connectorContexts:
+          type: array
+          maxItems: 3
+          default: []
+          description: 用户消息在该轮提交的已脱敏连接器上下文；其他角色固定为空数组。用于恢复连接器授权提示等确定性交互，不作为 CEES 权限或业务事实依据
+          items:
+            $ref: '#/components/schemas/ConnectorContext'
         resources:
           type: array
           maxItems: 20
