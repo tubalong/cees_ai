@@ -26,6 +26,7 @@ import { KnowledgeIndexingService, readIndexVersions } from './knowledge-indexin
 import {
     KNOWLEDGE_BASE_MEMBER_PERMISSIONS,
     AssistantKnowledgeBaseCandidate,
+    AssistantKnowledgeDocumentCandidate,
     AssistantKnowledgeSearchResult,
     KnowledgeBaseMemberListResult,
     KnowledgeBaseMemberPermission,
@@ -33,6 +34,7 @@ import {
     KnowledgeBaseListResult,
     KnowledgeBaseResult,
     KnowledgeBaseVisibilityScope,
+    KnowledgeDocumentStatus,
     KnowledgeQueryResult,
 } from './knowledge.types';
 
@@ -260,6 +262,61 @@ export class KnowledgeService {
             membershipId: context.membershipId,
             requestId: context.requestId,
         }, input);
+    }
+
+    /**
+     * 助手知识库文档清单：回答「我的知识库里有哪些文档」。
+     *
+     * 可见范围与 `searchKnowledgeForAssistant` 完全一致——真实成员库（或
+     * manage_all/read_all 短路下的全租户库）。刻意不含锚点人群虚拟 READER 库：
+     * 项目约定「内容触达必须真实成员或全读权限码」，锚点只给页面可见性，
+     * 否则会出现「列得出来、检索不到」的不一致。
+     *
+     * 只返回展示所需的业务字段，不含文件对象 ID、COS 对象键等内部标识。
+     */
+    async listKnowledgeDocumentsForAssistant(input: {
+        tenantId: string;
+        userId: string;
+        permissions: string[];
+        knowledgeBaseName?: string;
+        keyword?: string;
+        limit: number;
+    }): Promise<AssistantKnowledgeDocumentCandidate[]> {
+        const knowledgeBaseIds = this.canReadAllKnowledgeBases(input.permissions)
+            ? await this.listTenantKnowledgeBaseIds(input.tenantId)
+            : await this.listMemberKnowledgeBaseIds(input.tenantId, input.userId);
+        if (knowledgeBaseIds.length === 0) return [];
+        const bases = await this.prisma.knowledgeBase.findMany({
+            where: { tenantId: input.tenantId, deletedAt: null, id: { in: knowledgeBaseIds } },
+            select: { id: true, name: true },
+        });
+        if (bases.length === 0) return [];
+        const requestedName = input.knowledgeBaseName?.trim().toLowerCase();
+        const scopedBases = requestedName
+            ? bases.filter((base) => base.name.toLowerCase().includes(requestedName))
+            : bases;
+        if (scopedBases.length === 0) return [];
+        const nameByKnowledgeBaseId = new Map(bases.map((base) => [base.id, base.name]));
+        const keyword = input.keyword?.trim();
+        const records = await this.prisma.knowledgeDocument.findMany({
+            where: {
+                tenantId: input.tenantId,
+                deletedAt: null,
+                knowledgeBaseId: { in: scopedBases.map((base) => base.id) },
+                name: keyword ? { contains: keyword, mode: 'insensitive' } : undefined,
+            },
+            select: { id: true, name: true, status: true, knowledgeBaseId: true, updatedAt: true },
+            orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+            take: input.limit,
+        });
+        return records.map((record) => ({
+            documentId: record.id,
+            name: record.name,
+            status: record.status as KnowledgeDocumentStatus,
+            knowledgeBaseId: record.knowledgeBaseId,
+            knowledgeBaseName: nameByKnowledgeBaseId.get(record.knowledgeBaseId) ?? '',
+            updatedAt: record.updatedAt.toISOString(),
+        }));
     }
 
     /**

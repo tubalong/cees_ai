@@ -210,8 +210,8 @@ describe('KnowledgeIndexingService', () => {
         mocks.prisma.knowledgeDocument.findMany
             .mockResolvedValueOnce([])
             .mockResolvedValue([
-            pendingDocument({ currentVersionId: null }),
-        ]);
+                pendingDocument({ currentVersionId: null }),
+            ]);
         mocks.prisma.knowledgeDocument.updateMany.mockResolvedValue({ count: 1 });
         mocks.prisma.knowledgeDocument.update
             .mockResolvedValueOnce({ retryCount: 1 })
@@ -259,6 +259,72 @@ describe('KnowledgeIndexingService', () => {
 
         expect(result).toEqual({ skipped: true, processed: 0 });
         expect(mocks.prisma.knowledgeDocument.findMany).not.toHaveBeenCalled();
+    });
+
+    it('requeues READY documents when a volatile index is lost across an ai-service restart', async () => {
+        const mocks = createMocks();
+        mocks.gateway.fetchKnowledgeIndexStatus.mockResolvedValue({ backend: 'memory', durable: false, epoch: 'epoch-2' });
+        mocks.redis.get.mockResolvedValue('epoch-1');
+        mocks.prisma.knowledgeDocument.updateMany.mockResolvedValue({ count: 2 });
+        const service = createService(mocks);
+
+        await service.runOnce();
+
+        expect(mocks.redis.set).toHaveBeenCalledWith('jobs:knowledge-index-epoch', 'epoch-2');
+        expect(mocks.prisma.knowledgeDocument.updateMany).toHaveBeenCalledWith({
+            where: { status: KnowledgeDocumentStatus.READY, deletedAt: null },
+            data: { status: KnowledgeDocumentStatus.PENDING, lastError: expect.any(String) },
+        });
+    });
+
+    it('rebuilds on the first observation of a volatile index because its contents are unknown', async () => {
+        const mocks = createMocks();
+        mocks.gateway.fetchKnowledgeIndexStatus.mockResolvedValue({ backend: 'memory', durable: false, epoch: 'epoch-1' });
+        mocks.redis.get.mockResolvedValue(null);
+        mocks.prisma.knowledgeDocument.updateMany.mockResolvedValue({ count: 3 });
+        const service = createService(mocks);
+
+        await service.runOnce();
+
+        expect(mocks.prisma.knowledgeDocument.updateMany).toHaveBeenCalledWith({
+            where: { status: KnowledgeDocumentStatus.READY, deletedAt: null },
+            data: { status: KnowledgeDocumentStatus.PENDING, lastError: expect.any(String) },
+        });
+    });
+
+    it('only records the baseline epoch for a durable index', async () => {
+        const mocks = createMocks();
+        mocks.gateway.fetchKnowledgeIndexStatus.mockResolvedValue({ backend: 'pgvector', durable: true, epoch: 'persistent' });
+        mocks.redis.get.mockResolvedValue(null);
+        const service = createService(mocks);
+
+        await service.runOnce();
+
+        expect(mocks.redis.set).toHaveBeenCalledWith('jobs:knowledge-index-epoch', 'persistent');
+        expect(mocks.prisma.knowledgeDocument.updateMany).not.toHaveBeenCalledWith(
+            expect.objectContaining({ where: { status: KnowledgeDocumentStatus.READY, deletedAt: null } }),
+        );
+    });
+
+    it('leaves documents alone when the index epoch is unchanged', async () => {
+        const mocks = createMocks();
+        mocks.gateway.fetchKnowledgeIndexStatus.mockResolvedValue({ backend: 'memory', durable: false, epoch: 'epoch-1' });
+        mocks.redis.get.mockResolvedValue('epoch-1');
+        const service = createService(mocks);
+
+        await service.runOnce();
+
+        expect(mocks.redis.set).not.toHaveBeenCalled();
+        expect(mocks.prisma.knowledgeDocument.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('skips reconciliation when the index status cannot be read', async () => {
+        const mocks = createMocks();
+        const service = createService(mocks);
+
+        await service.runOnce();
+
+        expect(mocks.redis.get).not.toHaveBeenCalled();
     });
 
     it('derives stable index identity from configuration', async () => {
@@ -463,8 +529,8 @@ const DEPARTMENT_ID = '70000000-0000-0000-0000-000000000001';
 
 interface Mocks {
     prisma: Record<string, any>;
-    redis: { setIfAbsent: jest.Mock; deleteIfValue: jest.Mock };
-    gateway: { indexKnowledge: jest.Mock; deleteKnowledgeIndex: jest.Mock };
+    redis: { setIfAbsent: jest.Mock; deleteIfValue: jest.Mock; get: jest.Mock; set: jest.Mock };
+    gateway: { indexKnowledge: jest.Mock; deleteKnowledgeIndex: jest.Mock; fetchKnowledgeIndexStatus: jest.Mock };
     parser: { parse: jest.Mock };
 }
 
@@ -491,8 +557,18 @@ function createMocks(): Mocks {
     };
     return {
         prisma,
-        redis: { setIfAbsent: jest.fn().mockResolvedValue(true), deleteIfValue: jest.fn().mockResolvedValue(undefined) },
-        gateway: { indexKnowledge: jest.fn(), deleteKnowledgeIndex: jest.fn() },
+        redis: {
+            setIfAbsent: jest.fn().mockResolvedValue(true),
+            deleteIfValue: jest.fn().mockResolvedValue(undefined),
+            get: jest.fn().mockResolvedValue(null),
+            set: jest.fn().mockResolvedValue(undefined),
+        },
+        // 默认读不到索引身份：对账跳过，不影响既有状态机用例的断言。
+        gateway: {
+            indexKnowledge: jest.fn(),
+            deleteKnowledgeIndex: jest.fn(),
+            fetchKnowledgeIndexStatus: jest.fn().mockResolvedValue(null),
+        },
         parser: { parse: jest.fn() },
     };
 }

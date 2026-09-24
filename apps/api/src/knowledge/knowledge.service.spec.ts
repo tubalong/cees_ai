@@ -704,6 +704,87 @@ describe('KnowledgeService', () => {
         expect(gateway.answerKnowledge).not.toHaveBeenCalled();
         expect(prisma.knowledgeQueryLog.create).not.toHaveBeenCalled();
     });
+
+    it('lists knowledge documents within the real member knowledge bases', async () => {
+        const prisma = createPrismaMock();
+        prisma.knowledgeBaseMember.findMany.mockResolvedValue([{ knowledgeBaseId: KNOWLEDGE_BASE_ID }]);
+        prisma.knowledgeBase.findMany.mockResolvedValue([{ id: KNOWLEDGE_BASE_ID, name: '自用' }]);
+        prisma.knowledgeDocument.findMany.mockResolvedValue([
+            {
+                id: '70000000-0000-0000-0000-000000000001',
+                name: '李悦.txt',
+                status: 'READY',
+                knowledgeBaseId: KNOWLEDGE_BASE_ID,
+                updatedAt: new Date('2026-09-23T08:19:27.285Z'),
+            },
+        ]);
+        const service = createService(prisma, ['knowledge_base.read']);
+
+        const result = await service.listKnowledgeDocumentsForAssistant({
+            tenantId: TENANT_ID,
+            userId: USER_ID,
+            permissions: ['knowledge_base.read'],
+            limit: 20,
+        });
+
+        expect(result).toEqual([{
+            documentId: '70000000-0000-0000-0000-000000000001',
+            name: '李悦.txt',
+            status: 'READY',
+            knowledgeBaseId: KNOWLEDGE_BASE_ID,
+            knowledgeBaseName: '自用',
+            updatedAt: '2026-09-23T08:19:27.285Z',
+        }]);
+        // 只查真实成员库：锚点虚拟 READER 库不进清单，避免「列得出来、检索不到」。
+        expect(prisma.knowledgeBase.findMany).toHaveBeenCalledWith(expect.objectContaining({
+            where: expect.objectContaining({ id: { in: [KNOWLEDGE_BASE_ID] } }),
+        }));
+    });
+
+    it('short-circuits the document list to all tenant knowledge bases for manage_all members', async () => {
+        const prisma = createPrismaMock();
+        prisma.knowledgeBase.findMany
+            .mockResolvedValueOnce([{ id: KNOWLEDGE_BASE_ID }, { id: OTHER_KNOWLEDGE_BASE_ID }])
+            .mockResolvedValueOnce([
+                { id: KNOWLEDGE_BASE_ID, name: '产品知识库' },
+                { id: OTHER_KNOWLEDGE_BASE_ID, name: '自用' },
+            ]);
+        prisma.knowledgeDocument.findMany.mockResolvedValue([]);
+        const service = createService(prisma, ['knowledge_base.manage_all']);
+
+        const result = await service.listKnowledgeDocumentsForAssistant({
+            tenantId: TENANT_ID,
+            userId: USER_ID,
+            permissions: ['knowledge_base.manage_all'],
+            limit: 20,
+        });
+
+        expect(result).toEqual([]);
+        expect(prisma.knowledgeBaseMember.findMany).not.toHaveBeenCalled();
+        expect(prisma.knowledgeDocument.findMany).toHaveBeenCalledWith(expect.objectContaining({
+            where: expect.objectContaining({
+                knowledgeBaseId: { in: [KNOWLEDGE_BASE_ID, OTHER_KNOWLEDGE_BASE_ID] },
+            }),
+        }));
+    });
+
+    it('does not query documents when the requested knowledge base name matches nothing', async () => {
+        const prisma = createPrismaMock();
+        prisma.knowledgeBaseMember.findMany.mockResolvedValue([{ knowledgeBaseId: KNOWLEDGE_BASE_ID }]);
+        prisma.knowledgeBase.findMany.mockResolvedValue([{ id: KNOWLEDGE_BASE_ID, name: '自用' }]);
+        const service = createService(prisma, ['knowledge_base.read']);
+
+        const result = await service.listKnowledgeDocumentsForAssistant({
+            tenantId: TENANT_ID,
+            userId: USER_ID,
+            permissions: ['knowledge_base.read'],
+            knowledgeBaseName: '不存在的库',
+            limit: 20,
+        });
+
+        expect(result).toEqual([]);
+        expect(prisma.knowledgeDocument.findMany).not.toHaveBeenCalled();
+    });
 });
 
 const TENANT_ID = '10000000-0000-0000-0000-000000000001';
