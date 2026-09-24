@@ -2,108 +2,128 @@
 
 ## 1. 当前状态
 
-- 已落地：腾讯会议 `ConnectorManifest`、通用 Adapter、Registry 注册和连接器市场动态展示。
-- 已落地：当前用户、会议列表、会议详情、参会成员、录制与纪要元数据五类只读工具 Schema。
-- 已落地：通用 `HttpApiTransport`，提供固定服务地址、路径白名单、超时、响应大小限制、JSON 解析和结构化错误。
-- 已落地：Desktop 连接器卡片调用 CEES API 发起 OAuth、通过系统浏览器完成授权、轮询成员级连接状态，并支持解绑和重新授权。
-- 已落地：公开契约 `0.37.1`，定义成员级 OAuth 授权、回调、状态、解绑、工具发现和批量只读执行，并将官方回调字段修正为 `auth_code`。
-- 已落地：`apps/api` 中的 OAuth State、授权回调、Token 加密托管、刷新租约、解绑和审计。
-- 已落地：腾讯会议五类只读 API 网关、Scope 工具过滤、严格参数校验、字段白名单、分页适配、响应大小限制和执行审计。
-- 待实现：Assistant Tool Loop 直接调用 CEES API 只读网关；Desktop 不建设会议列表或详情业务页面。
+腾讯会议连接器当前采用“Desktop 托管腾讯官方 `@tencentcloud/tmeet` CLI + 浏览器 OAuth + 本地命令执行”路线，不再使用个人 Token 或远程 MCP。
 
-当前 API 已具备真实 OAuth 和只读查询能力，Desktop 市场卡片已完成授权、状态和解绑闭环。会议查询将在 Assistant Tool Loop 中由后端执行，不在 Desktop 建设独立会议客户端。
+已落地：
 
-## 2. 目标
+- Desktop 固定安装 `@tencentcloud/tmeet 1.0.18`，不依赖用户预装 Node.js 或 npm；
+- 从 npm 官方包下载单一 tgz，校验 SHA-256 `51d0cbb69d8400e29e73e88a5e1a0a3b6ef84323e8fa723e7da6725974025e61`，只提取当前平台二进制；
+- 支持 Windows x64、macOS Intel/Apple Silicon、Linux x64/ARM64；
+- 连接时执行 `tmeet auth login`，由官方 CLI 打开浏览器并完成设备码 OAuth；
+- OAuth Token 和 RefreshToken 由官方 CLI 使用 AES-256-GCM 加密，不进入 Renderer、CEES API、数据库或模型上下文；
+- CLI 配置与数据通过 `TMEET_CLI_CONFIG_DIR`、`TMEET_CLI_DATA_DIR` 隔离在 Electron `userData/connectors/tencent-meeting`；
+- Desktop 从固定允许列表读取已安装 CLI 的 `--help`，生成与当前版本对齐的参数 Schema；
+- API 只根据用户问题和 Desktop 提交的命令目录生成最多三条无副作用调用计划；
+- Desktop 执行前重新校验工具、参数和风险，所有写入或破坏性操作必须确认；
+- 执行结果脱敏、限长后以 `TENCENT_MEETING` 上下文注入本轮对话；
+- 不建设腾讯会议列表或会议详情等平行业务页面。
 
-腾讯会议连接器采用 API 执行型架构，验证 CEES 连接器运行时不仅支持钉钉 DWS 本地 CLI，也可以承载必须由服务端保存密钥和 Token 的第三方 HTTP API：
+## 2. 架构与边界
 
 ```text
-Desktop Connector Marketplace
+Renderer
     -> ConnectorHost
         -> TencentMeetingConnectorAdapter
-            -> CEES API Connector Gateway（已实现）
-                -> Tencent Meeting OAuth / Open API
+            -> LocalCliTransport
+                -> Managed @tencentcloud/tmeet 1.0.18
+                    -> Tencent Meeting OAuth / Open API
+
+Renderer
+    -> CEES API /assistant/connectors/tencent-meeting/plan
+        -> 只生成命令调用计划
+        -> 不接收 OAuth Token，不执行本地 CLI
 ```
 
-连接器只向 AI 暴露经过 CEES 定义和校验的只读工具。模型不能提交任意 URL、HTTP Header、Access Token 或腾讯会议原始 API 路径。
+`apps/api` 仍是 CEES 业务数据的唯一事实源。腾讯会议 CLI 的外部操作只影响腾讯会议，不能绕过 CEES API 创建或修改项目、任务、成员、财务、法务等正式资源。
 
-## 3. 安全边界
+## 3. 连接与解绑
 
-腾讯会议 OAuth 应用 Secret、Access Token 和 Refresh Token 不得打包进 Desktop，也不得保存到 Renderer 的 Local Storage。腾讯会议官方 OAuth 说明要求应用 Secret 和 Access Token 保存在服务端，参考：[腾讯会议 OAuth 2.0 授权](https://cloud.tencent.com/document/product/1095/51257)。
+1. 用户在连接器市场点击腾讯会议“连接”。
+2. Desktop 下载固定 npm 包、校验 SHA-256 并只提取当前平台二进制；已安装时直接复用。
+3. Desktop 使用独立配置和数据目录执行 `tmeet auth login`。
+4. 官方 CLI 自动打开系统浏览器；用户登录腾讯会议并确认 OAuth 授权。
+5. CLI 最多等待五分钟并将加密凭据写入本地隔离目录。
+6. Desktop 执行 `tmeet auth status`，只向 Renderer 返回登录状态、用户名、OpenId、版本和工具数量。
+7. 解绑先执行 `tmeet auth logout`，再删除 CEES 专属配置和数据目录；受管二进制保留，便于下次快速连接。
 
-服务端当前满足：
+CEES 不要求用户填写 SDK ID、Secret、Corp ID 或个人 Token，也不在服务端代管腾讯会议凭据。账号可见数据和可执行动作仍由腾讯会议账号、产品版本、OAuth 授权及资源权限决定。
 
-- OAuth State 与 CEES 用户、租户、客户端会话绑定，并设置短过期时间和一次性消费语义；
-- 应用 Secret 只来自服务端环境变量或平台 Secret；
-- 第三方 Token 采用服务端加密存储，不通过公开 API 返回给 Desktop；
-- Token 刷新加锁或使用等价的并发控制，避免重复刷新导致凭据失效；
-- 解绑撤销或清除服务端 Token，并记录租户、操作者、连接器和请求审计信息；
-- 腾讯会议 API 响应进入 AI 前执行字段过滤、大小限制和敏感字段脱敏；
-- 后续写操作必须单独建模风险等级，并增加显式二次确认，不得复用只读执行入口静默写入。
+## 4. 对话执行
 
-## 4. Manifest 与生命周期
+1. Desktop 检查 CLI 已安装且 `auth status` 为已登录。
+2. Desktop 对固定允许列表中的命令执行 `--help`，从官方参数定义生成工具 Schema 并缓存。
+3. Desktop 将用户问题和受限工具目录提交给 `POST /assistant/connectors/tencent-meeting/plan`。
+4. API 只允许模型返回目录内工具和参数，最多三条调用。
+5. Desktop 对 `WRITE`、`DESTRUCTIVE` 和未知风险操作展示精确参数并要求确认。
+6. Desktop 将结构化参数转换为 CLI flag，禁止模型指定可执行文件、Shell、环境变量、网络地址或额外参数。
+7. CLI 使用 JSON 输出执行官方能力；只读查询默认启用 `--compact`。
+8. Desktop 移除 Token、Secret、Cookie、Authorization、Credential、Password 等字段并限制上下文字节数。
 
-腾讯会议 Manifest 当前声明：
+当前仍是单轮批量规划，后一条命令不能引用前一条命令的实时返回值。需要“先找人再邀请”之类依赖链的操作应拆成多轮，或后续引入受控工具循环。
 
-| 字段 | 值 | 说明 |
-| --- | --- | --- |
-| `id` | `tencent-meeting` | 稳定连接器 ID |
-| `transportType` | `HTTP_API` | 最终通过受控 HTTP API 网关执行 |
-| `executionLocation` | `API` | 第三方 Secret 与 Token 只能存在服务端 |
-| `authType` | `OAUTH` | 使用腾讯会议 OAuth 授权 |
-| `supportsInstall` | `false` | 不需要安装本地组件 |
-| `supportsDisconnect` | `true` | 后续支持解绑和清除授权 |
-| `supportsDynamicTools` | `true` | 工具能力可根据授权范围和服务状态发现 |
+## 5. 当前暴露能力
 
-当前 Desktop 生命周期行为：
+当前允许列表覆盖：
 
-- `status` 从 CEES API 获取当前租户成员的授权和 Token 健康状态；
-- `connect` 从 CEES API 获取一次性授权地址，通过受控 Electron IPC 打开 HTTPS 系统浏览器，并轮询至成功、失败或 State 超时；
-- `disconnect` 删除 CEES API 为当前租户成员保存的腾讯会议凭据；
-- Desktop 不保存腾讯会议 Access Token、Refresh Token 或应用 Secret；
-- Desktop 既有工具执行占位不会用于正式会话，后续由 Assistant Tool Loop 在 API 内部直接调用只读网关。
+- CLI 应用展示配置查询与设置；
+- 会议创建、查询、搜索、更新、取消；
+- 会议受邀成员查询、添加、移除和替换；
+- 录制列表、地址、搜索、智能纪要、转写及录制权限申请；
+- 参会成员、等候室记录、报告导出和异步结果；
+- 元宝纪要搜索与详情；
+- 呼叫入会、移出成员和等候室管理。
 
-## 5. 第一阶段只读工具
+暂不暴露：
 
-| 工具 ID | 用途 | 关键参数 |
-| --- | --- | --- |
-| `tencent_meeting.profile.get` | 查询当前已授权账号资料 | 无 |
-| `tencent_meeting.meetings.list` | 按时间范围查询会议列表 | `startTime/endTime/page/pageSize` |
-| `tencent_meeting.meetings.get` | 查询会议详情 | `meetingId` |
-| `tencent_meeting.participants.list` | 查询参会成员 | `meetingId/page/pageSize` |
-| `tencent_meeting.recordings.list` | 查询录制和纪要元数据 | `meetingId` |
+- `event consume` 等长连接命令：当前连接器调用模型不管理长期子进程；
+- `contact` 独立查询：官方 Skill 明确限制通讯录只能作为会议邀请或呼叫入会的前置步骤，当前单轮规划无法安全传递前序结果；
+- `tshoot` 日志和反馈：涉及本地日志导出或向厂商提交问题，不属于普通对话查询。
 
-所有工具参数 Schema 均设置 `additionalProperties=false`。服务端执行层再次校验时间范围、分页上限、会议 ID、调用数量和腾讯会议授权 Scope；历史空 Scope 记录保持兼容，由提供方继续执行资源权限校验。
+这三类能力需在建立专用进程生命周期、受控链式调用或明确交互后再开放，不能只因 CLI 存在命令就直接暴露给模型。
 
-执行结果仅保留会议、参会者和录制的业务摘要字段。参会者标识使用会议 ID 与提供方用户标识生成 SHA-256 稳定键，不返回手机号、邮箱、IP、设备标识或原始用户 ID；录制结果不返回播放或下载 URL。
+## 6. 风险与确认
 
-## 6. HttpApiTransport
+- `READ`：会议、录制、报告和纪要查询，可直接执行；
+- `WRITE`：创建或更新会议、修改受邀成员、呼叫入会、等候室操作、报告导出、应用信息设置，必须确认；
+- `DESTRUCTIVE`：取消会议、移出成员、提交录制权限申请，必须确认；
+- 未识别的新命令默认按 `DESTRUCTIVE` 处理。
 
-通用 `HttpApiTransport` 为后续 API 型连接器提供：
+确认卡片必须展示工具名称、风险等级和完整结构化参数。`record.permission-apply-commit` 只有在用户明确确认先前预览的权限申请后才允许规划和执行。
 
-- 固定 `baseUrl`，拒绝请求中传入外部完整 URL；
-- 路径前缀白名单，防止 Adapter 越界调用其他服务接口；
-- Header 由可信依赖提供，禁止覆盖 `Host` 和 `Content-Length`；
-- 仅使用 JSON 请求和响应；
-- 最大 120 秒超时与可配置响应字节上限；
-- 禁止自动跟随重定向；
-- 统一 `HttpApiError`，保留 HTTP 状态、是否超时、是否可重试和受限响应正文。
+## 7. 安全设计
 
-本阶段 Transport 没有直接配置腾讯会议域名和凭据，也没有从环境变量读取腾讯会议 Secret。后续由腾讯会议服务端网关完成第三方请求，Desktop Transport 只允许调用受信任的 CEES API 路径。
+- 下载地址、版本、哈希和归档条目全部硬编码，禁止远程响应指定可执行路径；
+- tgz 解压限制总大小、单条目大小和精确条目名，不写出任意归档路径；
+- CLI 只由 Electron Main Process 启动，Renderer 不接触本地路径或凭据；
+- 配置目录和数据目录均在腾讯会议连接器专属根目录内，递归删除前验证绝对路径；
+- 工具参数必须存在于当前 CLI 帮助生成的 Schema，未知字段直接拒绝；
+- 本地命令通过 `execFile` 执行，`shell=false`，模型不能注入 Shell；
+- API 不接收或返回 OAuth Token、CLI 路径、环境变量、下载地址或 Header；
+- 第三方结果不能作为 CEES 租户、角色或业务权限判断依据。
 
-## 7. 后续实施顺序
+## 8. 契约与迁移
 
-1. 已完成：契约定义授权开始、状态、解绑和五类只读查询接口及失败语义。
-2. 已完成：API 实现 OAuth State、回调、Token 加密托管、刷新租约、解绑和审计。
-3. 已完成：将五类工具映射到固定腾讯会议 Open API，不接受任意 URL，并补齐字段过滤、分页适配、大小限制和审计。
-4. 已完成：Desktop 市场卡片接入 CEES API 授权、状态、轮询和解绑，授权时通过系统浏览器打开服务端返回的地址。
-5. 下一步：Assistant 接入原生 Tool Loop，由 API 直接执行腾讯会议只读工具。
-6. 写操作：另行设计创建会议、修改会议等操作的权限和二次确认机制。
+公开契约 `0.40.0` 保留 `POST /assistant/connectors/tencent-meeting/plan` 的请求和响应结构，仅将语义从“远程 MCP 动态工具”修正为“本地官方 CLI 版本化命令”。生成客户端必须重新生成。
 
-## 8. 验证
+从 `0.39.0` 升级时：
 
-- Electron TypeScript 检查；
-- `HttpApiTransport` 固定域名、路径白名单、错误、超时和响应大小测试；
-- 腾讯会议 Manifest、工具目录、未授权失败语义和 Adapter 委托测试；
-- Desktop 生产构建和连接器市场双卡片展示检查。
-- API 腾讯会议局部 Jest、NestJS 构建、契约 lint 与生成客户端 TypeScript 检查。
+- 删除 Desktop 个人 Token 输入和 `cees:tencent-meeting-connect-token` IPC；
+- 删除 `safeStorage` Token 文件和远程 MCP 执行路径；
+- 旧 `credential.secure` 不迁移，用户需要重新点击连接并完成浏览器 OAuth；
+- 服务端数据库无需新增迁移，CEES API 仍不保存腾讯会议凭据。
+
+## 9. 验收
+
+- 首次连接可自动安装固定 CLI 并打开浏览器 OAuth；
+- 授权后可通过 AI 查询当前账号会议、录制、报告和纪要；
+- 写操作未确认时拒绝执行，确认后使用精确参数执行；
+- Renderer、API、数据库、日志和模型上下文不出现 OAuth Token；
+- 解绑后 `auth status` 为未登录，CEES 专属凭据目录已删除；
+- 安装包哈希错误、平台不支持、授权超时、CLI 输出异常均返回可恢复错误；
+- Desktop 类型检查、生产构建、连接器测试、API Jest、契约 lint 和生成客户端全部通过。
+
+## 10. 官方来源
+
+- npm 包：`@tencentcloud/tmeet 1.0.18`
+- 官方源码：`TencentCloud/tencentmeeting-cli`
+- 官方授权命令：`tmeet auth login`、`tmeet auth status`、`tmeet auth logout`

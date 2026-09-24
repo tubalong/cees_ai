@@ -11,6 +11,8 @@ export const PLATFORM_PERMISSIONS = [
     'platform.tenant.admin.remove',
     'platform.tenant.admin.credential.reset',
     'platform.audit.read',
+    'platform.aiCredit.read',
+    'platform.aiCredit.write',
 ] as const;
 
 export function resolvePlatformPermissions(role: PlatformRole): string[] {

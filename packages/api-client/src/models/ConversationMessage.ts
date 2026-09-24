@@ -2,6 +2,7 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
+import type { ConnectorContext } from './ConnectorContext';
 import type { ConversationMessageRole } from './ConversationMessageRole';
 import type { KnowledgeToolCitation } from './KnowledgeToolCitation';
 import type { ToolResultResourceReference } from './ToolResultResourceReference';
@@ -20,6 +21,10 @@ export type ConversationMessage = {
      * 用户消息引用的稳定图片文件 ID（用户输入的附件），仅用户消息可能非空；展示/下载地址由前端通过文件接口按需获取
      */
     imageFileIds: Array<string>;
+    /**
+     * 用户消息在该轮提交的已脱敏连接器上下文；其他角色固定为空数组。用于恢复连接器授权提示等确定性交互，不作为 CEES 权限或业务事实依据
+     */
+    connectorContexts: Array<ConnectorContext>;
     /**
      * 工具产生的稳定正式资源引用（IMAGE 为 AI 生成图片、DOCUMENT 为 AI 生成文档）；非 TOOL 消息为空数组；资源访问 URL 必须通过对应资源接口按需获取（图片为 GET /api/v1/images/{imageId}），消息正文不携带签名 URL
      */

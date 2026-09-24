@@ -2,14 +2,22 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
-import type { TencentMeetingToolId } from './TencentMeetingToolId';
+import type { TencentMeetingConnectorToolRisk } from './TencentMeetingConnectorToolRisk';
 export type TencentMeetingConnectorTool = {
-    toolId: TencentMeetingToolId;
+    /**
+     * Version-aligned Tencent Meeting CLI command ID, for example meeting.list
+     */
+    toolId: string;
     name: string;
     description: string;
     /**
-     * CEES 固定只读工具的 JSON Schema；根节点必须为 object 且禁止未声明业务参数
+     * JSON Schema derived from the pinned official CLI command help; root must be an object
      */
     parameters: Record<string, any>;
+    riskLevel: TencentMeetingConnectorToolRisk;
+    /**
+     * Desktop must require explicit confirmation before executing this tool
+     */
+    requiresConfirmation: boolean;
 };
 

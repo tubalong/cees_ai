@@ -19,7 +19,9 @@
 - [密码修改与凭证安全](../security/password-management.md)：租户成员与平台管理员修改自己的密码。
 - [钉钉组织架构与人员同步](dingtalk-organization-sync.md)：兼容企业应用凭证和 DWS/MCP 可见组织快照，完成外部部门和人员镜像及管理员确认映射。
 - [钉钉 DWS/MCP 连接器](dingtalk-mcp-connector.md)：DWS 本地授权、可见范围导入、租户管理员边界和快照安全语义。
-- [腾讯会议连接器](tencent-meeting-connector.md)：API 执行型连接器基础、服务端 OAuth/Token 托管边界和第一阶段只读工具。
+- [腾讯会议连接器](tencent-meeting-connector.md)：Desktop 托管官方 CLI、浏览器 OAuth、版本化命令目录、对话规划与写操作确认。
+- [企业微信 CLI 连接器](wecom-cli-connector.md)：Desktop 托管官方 CLI、二维码机器人授权、动态工具发现与写操作确认。
+- [GitHub 官方远程 MCP 连接器](github-remote-mcp-connector.md)：GitHub OAuth、官方 MCP SDK、动态工具发现与 Desktop 本地执行。
 - [分配策略与人财法](assignment-and-hr-finance-legal.md)：AssignmentPolicy、完整 HR 与 Finance 已实现；Legal 契约已冻结待实现。
 - [AI 助手业务写操作](assistant-business-tools.md)：聊天式部门与知识库写入、待确认草稿与确认卡片、缺参追问与同名消歧、确认前无副作用。
 

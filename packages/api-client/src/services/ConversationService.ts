@@ -10,9 +10,15 @@ import type { CreateConversationRequest } from '../models/CreateConversationRequ
 import type { CreateTurnRequest } from '../models/CreateTurnRequest';
 import type { DingTalkConnectorPlanRequest } from '../models/DingTalkConnectorPlanRequest';
 import type { DingTalkConnectorPlanResponseEnvelope } from '../models/DingTalkConnectorPlanResponseEnvelope';
+import type { GitHubConnectorPlanRequest } from '../models/GitHubConnectorPlanRequest';
+import type { GitHubConnectorPlanResponseEnvelope } from '../models/GitHubConnectorPlanResponseEnvelope';
+import type { TencentMeetingConnectorPlanRequest } from '../models/TencentMeetingConnectorPlanRequest';
+import type { TencentMeetingConnectorPlanResponseEnvelope } from '../models/TencentMeetingConnectorPlanResponseEnvelope';
 import type { TurnResponseEnvelope } from '../models/TurnResponseEnvelope';
 import type { TurnStreamEvent } from '../models/TurnStreamEvent';
 import type { UpdateConversationRequest } from '../models/UpdateConversationRequest';
+import type { WeComConnectorPlanRequest } from '../models/WeComConnectorPlanRequest';
+import type { WeComConnectorPlanResponseEnvelope } from '../models/WeComConnectorPlanResponseEnvelope';
 import type { CancelablePromise } from '../core/CancelablePromise';
 import { OpenAPI } from '../core/OpenAPI';
 import { request as __request } from '../core/request';
@@ -38,6 +44,89 @@ export class ConversationService {
             mediaType: 'application/json',
             errors: {
                 400: `Invalid query or tool catalog`,
+                401: `Authentication or tenant membership is invalid`,
+                502: `AI provider returned an invalid plan`,
+                503: `AI service or model is temporarily unavailable`,
+            },
+        });
+    }
+    /**
+     * Plan Tencent Meeting official CLI calls for the current question
+     * Desktop installs a pinned official @tencentcloud/tmeet CLI, completes browser OAuth locally, and derives the
+     * version-aligned command schema from the installed CLI help. The API only asks the model to select tool names and
+     * arguments; OAuth credentials remain in the CLI-owned encrypted Desktop directories and are never uploaded to
+     * CEES API. Desktop must request explicit user confirmation before executing any WRITE or DESTRUCTIVE command.
+     *
+     * @returns TencentMeetingConnectorPlanResponseEnvelope Up to three local official-CLI calls; calls is empty when Tencent Meeting data is unnecessary
+     * @throws ApiError
+     */
+    public static planTencentMeetingConnectorQueries({
+        requestBody,
+    }: {
+        requestBody: TencentMeetingConnectorPlanRequest,
+    }): CancelablePromise<TencentMeetingConnectorPlanResponseEnvelope> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/assistant/connectors/tencent-meeting/plan',
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                400: `Invalid query or version-aligned CLI command catalog`,
+                401: `Authentication or tenant membership is invalid`,
+                502: `AI provider returned an invalid plan`,
+                503: `AI service or model is temporarily unavailable`,
+            },
+        });
+    }
+    /**
+     * Plan WeCom official CLI calls for the current question
+     * Desktop installs the pinned official WeCom CLI and dynamically discovers tools after the user authorizes an
+     * intelligent bot by QR code. The API only asks the model to select tool names and arguments; WeCom authorization
+     * remains in the Desktop-managed CLI config directory and is never uploaded to CEES API. Desktop must request
+     * explicit user confirmation before executing any tool marked as WRITE or DESTRUCTIVE.
+     *
+     * @returns WeComConnectorPlanResponseEnvelope Up to three local CLI calls; calls is empty when WeCom data is unnecessary
+     * @throws ApiError
+     */
+    public static planWeComConnectorQueries({
+        requestBody,
+    }: {
+        requestBody: WeComConnectorPlanRequest,
+    }): CancelablePromise<WeComConnectorPlanResponseEnvelope> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/assistant/connectors/wecom/plan',
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                400: `Invalid query or dynamic tool catalog`,
+                401: `Authentication or tenant membership is invalid`,
+                502: `AI provider returned an invalid plan`,
+                503: `AI service or model is temporarily unavailable`,
+            },
+        });
+    }
+    /**
+     * Plan GitHub official remote MCP calls for the current question
+     * Desktop connects to the fixed GitHub-hosted remote MCP endpoint and sends the dynamically discovered tool
+     * catalog. The API only plans tool names and arguments; GitHub OAuth credentials and MCP execution remain in
+     * the Desktop Main Process. Desktop must require explicit confirmation before executing WRITE or DESTRUCTIVE tools.
+     *
+     * @returns GitHubConnectorPlanResponseEnvelope Up to three GitHub remote MCP calls; calls is empty when GitHub data is unnecessary
+     * @throws ApiError
+     */
+    public static planGitHubConnectorQueries({
+        requestBody,
+    }: {
+        requestBody: GitHubConnectorPlanRequest,
+    }): CancelablePromise<GitHubConnectorPlanResponseEnvelope> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/assistant/connectors/github/plan',
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                400: `Invalid query or MCP tool catalog`,
                 401: `Authentication or tenant membership is invalid`,
                 502: `AI provider returned an invalid plan`,
                 503: `AI service or model is temporarily unavailable`,

@@ -51,11 +51,14 @@ export interface ConnectorTool {
     name: string;
     description: string;
     parameters: Record<string, unknown>;
+    riskLevel?: 'READ' | 'WRITE' | 'DESTRUCTIVE';
+    requiresConfirmation?: boolean;
 }
 
 export interface ConnectorPlannedCall {
     toolId: string;
     arguments: Record<string, unknown>;
+    confirmed?: boolean;
 }
 
 export interface ConnectorContext<Provider extends string = string> {

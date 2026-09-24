@@ -165,7 +165,7 @@ Accept: text/event-stream
 
 ### 4.1.2 本地连接器上下文
 
-`connectorContexts` 是可选的本轮只读参考数据，当前仅接受 `DINGTALK`。每项通过 `toolId` 标识本地 DWS 工具，通过 `toolName` 保存对应的 `canonical_path`；不再使用固定能力枚举。已连接状态下，Desktop 可让模型从当前 DWS Schema 暴露的全部安全只读查询中选择工具，模型返回空计划时不会读取或上传钉钉业务数据。
+`connectorContexts` 是可选的本轮只读参考数据，当前接受 `DINGTALK`、`TENCENT_MEETING`、`WECOM` 和 `GITHUB`。每项通过 `toolId` 标识本地连接器动态工具；不再使用固定能力枚举。连接器结果只用于本轮回答，不构成 CEES 权限、身份或正式业务事实。
 
 - API 会将上下文和用户消息一起持久化，重连、重放和模型上下文构建都以数据库记录为准；客户端不提交 DWS Token、Cookie、AppSecret 或其他凭据。
 - 单轮所有连接器上下文最大 64KB；包含 `token`、`secret`、`cookie`、`authorization`、`credential` 或 `password` 等键名时拒绝请求。

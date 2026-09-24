@@ -288,6 +288,25 @@ Tenant + User + TenantMembership
 - 同一轮可能包含 `chat.compact` 与 `chat.invoke/chat.stream` 多条真实调用，轮次总 Token 应求和；
 - 当前模型只有用量记录，不存在企业套餐、坑位额度、成员额度账户或扣减表。
 
+## AI Credit 计费配置模型
+
+```text
+AICreditCapability ── AICreditTierCapability ── AICreditTier
+        │                                        │
+        └── AICreditRateCard                     └── AICreditTierPrice（按持续时间）
+
+AICreditBoosterTier（加油包档位，永久有效）
+AICreditBillingConfig（全局计费配置，单行表）
+```
+
+- `ai_credit_capabilities` 保存平台级能力目录，`permission_code` 桥接 `permissions.code`；`ai_credit_tiers.code` 兼作档位权限码；
+- `ai_credit_tier_capabilities` 只关联功能开关类能力，通用能力全档开放、不写入该表；
+- `ai_credit_rate_cards` 按 能力 × 模型组 × 计量维度 配置费率，调价插入新 `rate_version` 行、历史版本保留不删除、账目不追溯历史；
+- `ai_credit_billing_configs` 是固定主键 `default` 的单行表，保存最小计量单位、重置规则、折扣与订阅参数；
+- 本阶段只有平台级配置表；企业池、订阅记录、订单与扣减流水表属后续阶段；
+- `20260923070447_ai_credit_billing_config` 创建上述七张表与五个枚举；`20260923071550_ai_credit_billing_config_refine` 将 `code` 唯一性改为部分唯一索引（`WHERE deleted_at IS NULL`，软删除后允许重建）并补齐 PostgreSQL 中文注释；
+- 表结构与字段说明见 [AI Credit 计费配置表结构设计](ai-credit-billing-tables.md)；产品设计见 [AI Credit 额度计量体系设计](../product/ai-credit-system-design.md)。
+
 - `apps/api/prisma/schema.prisma` 是数据模型唯一事实源，迁移提交到 `apps/api/prisma/migrations`。
 - `0001_init` 包含 pgvector 扩展和当前 `schema.prisma` 的完整空库结构；共享环境首次执行后，后续结构变化必须新增前向迁移，不再重写该基线。
 - 本地 PostgreSQL 与 Redis 由 `infra/database/docker-compose.yml` 和本地开发覆盖启动；Staging 与 Production 数据库部署在各自独立服务器或服务器组，Redis 必须启用密码。

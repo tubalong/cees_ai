@@ -1,5 +1,5 @@
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000/api/';
-// export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://192.168.5.29:3000/api/';
+// export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000/api/';
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://192.168.5.29:3000/api/';
 // export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://132.232.159.186:3000/api/';
 // http://192.168.5.29:3000/api/
 // http://132.232.159.186:3000/api/
@@ -36,31 +36,6 @@ export interface LoginResult extends TokenPair, AuthContext { }
 
 export interface MeResult extends AuthContext {
     permissions: string[];
-}
-
-export interface TencentMeetingAuthorization {
-    authorizationUrl: string;
-    expiresAt: string;
-    pollAfterMs: number;
-}
-
-export interface TencentMeetingConnection {
-    state: 'NOT_CONNECTED' | 'AUTHORIZING' | 'READY' | 'ERROR';
-    authenticated: boolean;
-    account: {
-        externalUserId: string;
-        displayName: string | null;
-        organizationId: string | null;
-        organizationName: string | null;
-    } | null;
-    grantedScopes: string[];
-    tokenStatus: 'MISSING' | 'VALID' | 'EXPIRING' | 'REFRESH_FAILED' | 'REVOKED';
-    authorizedAt: string | null;
-    tokenExpiresAt: string | null;
-    lastVerifiedAt: string | null;
-    lastErrorCode: string | null;
-    lastErrorMessage: string | null;
-    updatedAt: string;
 }
 
 export interface PlatformLoginInput {
@@ -408,18 +383,6 @@ export async function login(input: LoginInput): Promise<LoginResult> {
 
 export async function getMe(): Promise<MeResult> {
     return authorizedRequest<MeResult>('v1/auth/me');
-}
-
-export function startTencentMeetingAuthorization(): Promise<TencentMeetingAuthorization> {
-    return authorizedRequest<TencentMeetingAuthorization>('v1/connectors/tencent-meeting/authorization', { method: 'POST' });
-}
-
-export function getTencentMeetingConnection(): Promise<TencentMeetingConnection> {
-    return authorizedRequest<TencentMeetingConnection>('v1/connectors/tencent-meeting/status');
-}
-
-export function disconnectTencentMeeting(): Promise<void> {
-    return authorizedRequest<void>('v1/connectors/tencent-meeting/authorization', { method: 'DELETE' });
 }
 
 export async function getUserProfile(): Promise<UserProfile> {
@@ -1513,7 +1476,7 @@ export async function uploadAttachmentFile(file: File): Promise<string> {
 export type ChatMode = 'standard' | 'ultra';
 
 export interface Conversation { id: string; title: string; mode: ChatMode; visibility: 'PRIVATE'; version: number; createdAt: string; updatedAt: string; lastTurnAt?: string | null; }
-export interface ConversationMessage { id: string; role: 'USER' | 'ASSISTANT' | 'TOOL'; content: string; createdAt: string; turnId?: string | null; toolCallId?: string | null; resources?: Array<{ id: string; resourceId?: string; type: 'IMAGE' | 'DOCUMENT'; url?: string | null; resourceUrl?: string | null }> | null; sources?: Array<{ id: string; title: string; url: string; domain: string; snippet: string; publishedAt?: string | null }> | null; citations?: Array<{ id: string; title: string; snippet: string; pageIndex?: number | null; knowledgeBaseId?: string | null; deletable?: boolean }> | null; }
+export interface ConversationMessage { id: string; role: 'USER' | 'ASSISTANT' | 'TOOL'; content: string; createdAt: string; turnId?: string | null; toolCallId?: string | null; connectorContexts?: ConnectorContext[] | null; resources?: Array<{ id: string; resourceId?: string; type: 'IMAGE' | 'DOCUMENT'; url?: string | null; resourceUrl?: string | null }> | null; sources?: Array<{ id: string; title: string; url: string; domain: string; snippet: string; publishedAt?: string | null }> | null; citations?: Array<{ id: string; title: string; snippet: string; pageIndex?: number | null; knowledgeBaseId?: string | null; deletable?: boolean }> | null; }
 export interface ConversationDetail { conversation: Conversation; messages: ConversationMessage[]; }
 export interface Turn { id: string; conversationId: string; status: 'RECEIVED' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED'; mode: ChatMode; error?: Record<string, unknown> | null; createdAt: string; completedAt?: string | null; }
 export interface ImageAccess { id: string; resourceId: string; mimeType: 'image/png' | 'image/jpeg' | 'image/webp'; sizeBytes: number; url: string; prompt?: string | null; model?: string | null; createdAt: string; }
@@ -1561,7 +1524,7 @@ export async function updateConversation(conversationId: string, title: string, 
 export async function deleteConversation(conversationId: string, version: number): Promise<void> { await authorizedRequest<unknown>(`v1/conversations/${encodeURIComponent(conversationId)}?version=${encodeURIComponent(String(version))}`, { method: 'DELETE' }); }
 
 export interface ConnectorContext {
-    provider: 'DINGTALK';
+    provider: 'DINGTALK' | 'TENCENT_MEETING' | 'WECOM' | 'GITHUB';
     toolId: string;
     toolName: string;
     fetchedAt: string;
@@ -1581,6 +1544,75 @@ export interface DingTalkConnectorPlan {
 
 export async function planDingTalkConnectorQueries(query: string, tools: DingTalkConnectorTool[]): Promise<DingTalkConnectorPlan> {
     return authorizedRequest<DingTalkConnectorPlan>('v1/assistant/connectors/dingtalk/plan', { method: 'POST', body: JSON.stringify({ query, tools }) });
+}
+
+export interface TencentMeetingConnectorTool {
+    toolId: string;
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+    riskLevel: 'READ' | 'WRITE' | 'DESTRUCTIVE';
+    requiresConfirmation: boolean;
+}
+
+export interface TencentMeetingConnectorPlan {
+    calls: Array<{ toolId: string; arguments: Record<string, unknown> }>;
+}
+
+export async function planTencentMeetingConnectorQueries(
+    query: string,
+    tools: TencentMeetingConnectorTool[],
+): Promise<TencentMeetingConnectorPlan> {
+    return authorizedRequest<TencentMeetingConnectorPlan>('v1/assistant/connectors/tencent-meeting/plan', {
+        method: 'POST',
+        body: JSON.stringify({ query, tools }),
+    });
+}
+
+export interface WeComConnectorTool {
+    toolId: string;
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+    riskLevel: 'READ' | 'WRITE' | 'DESTRUCTIVE';
+    requiresConfirmation: boolean;
+}
+
+export interface WeComConnectorPlan {
+    calls: Array<{ toolId: string; arguments: Record<string, unknown> }>;
+}
+
+export async function planWeComConnectorQueries(
+    query: string,
+    tools: WeComConnectorTool[],
+): Promise<WeComConnectorPlan> {
+    return authorizedRequest<WeComConnectorPlan>('v1/assistant/connectors/wecom/plan', {
+        method: 'POST',
+        body: JSON.stringify({ query, tools }),
+    });
+}
+
+export interface GitHubConnectorTool {
+    toolId: string;
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+    riskLevel: 'READ' | 'WRITE' | 'DESTRUCTIVE';
+    requiresConfirmation: boolean;
+}
+
+export interface GitHubConnectorPlan {
+    calls: Array<{ toolId: string; arguments: Record<string, unknown> }>;
+}
+
+export async function planGitHubConnectorQueries(
+    query: string,
+    tools: GitHubConnectorTool[],
+): Promise<GitHubConnectorPlan> {
+    return authorizedRequest<GitHubConnectorPlan>('v1/assistant/connectors/github/plan', {
+        method: 'POST',
+        body: JSON.stringify({ query, tools }),
+    });
 }
 
 async function streamSse(path: string, init: RequestInit, onEvent: (event: TurnStreamEvent) => void, retry = true): Promise<void> {

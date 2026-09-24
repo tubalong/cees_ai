@@ -10,7 +10,7 @@ export type PublicTurnMode = 'standard' | 'ultra';
 export type PublicTurnPhase = 'reasoning' | 'answering' | 'tool_executing';
 
 export interface ConnectorContextInput {
-  provider: 'DINGTALK';
+  provider: 'DINGTALK' | 'TENCENT_MEETING' | 'WECOM' | 'GITHUB';
   toolId: string;
   toolName: string;
   fetchedAt: string;
@@ -25,6 +25,48 @@ export interface DingTalkConnectorToolInput {
 }
 
 export interface DingTalkConnectorPlannedCall {
+  toolId: string;
+  arguments: Record<string, unknown>;
+}
+
+export interface TencentMeetingConnectorToolInput {
+  toolId: string;
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+  riskLevel: 'READ' | 'WRITE' | 'DESTRUCTIVE';
+  requiresConfirmation: boolean;
+}
+
+export interface TencentMeetingConnectorPlannedCall {
+  toolId: string;
+  arguments: Record<string, unknown>;
+}
+
+export interface WeComConnectorToolInput {
+  toolId: string;
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+  riskLevel: 'READ' | 'WRITE' | 'DESTRUCTIVE';
+  requiresConfirmation: boolean;
+}
+
+export interface WeComConnectorPlannedCall {
+  toolId: string;
+  arguments: Record<string, unknown>;
+}
+
+export interface GitHubConnectorToolInput {
+  toolId: string;
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+  riskLevel: 'READ' | 'WRITE' | 'DESTRUCTIVE';
+  requiresConfirmation: boolean;
+}
+
+export interface GitHubConnectorPlannedCall {
   toolId: string;
   arguments: Record<string, unknown>;
 }
@@ -60,6 +102,8 @@ export interface PublicConversationMessage {
   imageFileIds: string[];
   /** 稳定的文档文件引用；不保存或返回带签名的长期 URL。 */
   documentFileIds: string[];
+  /** 用户消息在该轮提交的已脱敏连接器上下文；其他角色为空数组。 */
+  connectorContexts: ConnectorContextInput[];
   /** 工具产生的稳定正式资源引用；非 TOOL 消息为空数组；访问 URL 由资源接口按需签发。 */
   resources: PublicResourceReference[];
   /** TOOL 消息对应工具调用返回的结构化来源；其他角色为空数组；来源按轮次归属。 */

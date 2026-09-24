@@ -15,11 +15,11 @@ import ReactMarkdown, { type Components } from 'react-markdown';
 import { useLocation, useNavigate } from 'react-router-dom';
 import remarkGfm from 'remark-gfm';
 import {
-    cancelActionDraft, cancelTurn, confirmActionDraft, createConversation, createTurn, deleteConversation, exportDocument, getConversation, getDashboardOverview, getDashboardTodos, getDashboardUpcomingMeetings, getDocument, getImage, planDingTalkConnectorQueries, replayTurnEvents, updateConversation, uploadAttachmentFile,
+    cancelActionDraft, cancelTurn, confirmActionDraft, createConversation, createTurn, deleteConversation, exportDocument, getConversation, getDashboardOverview, getDashboardTodos, getDashboardUpcomingMeetings, getDocument, getImage, planDingTalkConnectorQueries, planGitHubConnectorQueries, planTencentMeetingConnectorQueries, planWeComConnectorQueries, replayTurnEvents, updateConversation, uploadAttachmentFile,
     getUnreadNotificationCount, hasStoredSession, listConversations, listDocuments, listTenantMembers, logout,
     createKnowledgeDocument, deleteKnowledgeDocument, listWritableKnowledgeBases,
     type Conversation, type ConversationMessage, type DashboardOverview, type DashboardTodoItem, type DashboardUpcomingMeeting, type ImageAccess,
-    type ConnectorContext, type TurnStreamEvent,
+    type ConnectorContext, type GitHubConnectorTool, type TencentMeetingConnectorTool, type TurnStreamEvent, type WeComConnectorTool,
     type KnowledgeBaseSummary, type KnowledgeSourceType,
     type ManagedDocumentSummary, type MeResult, type TenantMember,
 } from '../core/api';
@@ -354,8 +354,63 @@ interface LocalChatMessage {
     citations?: ChatCitation[];
     /** 写操作待确认卡片；副作用尚未发生，需用户在本页确认。 */
     confirmation?: PendingActionConfirmation;
+    /** 企业微信业务域缺权后的官方授权入口，可从历史 connectorContexts 恢复。 */
+    weComAuthorizations?: WeComAuthorizationRequest[];
     /** 已持久化的历史消息才有稳定 message id，才能转存到知识库（块 7c）。 */
     persisted?: boolean;
+}
+
+interface WeComAuthorizationRequest {
+    capability: string;
+    notice: string;
+    authorizationUrl: string | null;
+    originalQuery: string;
+    creatorRequired: boolean;
+}
+
+function normalizeWeComAuthorizationUrl(value: unknown): string | null {
+    if (typeof value !== 'string') return null;
+    try {
+        const url = new URL(value);
+        if (url.protocol !== 'https:' || url.hostname !== 'work.weixin.qq.com') return null;
+        if (!url.pathname.startsWith('/ai/aiHelper/')) return null;
+        url.username = '';
+        url.password = '';
+        url.hash = '';
+        return url.toString();
+    } catch {
+        return null;
+    }
+}
+
+function extractWeComAuthorizationRequests(
+    contexts: readonly ConnectorContext[] | null | undefined,
+    originalQuery: string,
+): WeComAuthorizationRequest[] {
+    const requests = new Map<string, WeComAuthorizationRequest>();
+    for (const context of contexts ?? []) {
+        if (context.provider !== 'WECOM' || context.data.permissionRequired !== true) continue;
+        const capability = typeof context.data.capability === 'string'
+            ? context.data.capability
+            : typeof context.data.missingPermission === 'string'
+                ? context.data.missingPermission
+                : '对应业务';
+        const authorizationUrl = normalizeWeComAuthorizationUrl(
+            context.data.permissionGrantUrl ?? context.data.authorizationUrl,
+        );
+        const notice = typeof context.data.notice === 'string'
+            ? context.data.notice
+            : `当前企业微信机器人尚未获得${capability}使用权限`;
+        const request = {
+            capability,
+            notice,
+            authorizationUrl,
+            originalQuery,
+            creatorRequired: context.data.creatorRequired !== false,
+        };
+        requests.set(`${capability}:${authorizationUrl ?? ''}`, request);
+    }
+    return [...requests.values()];
 }
 
 /**
@@ -605,7 +660,54 @@ const DELETED_CITATIONS_KEY = 'cees.chat.citations.deleted';
 
 interface AssistantNavigationState {
     createNewConversation?: boolean;
-    source?: 'DINGTALK_CONNECTOR' | 'CONNECTOR_MARKETPLACE';
+    source?: 'DINGTALK_CONNECTOR' | 'TENCENT_MEETING_CONNECTOR' | 'WECOM_CONNECTOR' | 'GITHUB_CONNECTOR' | 'CONNECTOR_MARKETPLACE';
+}
+
+interface ConfirmableConnectorTool {
+    toolId: string;
+    name: string;
+    riskLevel: 'READ' | 'WRITE' | 'DESTRUCTIVE';
+    requiresConfirmation: boolean;
+}
+
+async function confirmConnectorCalls(
+    calls: Array<{ toolId: string; arguments: Record<string, unknown> }>,
+    tools: ConfirmableConnectorTool[],
+    connectorName: string,
+    credentialDescription: string,
+    modal: ReturnType<typeof AntdApp.useApp>['modal'],
+    t: (text: string, values?: Record<string, string | number>) => string,
+): Promise<boolean> {
+    const toolMap = new Map(tools.map((tool) => [tool.toolId, tool]));
+    const sensitiveCalls = calls.filter((call) => toolMap.get(call.toolId)?.requiresConfirmation !== false);
+    if (sensitiveCalls.length === 0) return true;
+    const summary = sensitiveCalls.map((call) => {
+        const tool = toolMap.get(call.toolId);
+        return {
+            name: tool?.name || call.toolId,
+            risk: tool?.riskLevel || 'DESTRUCTIVE',
+            arguments: JSON.stringify(call.arguments, null, 2),
+        };
+    });
+    return new Promise((resolve) => {
+        modal.confirm({
+            title: t('确认执行{connectorName}操作', { connectorName }),
+            width: 620,
+            content: <div className="connector-action-confirmation">
+                <p>{t('以下操作将使用{credentialDescription}执行。确认前不会产生任何变更。', { credentialDescription })}</p>
+                {summary.map((item) => <div key={`${item.name}:${item.arguments}`} className="connector-action-confirmation-item">
+                    <strong>{item.name}</strong>
+                    <Tag color={item.risk === 'DESTRUCTIVE' ? 'red' : 'orange'}>{item.risk}</Tag>
+                    <pre>{item.arguments}</pre>
+                </div>)}
+            </div>,
+            okText: t('确认执行'),
+            cancelText: t('取消'),
+            okButtonProps: { danger: summary.some((item) => item.risk === 'DESTRUCTIVE') },
+            onOk: () => resolve(true),
+            onCancel: () => resolve(false),
+        });
+    });
 }
 
 function readDeletedCitationIds(conversationId: string): Set<string> {
@@ -663,9 +765,47 @@ function ActionConfirmationCard({ confirmation, onResolve }: {
     </div>;
 }
 
-function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element {
+function WeComAuthorizationCard({ request, retrying, onRetry }: {
+    request: WeComAuthorizationRequest;
+    retrying: boolean;
+    onRetry: () => void;
+}): JSX.Element {
     const { t } = useI18n();
     const { message } = AntdApp.useApp();
+    const openAuthorization = async (): Promise<void> => {
+        const safeUrl = normalizeWeComAuthorizationUrl(request.authorizationUrl);
+        if (!safeUrl) {
+            message.warning(t('企业微信未返回可用的官方授权入口，请联系机器人创建者在企业微信中完成授权'));
+            return;
+        }
+        const desktopBridge = window.cees;
+        if (!desktopBridge) {
+            message.error(t('当前环境无法打开外部授权页面'));
+            return;
+        }
+        try {
+            await desktopBridge.openExternal(safeUrl);
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : t('无法打开企业微信授权页面'));
+        }
+    };
+    return <div className="wecom-authorization-card">
+        <div className="wecom-authorization-head">
+            <SafetyCertificateOutlined />
+            <strong>{t('需要企业微信{capability}权限', { capability: request.capability })}</strong>
+        </div>
+        <p>{request.notice}</p>
+        {request.creatorRequired && <p className="wecom-authorization-hint">{t('如果你是机器人创建者，请打开官方页面授权；否则请联系机器人创建者在企业微信「工作台 → 智能机器人」中完成授权。')}</p>}
+        <div className="wecom-authorization-actions">
+            {request.authorizationUrl && <Button type="primary" icon={<ExternalLink size={14} />} onClick={() => void openAuthorization()}>{t('去授权')}</Button>}
+            <Button icon={<RotateCw size={14} />} loading={retrying} disabled={retrying} onClick={onRetry}>{t('授权完成，重新查询')}</Button>
+        </div>
+    </div>;
+}
+
+function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element {
+    const { t } = useI18n();
+    const { message, modal } = AntdApp.useApp();
     const location = useLocation();
     const navigate = useNavigate();
     const canSaveToKnowledge = permissions.includes('knowledge_base.read');
@@ -695,6 +835,7 @@ function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element 
     const [renameTarget, setRenameTarget] = useState<Conversation>();
     const [renameValue, setRenameValue] = useState('');
     const [dingtalkConnected, setDingtalkConnected] = useState(false);
+    const [preferredConnector, setPreferredConnector] = useState<'dingtalk' | 'tencent-meeting' | 'wecom' | 'github'>();
     const initialConversationLoadStarted = useRef(false);
 
     /** 就地更新某条消息上的确认卡片状态（不重建消息，避免滚动位置跳动）。 */
@@ -736,6 +877,10 @@ function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element 
         initialConversationLoadStarted.current = true;
         const navigationState = location.state as AssistantNavigationState | null;
         const createNewConversation = navigationState?.createNewConversation === true;
+        if (navigationState?.source === 'DINGTALK_CONNECTOR') setPreferredConnector('dingtalk');
+        if (navigationState?.source === 'TENCENT_MEETING_CONNECTOR') setPreferredConnector('tencent-meeting');
+        if (navigationState?.source === 'WECOM_CONNECTOR') setPreferredConnector('wecom');
+        if (navigationState?.source === 'GITHUB_CONNECTOR') setPreferredConnector('github');
         void listConversations()
             .then(async (result) => {
                 setConversations(result.items);
@@ -842,8 +987,13 @@ function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element 
         const resourcesByTurn = new Map<string, Map<string, ChatResource>>();
         const sourcesByTurn = new Map<string, ChatSource[]>();
         const citationsByTurn = new Map<string, ChatCitation[]>();
+        const weComAuthorizationsByTurn = new Map<string, WeComAuthorizationRequest[]>();
         for (const item of detail.messages) {
             if (!item.turnId) continue;
+            if (item.role === 'USER') {
+                const requests = extractWeComAuthorizationRequests(item.connectorContexts, item.content);
+                if (requests.length) weComAuthorizationsByTurn.set(item.turnId, requests);
+            }
             const resources = item.resources?.map((resource): ChatResource => ({ id: resource.id || resource.resourceId || '', type: resource.type, url: resource.url ?? resource.resourceUrl })) ?? [];
             if (resources.length) {
                 const resourcesForTurn = resourcesByTurn.get(item.turnId) ?? new Map<string, ChatResource>();
@@ -859,18 +1009,23 @@ function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element 
                 message.resources = [...(resourcesByTurn.get(item.turnId)?.values() ?? [])];
                 message.sources = sourcesByTurn.get(item.turnId);
                 message.citations = citationsByTurn.get(item.turnId);
+                message.weComAuthorizations = weComAuthorizationsByTurn.get(item.turnId);
             }
             return message;
         });
         setMessages(restored);
     };
 
-    const sendMessage = async (): Promise<void> => {
-        const text = input.trim();
-        const imageFileIds = attachment?.isImage ? [attachment.id] : [];
-        const fileIds = attachment && !attachment.isImage ? [attachment.id] : [];
-        const options = [attachment && !attachment.isImage && `参考附件：${attachment.name}`].filter(Boolean);
-        const content = [selectedPrompt, ...options, text].filter(Boolean).join('\n') || (imageFileIds.length ? t('请分析这张图片') : '');
+    const sendMessage = async (overrideContent?: string, forcedConnector?: 'wecom' | 'github'): Promise<void> => {
+        const isRetry = typeof overrideContent === 'string';
+        const text = (overrideContent ?? input).trim();
+        const turnAttachment = isRetry ? undefined : attachment;
+        const imageFileIds = turnAttachment?.isImage ? [turnAttachment.id] : [];
+        const fileIds = turnAttachment && !turnAttachment.isImage ? [turnAttachment.id] : [];
+        const options = [turnAttachment && !turnAttachment.isImage && `参考附件：${turnAttachment.name}`].filter(Boolean);
+        const content = isRetry
+            ? text
+            : [selectedPrompt, ...options, text].filter(Boolean).join('\n') || (imageFileIds.length ? t('请分析这张图片') : '');
         if ((!content && !imageFileIds.length && !fileIds.length) || sending) return;
         setSending(true);
         const version = ++requestVersion.current;
@@ -889,7 +1044,7 @@ function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element 
                         if (tools.length > 0) {
                             const plan = await planDingTalkConnectorQueries(content, tools);
                             connectorRequired = plan.calls.length > 0;
-                            connectorContexts = await dingtalkConnector.execute(plan.calls);
+                            connectorContexts.push(...await dingtalkConnector.execute(plan.calls));
                         }
                     } else if (mentionsDingTalk) {
                         if (status.state === 'PROFILE_REQUIRED') {
@@ -903,9 +1058,90 @@ function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element 
                     if (mentionsDingTalk || connectorRequired) throw error;
                 }
             }
-            setInput('');
-            setSelectedPrompt(undefined);
-            setAttachment(undefined);
+            const tencentMeetingConnector = window.cees?.connectors;
+            const mentionsTencentMeeting = /腾讯会议|wemeet|腾讯.*会议/i.test(content)
+                || preferredConnector === 'tencent-meeting';
+            if (tencentMeetingConnector && mentionsTencentMeeting) {
+                const status = await tencentMeetingConnector.status('tencent-meeting');
+                if (status.state !== 'READY') {
+                    throw new Error(status.error || '请先在连接器页面安装并授权腾讯会议连接器');
+                }
+                const tools = await tencentMeetingConnector.tools('tencent-meeting') as TencentMeetingConnectorTool[];
+                const plan = await planTencentMeetingConnectorQueries(content, tools);
+                if (plan.calls.length > 0) {
+                    if (connectorContexts.length + plan.calls.length > 3) {
+                        throw new Error('单轮最多执行三个连接器调用，请将钉钉和腾讯会议请求拆成多轮');
+                    }
+                    const confirmed = await confirmConnectorCalls(
+                        plan.calls,
+                        tools,
+                        '腾讯会议',
+                        '当前电脑已授权的腾讯会议账号',
+                        modal,
+                        t,
+                    );
+                    if (!confirmed) {
+                        message.info(t('已取消腾讯会议操作'));
+                        return;
+                    }
+                    connectorContexts.push(...await tencentMeetingConnector.execute(
+                        'tencent-meeting',
+                        plan.calls.map((call) => ({ ...call, confirmed: true })),
+                    ));
+                }
+            }
+            const weComConnector = window.cees?.connectors;
+            const mentionsWeCom = /企业微信|企微|wecom/i.test(content) || preferredConnector === 'wecom' || forcedConnector === 'wecom';
+            if (weComConnector && mentionsWeCom) {
+                const status = await weComConnector.status('wecom');
+                if (status.state !== 'READY') {
+                    throw new Error(status.error || '请先在连接器页面安装并扫码授权企业微信连接器');
+                }
+                const tools = await weComConnector.tools('wecom') as WeComConnectorTool[];
+                const plan = await planWeComConnectorQueries(content, tools);
+                if (plan.calls.length > 0) {
+                    if (connectorContexts.length + plan.calls.length > 3) {
+                        throw new Error('单轮最多执行三个连接器调用，请将多个连接器请求拆成多轮');
+                    }
+                    const confirmed = await confirmConnectorCalls(
+                        plan.calls,
+                        tools,
+                        '企业微信',
+                        '当前电脑中企业微信官方 CLI 保存的机器人授权',
+                        modal,
+                        t,
+                    );
+                    if (!confirmed) {
+                        message.info(t('已取消企业微信操作'));
+                        return;
+                    }
+                    connectorContexts.push(...await weComConnector.execute(
+                        'wecom',
+                        plan.calls.map((call) => ({ ...call, confirmed: true })),
+                    ));
+                }
+            }
+            const githubConnector = window.cees?.connectors;
+            const mentionsGitHub = /github|git hub|issue|pull request|\bpr\b|actions/i.test(content) || preferredConnector === 'github' || forcedConnector === 'github';
+            if (githubConnector && mentionsGitHub) {
+                const status = await githubConnector.status('github') as GitHubConnectorStatus;
+                if (status.state !== 'READY') throw new Error(status.error || '请先在连接器页面连接 GitHub');
+                const tools = await githubConnector.tools('github') as GitHubConnectorTool[];
+                const plan = await planGitHubConnectorQueries(content, tools);
+                if (plan.calls.length > 0) {
+                    if (connectorContexts.length + plan.calls.length > 3) throw new Error('单轮最多执行三个连接器调用，请将多个连接器请求拆成多轮');
+                    const confirmed = await confirmConnectorCalls(plan.calls, tools, 'GitHub', '当前电脑中 GitHub OAuth 授权', modal, t);
+                    if (!confirmed) { message.info(t('已取消 GitHub 操作')); return; }
+                    connectorContexts.push(...await githubConnector.execute('github', plan.calls.map((call) => ({ ...call, confirmed: true }))));
+                }
+            }
+            if (connectorContexts.length > 3) throw new Error('单轮连接器上下文不能超过三个');
+            const weComAuthorizations = extractWeComAuthorizationRequests(connectorContexts, content);
+            if (!isRetry) {
+                setInput('');
+                setSelectedPrompt(undefined);
+                setAttachment(undefined);
+            }
             setAutoEnabledCapabilities([]);
             const userMessage: LocalChatMessage = { id: `m-${Date.now()}`, role: 'user', content };
             pendingQuestionFocus.current = userMessage.id;
@@ -914,7 +1150,8 @@ function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element 
             setActiveConversationId(conversationId);
             if (!conversations.some((item) => item.id === conversationId)) setConversations((items) => [{ id: conversationId, title: t('新对话'), mode, visibility: 'PRIVATE', version: 1, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }, ...items]);
             let turnId = ''; let seq = 0; let answer = ''; let terminal = false; const streamingMessageId = `streaming-${Date.now()}`; const resources = new Map<string, ChatResource>(); const sources: ChatSource[] = []; const citations: ChatCitation[] = []; const toolTypes = new Map<string, ChatResource['type']>(); const toolFormats = new Map<string, ChatResource['format']>(); const confirmations = new Map<string, PendingActionConfirmation>();
-            const updateStreamingMessage = (): void => setMessages((items) => [...items.filter((item) => item.id !== streamingMessageId), { id: streamingMessageId, role: 'assistant', content: answer, resources: [...resources.values()], sources: [...sources], citations: [...citations], confirmation: [...confirmations.values()].at(-1) }]);
+            const updateStreamingMessage = (): void => setMessages((items) => [...items.filter((item) => item.id !== streamingMessageId), { id: streamingMessageId, role: 'assistant', content: answer, resources: [...resources.values()], sources: [...sources], citations: [...citations], confirmation: [...confirmations.values()].at(-1), weComAuthorizations }]);
+            if (weComAuthorizations.length) updateStreamingMessage();
             const handle = (event: TurnStreamEvent): void => {
                 if (event.seq <= seq) return;
                 seq = event.seq;
@@ -973,7 +1210,11 @@ function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element 
                 const errorMessage = error instanceof Error ? error.message : t('AI 请求失败，请稍后重试');
                 if (errorMessage.includes('连接器页面')) {
                     Modal.confirm({
-                        title: t('需要连接钉钉'),
+                        title: errorMessage.includes('腾讯会议')
+                            ? t('需要连接腾讯会议')
+                            : errorMessage.includes('企业微信')
+                                ? t('需要连接企业微信')
+                                : t('需要连接钉钉'),
                         content: errorMessage,
                         okText: t('前往连接器'),
                         cancelText: t('取消'),
@@ -1003,6 +1244,12 @@ function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element 
                             <div className="chat-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownRenderComponents}>{item.content}</ReactMarkdown></div>
                             {item.confirmation && <ActionConfirmationCard confirmation={item.confirmation}
                                 onResolve={(decision) => void resolveActionDraft(item.id, item.confirmation!.draftId, decision)} />}
+                            {item.weComAuthorizations?.map((request) => <WeComAuthorizationCard
+                                key={`${request.capability}:${request.authorizationUrl ?? ''}`}
+                                request={request}
+                                retrying={sending}
+                                onRetry={() => void sendMessage(request.originalQuery, 'wecom')}
+                            />)}
                             {item.resources?.map((resource) => <ChatResourceCard key={chatResourceKey(resource)} resource={resource} onPreviewDocument={setPreviewDocument} onSaveToKnowledge={canSaveToKnowledge ? setSaveTarget : undefined} />)}
                             {item.sources?.length ? <div className="chat-sources">{item.sources.map((source) => <ChatSourceCard key={source.id} source={source} />)}</div> : null}
                             {item.citations?.length ? <div className="chat-sources">{groupCitations(item.citations).map((citation) => <KnowledgeCitationCard key={citation.id} citation={citation} onDeleted={handleCitationDeleted} />)}</div> : null}

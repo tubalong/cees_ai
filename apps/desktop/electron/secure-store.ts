@@ -27,8 +27,11 @@ export class SecureTokenStore {
     private cache: Record<string, string> = {};
     private loaded = false;
 
-    constructor(userDataPath: string) {
-        this.file = path.join(userDataPath, 'session.secure');
+    constructor(userDataPath: string, relativeFile = 'session.secure', private readonly requireEncryption = false) {
+        const root = path.resolve(userDataPath);
+        const file = path.resolve(root, relativeFile);
+        if (file === root || !file.startsWith(`${root}${path.sep}`)) throw new Error('安全存储路径无效');
+        this.file = file;
     }
 
     async getAll(): Promise<Record<string, string>> {
@@ -53,6 +56,7 @@ export class SecureTokenStore {
 
     private async load(): Promise<void> {
         if (this.loaded) return;
+        if (this.requireEncryption && !safeStorage.isEncryptionAvailable()) throw new Error('当前系统安全存储不可用，无法保存连接器授权');
         this.loaded = true;
         try {
             const raw = await readFile(this.file);
@@ -68,6 +72,7 @@ export class SecureTokenStore {
     }
 
     private async persist(): Promise<void> {
+        if (this.requireEncryption && !safeStorage.isEncryptionAvailable()) throw new Error('当前系统安全存储不可用，无法保存连接器授权');
         const json = JSON.stringify(this.cache);
         const payload = safeStorage.isEncryptionAvailable() ? safeStorage.encryptString(json) : Buffer.from(json, 'utf8');
         await mkdir(path.dirname(this.file), { recursive: true });

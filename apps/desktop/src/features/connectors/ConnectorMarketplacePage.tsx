@@ -1,13 +1,8 @@
-import { CheckCircleFilled, DingdingOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
+import { DingdingOutlined, GithubOutlined, LinkOutlined, MessageOutlined, PlusOutlined, ReloadOutlined, WechatOutlined } from '@ant-design/icons';
 import { App as AntdApp, Button, Modal, Select, Space, Spin, Tag } from 'antd';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useI18n } from '../../core/i18n';
-import {
-    connectTencentMeeting,
-    disconnectTencentMeetingConnector,
-    getTencentMeetingStatus,
-} from './tencentMeetingConnector';
 
 const EMPTY_STATUS: DesktopConnectorStatus = {
     state: 'NOT_INSTALLED',
@@ -82,9 +77,7 @@ export default function ConnectorMarketplacePage(): JSX.Element {
             const nextManifests = await connectors.list();
             const statusEntries = await Promise.all(nextManifests.map(async (manifest) => {
                 try {
-                    const status = manifest.id === 'tencent-meeting'
-                        ? await getTencentMeetingStatus()
-                        : await connectors.status(manifest.id);
+                    const status = await connectors.status(manifest.id);
                     return [manifest.id, status] as const;
                 } catch (error) {
                     return [manifest.id, connectorErrorStatus(error, t('读取连接器状态失败'))] as const;
@@ -128,39 +121,62 @@ export default function ConnectorMarketplacePage(): JSX.Element {
     const selectedStatus = selectedManifest ? statuses[selectedManifest.id] ?? EMPTY_STATUS : EMPTY_STATUS;
     const selectedDingTalkStatus = toDingTalkStatus(selectedManifest?.id === 'dingtalk' ? selectedStatus : undefined);
     const selectedTencentMeetingStatus = toTencentMeetingStatus(selectedManifest?.id === 'tencent-meeting' ? selectedStatus : undefined);
+    const selectedWeComStatus = toWeComStatus(selectedManifest?.id === 'wecom' ? selectedStatus : undefined);
+    const selectedGitHubStatus = toGitHubStatus(selectedManifest?.id === 'github' ? selectedStatus : undefined);
     const selectedConnected = selectedStatus.state === 'READY';
+
+    useEffect(() => {
+        if (selectedManifest?.id !== 'wecom' || selectedWeComStatus.authorizationState !== 'AUTHORIZING') return;
+        const connectors = window.cees?.connectors;
+        if (!connectors) return;
+        const timer = window.setInterval(() => {
+            void connectors.status('wecom').then((status) => {
+                updateStatus('wecom', status);
+                if (status.state === 'READY') message.success(t('企业微信连接器已连接'));
+            }).catch(() => undefined);
+        }, 1500);
+        return () => window.clearInterval(timer);
+    }, [selectedManifest?.id, selectedWeComStatus.authorizationState]);
 
     const updateStatus = (connectorId: string, status: DesktopConnectorStatus): void => {
         setStatuses((current) => ({ ...current, [connectorId]: status }));
     };
 
-    const connect = async (): Promise<void> => {
-        if (!selectedManifest) return;
+    const connect = async (manifest: DesktopConnectorManifest | undefined = selectedManifest): Promise<void> => {
+        if (!manifest) return;
         const connectors = window.cees?.connectors;
         if (!connectors) return;
-        setConnectingId(selectedManifest.id);
+        const currentStatus = statuses[manifest.id] ?? EMPTY_STATUS;
+        const currentDingTalkStatus = toDingTalkStatus(manifest.id === 'dingtalk' ? currentStatus : undefined);
+        if (manifest.id === 'dingtalk' && currentDingTalkStatus.state === 'PROFILE_REQUIRED' && !selectedProfile) {
+            setSelectedConnectorId(manifest.id);
+            return;
+        }
+        setConnectingId(manifest.id);
         try {
-            const nextStatus = selectedManifest.id === 'tencent-meeting'
-                ? await connectTencentMeeting((authorizingStatus) => {
-                    updateStatus(selectedManifest.id, authorizingStatus);
-                    setSelectedConnectorId(undefined);
-                    message.info(t('已打开腾讯会议授权页面，请在系统浏览器中完成授权'));
-                })
-                : selectedManifest.id === 'dingtalk'
-                    && selectedDingTalkStatus.state === 'PROFILE_REQUIRED'
+            const nextStatus = manifest.id === 'dingtalk'
+                    && currentDingTalkStatus.state === 'PROFILE_REQUIRED'
                     && connectors.dingtalk
                     ? await connectors.dingtalk.selectProfile(selectedProfile ?? '')
-                    : await connectors.connect(selectedManifest.id);
-            updateStatus(selectedManifest.id, nextStatus);
-            if (nextStatus.state === 'PROFILE_REQUIRED') return;
+                    : await connectors.connect(manifest.id);
+            updateStatus(manifest.id, nextStatus);
+            if (nextStatus.state === 'PROFILE_REQUIRED') {
+                setSelectedConnectorId(manifest.id);
+                return;
+            }
+            if (manifest.id === 'wecom' && toWeComStatus(nextStatus).authorizationState === 'AUTHORIZING') {
+                setSelectedConnectorId(manifest.id);
+                message.info(t('请使用手机企业微信扫描二维码并确认机器人授权'));
+                return;
+            }
             setSelectedConnectorId(undefined);
             if (nextStatus.authenticated) {
-                message.success(t('{name}连接器已连接', { name: selectedManifest.name }));
+                message.success(t('{name}连接器已连接', { name: manifest.name }));
             } else {
                 message.warning(nextStatus.error || t('连接器已安装，请继续完成授权'));
             }
         } catch (error) {
-            message.error(error instanceof Error ? error.message : t('{name}连接器安装或授权失败', { name: selectedManifest.name }));
+            message.error(error instanceof Error ? error.message : t('{name}连接器安装或授权失败', { name: manifest.name }));
         } finally {
             setConnectingId(undefined);
         }
@@ -234,15 +250,27 @@ export default function ConnectorMarketplacePage(): JSX.Element {
         });
     };
 
-    const tryConnector = (): void => {
-        if (!selectedManifest) return;
+    const openConnectorConversation = (manifest: DesktopConnectorManifest): void => {
         setSelectedConnectorId(undefined);
         navigate('/assistant', {
             state: {
                 createNewConversation: true,
-                source: selectedManifest.id === 'dingtalk' ? 'DINGTALK_CONNECTOR' : 'CONNECTOR_MARKETPLACE',
+                source: manifest.id === 'dingtalk'
+                    ? 'DINGTALK_CONNECTOR'
+                    : manifest.id === 'tencent-meeting'
+                        ? 'TENCENT_MEETING_CONNECTOR'
+                        : manifest.id === 'wecom'
+                            ? 'WECOM_CONNECTOR'
+                            : manifest.id === 'github'
+                                ? 'GITHUB_CONNECTOR'
+                        : 'CONNECTOR_MARKETPLACE',
             },
         });
+    };
+
+    const tryConnector = (): void => {
+        if (!selectedManifest) return;
+        openConnectorConversation(selectedManifest);
     };
 
     const confirmDisconnect = (): void => {
@@ -252,8 +280,12 @@ export default function ConnectorMarketplacePage(): JSX.Element {
             content: selectedManifest.id === 'dingtalk'
                 ? t('解绑会清除本机保存的全部钉钉登录授权，但不会卸载 DWS，也不会删除已导入 CEES 的组织或业务数据。解绑后需要重新授权才能继续使用。')
                 : selectedManifest.id === 'tencent-meeting'
-                    ? t('解绑会清除 CEES API 服务端为当前租户成员保存的腾讯会议授权凭据，不会删除腾讯会议中的会议或 CEES 业务数据。')
-                    : t('解绑会清除当前连接器保存的授权信息，但不会删除已经写入 CEES 的业务数据。'),
+                    ? t('解绑会退出当前电脑的腾讯会议 CLI OAuth，并清除 CEES 专属凭据目录和工具缓存，不会删除腾讯会议中的会议或 CEES 业务数据。')
+                    : selectedManifest.id === 'wecom'
+                        ? t('解绑会删除当前电脑中 CEES 专属的企业微信 CLI 授权和工具缓存，不会删除 CEES 业务数据；企业微信侧已创建的智能机器人可能仍需在企业微信中自行管理。')
+                        : selectedManifest.id === 'github'
+                            ? t('解绑只会删除当前电脑中 CEES 保存的 GitHub OAuth 令牌和工具缓存，不会删除 GitHub 或 CEES 数据。如需撤销 GitHub 侧授权，请在 GitHub Settings 的 Applications 中操作。')
+                        : t('解绑会清除当前连接器保存的授权信息，但不会删除已经写入 CEES 的业务数据。'),
             okText: t('确认解绑'),
             cancelText: t('取消'),
             okButtonProps: { danger: true },
@@ -262,9 +294,7 @@ export default function ConnectorMarketplacePage(): JSX.Element {
                 if (!connectors) return;
                 setDisconnectingId(selectedManifest.id);
                 try {
-                    const nextStatus = selectedManifest.id === 'tencent-meeting'
-                        ? await disconnectTencentMeetingConnector()
-                        : await connectors.disconnect(selectedManifest.id);
+                    const nextStatus = await connectors.disconnect(selectedManifest.id);
                     updateStatus(selectedManifest.id, nextStatus);
                     if (selectedManifest.id === 'dingtalk') setSelectedProfile(undefined);
                     setSelectedConnectorId(undefined);
@@ -299,47 +329,36 @@ export default function ConnectorMarketplacePage(): JSX.Element {
                 {manifests.map((manifest) => {
                     const status = statuses[manifest.id] ?? EMPTY_STATUS;
                     const connected = status.state === 'READY';
-                    const dingtalkStatus = toDingTalkStatus(manifest.id === 'dingtalk' ? status : undefined);
-                    return <article key={manifest.id} className={`connector-card ${connected ? 'is-connected' : ''}`}>
+                    return <article key={manifest.id} className={`connector-card ${connected ? 'is-connected' : 'is-disconnected'}`}>
                         <button
                             className="connector-card-hit-area"
                             type="button"
-                            aria-label={connected
-                                ? t('查看{name}连接器详情', { name: manifest.name })
-                                : t('安装或授权{name}连接器', { name: manifest.name })}
+                            aria-label={t('查看{name}连接器详情', { name: manifest.name })}
                             onClick={() => setSelectedConnectorId(manifest.id)}
                         />
-                        <span className="connector-card-indicator" aria-hidden="true">
-                            {connected ? <CheckCircleFilled /> : <PlusOutlined />}
-                        </span>
+                        {connected ? <button
+                            className="connector-card-indicator connector-card-conversation-action"
+                            type="button"
+                            aria-label={t('使用{name}开始新对话', { name: manifest.name })}
+                            onClick={() => openConnectorConversation(manifest)}
+                        >
+                            <MessageOutlined />
+                            <span className="connector-card-indicator-label">{t('去对话')}</span>
+                        </button> : <button
+                            className="connector-card-indicator connector-card-connect-action"
+                            type="button"
+                            aria-label={t('连接{name}连接器', { name: manifest.name })}
+                            disabled={connectingId === manifest.id}
+                            onClick={() => void connect(manifest)}
+                        >
+                            {connectingId === manifest.id ? <Spin size="small" /> : <PlusOutlined />}
+                            <span className="connector-card-indicator-label">{connectingId === manifest.id ? t('连接中') : t('连接')}</span>
+                        </button>}
                         <div className="connector-logo" aria-hidden="true">{connectorGlyph(manifest)}</div>
                         <div className="connector-card-copy">
-                            <div className="connector-card-title"><h3>{t(manifest.name)}</h3><span className={`connector-status ${connected ? 'is-connected' : ''}`}>{connectorStatusText(status, t)}</span></div>
+                            <div className="connector-card-title"><h3>{t(manifest.name)}</h3></div>
                             <p>{t(manifest.description)}</p>
                         </div>
-                        <div className="connector-card-meta">
-                            {loading ? <Spin size="small" /> : <>
-                                <span>{manifest.id === 'dingtalk'
-                                    ? dingtalkStatus.corpName || dingtalkStatus.profile || t('尚未授权组织')
-                                    : status.authenticated ? t('已完成授权') : t('尚未授权账号')}</span>
-                                <small>{manifest.id === 'dingtalk'
-                                    ? dingtalkStatus.externalUserName || status.version || release.version
-                                    : status.version || manifest.transportType}</small>
-                            </>}
-                        </div>
-                        {status.error && !connected ? <div className="connector-card-error">{status.error}</div> : null}
-                        {status.state === 'ERROR' ? <Button size="small" onClick={() => void refresh()}>{t('重试检查')}</Button> : null}
-                        {manifest.id === 'dingtalk' && manifest.supportsVersionManagement ? <DingTalkVersionPanel
-                            release={release}
-                            status={dingtalkStatus}
-                            checkingUpdate={checkingUpdate}
-                            upgrading={upgrading}
-                            rollingBack={rollingBack}
-                            onCheckForUpdates={() => void checkForUpdates()}
-                            onUpgrade={confirmUpgrade}
-                            onRollback={confirmRollback}
-                            t={t}
-                        /> : null}
                     </article>;
                 })}
             </div>
@@ -347,25 +366,9 @@ export default function ConnectorMarketplacePage(): JSX.Element {
 
         <Modal
             open={Boolean(selectedManifest)}
-            title={selectedConnected || !selectedManifest
-                ? undefined
-                : selectedManifest.id === 'dingtalk' && selectedDingTalkStatus.state === 'PROFILE_REQUIRED'
-                    ? t('选择当前钉钉组织')
-                    : connectorDialogTitle(selectedManifest, t)}
-            footer={selectedConnected ? null : undefined}
-            okText={selectedManifest?.id === 'dingtalk' && selectedDingTalkStatus.state === 'PROFILE_REQUIRED'
-                ? t('使用此组织')
-                : selectedManifest ? connectorActionText(selectedManifest, t) : t('连接')}
-            cancelText={t('取消')}
-            confirmLoading={connectingId === selectedManifest?.id}
-            okButtonProps={{
-                disabled: selectedManifest?.id === 'dingtalk'
-                    ? selectedDingTalkStatus.state === 'PROFILE_REQUIRED'
-                        ? !selectedProfile
-                        : !selectedDingTalkStatus.installSupported && !selectedDingTalkStatus.installed
-                    : false,
-            }}
-            onOk={() => void connect()}
+            title={undefined}
+            footer={null}
+            width={620}
             onCancel={() => !connectingId && !disconnectingId && setSelectedConnectorId(undefined)}
             maskClosable={!connectingId && !disconnectingId}
             closable={!connectingId && !disconnectingId}
@@ -385,39 +388,89 @@ export default function ConnectorMarketplacePage(): JSX.Element {
                     <strong>{selectedManifest.id === 'dingtalk'
                         ? selectedDingTalkStatus.corpName || t('当前钉钉组织')
                         : selectedManifest.id === 'tencent-meeting'
-                            ? selectedTencentMeetingStatus.account?.organizationName || t('当前腾讯会议账号')
+                            ? t('腾讯会议账号已授权')
+                            : selectedManifest.id === 'wecom'
+                                ? t('智能机器人已授权')
+                                : selectedManifest.id === 'github'
+                                    ? selectedGitHubStatus.authorizedLogin || t('GitHub 账号已授权')
                             : selectedManifest.name}</strong>
                     <span>{selectedManifest.id === 'dingtalk'
                         ? selectedDingTalkStatus.externalUserName || selectedDingTalkStatus.profile || t('已完成授权')
                         : selectedManifest.id === 'tencent-meeting'
-                            ? selectedTencentMeetingStatus.account?.displayName || selectedTencentMeetingStatus.account?.externalUserId || t('已完成授权')
-                            : selectedStatus.version || t('已完成授权')}</span>
+                            ? selectedTencentMeetingStatus.authorizedUserName || t('{count} 个腾讯会议 CLI 命令可用', { count: selectedTencentMeetingStatus.toolCount })
+                            : selectedManifest.id === 'wecom'
+                                ? t('{count} 个企业微信 CLI 工具可用', { count: selectedWeComStatus.toolCount })
+                                : selectedManifest.id === 'github'
+                                    ? t('{count} 个 GitHub MCP 工具可用', { count: selectedGitHubStatus.toolCount })
+                        : selectedStatus.version || t('已完成授权')}</span>
                 </div>
+                {selectedManifest.id === 'github' ? <div className="connector-version-panel">
+                    <div className="connector-version-summary">
+                        <span>{t('执行方式')}</span><strong>Remote MCP</strong>
+                    </div>
+                    <div className="connector-version-message">{t('已启用工具集：{toolsets}', { toolsets: selectedGitHubStatus.enabledToolsets.join(', ') || t('动态发现') })}</div>
+                </div> : null}
+                {selectedManifest.id === 'dingtalk' && selectedManifest.supportsVersionManagement ? <DingTalkVersionPanel
+                    release={release}
+                    status={selectedDingTalkStatus}
+                    checkingUpdate={checkingUpdate}
+                    upgrading={upgrading}
+                    rollingBack={rollingBack}
+                    onCheckForUpdates={() => void checkForUpdates()}
+                    onUpgrade={confirmUpgrade}
+                    onRollback={confirmRollback}
+                    t={t}
+                /> : null}
                 <div className="connector-connected-actions">
                     <Button type="primary" size="large" onClick={tryConnector}>{t('去试试')}</Button>
                     {selectedManifest.supportsDisconnect ? <Button danger size="large" loading={disconnectingId === selectedManifest.id} onClick={confirmDisconnect}>{t('解绑')}</Button> : null}
                 </div>
-            </div> : selectedManifest ? <div className="connector-install-dialog">
-                <div className="connector-install-logo">{connectorGlyph(selectedManifest)}</div>
-                <div>
-                    {selectedManifest.id === 'dingtalk'
-                        ? <DingTalkInstallContent
-                            status={selectedDingTalkStatus}
-                            release={release}
-                            selectedProfile={selectedProfile}
-                            onSelectProfile={setSelectedProfile}
-                            t={t}
-                        />
-                        : <>
-                            <p>{t('CEES 将通过当前连接器支持的官方授权方式建立连接，并仅在授权范围内访问数据。')}</p>
-                            <ul>
-                                <li>{selectedManifest.supportsInstall ? t('支持由 CEES 管理本地安装') : t('无需由 CEES 安装本地组件')}</li>
-                                <li>{t('传输方式：{transport}', { transport: selectedManifest.transportType })}</li>
-                                <li>{t('执行位置：{location}', { location: selectedManifest.executionLocation })}</li>
-                                <li>{t('授权方式：{auth}', { auth: selectedManifest.authType })}</li>
-                            </ul>
-                        </>}
+            </div> : selectedManifest ? <div className="connector-connected-dialog connector-disconnected-dialog">
+                <div className="connector-connected-visual" aria-hidden="true">
+                    <div className="connector-connected-node connector-connected-cees">
+                        <img src="./assests/logo.webp" alt="" />
+                    </div>
+                    <div className="connector-connected-dots"><span /><span /><span /></div>
+                    <div className="connector-connected-node connector-connected-provider">{connectorProviderGlyph(selectedManifest)}</div>
                 </div>
+                <h2>{t('连接 {name}', { name: selectedManifest.name })}</h2>
+                <p className="connector-connected-description">{t(selectedManifest.description)}</p>
+                {selectedManifest.id === 'github' && selectedStatus.issueCode === 'GITHUB_OAUTH_CLIENT_ID_MISSING'
+                    ? <div className="connector-version-message is-error">{t('GitHub OAuth Client ID 尚未配置。请由部署方设置 CEES_GITHUB_OAUTH_CLIENT_ID 后重启桌面端。')}</div>
+                    : null}
+                {selectedManifest.id === 'dingtalk' && selectedDingTalkStatus.state === 'PROFILE_REQUIRED'
+                    ? <DingTalkProfileSelector
+                        status={selectedDingTalkStatus}
+                        selectedProfile={selectedProfile}
+                        onSelectProfile={setSelectedProfile}
+                        t={t}
+                    />
+                    : null}
+                {selectedManifest.id === 'wecom' && selectedWeComStatus.authorizationState === 'AUTHORIZING' ? <div className="connector-wecom-authorization">
+                    <p>{t('请使用手机企业微信扫描二维码。若尚未创建智能机器人，企业微信会引导你一键创建并确认可用能力。')}</p>
+                    {selectedWeComStatus.qrCodeDataUrl
+                        ? <img src={selectedWeComStatus.qrCodeDataUrl} alt={t('企业微信机器人授权二维码')} />
+                        : <Spin />}
+                    <small>{t('授权完成后页面会自动更新，二维码约五分钟内有效。')}</small>
+                </div> : null}
+                <Button
+                    className="connector-connect-button"
+                    type="primary"
+                    size="large"
+                    icon={<LinkOutlined />}
+                    loading={connectingId === selectedManifest.id}
+                    disabled={(selectedManifest.id === 'dingtalk'
+                        && selectedDingTalkStatus.state === 'PROFILE_REQUIRED'
+                        && !selectedProfile)
+                        || (selectedManifest.id === 'wecom' && selectedWeComStatus.authorizationState === 'AUTHORIZING')}
+                    onClick={() => void connect(selectedManifest)}
+                >
+                    {selectedManifest.id === 'dingtalk' && selectedDingTalkStatus.state === 'PROFILE_REQUIRED'
+                        ? t('使用此组织')
+                        : selectedManifest.id === 'wecom' && selectedWeComStatus.authorizationState === 'AUTHORIZING'
+                            ? t('等待扫码授权')
+                        : t('连接')}
+                </Button>
             </div> : null}
         </Modal>
     </div>;
@@ -451,39 +504,26 @@ function DingTalkVersionPanel(props: {
     </div>;
 }
 
-function DingTalkInstallContent(props: {
+function DingTalkProfileSelector(props: {
     status: DingTalkConnectorStatus;
-    release: DingTalkConnectorReleaseStatus;
     selectedProfile?: string;
     onSelectProfile: (profile: string) => void;
     t: (text: string, values?: Record<string, string | number>) => string;
 }): JSX.Element {
-    const { status, release, selectedProfile, onSelectProfile, t } = props;
-    return <>
-        {status.state === 'PROFILE_REQUIRED'
-            ? <>
-                <p>{t('当前账号已授权多个钉钉组织，请明确选择本次使用的组织。CEES 不会默认选择第一项。')}</p>
-                <Select
-                    style={{ width: '100%', marginBottom: 12 }}
-                    placeholder={t('选择钉钉组织账号')}
-                    value={selectedProfile}
-                    onChange={onSelectProfile}
-                    options={status.profiles.map((profile) => ({
-                        value: profile.profile,
-                        label: `${profile.corpName || profile.corpId || t('未知组织')} · ${profile.externalUserName || profile.externalUserId || t('未知用户')}`,
-                    }))}
-                />
-            </>
-            : <p>{t('CEES 将下载并校验钉钉官方 DWS，然后安装到当前用户的 CEES 数据目录。安装完成后会自动打开钉钉授权流程。')}</p>}
-        {status.state !== 'PROFILE_REQUIRED' ? <ul>
-            <li>{t('固定版本：{version}', { version: release.version })}</li>
-            <li>{t('开源许可：{license}', { license: release.license })}</li>
-            <li>{t('当前版本仅在 Windows 支持自动安装')}</li>
-            <li>{t('授权凭据仅保存在本机，不会上传到 CEES API')}</li>
-            <li>{t('暂不安装 DWS 技能与专家能力')}</li>
-        </ul> : null}
-        {!status.installSupported && !status.installed ? <p className="connector-install-warning">{t('当前系统不支持自动安装，请先手动安装 DWS。')}</p> : null}
-    </>;
+    const { status, selectedProfile, onSelectProfile, t } = props;
+    return <div className="connector-profile-selector">
+        <p>{t('当前账号包含多个钉钉组织，请选择本次连接使用的组织。')}</p>
+        <Select
+            style={{ width: '100%' }}
+            placeholder={t('选择钉钉组织账号')}
+            value={selectedProfile}
+            onChange={onSelectProfile}
+            options={status.profiles.map((profile) => ({
+                value: profile.profile,
+                label: `${profile.corpName || profile.corpId || t('未知组织')} · ${profile.externalUserName || profile.externalUserId || t('未知用户')}`,
+            }))}
+        />
+    </div>;
 }
 
 function connectorErrorStatus(error: unknown, fallback: string): DesktopConnectorStatus {
@@ -511,46 +551,50 @@ function toTencentMeetingStatus(status?: DesktopConnectorStatus): TencentMeeting
     return {
         ...EMPTY_STATUS,
         ...candidate,
-        account: candidate?.account ?? null,
-        grantedScopes: Array.isArray(candidate?.grantedScopes) ? candidate.grantedScopes : [],
-        tokenStatus: candidate?.tokenStatus ?? 'MISSING',
-        authorizedAt: candidate?.authorizedAt ?? null,
-        tokenExpiresAt: candidate?.tokenExpiresAt ?? null,
+        source: candidate?.source === 'MANAGED' ? 'MANAGED' : null,
+        installSupported: candidate?.installSupported === true,
+        authorizationState: candidate?.authorizationState === 'AUTHORIZED' ? 'AUTHORIZED' : 'UNAUTHORIZED',
+        authorizedUserName: typeof candidate?.authorizedUserName === 'string' ? candidate.authorizedUserName : null,
+        authorizedOpenId: typeof candidate?.authorizedOpenId === 'string' ? candidate.authorizedOpenId : null,
+        toolCount: typeof candidate?.toolCount === 'number' ? candidate.toolCount : 0,
     };
 }
 
-function connectorStatusText(
-    status: DesktopConnectorStatus,
-    t: (text: string, values?: Record<string, string | number>) => string,
-): string {
-    if (status.state === 'READY') return t('已连接');
-    if (status.state === 'PROFILE_REQUIRED') return t('需要选择组织');
-    if (status.state === 'AUTH_REQUIRED') return t('待授权');
-    if (status.state === 'ERROR') return t('连接异常');
-    return status.installed ? t('已安装') : t('未安装');
+function toWeComStatus(status?: DesktopConnectorStatus): WeComConnectorStatus {
+    const candidate = status as Partial<WeComConnectorStatus> | undefined;
+    return {
+        ...EMPTY_STATUS,
+        ...candidate,
+        source: candidate?.source === 'MANAGED' ? 'MANAGED' : null,
+        installSupported: candidate?.installSupported === true,
+        authorizationState: candidate?.authorizationState === 'AUTHORIZED' || candidate?.authorizationState === 'AUTHORIZING'
+            ? candidate.authorizationState
+            : 'UNAUTHORIZED',
+        qrCodeDataUrl: typeof candidate?.qrCodeDataUrl === 'string' ? candidate.qrCodeDataUrl : null,
+        authorizationExpiresAt: typeof candidate?.authorizationExpiresAt === 'string' ? candidate.authorizationExpiresAt : null,
+        toolCount: typeof candidate?.toolCount === 'number' ? candidate.toolCount : 0,
+    };
+}
+
+function toGitHubStatus(status?: DesktopConnectorStatus): GitHubConnectorStatus {
+    const candidate = status as Partial<GitHubConnectorStatus> | undefined;
+    return {
+        ...EMPTY_STATUS,
+        ...candidate,
+        source: candidate?.source === 'REMOTE_MCP' ? 'REMOTE_MCP' : null,
+        authorizationState: candidate?.authorizationState === 'AUTHORIZED' || candidate?.authorizationState === 'AUTHORIZING'
+            ? candidate.authorizationState
+            : 'UNAUTHORIZED',
+        authorizedLogin: typeof candidate?.authorizedLogin === 'string' ? candidate.authorizedLogin : null,
+        toolCount: typeof candidate?.toolCount === 'number' ? candidate.toolCount : 0,
+        enabledToolsets: Array.isArray(candidate?.enabledToolsets) ? candidate.enabledToolsets.filter((item): item is string => typeof item === 'string') : [],
+    };
 }
 
 function connectorGlyph(manifest: DesktopConnectorManifest): string {
-    return manifest.id === 'dingtalk' ? '钉' : manifest.name.trim().slice(0, 1).toUpperCase();
+    return manifest.id === 'dingtalk' ? '钉' : manifest.id === 'wecom' ? '企' : manifest.id === 'github' ? 'GH' : manifest.name.trim().slice(0, 1).toUpperCase();
 }
 
 function connectorProviderGlyph(manifest: DesktopConnectorManifest): JSX.Element | string {
-    return manifest.id === 'dingtalk' ? <DingdingOutlined /> : connectorGlyph(manifest);
-}
-
-function connectorDialogTitle(
-    manifest: DesktopConnectorManifest,
-    t: (text: string, values?: Record<string, string | number>) => string,
-): string {
-    return manifest.supportsInstall
-        ? t('安装并连接{name}', { name: manifest.name })
-        : t('连接{name}', { name: manifest.name });
-}
-
-function connectorActionText(
-    manifest: DesktopConnectorManifest,
-    t: (text: string, values?: Record<string, string | number>) => string,
-): string {
-    if (manifest.supportsInstall) return manifest.authType === 'NONE' ? t('安装并连接') : t('安装并授权');
-    return manifest.authType === 'NONE' ? t('连接') : t('连接并授权');
+    return manifest.id === 'dingtalk' ? <DingdingOutlined /> : manifest.id === 'wecom' ? <WechatOutlined /> : manifest.id === 'github' ? <GithubOutlined /> : connectorGlyph(manifest);
 }

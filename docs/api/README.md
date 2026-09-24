@@ -7,7 +7,13 @@
 
 ### 契约版本与迁移
 
-- **0.37.1**：当前开发基线。腾讯会议 OAuth 回调使用官方 `auth_code`，保留 `code` 废弃兼容别名；API 已实现成员级授权、State 防重放、Token 加密托管、刷新租约、状态查询、幂等解绑和审计。只读工具网关与 Desktop 真实授权接线仍待后续分支实现。
+- **0.43.0**：当前开发基线。新增平台 AI Credit 配置管理 API：`/platform/ai-credit/*` 共 21 个操作（能力目录、档位、费率、订阅参数、加油包、全局计费配置），列表响应统一为 `{ items }` 信封，权限码 `platform.aiCredit.read/write`。客户端需要重新生成。详见 [AI 计费系统设计](../product/ai-credit-system-design.md)。
+- **0.42.0**：新增 GitHub 官方远程 MCP `POST /assistant/connectors/github/plan`，并将 `ConnectorContext.provider` 新增 `GITHUB`；客户端需重新生成。详见 [GitHub 连接器 API](github-connector-api.md)。
+- **0.41.0**：`ConversationMessage` 新增必填但默认空数组的 `connectorContexts`，用于恢复企业微信业务权限授权提示；旧客户端可忽略，新客户端需重新生成。连接器上下文仍不构成 CEES 权限或业务事实。详见 [企业微信连接器 API](wecom-connector-api.md)。
+- **0.40.0**：腾讯会议从 Desktop 个人 Token + 远程 MCP 修正为托管官方 `@tencentcloud/tmeet` CLI + 浏览器 OAuth；保留无副作用的 `POST /assistant/connectors/tencent-meeting/plan` Schema，更新工具目录语义并删除 Desktop Token IPC。旧个人 Token 不迁移，升级后用户需重新完成 OAuth；详见 [腾讯会议连接器 API 与迁移说明](tencent-meeting-connector-api.md)。
+- **0.39.0**：新增 Desktop 托管企业微信官方 CLI、二维码智能机器人授权和无副作用的 `POST /assistant/connectors/wecom/plan`；`ConnectorContext.provider` 新增 `WECOM`，客户端需重新生成。详见 [企业微信连接器 API](wecom-connector-api.md)。
+- **0.38.0**：删除 `/connectors/tencent-meeting/*` 服务端 OAuth、状态、解绑、工具和执行接口，新增无副作用的 `POST /assistant/connectors/tencent-meeting/plan`。
+- **0.37.1**：历史版本。腾讯会议使用 CEES 服务端 OAuth 和 Token 托管；该方案已在 `0.38.0` 删除。
 - **0.37.0**：新增腾讯会议个人 OAuth 授权、公开回调、连接状态、幂等解绑、只读工具发现和批量只读执行契约；授权按 `tenantId + membershipId` 隔离，第三方 Token 只允许服务端托管。
 - **0.19.0**：删除 `/api/v1/chat/*` 旧对话接口（invoke / stream / compact），以 `/api/v1/conversations/*` 会话、轮次、事件重放资源重建，并新增工具循环（generate_image / generate_document）与公开图片访问 `GET /api/v1/images/{imageId}`。旧客户端迁移到 `createConversation` / `createTurn` / `replayTurnEvents`；`chat` 相关生成模型与客户端已移除。
 - **0.20.0**：新增知识库 CRUD、知识库成员管理和 `READER`/`EDITOR`/`MANAGER` 权限契约；新增 `KnowledgeBase*` Schema 和 9 个公开操作。客户端需要重新生成；文档上传、解析、切片、向量化和 RAG 仍不在本版本范围内。
@@ -35,6 +41,7 @@
 - [工作台与数据看板](../product/dashboard-workbench.md)
 - [Assistant / Conversation API](assistant-api.md)
 - [腾讯会议连接器 API](tencent-meeting-connector-api.md)
+- [企业微信连接器 API](wecom-connector-api.md)
 - [公开 AI 对话链路与 Token 计量](../architecture/public-chat-api-and-token-metering.md)
 - [用户个人资料管理](../product/user-profile-management.md)
 - [钉钉组织架构与人员同步 API](dingtalk-organization-sync-api.md)
@@ -173,6 +180,31 @@ POST   /api/v1/platform/tenants/{tenantId}/restore
 GET    /api/v1/platform/tenants/{tenantId}/administrators
 POST   /api/v1/platform/tenants/{tenantId}/administrators
 DELETE /api/v1/platform/tenants/{tenantId}/administrators/{membershipId}
+
+GET    /api/v1/platform/ai-credit/capabilities
+POST   /api/v1/platform/ai-credit/capabilities
+GET    /api/v1/platform/ai-credit/capabilities/{capabilityId}
+PATCH  /api/v1/platform/ai-credit/capabilities/{capabilityId}
+DELETE /api/v1/platform/ai-credit/capabilities/{capabilityId}
+
+> `/platform/ai-credit/*` 为契约先行：其中 capabilities 5 个端点已实现（S6）、tiers 5 个端点已实现（S7），权限码 `platform.aiCredit.read/write`；其余路径（rate-cards/booster-tiers/billing-config）待后续实现。
+
+GET    /api/v1/platform/ai-credit/tiers
+POST   /api/v1/platform/ai-credit/tiers
+GET    /api/v1/platform/ai-credit/tiers/{tierId}
+PATCH  /api/v1/platform/ai-credit/tiers/{tierId}
+DELETE /api/v1/platform/ai-credit/tiers/{tierId}
+GET    /api/v1/platform/ai-credit/rate-cards
+POST   /api/v1/platform/ai-credit/rate-cards
+GET    /api/v1/platform/ai-credit/rate-cards/{rateCardId}
+PATCH  /api/v1/platform/ai-credit/rate-cards/{rateCardId}
+GET    /api/v1/platform/ai-credit/booster-tiers
+POST   /api/v1/platform/ai-credit/booster-tiers
+GET    /api/v1/platform/ai-credit/booster-tiers/{boosterTierId}
+PATCH  /api/v1/platform/ai-credit/booster-tiers/{boosterTierId}
+DELETE /api/v1/platform/ai-credit/booster-tiers/{boosterTierId}
+GET    /api/v1/platform/ai-credit/billing-config
+PATCH  /api/v1/platform/ai-credit/billing-config
 
 GET    /api/v1/tenants/current/invitations
 POST   /api/v1/tenants/current/invitations

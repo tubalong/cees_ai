@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CEES AI API
-  version: 0.37.1
+  version: 0.43.0
   description: 以本文件为唯一事实源的公开 API 契约。资源与操作按 docs/api 约定补充。
 
 servers:
@@ -50,6 +50,155 @@ paths:
                 $ref: '#/components/schemas/DingTalkConnectorPlanResponseEnvelope'
         '400':
           description: Invalid query or tool catalog
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '401':
+          description: Authentication or tenant membership is invalid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '502':
+          description: AI provider returned an invalid plan
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '503':
+          description: AI service or model is temporarily unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+  /assistant/connectors/tencent-meeting/plan:
+    post:
+      summary: Plan Tencent Meeting official CLI calls for the current question
+      description: |
+        Desktop installs a pinned official @tencentcloud/tmeet CLI, completes browser OAuth locally, and derives the
+        version-aligned command schema from the installed CLI help. The API only asks the model to select tool names and
+        arguments; OAuth credentials remain in the CLI-owned encrypted Desktop directories and are never uploaded to
+        CEES API. Desktop must request explicit user confirmation before executing any WRITE or DESTRUCTIVE command.
+      operationId: planTencentMeetingConnectorQueries
+      tags: [Conversation]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TencentMeetingConnectorPlanRequest'
+      responses:
+        '200':
+          description: Up to three local official-CLI calls; calls is empty when Tencent Meeting data is unnecessary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TencentMeetingConnectorPlanResponseEnvelope'
+        '400':
+          description: Invalid query or version-aligned CLI command catalog
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '401':
+          description: Authentication or tenant membership is invalid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '502':
+          description: AI provider returned an invalid plan
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '503':
+          description: AI service or model is temporarily unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+  /assistant/connectors/wecom/plan:
+    post:
+      summary: Plan WeCom official CLI calls for the current question
+      description: |
+        Desktop installs the pinned official WeCom CLI and dynamically discovers tools after the user authorizes an
+        intelligent bot by QR code. The API only asks the model to select tool names and arguments; WeCom authorization
+        remains in the Desktop-managed CLI config directory and is never uploaded to CEES API. Desktop must request
+        explicit user confirmation before executing any tool marked as WRITE or DESTRUCTIVE.
+      operationId: planWeComConnectorQueries
+      tags: [Conversation]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WeComConnectorPlanRequest'
+      responses:
+        '200':
+          description: Up to three local CLI calls; calls is empty when WeCom data is unnecessary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WeComConnectorPlanResponseEnvelope'
+        '400':
+          description: Invalid query or dynamic tool catalog
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '401':
+          description: Authentication or tenant membership is invalid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '502':
+          description: AI provider returned an invalid plan
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '503':
+          description: AI service or model is temporarily unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+  /assistant/connectors/github/plan:
+    post:
+      summary: Plan GitHub official remote MCP calls for the current question
+      description: |
+        Desktop connects to the fixed GitHub-hosted remote MCP endpoint and sends the dynamically discovered tool
+        catalog. The API only plans tool names and arguments; GitHub OAuth credentials and MCP execution remain in
+        the Desktop Main Process. Desktop must require explicit confirmation before executing WRITE or DESTRUCTIVE tools.
+      operationId: planGitHubConnectorQueries
+      tags: [Conversation]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GitHubConnectorPlanRequest'
+      responses:
+        '200':
+          description: Up to three GitHub remote MCP calls; calls is empty when GitHub data is unnecessary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GitHubConnectorPlanResponseEnvelope'
+        '400':
+          description: Invalid query or MCP tool catalog
           content:
             application/json:
               schema:
@@ -5338,226 +5487,6 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
 
-  /connectors/tencent-meeting/authorization:
-    post:
-      summary: 发起当前成员的腾讯会议 OAuth 授权
-      description: |
-        服务端为当前 tenantId + membershipId 创建短期、一次性 OAuth State，并返回腾讯会议授权地址。
-        同一成员再次发起时，服务端使此前未完成的授权尝试失效。返回值不包含应用 Secret、Access Token、Refresh Token 或原始 State。
-      operationId: startTencentMeetingAuthorization
-      tags: [TencentMeeting]
-      security: [{ bearerAuth: [] }]
-      responses:
-        '200':
-          description: OAuth 授权地址已创建
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/TencentMeetingAuthorizationResponseEnvelope' }
-        '401':
-          description: 登录状态无效、已过期或缺少有效租户成员身份
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
-        '409':
-          description: 当前成员已经连接腾讯会议且未要求重新授权
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
-        '503':
-          description: 腾讯会议连接器未配置或授权服务暂不可用
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
-
-    delete:
-      summary: 解绑当前成员的腾讯会议账号
-      description: |
-        幂等清除当前 tenantId + membershipId 的腾讯会议授权和服务端 Token。未连接时同样返回 204。
-        解绑不会删除已经写入 CEES 的业务数据，也不会影响其他租户或成员的独立授权。
-      operationId: disconnectTencentMeeting
-      tags: [TencentMeeting]
-      security: [{ bearerAuth: [] }]
-      responses:
-        '204':
-          description: 腾讯会议授权已清除或原本不存在
-        '401':
-          description: 登录状态无效、已过期或缺少有效租户成员身份
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
-        '503':
-          description: 连接器服务暂不可用，无法确认授权清理结果
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
-
-  /connectors/tencent-meeting/oauth/callback:
-    get:
-      summary: 接收腾讯会议 OAuth 回调
-      description: |
-        腾讯会议浏览器授权完成后的公开回调。服务端只依据一次性 State 定位并验证发起授权的租户成员，
-        交换并加密保存 Token 后返回可关闭的 HTML 页面。auth_code（或兼容字段 code）与 error 至少提供一个；
-        State 过期、无效或已消费时拒绝处理。服务端优先使用腾讯会议官方返回的 auth_code。
-      operationId: completeTencentMeetingAuthorization
-      tags: [TencentMeeting]
-      security: []
-      parameters:
-        - name: state
-          in: query
-          required: true
-          description: 服务端签发并持久化校验的一次性 OAuth State
-          schema: { type: string, minLength: 32, maxLength: 64 }
-        - name: auth_code
-          in: query
-          required: false
-          description: 腾讯会议官方回调返回的授权码；授权成功时必填
-          schema: { type: string, minLength: 1, maxLength: 2048 }
-        - name: code
-          in: query
-          required: false
-          deprecated: true
-          description: 历史兼容授权码字段；新接入必须使用 auth_code，若与 auth_code 同时存在则值必须一致
-          schema: { type: string, minLength: 1, maxLength: 2048 }
-        - name: error
-          in: query
-          required: false
-          description: 腾讯会议返回的授权失败代码
-          schema: { type: string, minLength: 1, maxLength: 200 }
-        - name: error_description
-          in: query
-          required: false
-          description: 腾讯会议返回的授权失败说明，仅用于用户提示和受控日志
-          schema: { type: string, maxLength: 2000 }
-      responses:
-        '200':
-          description: 授权结果已处理；HTML 页面提示用户返回 CEES Desktop
-          content:
-            text/html:
-              schema: { type: string }
-        '400':
-          description: OAuth State、授权码或回调参数无效、过期或已消费
-          content:
-            text/html:
-              schema: { type: string }
-        '502':
-          description: 腾讯会议 Token 交换或账号信息查询失败
-          content:
-            text/html:
-              schema: { type: string }
-        '503':
-          description: 腾讯会议连接器未配置或服务暂不可用
-          content:
-            text/html:
-              schema: { type: string }
-
-  /connectors/tencent-meeting/status:
-    get:
-      summary: 查询当前成员的腾讯会议连接状态
-      description: |
-        返回当前 tenantId + membershipId 的独立授权状态、账号摘要、授权范围和 Token 健康状态。
-        响应永远不包含第三方 Token、应用 Secret 或其他成员的授权信息。
-      operationId: getTencentMeetingConnectionStatus
-      tags: [TencentMeeting]
-      security: [{ bearerAuth: [] }]
-      responses:
-        '200':
-          description: 当前成员的腾讯会议连接状态
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/TencentMeetingConnectionResponseEnvelope' }
-        '401':
-          description: 登录状态无效、已过期或缺少有效租户成员身份
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
-
-  /connectors/tencent-meeting/tools:
-    get:
-      summary: 查询当前腾讯会议授权可用的只读工具
-      description: |
-        根据当前成员的授权范围和服务端能力返回工具目录。只返回 CEES 预定义的安全只读工具，
-        不暴露腾讯会议原始 URL、HTTP Header、Access Token 或任意 Open API 调用能力。
-      operationId: listTencentMeetingConnectorTools
-      tags: [TencentMeeting]
-      security: [{ bearerAuth: [] }]
-      responses:
-        '200':
-          description: 当前授权可用的只读工具
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/TencentMeetingConnectorToolListResponseEnvelope' }
-        '401':
-          description: 登录状态无效、已过期或缺少有效租户成员身份
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
-        '409':
-          description: 当前成员尚未完成腾讯会议授权或授权已经失效
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
-        '503':
-          description: 腾讯会议连接器未配置或服务暂不可用
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
-
-  /connectors/tencent-meeting/executions:
-    post:
-      summary: 执行当前成员的腾讯会议只读工具调用
-      description: |
-        按顺序执行一到三条 CEES 预定义的只读工具调用。服务端校验工具 ID、参数、OAuth Scope、
-        当前账号对会议资源的访问权限，并对结果执行字段过滤、脱敏和大小限制。
-      operationId: executeTencentMeetingConnectorTools
-      tags: [TencentMeeting]
-      security: [{ bearerAuth: [] }]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/TencentMeetingConnectorExecutionRequest' }
-      responses:
-        '200':
-          description: 按调用顺序返回腾讯会议只读上下文
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/TencentMeetingConnectorExecutionResponseEnvelope' }
-        '400':
-          description: 工具 ID、调用数量或参数不符合契约
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
-        '401':
-          description: 登录状态无效、已过期或缺少有效租户成员身份
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
-        '403':
-          description: 腾讯会议授权范围不足或当前账号无权访问目标会议资源
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
-        '409':
-          description: 当前成员尚未授权、授权已撤销或 Token 无法刷新
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
-        '429':
-          description: 腾讯会议提供方限流，请按错误详情中的重试语义稍后重试
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
-        '502':
-          description: 腾讯会议返回无效响应或上游调用失败
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
-        '503':
-          description: 腾讯会议连接器未配置或提供方暂不可用
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
-
   /dingtalk/integration:
     get:
       summary: 查询当前租户钉钉企业绑定
@@ -7709,6 +7638,704 @@ paths:
         '400': { description: 请求字段校验失败 }
         '401': { description: 登录状态无效或已过期 }
         '403': { description: 缺少 tenant.update 权限 }
+
+  /platform/ai-credit/capabilities:
+    get:
+      summary: 查询 AI 计费能力目录
+      description: |
+        返回全部未删除的能力（按 sortOrder 升序），供超级管理员后台维护档位功能集与费率表。
+      operationId: aiCreditCapabilityList
+      tags: [AI Credit Config]
+      security:
+        - platformBearerAuth: []
+      responses:
+        "200":
+          description: 能力目录列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AICreditCapabilityListResponseEnvelope"
+        "403":
+          description: 平台权限不足
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+    post:
+      summary: 创建 AI 计费能力
+      description: |
+        注册新的可计费能力。meterType / capabilityKind / sortOrder 省略时使用默认值
+        （TOKEN / TIER_GATED / 0）；permissionCode 映射现有权限码，通用能力可留空。
+      operationId: aiCreditCapabilityCreate
+      tags: [AI Credit Config]
+      security:
+        - platformBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AICreditCapabilityCreateRequest"
+      responses:
+        "200":
+          description: 创建成功的能力
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AICreditCapabilityResponseEnvelope"
+        "400":
+          description: 请求字段校验失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "403":
+          description: 平台权限不足
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "409":
+          description: code 已被现有能力占用
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /platform/ai-credit/capabilities/{capabilityId}:
+    get:
+      summary: 获取 AI 计费能力详情
+      operationId: aiCreditCapabilityGet
+      tags: [AI Credit Config]
+      security:
+        - platformBearerAuth: []
+      parameters:
+        - { name: capabilityId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 能力详情
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AICreditCapabilityResponseEnvelope"
+        "403":
+          description: 平台权限不足
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "404":
+          description: 能力不存在或已删除
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+    patch:
+      summary: 修改 AI 计费能力
+      description: |
+        修改能力资料。code 修改后部分唯一索引仍保证未删除记录不冲突；
+        permissionCode 变更不影响已授权成员的历史权限。
+      operationId: aiCreditCapabilityUpdate
+      tags: [AI Credit Config]
+      security:
+        - platformBearerAuth: []
+      parameters:
+        - { name: capabilityId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AICreditCapabilityUpdateRequest"
+      responses:
+        "200":
+          description: 修改后的能力
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AICreditCapabilityResponseEnvelope"
+        "400":
+          description: 请求字段校验失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "403":
+          description: 平台权限不足
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "404":
+          description: 能力不存在或已删除
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "409":
+          description: code 已被现有能力占用，或乐观锁版本冲突
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+    delete:
+      summary: 删除 AI 计费能力（软删除）
+      description: |
+        软删除能力。被档位功能集或费率表引用的能力不可删除，需先移除引用。
+      operationId: aiCreditCapabilityDelete
+      tags: [AI Credit Config]
+      security:
+        - platformBearerAuth: []
+      parameters:
+        - { name: capabilityId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204":
+          description: 已删除
+        "403":
+          description: 平台权限不足
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "404":
+          description: 能力不存在或已删除
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "409":
+          description: 能力仍被档位功能集或费率表引用
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /platform/ai-credit/tiers:
+    get:
+      summary: 查询 AI 计费档位列表
+      description: |
+        返回全部未删除的档位，含功能集（capabilityCodes）与各持续时间的价格。
+      operationId: aiCreditTierList
+      tags: [AI Credit Config]
+      security:
+        - platformBearerAuth: []
+      responses:
+        "200":
+          description: 档位列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AICreditTierListResponseEnvelope"
+        "403":
+          description: 平台权限不足
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+    post:
+      summary: 创建 AI 计费档位
+      description: |
+        创建档位：功能集（功能开关类能力 code 列表）、每订阅单位基础额度、
+        各持续时间档位价格与单位单价。code 兼作档位权限码，创建后不可修改。
+      operationId: aiCreditTierCreate
+      tags: [AI Credit Config]
+      security:
+        - platformBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AICreditTierCreateRequest"
+      responses:
+        "200":
+          description: 创建成功的档位
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AICreditTierResponseEnvelope"
+        "400":
+          description: 请求字段校验失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "403":
+          description: 平台权限不足
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "409":
+          description: code 已被现有档位占用
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /platform/ai-credit/tiers/{tierId}:
+    get:
+      summary: 获取 AI 计费档位详情
+      operationId: aiCreditTierGet
+      tags: [AI Credit Config]
+      security:
+        - platformBearerAuth: []
+      parameters:
+        - { name: tierId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 档位详情
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AICreditTierResponseEnvelope"
+        "403":
+          description: 平台权限不足
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "404":
+          description: 档位不存在或已删除
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+    patch:
+      summary: 修改 AI 计费档位
+      description: |
+        修改档位资料、基础额度、状态、功能集或价格。prices / capabilityCodes
+        传入时整体替换对应子集；code 创建后不可修改。
+      operationId: aiCreditTierUpdate
+      tags: [AI Credit Config]
+      security:
+        - platformBearerAuth: []
+      parameters:
+        - { name: tierId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AICreditTierUpdateRequest"
+      responses:
+        "200":
+          description: 修改后的档位
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AICreditTierResponseEnvelope"
+        "400":
+          description: 请求字段校验失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "403":
+          description: 平台权限不足
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "404":
+          description: 档位不存在或已删除
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "409":
+          description: 乐观锁版本冲突
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+    delete:
+      summary: 删除 AI 计费档位（软删除）
+      operationId: aiCreditTierDelete
+      tags: [AI Credit Config]
+      security:
+        - platformBearerAuth: []
+      parameters:
+        - { name: tierId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204":
+          description: 已删除
+        "403":
+          description: 平台权限不足
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "404":
+          description: 档位不存在或已删除
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /platform/ai-credit/rate-cards:
+    get:
+      summary: 查询 AI 计费费率表
+      description: |
+        默认返回每个 能力 × 模型组 × 计量维度 的当前版本行（含 INACTIVE 状态行，便于后台显示已停用）。
+        includeHistory=true 时返回全部历史版本行（调价不追溯历史账目，历史行仅作审计展示）。
+      operationId: aiCreditRateCardList
+      tags: [AI Credit Config]
+      security:
+        - platformBearerAuth: []
+      parameters:
+        - in: query
+          name: includeHistory
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "200":
+          description: 费率列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AICreditRateCardListResponseEnvelope"
+        "403":
+          description: 平台权限不足
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+    post:
+      summary: 创建 AI 计费费率行
+      description: |
+        为 能力 × 模型组 × 计量维度 创建首个费率版本行。TOKEN_INPUT / TOKEN_OUTPUT 维度
+        填写 tokenMultiplier 与 creditPerToken；PER_REQUEST 维度填写 perRequestCredits。
+        同一组合已存在未删除行时返回 409。
+      operationId: aiCreditRateCardCreate
+      tags: [AI Credit Config]
+      security:
+        - platformBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AICreditRateCardCreateRequest"
+      responses:
+        "200":
+          description: 创建成功的费率行
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AICreditRateCardResponseEnvelope"
+        "400":
+          description: 请求字段校验失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "403":
+          description: 平台权限不足
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "409":
+          description: 同一能力 × 模型组 × 计量维度已存在费率行
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /platform/ai-credit/rate-cards/{rateCardId}:
+    get:
+      summary: 获取 AI 计费费率行详情
+      operationId: aiCreditRateCardGet
+      tags: [AI Credit Config]
+      security:
+        - platformBearerAuth: []
+      parameters:
+        - { name: rateCardId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 费率行详情
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AICreditRateCardResponseEnvelope"
+        "403":
+          description: 平台权限不足
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "404":
+          description: 费率行不存在或已删除
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+    patch:
+      summary: 修改 AI 计费费率行（调价版本化）
+      description: |
+        修改费率。计量字段（tokenMultiplier / creditPerToken / perRequestCredits）任一变更时，
+        服务端插入新版本行（rateVersion + 1），原行保留为历史、不追溯历史账目；
+        仅修改 status 时更新原行。
+      operationId: aiCreditRateCardUpdate
+      tags: [AI Credit Config]
+      security:
+        - platformBearerAuth: []
+      parameters:
+        - { name: rateCardId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AICreditRateCardUpdateRequest"
+      responses:
+        "200":
+          description: 修改后（或新版本）的费率行
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AICreditRateCardResponseEnvelope"
+        "400":
+          description: 请求字段校验失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "403":
+          description: 平台权限不足
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "404":
+          description: 费率行不存在或已删除
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "409":
+          description: 乐观锁版本冲突
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /platform/ai-credit/booster-tiers:
+    get:
+      summary: 查询 AI 计费加油包档位列表
+      description: |
+        返回全部未删除的加油包档位。加油包永久有效，只零售（买多个单价相同）。
+      operationId: aiCreditBoosterTierList
+      tags: [AI Credit Config]
+      security:
+        - platformBearerAuth: []
+      responses:
+        "200":
+          description: 加油包档位列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AICreditBoosterTierListResponseEnvelope"
+        "403":
+          description: 平台权限不足
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+    post:
+      summary: 创建 AI 计费加油包档位
+      operationId: aiCreditBoosterTierCreate
+      tags: [AI Credit Config]
+      security:
+        - platformBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AICreditBoosterTierCreateRequest"
+      responses:
+        "200":
+          description: 创建成功的加油包档位
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AICreditBoosterTierResponseEnvelope"
+        "400":
+          description: 请求字段校验失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "403":
+          description: 平台权限不足
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /platform/ai-credit/booster-tiers/{boosterTierId}:
+    get:
+      summary: 获取 AI 计费加油包档位详情
+      operationId: aiCreditBoosterTierGet
+      tags: [AI Credit Config]
+      security:
+        - platformBearerAuth: []
+      parameters:
+        - { name: boosterTierId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: 加油包档位详情
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AICreditBoosterTierResponseEnvelope"
+        "403":
+          description: 平台权限不足
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "404":
+          description: 加油包档位不存在或已删除
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+    patch:
+      summary: 修改 AI 计费加油包档位
+      operationId: aiCreditBoosterTierUpdate
+      tags: [AI Credit Config]
+      security:
+        - platformBearerAuth: []
+      parameters:
+        - { name: boosterTierId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AICreditBoosterTierUpdateRequest"
+      responses:
+        "200":
+          description: 修改后的加油包档位
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AICreditBoosterTierResponseEnvelope"
+        "400":
+          description: 请求字段校验失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "403":
+          description: 平台权限不足
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "404":
+          description: 加油包档位不存在或已删除
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "409":
+          description: 乐观锁版本冲突
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+    delete:
+      summary: 删除 AI 计费加油包档位（软删除）
+      operationId: aiCreditBoosterTierDelete
+      tags: [AI Credit Config]
+      security:
+        - platformBearerAuth: []
+      parameters:
+        - { name: boosterTierId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204":
+          description: 已删除
+        "403":
+          description: 平台权限不足
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "404":
+          description: 加油包档位不存在或已删除
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
+  /platform/ai-credit/billing-config:
+    get:
+      summary: 获取全局 AI 计费配置
+      description: |
+        全局计费配置为单行资源：最小计量单位、每月重置日与企业本地时区模式、
+        未配置费率拒绝开关、订阅持续时间选项、半年/一年折扣、订阅单位上限。
+      operationId: aiCreditBillingConfigGet
+      tags: [AI Credit Config]
+      security:
+        - platformBearerAuth: []
+      responses:
+        "200":
+          description: 全局计费配置
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AICreditBillingConfigResponseEnvelope"
+        "403":
+          description: 平台权限不足
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+    patch:
+      summary: 修改全局 AI 计费配置
+      description: |
+        修改全局计费配置（订阅参数与重置/拒绝策略均在此资源）。
+        subscriptionDurations 传入时整体替换；未配置费率的调用按 rejectUnconfiguredRate 拒绝。
+      operationId: aiCreditBillingConfigUpdate
+      tags: [AI Credit Config]
+      security:
+        - platformBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AICreditBillingConfigUpdateRequest"
+      responses:
+        "200":
+          description: 修改后的全局计费配置
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AICreditBillingConfigResponseEnvelope"
+        "400":
+          description: 请求字段校验失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "403":
+          description: 平台权限不足
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "409":
+          description: 乐观锁版本冲突
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
 
 components:
   securitySchemes:
@@ -9920,7 +10547,7 @@ components:
     ConversationMessage:
       type: object
       additionalProperties: false
-      required: [id, role, content, imageFileIds, resources, createdAt]
+      required: [id, role, content, imageFileIds, connectorContexts, resources, createdAt]
       properties:
         id:
           type: string
@@ -9940,6 +10567,13 @@ components:
           items:
             type: string
             format: uuid
+        connectorContexts:
+          type: array
+          maxItems: 3
+          default: []
+          description: 用户消息在该轮提交的已脱敏连接器上下文；其他角色固定为空数组。用于恢复连接器授权提示等确定性交互，不作为 CEES 权限或业务事实依据
+          items:
+            $ref: '#/components/schemas/ConnectorContext'
         resources:
           type: array
           maxItems: 20
@@ -10060,7 +10694,7 @@ components:
         connectorContexts:
           type: array
           maxItems: 3
-          description: Desktop 从用户已授权的本地连接器读取的本轮只读上下文；不会作为业务事实或写操作权限依据
+          description: Desktop 从用户已授权的本地连接器取得的本轮结构化结果；不会作为业务事实或后续写操作权限依据
           items:
             $ref: '#/components/schemas/ConnectorContext'
 
@@ -10071,13 +10705,13 @@ components:
       properties:
         provider:
           type: string
-          enum: [DINGTALK]
+          enum: [DINGTALK, TENCENT_MEETING, WECOM, GITHUB]
         toolId:
           type: string
           minLength: 1
-          maxLength: 80
-          pattern: '^dws_read_[a-f0-9]{16}$'
-          description: Stable local tool ID derived from the DWS canonical_path
+          maxLength: 120
+          pattern: '^[A-Za-z][A-Za-z0-9._-]{0,119}$'
+          description: Stable local connector tool ID; DWS uses a derived ID while Tencent Meeting and WeCom use provider tool names
         toolName:
           type: string
           minLength: 1
@@ -10090,6 +10724,270 @@ components:
           type: object
           additionalProperties: true
           description: 已脱敏的连接器结构化结果，不得包含 Token、Cookie、AppSecret 或授权凭据
+
+    TencentMeetingConnectorToolRisk:
+      type: string
+      enum: [READ, WRITE, DESTRUCTIVE]
+
+    TencentMeetingConnectorTool:
+      type: object
+      additionalProperties: false
+      required: [toolId, name, description, parameters, riskLevel, requiresConfirmation]
+      properties:
+        toolId:
+          type: string
+          minLength: 1
+          maxLength: 120
+          pattern: '^[A-Za-z][A-Za-z0-9._-]{0,119}$'
+          description: Version-aligned Tencent Meeting CLI command ID, for example meeting.list
+        name:
+          type: string
+          minLength: 1
+          maxLength: 240
+        description:
+          type: string
+          minLength: 1
+          maxLength: 4000
+        parameters:
+          type: object
+          additionalProperties: true
+          description: JSON Schema derived from the pinned official CLI command help; root must be an object
+        riskLevel:
+          $ref: '#/components/schemas/TencentMeetingConnectorToolRisk'
+        requiresConfirmation:
+          type: boolean
+          description: Desktop must require explicit confirmation before executing this tool
+
+    TencentMeetingConnectorPlanRequest:
+      type: object
+      additionalProperties: false
+      required: [query, tools]
+      properties:
+        query:
+          type: string
+          minLength: 1
+          maxLength: 10000
+        tools:
+          type: array
+          minItems: 1
+          maxItems: 128
+          items:
+            $ref: '#/components/schemas/TencentMeetingConnectorTool'
+
+    TencentMeetingConnectorPlannedCall:
+      type: object
+      additionalProperties: false
+      required: [toolId, arguments]
+      properties:
+        toolId:
+          type: string
+          minLength: 1
+          maxLength: 120
+          pattern: '^[A-Za-z][A-Za-z0-9._-]{0,119}$'
+        arguments:
+          type: object
+          additionalProperties: true
+
+    TencentMeetingConnectorPlanResult:
+      type: object
+      additionalProperties: false
+      required: [calls]
+      properties:
+        calls:
+          type: array
+          maxItems: 3
+          items:
+            $ref: '#/components/schemas/TencentMeetingConnectorPlannedCall'
+
+    TencentMeetingConnectorPlanResponseEnvelope:
+      type: object
+      additionalProperties: false
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: '#/components/schemas/TencentMeetingConnectorPlanResult'
+        requestId:
+          type: [string, 'null']
+          description: Public API request trace ID
+
+    WeComConnectorToolRisk:
+      type: string
+      enum: [READ, WRITE, DESTRUCTIVE]
+
+    WeComConnectorTool:
+      type: object
+      additionalProperties: false
+      required: [toolId, name, description, parameters, riskLevel, requiresConfirmation]
+      properties:
+        toolId:
+          type: string
+          minLength: 1
+          maxLength: 120
+          pattern: '^[A-Za-z][A-Za-z0-9._-]{0,119}$'
+          description: Official WeCom CLI method name discovered from schema list/get
+        name:
+          type: string
+          minLength: 1
+          maxLength: 240
+        description:
+          type: string
+          minLength: 1
+          maxLength: 4000
+        parameters:
+          type: object
+          additionalProperties: true
+          description: JSON Schema dynamically returned by the official CLI; root must be an object
+        riskLevel:
+          $ref: '#/components/schemas/WeComConnectorToolRisk'
+        requiresConfirmation:
+          type: boolean
+          description: Desktop must require explicit confirmation before executing this tool
+
+    WeComConnectorPlanRequest:
+      type: object
+      additionalProperties: false
+      required: [query, tools]
+      properties:
+        query:
+          type: string
+          minLength: 1
+          maxLength: 10000
+        tools:
+          type: array
+          minItems: 1
+          maxItems: 256
+          items:
+            $ref: '#/components/schemas/WeComConnectorTool'
+
+    WeComConnectorPlannedCall:
+      type: object
+      additionalProperties: false
+      required: [toolId, arguments]
+      properties:
+        toolId:
+          type: string
+          minLength: 1
+          maxLength: 120
+          pattern: '^[A-Za-z][A-Za-z0-9._-]{0,119}$'
+        arguments:
+          type: object
+          additionalProperties: true
+
+    WeComConnectorPlanResult:
+      type: object
+      additionalProperties: false
+      required: [calls]
+      properties:
+        calls:
+          type: array
+          maxItems: 3
+          items:
+            $ref: '#/components/schemas/WeComConnectorPlannedCall'
+
+    WeComConnectorPlanResponseEnvelope:
+      type: object
+      additionalProperties: false
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: '#/components/schemas/WeComConnectorPlanResult'
+        requestId:
+          type: [string, 'null']
+          description: Public API request trace ID
+
+    GitHubConnectorToolRisk:
+      type: string
+      enum: [READ, WRITE, DESTRUCTIVE]
+
+    GitHubConnectorTool:
+      type: object
+      additionalProperties: false
+      required: [toolId, name, description, parameters, riskLevel, requiresConfirmation]
+      properties:
+        toolId:
+          type: string
+          minLength: 1
+          maxLength: 120
+          pattern: '^[A-Za-z][A-Za-z0-9._-]{0,119}$'
+          description: GitHub remote MCP tool name discovered from tools/list
+        name:
+          type: string
+          minLength: 1
+          maxLength: 240
+        description:
+          type: string
+          minLength: 1
+          maxLength: 4000
+        parameters:
+          type: object
+          additionalProperties: true
+          description: JSON Schema dynamically returned by GitHub MCP; root must be an object
+        riskLevel:
+          $ref: '#/components/schemas/GitHubConnectorToolRisk'
+        requiresConfirmation:
+          type: boolean
+          description: Desktop must require explicit confirmation before executing this tool
+
+    GitHubConnectorPlanRequest:
+      type: object
+      additionalProperties: false
+      required: [query, tools]
+      properties:
+        query:
+          type: string
+          minLength: 1
+          maxLength: 10000
+        tools:
+          type: array
+          minItems: 1
+          maxItems: 256
+          items:
+            $ref: '#/components/schemas/GitHubConnectorTool'
+
+    GitHubConnectorPlannedCall:
+      type: object
+      additionalProperties: false
+      required: [toolId, arguments]
+      properties:
+        toolId:
+          type: string
+          minLength: 1
+          maxLength: 120
+          pattern: '^[A-Za-z][A-Za-z0-9._-]{0,119}$'
+        arguments:
+          type: object
+          additionalProperties: true
+
+    GitHubConnectorPlanResult:
+      type: object
+      additionalProperties: false
+      required: [calls]
+      properties:
+        calls:
+          type: array
+          maxItems: 3
+          items:
+            $ref: '#/components/schemas/GitHubConnectorPlannedCall'
+
+    GitHubConnectorPlanResponseEnvelope:
+      type: object
+      additionalProperties: false
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: '#/components/schemas/GitHubConnectorPlanResult'
+        requestId:
+          type: [string, 'null']
+          description: Public API request trace ID
 
     DingTalkConnectorTool:
       type: object
@@ -14842,259 +15740,6 @@ components:
         data: { $ref: '#/components/schemas/DingTalkMappingResult' }
         requestId: { type: [string, 'null'] }
 
-    TencentMeetingConnectionState:
-      type: string
-      enum: [NOT_CONNECTED, AUTHORIZING, READY, ERROR]
-      description: 当前租户成员的腾讯会议授权生命周期状态
-
-    TencentMeetingTokenStatus:
-      type: string
-      enum: [MISSING, VALID, EXPIRING, REFRESH_FAILED, REVOKED]
-      description: 服务端托管 Token 的健康状态；不会返回 Token 本身
-
-    TencentMeetingConnectorErrorCode:
-      type: string
-      enum:
-        - CONNECTOR_NOT_CONFIGURED
-        - CONNECTOR_ALREADY_CONNECTED
-        - OAUTH_STATE_INVALID
-        - OAUTH_STATE_EXPIRED
-        - OAUTH_STATE_ALREADY_USED
-        - OAUTH_ACCESS_DENIED
-        - AUTH_REQUIRED
-        - INSUFFICIENT_SCOPE
-        - TOKEN_REFRESH_FAILED
-        - PROVIDER_RATE_LIMITED
-        - PROVIDER_UNAVAILABLE
-        - RESOURCE_FORBIDDEN
-        - INVALID_ARGUMENTS
-
-    TencentMeetingAccount:
-      type: object
-      additionalProperties: false
-      required: [externalUserId, displayName, organizationId, organizationName]
-      properties:
-        externalUserId:
-          type: string
-          minLength: 1
-          maxLength: 200
-          description: 腾讯会议授权账号的稳定外部用户标识
-        displayName:
-          type: [string, 'null']
-          maxLength: 200
-        organizationId:
-          type: [string, 'null']
-          maxLength: 200
-        organizationName:
-          type: [string, 'null']
-          maxLength: 300
-
-    TencentMeetingConnection:
-      type: object
-      additionalProperties: false
-      required:
-        - state
-        - authenticated
-        - account
-        - grantedScopes
-        - tokenStatus
-        - authorizedAt
-        - tokenExpiresAt
-        - lastVerifiedAt
-        - lastErrorCode
-        - lastErrorMessage
-        - updatedAt
-      properties:
-        state:
-          $ref: '#/components/schemas/TencentMeetingConnectionState'
-        authenticated:
-          type: boolean
-          description: 仅在授权有效且 Token 可用时为 true
-        account:
-          oneOf:
-            - $ref: '#/components/schemas/TencentMeetingAccount'
-            - type: 'null'
-        grantedScopes:
-          type: array
-          uniqueItems: true
-          items: { type: string, minLength: 1, maxLength: 200 }
-          description: 腾讯会议实际授予的 OAuth Scope；未授权时为空数组
-        tokenStatus:
-          $ref: '#/components/schemas/TencentMeetingTokenStatus'
-        authorizedAt:
-          type: [string, 'null']
-          format: date-time
-        tokenExpiresAt:
-          type: [string, 'null']
-          format: date-time
-        lastVerifiedAt:
-          type: [string, 'null']
-          format: date-time
-        lastErrorCode:
-          oneOf:
-            - $ref: '#/components/schemas/TencentMeetingConnectorErrorCode'
-            - type: 'null'
-        lastErrorMessage:
-          type: [string, 'null']
-          maxLength: 2000
-        updatedAt:
-          type: string
-          format: date-time
-
-    TencentMeetingAuthorization:
-      type: object
-      additionalProperties: false
-      required: [authorizationUrl, expiresAt, pollAfterMs]
-      properties:
-        authorizationUrl:
-          type: string
-          format: uri
-          description: 包含一次性 State 的腾讯会议 OAuth 授权地址
-        expiresAt:
-          type: string
-          format: date-time
-          description: 本次 OAuth State 的过期时间
-        pollAfterMs:
-          type: integer
-          minimum: 500
-          maximum: 10000
-          default: 1500
-          description: Desktop 建议等待该时长后轮询连接状态
-
-    TencentMeetingToolId:
-      type: string
-      enum:
-        - tencent_meeting.profile.get
-        - tencent_meeting.meetings.list
-        - tencent_meeting.meetings.get
-        - tencent_meeting.participants.list
-        - tencent_meeting.recordings.list
-
-    TencentMeetingConnectorProvider:
-      type: string
-      enum: [TENCENT_MEETING]
-
-    TencentMeetingConnectorTool:
-      type: object
-      additionalProperties: false
-      required: [toolId, name, description, parameters]
-      properties:
-        toolId:
-          $ref: '#/components/schemas/TencentMeetingToolId'
-        name:
-          type: string
-          minLength: 1
-          maxLength: 200
-        description:
-          type: string
-          minLength: 1
-          maxLength: 2000
-        parameters:
-          type: object
-          additionalProperties: true
-          description: CEES 固定只读工具的 JSON Schema；根节点必须为 object 且禁止未声明业务参数
-
-    TencentMeetingConnectorToolList:
-      type: object
-      additionalProperties: false
-      required: [tools]
-      properties:
-        tools:
-          type: array
-          maxItems: 5
-          items: { $ref: '#/components/schemas/TencentMeetingConnectorTool' }
-
-    TencentMeetingConnectorPlannedCall:
-      type: object
-      additionalProperties: false
-      required: [toolId, arguments]
-      properties:
-        toolId:
-          $ref: '#/components/schemas/TencentMeetingToolId'
-        arguments:
-          type: object
-          additionalProperties: true
-          description: 必须通过对应工具 parameters Schema 校验的结构化参数
-
-    TencentMeetingConnectorExecutionRequest:
-      type: object
-      additionalProperties: false
-      required: [calls]
-      properties:
-        calls:
-          type: array
-          minItems: 1
-          maxItems: 3
-          items: { $ref: '#/components/schemas/TencentMeetingConnectorPlannedCall' }
-
-    TencentMeetingConnectorContext:
-      type: object
-      additionalProperties: false
-      required: [provider, toolId, toolName, fetchedAt, data]
-      properties:
-        provider:
-          $ref: '#/components/schemas/TencentMeetingConnectorProvider'
-        toolId:
-          $ref: '#/components/schemas/TencentMeetingToolId'
-        toolName:
-          type: string
-          minLength: 1
-          maxLength: 200
-        fetchedAt:
-          type: string
-          format: date-time
-        data:
-          type: object
-          additionalProperties: true
-          description: 已按工具白名单过滤并脱敏的腾讯会议结构化结果，不包含 Token、Secret 或原始认证响应
-
-    TencentMeetingConnectorExecutionResult:
-      type: object
-      additionalProperties: false
-      required: [contexts]
-      properties:
-        contexts:
-          type: array
-          minItems: 1
-          maxItems: 3
-          items: { $ref: '#/components/schemas/TencentMeetingConnectorContext' }
-
-    TencentMeetingAuthorizationResponseEnvelope:
-      type: object
-      additionalProperties: false
-      required: [success, data]
-      properties:
-        success: { type: boolean, const: true }
-        data: { $ref: '#/components/schemas/TencentMeetingAuthorization' }
-        requestId: { type: [string, 'null'] }
-
-    TencentMeetingConnectionResponseEnvelope:
-      type: object
-      additionalProperties: false
-      required: [success, data]
-      properties:
-        success: { type: boolean, const: true }
-        data: { $ref: '#/components/schemas/TencentMeetingConnection' }
-        requestId: { type: [string, 'null'] }
-
-    TencentMeetingConnectorToolListResponseEnvelope:
-      type: object
-      additionalProperties: false
-      required: [success, data]
-      properties:
-        success: { type: boolean, const: true }
-        data: { $ref: '#/components/schemas/TencentMeetingConnectorToolList' }
-        requestId: { type: [string, 'null'] }
-
-    TencentMeetingConnectorExecutionResponseEnvelope:
-      type: object
-      additionalProperties: false
-      required: [success, data]
-      properties:
-        success: { type: boolean, const: true }
-        data: { $ref: '#/components/schemas/TencentMeetingConnectorExecutionResult' }
-        requestId: { type: [string, 'null'] }
-
     DingTalkIntegrationStatus:
       type: string
       enum: [ACTIVE, DISABLED, ERROR]
@@ -15364,3 +16009,385 @@ components:
           type:
             - string
             - "null"
+
+    AICreditConfigStatus:
+      type: string
+      enum:
+        - ACTIVE
+        - INACTIVE
+
+    AICreditMeterType:
+      type: string
+      enum:
+        - TOKEN
+        - PER_REQUEST
+
+    AICreditCapabilityKind:
+      type: string
+      enum:
+        - TIER_GATED
+        - UNIVERSAL
+
+    AICreditRateDimension:
+      type: string
+      enum:
+        - TOKEN_INPUT
+        - TOKEN_OUTPUT
+        - PER_REQUEST
+
+    AICreditSubscriptionDuration:
+      type: string
+      enum:
+        - ONE_MONTH
+        - SIX_MONTHS
+        - TWELVE_MONTHS
+
+    AICreditCapability:
+      type: object
+      required: [id, code, name, meterType, capabilityKind, sortOrder, status, version, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string, maxLength: 40 }
+        name: { type: string, maxLength: 100 }
+        description: { type: [string, "null"], maxLength: 500 }
+        meterType: { $ref: "#/components/schemas/AICreditMeterType" }
+        capabilityKind: { $ref: "#/components/schemas/AICreditCapabilityKind" }
+        permissionCode: { type: [string, "null"], maxLength: 100 }
+        sortOrder: { type: integer, minimum: 0 }
+        status: { $ref: "#/components/schemas/AICreditConfigStatus" }
+        version: { type: integer, minimum: 1 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    AICreditCapabilityList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/AICreditCapability" }
+
+    AICreditCapabilityCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [code, name]
+      properties:
+        code:
+          type: string
+          pattern: '^[a-z][a-z0-9-]*$'
+          maxLength: 40
+        name:
+          type: string
+          maxLength: 100
+        description: { type: [string, "null"], maxLength: 500 }
+        meterType: { $ref: "#/components/schemas/AICreditMeterType", default: TOKEN }
+        capabilityKind: { $ref: "#/components/schemas/AICreditCapabilityKind", default: TIER_GATED }
+        permissionCode: { type: [string, "null"], maxLength: 100 }
+        sortOrder: { type: integer, minimum: 0, default: 0 }
+
+    AICreditCapabilityUpdateRequest:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        code: { type: string, pattern: '^[a-z][a-z0-9-]*$', maxLength: 40 }
+        name: { type: string, maxLength: 100 }
+        description: { type: [string, "null"], maxLength: 500 }
+        meterType: { $ref: "#/components/schemas/AICreditMeterType" }
+        capabilityKind: { $ref: "#/components/schemas/AICreditCapabilityKind" }
+        permissionCode: { type: [string, "null"], maxLength: 100 }
+        sortOrder: { type: integer, minimum: 0 }
+        status: { $ref: "#/components/schemas/AICreditConfigStatus" }
+        version: { type: integer, minimum: 1 }
+
+    AICreditCapabilityListResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: "#/components/schemas/AICreditCapabilityList" }
+        requestId: { type: [string, "null"] }
+
+    AICreditCapabilityResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: "#/components/schemas/AICreditCapability" }
+        requestId: { type: [string, "null"] }
+
+    AICreditTierPriceInput:
+      type: object
+      additionalProperties: false
+      required: [duration, tierPrice, unitPrice]
+      properties:
+        duration: { $ref: "#/components/schemas/AICreditSubscriptionDuration" }
+        tierPrice:
+          type: string
+          pattern: '^\d{1,16}(\.\d{1,2})?$'
+          description: 档位价格（该持续时间），十进制字符串，最多两位小数
+        unitPrice:
+          type: string
+          pattern: '^\d{1,16}(\.\d{1,2})?$'
+          description: 单位单价（该持续时间），订阅总价 = (档位价格 + 单位单价 × 单位数) × 折扣
+
+    AICreditTierPrice:
+      type: object
+      required: [duration, tierPrice, unitPrice]
+      properties:
+        duration: { $ref: "#/components/schemas/AICreditSubscriptionDuration" }
+        tierPrice: { type: string, pattern: '^\d{1,16}(\.\d{1,2})?$' }
+        unitPrice: { type: string, pattern: '^\d{1,16}(\.\d{1,2})?$' }
+
+    AICreditTier:
+      type: object
+      required: [id, code, name, monthlyBaseCredits, status, prices, capabilityCodes, version, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string, maxLength: 40 }
+        name: { type: string, maxLength: 100 }
+        description: { type: [string, "null"], maxLength: 500 }
+        monthlyBaseCredits: { type: string, pattern: '^\d{1,16}(\.\d{1,2})?$' }
+        status: { $ref: "#/components/schemas/AICreditConfigStatus" }
+        prices:
+          type: array
+          items: { $ref: "#/components/schemas/AICreditTierPrice" }
+        capabilityCodes:
+          type: array
+          items: { type: string, maxLength: 40 }
+        version: { type: integer, minimum: 1 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    AICreditTierList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/AICreditTier" }
+
+    AICreditTierCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [code, name, monthlyBaseCredits, prices]
+      properties:
+        code:
+          type: string
+          pattern: '^[A-Za-z0-9][A-Za-z0-9_-]*$'
+          maxLength: 40
+          description: 档位 code，兼作档位权限码值，创建后不可修改
+        name: { type: string, maxLength: 100 }
+        description: { type: [string, "null"], maxLength: 500 }
+        monthlyBaseCredits: { type: string, pattern: '^\d{1,16}(\.\d{1,2})?$' }
+        prices:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/AICreditTierPriceInput" }
+        capabilityCodes:
+          type: array
+          items: { type: string, maxLength: 40 }
+          description: 功能开关类能力 code 列表（通用能力全档开放，不写入）
+
+    AICreditTierUpdateRequest:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        name: { type: string, maxLength: 100 }
+        description: { type: [string, "null"], maxLength: 500 }
+        monthlyBaseCredits: { type: string, pattern: '^\d{1,16}(\.\d{1,2})?$' }
+        status: { $ref: "#/components/schemas/AICreditConfigStatus" }
+        prices:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/AICreditTierPriceInput" }
+        capabilityCodes:
+          type: array
+          items: { type: string, maxLength: 40 }
+        version: { type: integer, minimum: 1 }
+
+    AICreditTierListResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: "#/components/schemas/AICreditTierList" }
+        requestId: { type: [string, "null"] }
+
+    AICreditTierResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: "#/components/schemas/AICreditTier" }
+        requestId: { type: [string, "null"] }
+
+    AICreditRateCard:
+      type: object
+      required: [id, capabilityId, capabilityCode, modelGroup, dimension, rateVersion, status, version, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        capabilityId: { type: string, format: uuid }
+        capabilityCode: { type: string, maxLength: 40 }
+        modelGroup: { type: string, maxLength: 50 }
+        dimension: { $ref: "#/components/schemas/AICreditRateDimension" }
+        tokenMultiplier: { type: [string, "null"], pattern: '^\d{1,6}(\.\d{1,4})?$', description: token 倍率（上游 token → 计费 token），仅 TOKEN 维度填写 }
+        creditPerToken: { type: [string, "null"], pattern: '^\d{1,6}(\.\d{1,4})?$', description: token→credit 比例（计费 token → credit），仅 TOKEN 维度填写 }
+        perRequestCredits: { type: [string, "null"], pattern: '^\d{1,16}(\.\d{1,2})?$', description: 按次 credit，仅 PER_REQUEST 维度填写 }
+        rateVersion: { type: integer, minimum: 1, description: 业务版本号，调价插入新版本行 }
+        status: { $ref: "#/components/schemas/AICreditConfigStatus" }
+        version: { type: integer, minimum: 1 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    AICreditRateCardList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/AICreditRateCard" }
+
+    AICreditRateCardCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [capabilityId, dimension]
+      properties:
+        capabilityId: { type: string, format: uuid }
+        modelGroup: { type: string, pattern: '^[a-z0-9][a-z0-9-]*$', maxLength: 50, default: default }
+        dimension: { $ref: "#/components/schemas/AICreditRateDimension" }
+        tokenMultiplier: { type: [string, "null"], pattern: '^\d{1,6}(\.\d{1,4})?$' }
+        creditPerToken: { type: [string, "null"], pattern: '^\d{1,6}(\.\d{1,4})?$' }
+        perRequestCredits: { type: [string, "null"], pattern: '^\d{1,16}(\.\d{1,2})?$' }
+
+    AICreditRateCardUpdateRequest:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        tokenMultiplier: { type: [string, "null"], pattern: '^\d{1,6}(\.\d{1,4})?$' }
+        creditPerToken: { type: [string, "null"], pattern: '^\d{1,6}(\.\d{1,4})?$' }
+        perRequestCredits: { type: [string, "null"], pattern: '^\d{1,16}(\.\d{1,2})?$' }
+        status: { $ref: "#/components/schemas/AICreditConfigStatus" }
+        version: { type: integer, minimum: 1 }
+
+    AICreditRateCardListResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: "#/components/schemas/AICreditRateCardList" }
+        requestId: { type: [string, "null"] }
+
+    AICreditRateCardResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: "#/components/schemas/AICreditRateCard" }
+        requestId: { type: [string, "null"] }
+
+    AICreditBoosterTier:
+      type: object
+      required: [id, name, credits, price, status, version, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, maxLength: 100 }
+        credits: { type: string, pattern: '^\d{1,16}(\.\d{1,2})?$', description: 加油包额度（credit），十进制字符串，最多两位小数 }
+        price: { type: string, pattern: '^\d{1,16}(\.\d{1,2})?$', description: 加油包价格，十进制字符串，最多两位小数 }
+        description: { type: [string, "null"], maxLength: 500 }
+        status: { $ref: "#/components/schemas/AICreditConfigStatus" }
+        version: { type: integer, minimum: 1 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    AICreditBoosterTierList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/AICreditBoosterTier" }
+
+    AICreditBoosterTierCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [name, credits, price]
+      properties:
+        name: { type: string, maxLength: 100 }
+        credits: { type: string, pattern: '^\d{1,16}(\.\d{1,2})?$' }
+        price: { type: string, pattern: '^\d{1,16}(\.\d{1,2})?$' }
+        description: { type: [string, "null"], maxLength: 500 }
+
+    AICreditBoosterTierUpdateRequest:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        name: { type: string, maxLength: 100 }
+        credits: { type: string, pattern: '^\d{1,16}(\.\d{1,2})?$' }
+        price: { type: string, pattern: '^\d{1,16}(\.\d{1,2})?$' }
+        description: { type: [string, "null"], maxLength: 500 }
+        status: { $ref: "#/components/schemas/AICreditConfigStatus" }
+        version: { type: integer, minimum: 1 }
+
+    AICreditBoosterTierListResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: "#/components/schemas/AICreditBoosterTierList" }
+        requestId: { type: [string, "null"] }
+
+    AICreditBoosterTierResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: "#/components/schemas/AICreditBoosterTier" }
+        requestId: { type: [string, "null"] }
+
+    AICreditBillingConfig:
+      type: object
+      required: [id, minCreditUnit, resetDay, resetTimezoneMode, rejectUnconfiguredRate, subscriptionDurations, halfYearlyDiscountRate, yearlyDiscountRate, maxSubscriptionUnits, updatedAt, version]
+      properties:
+        id: { type: string, description: 固定主键 default }
+        minCreditUnit: { type: string, pattern: '^\d{1,3}(\.\d)?$', description: 最小计量单位（credit），如 0.1 }
+        resetDay: { type: integer, minimum: 1, maximum: 28, description: 每月重置日（企业本地时区） }
+        resetTimezoneMode: { type: string, enum: [TENANT_LOCAL], description: 重置时区模式（企业本地时区，值预留扩展） }
+        rejectUnconfiguredRate: { type: boolean, description: 未配置费率的调用一律拒绝 }
+        subscriptionDurations:
+          type: array
+          items: { $ref: "#/components/schemas/AICreditSubscriptionDuration" }
+          description: 可配置的订阅持续时间选项
+        halfYearlyDiscountRate: { type: string, pattern: '^0\.\d{1,2}$', description: 半年折扣率（0.01-0.99） }
+        yearlyDiscountRate: { type: string, pattern: '^0\.\d{1,2}$', description: 一年折扣率（0.01-0.99） }
+        maxSubscriptionUnits: { type: integer, minimum: 1 }
+        updatedAt: { type: string, format: date-time }
+        version: { type: integer, minimum: 1 }
+
+    AICreditBillingConfigUpdateRequest:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        minCreditUnit: { type: string, pattern: '^\d{1,3}(\.\d)?$' }
+        resetDay: { type: integer, minimum: 1, maximum: 28 }
+        resetTimezoneMode: { type: string, enum: [TENANT_LOCAL] }
+        rejectUnconfiguredRate: { type: boolean }
+        subscriptionDurations:
+          type: array
+          items: { $ref: "#/components/schemas/AICreditSubscriptionDuration" }
+        halfYearlyDiscountRate: { type: string, pattern: '^0\.\d{1,2}$' }
+        yearlyDiscountRate: { type: string, pattern: '^0\.\d{1,2}$' }
+        maxSubscriptionUnits: { type: integer, minimum: 1 }
+        version: { type: integer, minimum: 1 }
+
+    AICreditBillingConfigResponseEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, const: true }
+        data: { $ref: "#/components/schemas/AICreditBillingConfig" }
+        requestId: { type: [string, "null"] }

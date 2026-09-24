@@ -30,7 +30,7 @@ export type CreateTurnRequest = {
      */
     webSearchEnabled?: boolean;
     /**
-     * Desktop 从用户已授权的本地连接器读取的本轮只读上下文；不会作为业务事实或写操作权限依据
+     * Desktop 从用户已授权的本地连接器取得的本轮结构化结果；不会作为业务事实或后续写操作权限依据
      */
     connectorContexts?: Array<ConnectorContext>;
 };
