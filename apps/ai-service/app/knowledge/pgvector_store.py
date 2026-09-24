@@ -11,7 +11,11 @@ from llama_index.core.vector_stores.types import (
 from llama_index.vector_stores.postgres import PGVectorStore
 from sqlalchemy import and_, text
 
-from app.api.generated.models import KnowledgeRetrieveScope
+from app.api.generated.models import (
+    Backend,
+    KnowledgeIndexStatus,
+    KnowledgeRetrieveScope,
+)
 from app.knowledge.stores import ScoredNode
 
 # 向量表名。schema 由 ai-service 自行管理（不进 Prisma），首次使用时
@@ -29,6 +33,9 @@ HNSW_KWARGS = {
     "hnsw_ef_search": 64,
     "hnsw_dist_method": "vector_cosine_ops",
 }
+
+# 持久化解的 epoch：向量落在数据库而非进程内，重启不清空，索引身份恒定。
+PERSISTENT_EPOCH = "persistent"
 
 
 class PGVectorStoreGateway:
@@ -171,6 +178,11 @@ class PGVectorStoreGateway:
         except Exception:
             return False
         return True
+
+    def describe(self) -> KnowledgeIndexStatus:
+        return KnowledgeIndexStatus(
+            backend=Backend.pgvector, durable=True, epoch=PERSISTENT_EPOCH
+        )
 
     def _assert_embedding_dimensions(self, nodes: list[TextNode]) -> None:
         for node in nodes:

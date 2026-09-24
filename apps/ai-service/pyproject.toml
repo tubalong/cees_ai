@@ -14,6 +14,7 @@ dependencies = [
     "llama-index-llms-langchain",
     "llama-index-vector-stores-postgres",
     "openai",
+    "openpyxl",
     "pgvector",
     "pydantic-settings",
     "pymupdf>=1.28.2",
@@ -22,6 +23,7 @@ dependencies = [
     "reportlab",
     "sqlalchemy",
     "uvicorn[standard]",
+    "xlsxwriter",
 ]
 
 [dependency-groups]

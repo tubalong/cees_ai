@@ -41,6 +41,18 @@ def build_knowledge_client() -> TestClient:
     return TestClient(create_app(runtime=runtime))
 
 
+def test_readiness_reports_the_knowledge_index_identity() -> None:
+    # 索引 Worker 依赖该字段判断存量向量是否随 ai-service 重启丢失；
+    # 缺失或语义错误会导致文档长期停留在 READY 但检索永远为空。
+    client = build_knowledge_client()
+    with client:
+        payload = client.get("/ready").json()
+    index = payload["knowledge_index"]
+    assert index["backend"] == "memory"
+    assert index["durable"] is False
+    assert index["epoch"]
+
+
 def index_payload() -> dict[str, object]:
     return {
         "request_id": "req-index-1",

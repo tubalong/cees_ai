@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import re
 import zipfile
+from datetime import date, datetime
 from io import BytesIO
 from xml.etree import ElementTree
 
 from docx import Document
+from openpyxl import load_workbook
 
 DRAWINGML_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
 SPREADSHEETML_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
@@ -52,20 +54,37 @@ def extract_pptx_text(data: bytes) -> str:
 
 
 def extract_xlsx_text(data: bytes) -> str:
-    """Extract cell text from an XLSX using stdlib ZIP/XML without new dependencies."""
-    with zipfile.ZipFile(BytesIO(data)) as archive:
-        shared = _shared_strings(archive)
-        names = sorted(
-            (name for name in archive.namelist() if _SHEET_RE.match(name)),
-            key=lambda name: int(_SHEET_RE.match(name).group(1)),
-        )
+    """Extract stable tabular text while preserving empty columns and Excel dates."""
+    workbook = load_workbook(BytesIO(data), read_only=True, data_only=True)
+    try:
         sections: list[str] = []
-        for name in names:
-            root = ElementTree.fromstring(archive.read(name))
-            rows = _sheet_rows(root, shared)
+        for sheet in workbook.worksheets:
+            rows: list[str] = []
+            for values in sheet.iter_rows(values_only=True):
+                cells = [_spreadsheet_value(value) for value in values]
+                while cells and cells[-1] == "":
+                    cells.pop()
+                if any(cells):
+                    rows.append("\t".join(cells))
             if rows:
-                sections.append("\n".join(rows))
+                sections.append(f"[Sheet: {sheet.title}]\n" + "\n".join(rows))
         return "\n\n".join(sections)
+    finally:
+        workbook.close()
+
+
+def _spreadsheet_value(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, datetime):
+        if value.time() == datetime.min.time():
+            return value.date().isoformat()
+        return value.isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value).strip()
 
 
 def _paragraph_lines(root: ElementTree.Element, namespace: str) -> list[str]:

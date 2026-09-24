@@ -7,9 +7,10 @@ import pytest
 from llama_index.core.schema import NodeRelationship, RelatedNodeInfo, TextNode
 from sqlalchemy import text
 
-from app.api.generated.models import KnowledgeRetrieveScope
+from app.api.generated.models import Backend, KnowledgeRetrieveScope
 from app.knowledge.pgvector_store import (
     HNSW_KWARGS,
+    PERSISTENT_EPOCH,
     PGVectorStoreGateway,
     _nullable_in_filter,
     _to_async_url,
@@ -136,6 +137,15 @@ def test_nullable_in_filter_combines_empty_and_list() -> None:
 def test_gateway_rejects_invalid_embed_dim() -> None:
     with pytest.raises(ValueError, match="embed_dim"):
         PGVectorStoreGateway("postgresql://x", embed_dim=0)
+
+
+def test_gateway_reports_a_durable_index_identity() -> None:
+    # 向量落在数据库而非进程内，重启不清空，因此 epoch 恒定，上层不会触发重建。
+    gateway = PGVectorStoreGateway("postgresql://x", embed_dim=4)
+    status = gateway.describe()
+    assert status.backend == Backend.pgvector
+    assert status.durable is True
+    assert status.epoch == PERSISTENT_EPOCH
 
 
 def test_gateway_declares_hnsw_kwargs_per_instance() -> None:

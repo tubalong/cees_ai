@@ -59,6 +59,11 @@ async def ready(request: Request) -> ReadinessResponse | JSONResponse:
         configured_roles=[ModelRole(role) for role in runtime.configured_roles],
         configured_chat_modes=[ChatMode(mode) for mode in runtime.configured_chat_modes],
         errors=runtime.readiness_errors,
+        knowledge_index=(
+            runtime.knowledge_store.describe()
+            if runtime.knowledge_store is not None
+            else None
+        ),
         chat_context_budgets=chat_context_budgets,
     )
     if runtime.ready:
