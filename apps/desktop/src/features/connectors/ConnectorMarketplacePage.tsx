@@ -1,4 +1,4 @@
-import { DingdingOutlined, LinkOutlined, MessageOutlined, PlusOutlined, ReloadOutlined, WechatOutlined } from '@ant-design/icons';
+import { DingdingOutlined, GithubOutlined, LinkOutlined, MessageOutlined, PlusOutlined, ReloadOutlined, WechatOutlined } from '@ant-design/icons';
 import { App as AntdApp, Button, Modal, Select, Space, Spin, Tag } from 'antd';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -122,6 +122,7 @@ export default function ConnectorMarketplacePage(): JSX.Element {
     const selectedDingTalkStatus = toDingTalkStatus(selectedManifest?.id === 'dingtalk' ? selectedStatus : undefined);
     const selectedTencentMeetingStatus = toTencentMeetingStatus(selectedManifest?.id === 'tencent-meeting' ? selectedStatus : undefined);
     const selectedWeComStatus = toWeComStatus(selectedManifest?.id === 'wecom' ? selectedStatus : undefined);
+    const selectedGitHubStatus = toGitHubStatus(selectedManifest?.id === 'github' ? selectedStatus : undefined);
     const selectedConnected = selectedStatus.state === 'READY';
 
     useEffect(() => {
@@ -260,6 +261,8 @@ export default function ConnectorMarketplacePage(): JSX.Element {
                         ? 'TENCENT_MEETING_CONNECTOR'
                         : manifest.id === 'wecom'
                             ? 'WECOM_CONNECTOR'
+                            : manifest.id === 'github'
+                                ? 'GITHUB_CONNECTOR'
                         : 'CONNECTOR_MARKETPLACE',
             },
         });
@@ -280,6 +283,8 @@ export default function ConnectorMarketplacePage(): JSX.Element {
                     ? t('解绑会退出当前电脑的腾讯会议 CLI OAuth，并清除 CEES 专属凭据目录和工具缓存，不会删除腾讯会议中的会议或 CEES 业务数据。')
                     : selectedManifest.id === 'wecom'
                         ? t('解绑会删除当前电脑中 CEES 专属的企业微信 CLI 授权和工具缓存，不会删除 CEES 业务数据；企业微信侧已创建的智能机器人可能仍需在企业微信中自行管理。')
+                        : selectedManifest.id === 'github'
+                            ? t('解绑只会删除当前电脑中 CEES 保存的 GitHub OAuth 令牌和工具缓存，不会删除 GitHub 或 CEES 数据。如需撤销 GitHub 侧授权，请在 GitHub Settings 的 Applications 中操作。')
                         : t('解绑会清除当前连接器保存的授权信息，但不会删除已经写入 CEES 的业务数据。'),
             okText: t('确认解绑'),
             cancelText: t('取消'),
@@ -386,6 +391,8 @@ export default function ConnectorMarketplacePage(): JSX.Element {
                             ? t('腾讯会议账号已授权')
                             : selectedManifest.id === 'wecom'
                                 ? t('智能机器人已授权')
+                                : selectedManifest.id === 'github'
+                                    ? selectedGitHubStatus.authorizedLogin || t('GitHub 账号已授权')
                             : selectedManifest.name}</strong>
                     <span>{selectedManifest.id === 'dingtalk'
                         ? selectedDingTalkStatus.externalUserName || selectedDingTalkStatus.profile || t('已完成授权')
@@ -393,8 +400,16 @@ export default function ConnectorMarketplacePage(): JSX.Element {
                             ? selectedTencentMeetingStatus.authorizedUserName || t('{count} 个腾讯会议 CLI 命令可用', { count: selectedTencentMeetingStatus.toolCount })
                             : selectedManifest.id === 'wecom'
                                 ? t('{count} 个企业微信 CLI 工具可用', { count: selectedWeComStatus.toolCount })
+                                : selectedManifest.id === 'github'
+                                    ? t('{count} 个 GitHub MCP 工具可用', { count: selectedGitHubStatus.toolCount })
                         : selectedStatus.version || t('已完成授权')}</span>
                 </div>
+                {selectedManifest.id === 'github' ? <div className="connector-version-panel">
+                    <div className="connector-version-summary">
+                        <span>{t('执行方式')}</span><strong>Remote MCP</strong>
+                    </div>
+                    <div className="connector-version-message">{t('已启用工具集：{toolsets}', { toolsets: selectedGitHubStatus.enabledToolsets.join(', ') || t('动态发现') })}</div>
+                </div> : null}
                 {selectedManifest.id === 'dingtalk' && selectedManifest.supportsVersionManagement ? <DingTalkVersionPanel
                     release={release}
                     status={selectedDingTalkStatus}
@@ -420,6 +435,9 @@ export default function ConnectorMarketplacePage(): JSX.Element {
                 </div>
                 <h2>{t('连接 {name}', { name: selectedManifest.name })}</h2>
                 <p className="connector-connected-description">{t(selectedManifest.description)}</p>
+                {selectedManifest.id === 'github' && selectedStatus.issueCode === 'GITHUB_OAUTH_CLIENT_ID_MISSING'
+                    ? <div className="connector-version-message is-error">{t('GitHub OAuth Client ID 尚未配置。请由部署方设置 CEES_GITHUB_OAUTH_CLIENT_ID 后重启桌面端。')}</div>
+                    : null}
                 {selectedManifest.id === 'dingtalk' && selectedDingTalkStatus.state === 'PROFILE_REQUIRED'
                     ? <DingTalkProfileSelector
                         status={selectedDingTalkStatus}
@@ -558,10 +576,25 @@ function toWeComStatus(status?: DesktopConnectorStatus): WeComConnectorStatus {
     };
 }
 
+function toGitHubStatus(status?: DesktopConnectorStatus): GitHubConnectorStatus {
+    const candidate = status as Partial<GitHubConnectorStatus> | undefined;
+    return {
+        ...EMPTY_STATUS,
+        ...candidate,
+        source: candidate?.source === 'REMOTE_MCP' ? 'REMOTE_MCP' : null,
+        authorizationState: candidate?.authorizationState === 'AUTHORIZED' || candidate?.authorizationState === 'AUTHORIZING'
+            ? candidate.authorizationState
+            : 'UNAUTHORIZED',
+        authorizedLogin: typeof candidate?.authorizedLogin === 'string' ? candidate.authorizedLogin : null,
+        toolCount: typeof candidate?.toolCount === 'number' ? candidate.toolCount : 0,
+        enabledToolsets: Array.isArray(candidate?.enabledToolsets) ? candidate.enabledToolsets.filter((item): item is string => typeof item === 'string') : [],
+    };
+}
+
 function connectorGlyph(manifest: DesktopConnectorManifest): string {
-    return manifest.id === 'dingtalk' ? '钉' : manifest.id === 'wecom' ? '企' : manifest.name.trim().slice(0, 1).toUpperCase();
+    return manifest.id === 'dingtalk' ? '钉' : manifest.id === 'wecom' ? '企' : manifest.id === 'github' ? 'GH' : manifest.name.trim().slice(0, 1).toUpperCase();
 }
 
 function connectorProviderGlyph(manifest: DesktopConnectorManifest): JSX.Element | string {
-    return manifest.id === 'dingtalk' ? <DingdingOutlined /> : manifest.id === 'wecom' ? <WechatOutlined /> : connectorGlyph(manifest);
+    return manifest.id === 'dingtalk' ? <DingdingOutlined /> : manifest.id === 'wecom' ? <WechatOutlined /> : manifest.id === 'github' ? <GithubOutlined /> : connectorGlyph(manifest);
 }

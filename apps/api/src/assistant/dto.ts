@@ -26,12 +26,13 @@ import type {
   PublicTurnMode,
   TencentMeetingConnectorToolInput,
   WeComConnectorToolInput,
+  GitHubConnectorToolInput,
 } from './assistant.types';
 
 export class ConnectorContextDto implements ConnectorContextInput {
-  @ApiProperty({ enum: ['DINGTALK', 'TENCENT_MEETING', 'WECOM'] })
-  @IsIn(['DINGTALK', 'TENCENT_MEETING', 'WECOM'])
-  provider!: 'DINGTALK' | 'TENCENT_MEETING' | 'WECOM';
+  @ApiProperty({ enum: ['DINGTALK', 'TENCENT_MEETING', 'WECOM', 'GITHUB'] })
+  @IsIn(['DINGTALK', 'TENCENT_MEETING', 'WECOM', 'GITHUB'])
+  provider!: 'DINGTALK' | 'TENCENT_MEETING' | 'WECOM' | 'GITHUB';
 
   @ApiProperty({ maxLength: 120, pattern: '^[A-Za-z][A-Za-z0-9._-]{0,119}$' })
   @IsString()
@@ -188,6 +189,54 @@ export class PlanWeComConnectorRequestDto {
   @Type(() => WeComConnectorToolDto)
   @ValidateNested({ each: true })
   tools!: WeComConnectorToolDto[];
+}
+
+export class GitHubConnectorToolDto implements GitHubConnectorToolInput {
+  @ApiProperty({ maxLength: 120, pattern: '^[A-Za-z][A-Za-z0-9._-]{0,119}$' })
+  @IsString()
+  @Matches(/^[A-Za-z][A-Za-z0-9._-]{0,119}$/)
+  @MaxLength(120)
+  toolId!: string;
+
+  @ApiProperty({ maxLength: 240 })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(240)
+  name!: string;
+
+  @ApiProperty({ maxLength: 4000 })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(4000)
+  description!: string;
+
+  @ApiProperty({ type: 'object', additionalProperties: true })
+  @IsObject()
+  parameters!: Record<string, unknown>;
+
+  @ApiProperty({ enum: ['READ', 'WRITE', 'DESTRUCTIVE'] })
+  @IsIn(['READ', 'WRITE', 'DESTRUCTIVE'])
+  riskLevel!: 'READ' | 'WRITE' | 'DESTRUCTIVE';
+
+  @ApiProperty()
+  @IsBoolean()
+  requiresConfirmation!: boolean;
+}
+
+export class PlanGitHubConnectorRequestDto {
+  @ApiProperty({ maxLength: 10000 })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(10000)
+  query!: string;
+
+  @ApiProperty({ type: [GitHubConnectorToolDto], maxItems: 256 })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(256)
+  @Type(() => GitHubConnectorToolDto)
+  @ValidateNested({ each: true })
+  tools!: GitHubConnectorToolDto[];
 }
 
 export class CreateConversationRequestDto {

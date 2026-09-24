@@ -10,6 +10,8 @@ import type { CreateConversationRequest } from '../models/CreateConversationRequ
 import type { CreateTurnRequest } from '../models/CreateTurnRequest';
 import type { DingTalkConnectorPlanRequest } from '../models/DingTalkConnectorPlanRequest';
 import type { DingTalkConnectorPlanResponseEnvelope } from '../models/DingTalkConnectorPlanResponseEnvelope';
+import type { GitHubConnectorPlanRequest } from '../models/GitHubConnectorPlanRequest';
+import type { GitHubConnectorPlanResponseEnvelope } from '../models/GitHubConnectorPlanResponseEnvelope';
 import type { TencentMeetingConnectorPlanRequest } from '../models/TencentMeetingConnectorPlanRequest';
 import type { TencentMeetingConnectorPlanResponseEnvelope } from '../models/TencentMeetingConnectorPlanResponseEnvelope';
 import type { TurnResponseEnvelope } from '../models/TurnResponseEnvelope';
@@ -98,6 +100,33 @@ export class ConversationService {
             mediaType: 'application/json',
             errors: {
                 400: `Invalid query or dynamic tool catalog`,
+                401: `Authentication or tenant membership is invalid`,
+                502: `AI provider returned an invalid plan`,
+                503: `AI service or model is temporarily unavailable`,
+            },
+        });
+    }
+    /**
+     * Plan GitHub official remote MCP calls for the current question
+     * Desktop connects to the fixed GitHub-hosted remote MCP endpoint and sends the dynamically discovered tool
+     * catalog. The API only plans tool names and arguments; GitHub OAuth credentials and MCP execution remain in
+     * the Desktop Main Process. Desktop must require explicit confirmation before executing WRITE or DESTRUCTIVE tools.
+     *
+     * @returns GitHubConnectorPlanResponseEnvelope Up to three GitHub remote MCP calls; calls is empty when GitHub data is unnecessary
+     * @throws ApiError
+     */
+    public static planGitHubConnectorQueries({
+        requestBody,
+    }: {
+        requestBody: GitHubConnectorPlanRequest,
+    }): CancelablePromise<GitHubConnectorPlanResponseEnvelope> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/assistant/connectors/github/plan',
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                400: `Invalid query or MCP tool catalog`,
                 401: `Authentication or tenant membership is invalid`,
                 502: `AI provider returned an invalid plan`,
                 503: `AI service or model is temporarily unavailable`,

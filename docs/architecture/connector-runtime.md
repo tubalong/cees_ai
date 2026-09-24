@@ -9,6 +9,7 @@
 - 已落地 `RemoteMcpTransport`，提供固定 HTTPS 地址、JSON-RPC、动态安全请求头、超时、响应上限、禁止重定向和结构化错误；
 - 已落地腾讯会议官方 CLI 托管安装、浏览器 OAuth、版本化命令 Schema、API 无副作用规划和 Desktop 确认执行；
 - 已落地企业微信官方 CLI 托管安装、二维码机器人授权、动态 Schema、API 无副作用规划和 Desktop 确认执行；
+- 已落地 GitHub 官方远程 MCP、OAuth PKCE、官方 MCP SDK、动态工具目录、API 无副作用规划和 Desktop 确认执行；
 - 已删除腾讯会议旧服务端 OAuth、Token 托管、固定工具网关和数据表。
 
 ## 2. 目标
@@ -100,6 +101,20 @@ Renderer -> CEES API WeComConnectorPlannerService
 
 Desktop 固定下载 `@wecom/cli 1.3.2` 平台包并校验 SHA-256，只提取目标二进制。官方 CLI 的独立配置目录为 `userData/connectors/wecom/config`，不会上传 CEES API。企业微信能力由官方 CLI 动态目录和机器人实际授权决定，不承诺考勤、OA 审批或完整组织同步。动态工具缺少业务权限时，Adapter 返回结构化授权上下文，Renderer 展示官方授权入口并支持重新执行原问题。
 
+### GitHub
+
+```text
+Renderer -> ConnectorHost -> GitHubConnectorAdapter
+    -> official @modelcontextprotocol/sdk
+    -> https://api.githubcopilot.com/mcp/
+    -> GitHub OAuth
+
+Renderer -> CEES API GitHubConnectorPlannerService
+    -> 仅规划 tools/list 返回的动态工具调用，不持有 Token，不执行 MCP
+```
+
+GitHub Manifest 使用 `REMOTE_MCP`、`DESKTOP`、`OAUTH`，不自动安装第三方 CLI。OAuth Token 由 Main Process 使用 Electron `safeStorage` 保存在 `userData/connectors/github/oauth.secure`；API、数据库和 Renderer 不读取 Token。官方 Resource Metadata 或 `WWW-Authenticate` challenge 决定实际授权 scope，不能把连接成功解释为拥有全部仓库权限。GitHub 远程 MCP 端点由 Adapter 固定，暂不支持 GHES。
+
 ## 5. Remote MCP Transport
 
 `RemoteMcpTransport` 只接受 Adapter 在代码中提供的固定地址和动态凭据解析器，统一提供：
@@ -141,7 +156,7 @@ Desktop 固定下载 `@wecom/cli 1.3.2` 平台包并校验 SHA-256，只提取�
 6. 写入和破坏性操作先确认，再由持有凭据的 Desktop 执行；
 7. 结果脱敏、限长后作为 `ConnectorContext` 注入会话。
 
-工具超过模型单次可接受数量时，规划器先做候选选择，再规划实际调用。当前腾讯会议最多接收 128 个目录项、选择 32 个候选并返回三条调用。
+工具超过模型单次可接受数量时，规划器先做候选选择，再规划实际调用。腾讯会议最多接收 128 个目录项，GitHub 和企业微信最多接收 256 个目录项；各规划器最多选择 32 个候选并返回三条调用。
 
 ## 8. 安全边界
 
@@ -176,3 +191,4 @@ Desktop 固定下载 `@wecom/cli 1.3.2` 平台包并校验 SHA-256，只提取�
 6. 不为尚未接入的厂商提前抽象凭据或协议细节。
 
 腾讯会议详细设计见 [腾讯会议连接器](../product/tencent-meeting-connector.md)。
+GitHub 详细设计见 [GitHub 官方远程 MCP 连接器](../product/github-remote-mcp-connector.md)。

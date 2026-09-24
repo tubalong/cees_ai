@@ -12,6 +12,7 @@
 | [钉钉 DWS/MCP 连接器](product/dingtalk-mcp-connector.md) | 连接器市场、一键安装 DWS、本地授权、对话只读上下文、可见范围导入和租户管理员确认流程 |
 | [腾讯会议连接器](product/tencent-meeting-connector.md) | Desktop 托管官方 CLI、浏览器 OAuth、版本化命令目录与写操作确认 |
 | [企业微信 CLI 连接器](product/wecom-cli-connector.md) | 官方 CLI 托管安装、扫码授权智能机器人、动态工具与对话确认执行 |
+| [GitHub 官方远程 MCP 连接器](product/github-remote-mcp-connector.md) | GitHub OAuth、官方远程 MCP、动态工具发现与 Desktop 本地执行 |
 | [分配策略与人财法](product/assignment-and-hr-finance-legal.md) | AssignmentPolicy、完整 HR 与 Finance 已实现；Legal 契约已冻结待实现 |
 | [AI 助手业务写操作](product/assistant-business-tools.md) | 聊天式部门/知识库写入：发现+动作两层工具、待确认草稿、确认前无副作用、幂等与重鉴权 |
 | [桌面端安全加固](engineering/desktop-security-hardening.md) | CSP（dev 响应头 + 打包 meta）、IPC 来源校验、导航锁定、webview 策略、令牌移出 Web Storage |
@@ -42,6 +43,7 @@
 | [钉钉组织架构与人员同步 API](api/dingtalk-organization-sync-api.md) | 钉钉绑定、组织人员同步和同步任务查询 |
 | [腾讯会议连接器 API](api/tencent-meeting-connector-api.md) | `0.40.0` 官方 CLI 规划语义、本地 OAuth 边界与迁移说明 |
 | [企业微信连接器 API](api/wecom-connector-api.md) | `0.39.0` 动态 CLI 工具规划与 `WECOM` 会话上下文 |
+| [GitHub 连接器 API](api/github-connector-api.md) | `0.42.0` 官方远程 MCP 工具规划与 `GITHUB` 会话上下文 |
 | [分配策略与人财法 API](api/assignment-and-hr-finance-legal-api.md) | AssignmentPolicy、HR 与 Finance 已实现；Legal 契约已冻结待实现 |
 | [database](database/README.md) | 数据模型与迁移约定 |
 | [security](security/README.md) | 安全模型、租户隔离与审计 |

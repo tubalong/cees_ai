@@ -15,11 +15,11 @@ import ReactMarkdown, { type Components } from 'react-markdown';
 import { useLocation, useNavigate } from 'react-router-dom';
 import remarkGfm from 'remark-gfm';
 import {
-    cancelActionDraft, cancelTurn, confirmActionDraft, createConversation, createTurn, deleteConversation, exportDocument, getConversation, getDashboardOverview, getDashboardTodos, getDashboardUpcomingMeetings, getDocument, getImage, planDingTalkConnectorQueries, planTencentMeetingConnectorQueries, planWeComConnectorQueries, replayTurnEvents, updateConversation, uploadAttachmentFile,
+    cancelActionDraft, cancelTurn, confirmActionDraft, createConversation, createTurn, deleteConversation, exportDocument, getConversation, getDashboardOverview, getDashboardTodos, getDashboardUpcomingMeetings, getDocument, getImage, planDingTalkConnectorQueries, planGitHubConnectorQueries, planTencentMeetingConnectorQueries, planWeComConnectorQueries, replayTurnEvents, updateConversation, uploadAttachmentFile,
     getUnreadNotificationCount, hasStoredSession, listConversations, listDocuments, listTenantMembers, logout,
     createKnowledgeDocument, deleteKnowledgeDocument, listWritableKnowledgeBases,
     type Conversation, type ConversationMessage, type DashboardOverview, type DashboardTodoItem, type DashboardUpcomingMeeting, type ImageAccess,
-    type ConnectorContext, type TencentMeetingConnectorTool, type TurnStreamEvent, type WeComConnectorTool,
+    type ConnectorContext, type GitHubConnectorTool, type TencentMeetingConnectorTool, type TurnStreamEvent, type WeComConnectorTool,
     type KnowledgeBaseSummary, type KnowledgeSourceType,
     type ManagedDocumentSummary, type MeResult, type TenantMember,
 } from '../core/api';
@@ -660,7 +660,7 @@ const DELETED_CITATIONS_KEY = 'cees.chat.citations.deleted';
 
 interface AssistantNavigationState {
     createNewConversation?: boolean;
-    source?: 'DINGTALK_CONNECTOR' | 'TENCENT_MEETING_CONNECTOR' | 'WECOM_CONNECTOR' | 'CONNECTOR_MARKETPLACE';
+    source?: 'DINGTALK_CONNECTOR' | 'TENCENT_MEETING_CONNECTOR' | 'WECOM_CONNECTOR' | 'GITHUB_CONNECTOR' | 'CONNECTOR_MARKETPLACE';
 }
 
 interface ConfirmableConnectorTool {
@@ -835,7 +835,7 @@ function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element 
     const [renameTarget, setRenameTarget] = useState<Conversation>();
     const [renameValue, setRenameValue] = useState('');
     const [dingtalkConnected, setDingtalkConnected] = useState(false);
-    const [preferredConnector, setPreferredConnector] = useState<'dingtalk' | 'tencent-meeting' | 'wecom'>();
+    const [preferredConnector, setPreferredConnector] = useState<'dingtalk' | 'tencent-meeting' | 'wecom' | 'github'>();
     const initialConversationLoadStarted = useRef(false);
 
     /** 就地更新某条消息上的确认卡片状态（不重建消息，避免滚动位置跳动）。 */
@@ -880,6 +880,7 @@ function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element 
         if (navigationState?.source === 'DINGTALK_CONNECTOR') setPreferredConnector('dingtalk');
         if (navigationState?.source === 'TENCENT_MEETING_CONNECTOR') setPreferredConnector('tencent-meeting');
         if (navigationState?.source === 'WECOM_CONNECTOR') setPreferredConnector('wecom');
+        if (navigationState?.source === 'GITHUB_CONNECTOR') setPreferredConnector('github');
         void listConversations()
             .then(async (result) => {
                 setConversations(result.items);
@@ -1015,7 +1016,7 @@ function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element 
         setMessages(restored);
     };
 
-    const sendMessage = async (overrideContent?: string, forcedConnector?: 'wecom'): Promise<void> => {
+    const sendMessage = async (overrideContent?: string, forcedConnector?: 'wecom' | 'github'): Promise<void> => {
         const isRetry = typeof overrideContent === 'string';
         const text = (overrideContent ?? input).trim();
         const turnAttachment = isRetry ? undefined : attachment;
@@ -1118,6 +1119,20 @@ function AssistantPage({ permissions }: { permissions: string[] }): JSX.Element 
                         'wecom',
                         plan.calls.map((call) => ({ ...call, confirmed: true })),
                     ));
+                }
+            }
+            const githubConnector = window.cees?.connectors;
+            const mentionsGitHub = /github|git hub|issue|pull request|\bpr\b|actions/i.test(content) || preferredConnector === 'github' || forcedConnector === 'github';
+            if (githubConnector && mentionsGitHub) {
+                const status = await githubConnector.status('github') as GitHubConnectorStatus;
+                if (status.state !== 'READY') throw new Error(status.error || '请先在连接器页面连接 GitHub');
+                const tools = await githubConnector.tools('github') as GitHubConnectorTool[];
+                const plan = await planGitHubConnectorQueries(content, tools);
+                if (plan.calls.length > 0) {
+                    if (connectorContexts.length + plan.calls.length > 3) throw new Error('单轮最多执行三个连接器调用，请将多个连接器请求拆成多轮');
+                    const confirmed = await confirmConnectorCalls(plan.calls, tools, 'GitHub', '当前电脑中 GitHub OAuth 授权', modal, t);
+                    if (!confirmed) { message.info(t('已取消 GitHub 操作')); return; }
+                    connectorContexts.push(...await githubConnector.execute('github', plan.calls.map((call) => ({ ...call, confirmed: true }))));
                 }
             }
             if (connectorContexts.length > 3) throw new Error('单轮连接器上下文不能超过三个');

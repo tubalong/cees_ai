@@ -10,7 +10,7 @@ export type PublicTurnMode = 'standard' | 'ultra';
 export type PublicTurnPhase = 'reasoning' | 'answering' | 'tool_executing';
 
 export interface ConnectorContextInput {
-  provider: 'DINGTALK' | 'TENCENT_MEETING' | 'WECOM';
+  provider: 'DINGTALK' | 'TENCENT_MEETING' | 'WECOM' | 'GITHUB';
   toolId: string;
   toolName: string;
   fetchedAt: string;
@@ -53,6 +53,20 @@ export interface WeComConnectorToolInput {
 }
 
 export interface WeComConnectorPlannedCall {
+  toolId: string;
+  arguments: Record<string, unknown>;
+}
+
+export interface GitHubConnectorToolInput {
+  toolId: string;
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+  riskLevel: 'READ' | 'WRITE' | 'DESTRUCTIVE';
+  requiresConfirmation: boolean;
+}
+
+export interface GitHubConnectorPlannedCall {
   toolId: string;
   arguments: Record<string, unknown>;
 }

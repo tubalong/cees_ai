@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CEES AI API
-  version: 0.41.0
+  version: 0.42.0
   description: 以本文件为唯一事实源的公开 API 契约。资源与操作按 docs/api 约定补充。
 
 servers:
@@ -150,6 +150,55 @@ paths:
                 $ref: '#/components/schemas/WeComConnectorPlanResponseEnvelope'
         '400':
           description: Invalid query or dynamic tool catalog
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '401':
+          description: Authentication or tenant membership is invalid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '502':
+          description: AI provider returned an invalid plan
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '503':
+          description: AI service or model is temporarily unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+  /assistant/connectors/github/plan:
+    post:
+      summary: Plan GitHub official remote MCP calls for the current question
+      description: |
+        Desktop connects to the fixed GitHub-hosted remote MCP endpoint and sends the dynamically discovered tool
+        catalog. The API only plans tool names and arguments; GitHub OAuth credentials and MCP execution remain in
+        the Desktop Main Process. Desktop must require explicit confirmation before executing WRITE or DESTRUCTIVE tools.
+      operationId: planGitHubConnectorQueries
+      tags: [Conversation]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GitHubConnectorPlanRequest'
+      responses:
+        '200':
+          description: Up to three GitHub remote MCP calls; calls is empty when GitHub data is unnecessary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GitHubConnectorPlanResponseEnvelope'
+        '400':
+          description: Invalid query or MCP tool catalog
           content:
             application/json:
               schema:
@@ -9958,7 +10007,7 @@ components:
       properties:
         provider:
           type: string
-          enum: [DINGTALK, TENCENT_MEETING, WECOM]
+          enum: [DINGTALK, TENCENT_MEETING, WECOM, GITHUB]
         toolId:
           type: string
           minLength: 1
@@ -10150,6 +10199,94 @@ components:
           const: true
         data:
           $ref: '#/components/schemas/WeComConnectorPlanResult'
+        requestId:
+          type: [string, 'null']
+          description: Public API request trace ID
+
+    GitHubConnectorToolRisk:
+      type: string
+      enum: [READ, WRITE, DESTRUCTIVE]
+
+    GitHubConnectorTool:
+      type: object
+      additionalProperties: false
+      required: [toolId, name, description, parameters, riskLevel, requiresConfirmation]
+      properties:
+        toolId:
+          type: string
+          minLength: 1
+          maxLength: 120
+          pattern: '^[A-Za-z][A-Za-z0-9._-]{0,119}$'
+          description: GitHub remote MCP tool name discovered from tools/list
+        name:
+          type: string
+          minLength: 1
+          maxLength: 240
+        description:
+          type: string
+          minLength: 1
+          maxLength: 4000
+        parameters:
+          type: object
+          additionalProperties: true
+          description: JSON Schema dynamically returned by GitHub MCP; root must be an object
+        riskLevel:
+          $ref: '#/components/schemas/GitHubConnectorToolRisk'
+        requiresConfirmation:
+          type: boolean
+          description: Desktop must require explicit confirmation before executing this tool
+
+    GitHubConnectorPlanRequest:
+      type: object
+      additionalProperties: false
+      required: [query, tools]
+      properties:
+        query:
+          type: string
+          minLength: 1
+          maxLength: 10000
+        tools:
+          type: array
+          minItems: 1
+          maxItems: 256
+          items:
+            $ref: '#/components/schemas/GitHubConnectorTool'
+
+    GitHubConnectorPlannedCall:
+      type: object
+      additionalProperties: false
+      required: [toolId, arguments]
+      properties:
+        toolId:
+          type: string
+          minLength: 1
+          maxLength: 120
+          pattern: '^[A-Za-z][A-Za-z0-9._-]{0,119}$'
+        arguments:
+          type: object
+          additionalProperties: true
+
+    GitHubConnectorPlanResult:
+      type: object
+      additionalProperties: false
+      required: [calls]
+      properties:
+        calls:
+          type: array
+          maxItems: 3
+          items:
+            $ref: '#/components/schemas/GitHubConnectorPlannedCall'
+
+    GitHubConnectorPlanResponseEnvelope:
+      type: object
+      additionalProperties: false
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: '#/components/schemas/GitHubConnectorPlanResult'
         requestId:
           type: [string, 'null']
           description: Public API request trace ID

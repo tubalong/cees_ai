@@ -65,7 +65,7 @@ declare global {
                 connect: (connectorId: string) => Promise<ConnectorStatus>;
                 disconnect: (connectorId: string) => Promise<ConnectorStatus>;
                 tools: (connectorId: string) => Promise<ConnectorTool[]>;
-                execute: (connectorId: string, calls: ConnectorPlannedCall[]) => Promise<ConnectorContext<'DINGTALK' | 'TENCENT_MEETING' | 'WECOM'>[]>;
+                execute: (connectorId: string, calls: ConnectorPlannedCall[]) => Promise<ConnectorContext<'DINGTALK' | 'TENCENT_MEETING' | 'WECOM' | 'GITHUB'>[]>;
                 onStatusChanged: (listener: (event: ConnectorStatusChangedEvent) => void) => () => void;
                 dingtalk: {
                     status: () => Promise<DingTalkConnectorStatus>;
@@ -161,6 +161,14 @@ declare global {
         qrCodeDataUrl: string | null;
         authorizationExpiresAt: string | null;
         toolCount: number;
+    }
+
+    interface GitHubConnectorStatus extends ConnectorStatus {
+        source: 'REMOTE_MCP' | null;
+        authorizationState: 'UNAUTHORIZED' | 'AUTHORIZING' | 'AUTHORIZED';
+        authorizedLogin: string | null;
+        toolCount: number;
+        enabledToolsets: string[];
     }
 
     interface ConnectorStatusChangedEvent {
