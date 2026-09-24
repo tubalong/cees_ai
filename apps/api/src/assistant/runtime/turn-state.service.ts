@@ -3,6 +3,7 @@ import {
   AssistantEventType,
   AssistantTurnStage,
   AssistantTurnStatus,
+  AuditOutcome,
   DraftStatus,
   ManagedImageStatus,
   Prisma,
@@ -121,11 +122,56 @@ export class TurnStateService {
             connectorContexts: (input.connectorContexts ?? []) as unknown as Prisma.InputJsonValue,
           },
         });
+        await this.writeLocalOperationAudits(transaction, input, turn.id);
         return turn;
       });
     } catch (error) {
       if (isUniqueConstraintError(error, 'idempotency_key')) return undefined;
       throw error;
+    }
+  }
+
+  /**
+   * 本机操作审计（本机工具计划 §4.6）：云端只记录动作摘要与清单 hash，**不记录完整本地路径**。
+   *
+   * 桌面端的本机操作（磁盘扫描、隔离/恢复/清理）结果以 `LOCAL_SYSTEM` 只读上下文随轮次上报，
+   * 此前完全不落审计——用户机器上发生了改动，服务端却没有痕迹。这里在轮次创建事务内补写审计。
+   *
+   * metadata 按**字段白名单**提取，绝不原样序列化 `context.data`：即使将来客户端多传了路径、
+   * 文件名或其它明细，也不会被写进审计表。这是纵深防御，不依赖客户端自觉。
+   */
+  private async writeLocalOperationAudits(
+    transaction: Prisma.TransactionClient,
+    input: {
+      tenantId: string;
+      userId: string;
+      membershipId: string;
+      requestId: string;
+      connectorContexts?: ConnectorContextInput[];
+    },
+    turnId: string,
+  ): Promise<void> {
+    for (const context of input.connectorContexts ?? []) {
+      if (context.provider !== 'LOCAL_SYSTEM') continue;
+      await transaction.auditLog.create({
+        data: {
+          tenantId: input.tenantId,
+          actorUserId: input.userId,
+          actorMembershipId: input.membershipId,
+          action: 'LOCAL_SYSTEM_OPERATION',
+          outcome: AuditOutcome.SUCCESS,
+          resourceType: 'LOCAL_SYSTEM',
+          resourceId: null,
+          requestId: input.requestId,
+          metadata: {
+            turnId,
+            toolId: context.toolId,
+            toolName: context.toolName,
+            fetchedAt: context.fetchedAt,
+            summary: pickLocalAuditSummary(context.data),
+          } as unknown as Prisma.InputJsonValue,
+        },
+      });
     }
   }
 
@@ -322,6 +368,11 @@ export class TurnStateService {
     executionOwner: string;
     code: string;
     summary: string;
+    /**
+     * 真实失败原因，落库与进公开事件供排查，**不**回喂模型。
+     * 缺省时与 summary 一致。
+     */
+    errorMessage?: string;
   }): Promise<boolean> {
     return this.settleToolCall({
       ...input,
@@ -933,4 +984,47 @@ function isUniqueConstraintError(error: unknown, field: string): boolean {
 
 function normalizeConstraintPart(value: string): string {
   return value.replace(/[_\s-]/g, '').toLowerCase();
+}
+
+/**
+ * 允许写入审计的本机操作聚合字段白名单（本机工具计划 §4.6）。
+ * 只放聚合值与清单 hash 前缀，**不含任何本地路径或文件名**；白名单之外一律丢弃，
+ * 因此即使客户端将来多传字段，审计表也不会出现本地明细。
+ */
+const LOCAL_AUDIT_SUMMARY_KEYS = [
+  'status',
+  'executed',
+  'itemCount',
+  'totalBytes',
+  'resultCounts',
+  'manifestHashPrefix',
+  'rootLabel',
+  'fileCount',
+  'directoryCount',
+  'skippedCount',
+  'truncated',
+  'elapsedMs',
+  'volumes',
+] as const;
+
+function pickLocalAuditSummary(data: Record<string, unknown>): Record<string, unknown> {
+  const summary: Record<string, unknown> = {};
+  for (const key of LOCAL_AUDIT_SUMMARY_KEYS) {
+    const value = data[key];
+    if (value === undefined) continue;
+    // 卷容量是「盘符 + 字节数」的聚合列表，逐项按同一精神只保留容量三元组。
+    if (key === 'volumes' && Array.isArray(value)) {
+      summary.volumes = value.slice(0, 16).map((volume) => {
+        const record = (volume ?? {}) as Record<string, unknown>;
+        return {
+          label: typeof record.label === 'string' ? record.label : '',
+          totalBytes: typeof record.totalBytes === 'number' ? record.totalBytes : null,
+          freeBytes: typeof record.freeBytes === 'number' ? record.freeBytes : null,
+        };
+      });
+      continue;
+    }
+    summary[key] = value;
+  }
+  return summary;
 }

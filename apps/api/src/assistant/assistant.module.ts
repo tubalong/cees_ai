@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AiOrchestrationModule } from '../ai-orchestration/ai-orchestration.module';
 import { DocumentModule } from '../document/document.module';
+import { FinanceModule } from '../finance/finance.module';
 import { ImageModule } from '../image/image.module';
 import { KnowledgeModule } from '../knowledge/knowledge.module';
 import { OrganizationModule } from '../organization/organization.module';
@@ -36,6 +37,7 @@ import { CreateTaskTool } from './tools/executors/create-task.tool';
 import { KnowledgeSearchTool } from './tools/executors/knowledge-search.tool';
 import { ListDepartmentsTool } from './tools/executors/list-departments.tool';
 import { ListKnowledgeBasesTool } from './tools/executors/list-knowledge-bases.tool';
+import { ListKnowledgeDocumentsTool } from './tools/executors/list-knowledge-documents.tool';
 import { ListProjectsTool } from './tools/executors/list-projects.tool';
 import { ListTasksTool } from './tools/executors/list-tasks.tool';
 import { UpdateTaskStatusTool } from './tools/executors/update-task-status.tool';
@@ -43,6 +45,7 @@ import { SaveToKnowledgeTool } from './tools/executors/save-to-knowledge.tool';
 import { InsertDocumentImageTool } from './tools/executors/insert-document-image.tool';
 import { WebSearchTool } from './tools/executors/web-search.tool';
 import { ListDocumentsTool } from './tools/executors/list-documents.tool';
+import { ImportFinanceLedgerTool } from './tools/executors/import-finance-ledger.tool';
 
 /**
  * 统一 AI 编排核心。会话事实源、事件重放与唯一 Tool Loop 运行器都在本模块内，
@@ -51,7 +54,7 @@ import { ListDocumentsTool } from './tools/executors/list-documents.tool';
  * 执行器在 onModuleInit 自注册，新增工具只需新增 provider。
  */
 @Module({
-  imports: [AiOrchestrationModule, DocumentModule, ImageModule, KnowledgeModule, OrganizationModule, ProjectModule, StorageModule, TaskModule, UserMemoryModule, WebSearchModule],
+  imports: [AiOrchestrationModule, DocumentModule, FinanceModule, ImageModule, KnowledgeModule, OrganizationModule, ProjectModule, StorageModule, TaskModule, UserMemoryModule, WebSearchModule],
   controllers: [AssistantActionDraftController, AssistantController, AssistantConnectorController],
   providers: [
     ConversationService,
@@ -78,6 +81,7 @@ import { ListDocumentsTool } from './tools/executors/list-documents.tool';
     KnowledgeSearchTool,
     ListDepartmentsTool,
     ListKnowledgeBasesTool,
+    ListKnowledgeDocumentsTool,
     ListProjectsTool,
     ListTasksTool,
     UpdateTaskStatusTool,
@@ -85,6 +89,7 @@ import { ListDocumentsTool } from './tools/executors/list-documents.tool';
     InsertDocumentImageTool,
     WebSearchTool,
     ListDocumentsTool,
+    ImportFinanceLedgerTool,
   ],
 })
 export class AssistantModule { }

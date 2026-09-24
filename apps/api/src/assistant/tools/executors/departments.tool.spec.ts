@@ -30,6 +30,7 @@ const confirmationContext: ToolConfirmationContext = {
     userId: 'u-1',
     membershipId: 'm-1',
     requestId: 'r-1',
+    turnId: 'turn-1',
     permissions: ['department.read', 'department.create'],
 };
 

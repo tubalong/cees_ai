@@ -674,6 +674,7 @@ function documentRecord(overrides: Record<string, unknown> = {}): ManagedDocumen
         title: 'Project plan',
         content: 'content',
         documentSpec: null,
+        spreadsheetSpec: null,
         visibility: DocumentVisibility.PRIVATE,
         createdAt: NOW,
         updatedAt: NOW,

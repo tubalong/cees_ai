@@ -6,7 +6,7 @@ import {
   Injectable,
 } from '@nestjs/common';
 import { ConversationMessageRole, FilePurpose, ManagedImageStatus } from '@prisma/client';
-import type { MessageContentPart } from '@cees/ai-service-client';
+import type { DocumentSourceMaterial, MessageContentPart } from '@cees/ai-service-client';
 import { AiServiceGateway } from '../../ai-orchestration/ai-service-gateway.service';
 import { PrismaService } from '../../database/prisma.service';
 import {
@@ -217,6 +217,37 @@ export class AssistantMessageContentService {
       });
     }
     return references;
+  }
+
+  /** 从会话事实源重建本轮文档附件，供需要原始内容的工具在重试/恢复后继续使用。 */
+  async resolveTurnDocumentSourceMaterials(
+    turnId: string,
+    identity: MessageContentIdentity,
+  ): Promise<DocumentSourceMaterial[]> {
+    const message = await this.prisma.conversationMessage.findFirst({
+      where: { tenantId: identity.tenantId, turnId, role: ConversationMessageRole.USER },
+      orderBy: { createdAt: 'asc' },
+      select: { documentFileIds: true },
+    });
+    const fileIds = normalizeFileIds(message?.documentFileIds ?? []);
+    if (fileIds.length === 0) return [];
+    const files = await this.prisma.fileObject.findMany({
+      where: { tenantId: identity.tenantId, id: { in: fileIds }, deletedAt: null },
+      select: { id: true, originalName: true },
+    });
+    const names = new Map(files.map((file) => [file.id, file.originalName]));
+    const materials: DocumentSourceMaterial[] = [];
+    for (const fileId of fileIds) {
+      const parts = await this.resolveDocumentParts([fileId], identity);
+      const content = parts
+        .filter((part): part is Extract<MessageContentPart, { type: 'text' }> => part.type === 'text')
+        .map((part) => part.text)
+        .join('\n');
+      if (content.trim()) {
+        materials.push({ id: fileId, title: names.get(fileId) ?? 'uploaded-spreadsheet', content });
+      }
+    }
+    return materials;
   }
 
   /** 抽取文档/文本文件内容为可注入对话上下文的文本 parts。 */

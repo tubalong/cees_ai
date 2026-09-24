@@ -10,7 +10,7 @@ export type PublicTurnMode = 'standard' | 'ultra';
 export type PublicTurnPhase = 'reasoning' | 'answering' | 'tool_executing';
 
 export interface ConnectorContextInput {
-  provider: 'DINGTALK' | 'TENCENT_MEETING' | 'WECOM' | 'GITHUB';
+  provider: 'DINGTALK' | 'TENCENT_MEETING' | 'WECOM' | 'GITHUB' | 'LOCAL_SYSTEM';
   toolId: string;
   toolName: string;
   fetchedAt: string;

@@ -157,7 +157,11 @@ export class ConversationService {
       messages: ordered.slice(-100).map((message) => ({
         id: message.id,
         role: message.role,
-        content: message.content,
+        // TOOL 消息的 content 是**回喂模型**的工具结果（含内部 ID 与给模型的行为约束文案），
+        // 不是给用户看的回答。客户端只需要 TOOL 消息上的结构化公开引用（resources/sources/citations），
+        // 因此这里对 TOOL 一律返回空串，避免内部提示随会话详情泄露到任意客户端
+        // （移动端曾把非 user 消息当助手气泡渲染，直接把这串 JSON 显示给了用户）。
+        content: message.role === ConversationMessageRole.TOOL ? '' : message.content,
         imageFileIds: message.imageFileIds,
         documentFileIds: message.documentFileIds,
         connectorContexts: message.role === ConversationMessageRole.USER

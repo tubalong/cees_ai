@@ -92,6 +92,7 @@ export class CreateKnowledgeBaseTool implements OnModuleInit {
                     + '不得向用户展示 knowledge_base_id 或任何权限枚举值（如 MANAGER）。'
                     + '用户想继续把对话内容存入新库时调用 save_to_knowledge 并传对应 knowledge_base_id。',
             }),
+            userSummary: `知识库「${knowledgeBase.name}」已创建，你是该知识库的管理员。`,
         };
     }
 }

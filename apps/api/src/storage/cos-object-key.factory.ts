@@ -34,10 +34,10 @@ export class CosObjectKeyFactory {
     }
 
     /**
-     * AI 生成文档（DOCX/PDF/PPTX）使用与工具调用 + 格式绑定的确定性对象键。
+    * AI 生成文档（DOCX/PDF/PPTX/XLSX）使用与工具调用 + 格式绑定的确定性对象键。
      * 相同 toolCallId + format 的恢复或重试始终覆盖同一对象，避免产生无限孤儿对象。
      */
-    buildGeneratedDocumentKey(input: { tenantId: string; toolCallId: string; format: 'docx' | 'pdf' | 'pptx' }): string {
+    buildGeneratedDocumentKey(input: { tenantId: string; toolCallId: string; format: 'docx' | 'pdf' | 'pptx' | 'xlsx' }): string {
         assertUuid(input.tenantId, 'tenantId');
         assertUuid(input.toolCallId, 'toolCallId');
         return `${this.config.objectPrefix}/tenants/${input.tenantId}/generated-documents/${input.toolCallId}/${input.format}`;

@@ -1,6 +1,7 @@
 import { DocumentVisibility } from '@prisma/client';
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { DocumentService } from '../../../document/document.service';
+import { AssistantMessageContentService } from '../../runtime/message-content.service';
 import { ToolRegistryService } from '../tool-registry';
 import type { ToolDefinition, ToolExecutionContext, ToolExecutionResult } from '../tool.types';
 
@@ -8,7 +9,7 @@ const VISIBILITY_VALUES = [DocumentVisibility.PRIVATE, DocumentVisibility.TENANT
 const MAX_INSTRUCTION_LENGTH = 8000;
 const MAX_TITLE_LENGTH = 200;
 
-type DocumentFormat = 'docx' | 'pdf' | 'pptx';
+type DocumentFormat = 'docx' | 'pdf' | 'pptx' | 'xlsx';
 
 interface FormatDescriptor {
   format: DocumentFormat;
@@ -40,6 +41,13 @@ const FORMATS: Record<DocumentFormat, FormatDescriptor> = {
     description: '根据指令生成一份结构化演示文稿并保存到文档库，可导出为 PPTX；成功返回标题与篇幅。',
     summary: (title, length) => `PPTX 演示已生成：《${title}》（共 ${length} 字）`,
   },
+  xlsx: {
+    format: 'xlsx',
+    name: 'generate_xlsx',
+    displayName: '生成 XLSX 表格',
+    description: '根据本轮上传的 Excel/CSV 与用户修改指令生成一份新的 XLSX 文件；不会覆盖原文件。',
+    summary: (title, length) => `XLSX 表格已生成：《${title}》（预览共 ${length} 字）`,
+  },
 };
 
 /**
@@ -53,6 +61,7 @@ export class GenerateDocumentTool implements OnModuleInit {
   constructor(
     private readonly registry: ToolRegistryService,
     private readonly documentService: DocumentService,
+    private readonly messageContent: AssistantMessageContentService,
   ) { }
 
   onModuleInit(): void {
@@ -93,7 +102,7 @@ export class GenerateDocumentTool implements OnModuleInit {
     input: Record<string, unknown>,
     format: FormatDescriptor,
   ): Promise<ToolExecutionResult> {
-    const document = await this.documentService.createGeneratedDocument({
+    const command = {
       tenantId: context.tenantId,
       userId: context.userId,
       membershipId: context.membershipId,
@@ -107,7 +116,24 @@ export class GenerateDocumentTool implements OnModuleInit {
       title: input.title as string | undefined,
       visibility: input.visibility as (typeof VISIBILITY_VALUES)[number],
       format: format.format,
-    });
+    } as const;
+    const document = format.format === 'xlsx'
+      ? await this.documentService.createGeneratedSpreadsheet({
+        ...command,
+        sourceMaterials: await this.messageContent.resolveTurnDocumentSourceMaterials(
+          context.turnId,
+          {
+            tenantId: context.tenantId,
+            userId: context.userId,
+            membershipId: context.membershipId,
+            requestId: context.requestId,
+          },
+        ),
+      })
+      : await this.documentService.createGeneratedDocument({
+        ...command,
+        format: format.format as Exclude<DocumentFormat, 'xlsx'>,
+      });
     return {
       resourceType: 'DOCUMENT',
       resourceId: document.documentId,

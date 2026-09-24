@@ -694,6 +694,7 @@ export class TurnRunnerService implements OnModuleDestroy {
               userId: input.userId,
               membershipId: input.membershipId,
               requestId: input.requestId,
+              turnId: input.turnId,
               permissions: executionPermissions,
               roles: executionRoles,
             },
@@ -723,6 +724,10 @@ export class TurnRunnerService implements OnModuleDestroy {
             executionOwner: input.executionOwner,
             code: rejection.code,
             summary: rejection.summary,
+            // 预览失败的真实原因必须落到库与公开事件：客户端要能告诉用户到底哪一行/哪个字段
+            // 不合法（例如台账附件里「第 172 行方向只能是收入或支出」）。
+            // 模型仍然只拿 summary，避免内部错误码进入模型上下文。
+            errorMessage: rejection.errorMessage,
           });
           if (!settled) return { limitExceeded: false, ownershipLost: true };
           continue;

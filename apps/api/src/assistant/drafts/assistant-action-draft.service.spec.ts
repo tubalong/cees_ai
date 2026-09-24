@@ -24,7 +24,7 @@ const TURN_ID = '4e1c1f0e-0000-4000-8000-000000000004';
 interface Harness {
     service: AssistantActionDraftService;
     prisma: {
-        assistantActionDraft: { findFirst: jest.Mock; create: jest.Mock; updateMany: jest.Mock };
+        assistantActionDraft: { findFirst: jest.Mock; findMany: jest.Mock; create: jest.Mock; updateMany: jest.Mock };
         toolCall: { updateMany: jest.Mock };
         conversationMessage: { create: jest.Mock };
         auditLog: { create: jest.Mock };
@@ -37,7 +37,7 @@ interface Harness {
 
 function createHarness(): Harness {
     const prisma = {
-        assistantActionDraft: { findFirst: jest.fn(), create: jest.fn(), updateMany: jest.fn() },
+        assistantActionDraft: { findFirst: jest.fn(), findMany: jest.fn(), create: jest.fn(), updateMany: jest.fn() },
         toolCall: { updateMany: jest.fn() },
         conversationMessage: { create: jest.fn() },
         auditLog: { create: jest.fn() },
@@ -209,6 +209,47 @@ describe('AssistantActionDraftService', () => {
             );
         });
 
+        it('keeps internal tool data for the model but exposes only userSummary to the user', async () => {
+            harness.prisma.assistantActionDraft.findFirst.mockResolvedValue(pendingDraft());
+            harness.prisma.assistantActionDraft.updateMany.mockResolvedValue({ count: 1 });
+            harness.prisma.toolCall.updateMany.mockResolvedValue({ count: 1 });
+            harness.prisma.conversationMessage.create.mockResolvedValue({});
+            harness.prisma.auditLog.create.mockResolvedValue({});
+            const internalSummary = JSON.stringify({
+                type: 'knowledge_base_created',
+                knowledge_base_id: 'kb-secret',
+                instruction: 'use MANAGER and save_to_knowledge',
+            });
+            harness.execute.mockResolvedValue({
+                resourceType: null,
+                resourceId: null,
+                summary: internalSummary,
+                userSummary: '知识库「产品知识库」已创建，你是该知识库的管理员。',
+            });
+
+            const result = await harness.service.confirm(DRAFT_ID);
+
+            expect(result.summary).toBe('知识库「产品知识库」已创建，你是该知识库的管理员。');
+            const toolCallUpdate = harness.prisma.toolCall.updateMany.mock.calls[0][0] as {
+                data: { result: { summary: string } };
+            };
+            expect(toolCallUpdate.data.result.summary).toBe(internalSummary);
+            const persistedMessages = harness.prisma.conversationMessage.create.mock.calls.map((call) => call[0] as {
+                data: { role: string; content: string; toolCallId?: string };
+            });
+            const internalMessage = persistedMessages.find((message) => message.data.role === 'TOOL');
+            expect(internalMessage?.data.content).toBe(internalSummary);
+            expect(internalMessage?.data.toolCallId).toBe(TOOL_CALL_ID);
+            const visibleMessage = persistedMessages.find((message) => message.data.role === 'ASSISTANT')!;
+            expect(visibleMessage.data.content).toBe('知识库「产品知识库」已创建，你是该知识库的管理员。');
+            expect(visibleMessage.data.content).not.toContain('knowledge_base_id');
+            expect(visibleMessage.data.content).not.toContain('MANAGER');
+            const draftUpdate = harness.prisma.assistantActionDraft.updateMany.mock.calls[1][0] as {
+                data: { resultSummary: string };
+            };
+            expect(draftUpdate.data.resultSummary).toBe('知识库「产品知识库」已创建，你是该知识库的管理员。');
+        });
+
         it('reports a failed execution with a safe summary and never leaks the raw error', async () => {
             harness.prisma.assistantActionDraft.findFirst.mockResolvedValue(pendingDraft());
             harness.prisma.assistantActionDraft.updateMany.mockResolvedValue({ count: 1 });
@@ -255,6 +296,43 @@ describe('AssistantActionDraftService', () => {
             expect(harness.execute).not.toHaveBeenCalled();
             const audit = harness.prisma.auditLog.create.mock.calls[0][0] as { data: { action: string } };
             expect(audit.data.action).toEqual('ASSISTANT_ACTION_DRAFT_CANCELLED');
+        });
+    });
+
+    describe('listPending', () => {
+        it('returns only unexpired pending drafts of the current membership and no argument snapshot', async () => {
+            harness.prisma.assistantActionDraft.findMany.mockResolvedValue([
+                {
+                    id: DRAFT_ID,
+                    toolName: 'create_department',
+                    preview: { title: '新建部门', fields: [{ label: '部门名称', value: '研发部' }] },
+                    expiresAt: new Date('2026-09-24T09:00:00.000Z'),
+                    conversationId: '50000000-0000-4000-8000-000000000005',
+                    createdAt: new Date('2026-09-24T08:50:00.000Z'),
+                },
+            ]);
+
+            const items = await harness.service.listPending();
+
+            expect(items).toEqual([{
+                draftId: DRAFT_ID,
+                toolName: 'create_department',
+                title: '新建部门',
+                fields: [{ label: '部门名称', value: '研发部' }],
+                expiresAt: new Date('2026-09-24T09:00:00.000Z'),
+                conversationId: '50000000-0000-4000-8000-000000000005',
+                createdAt: new Date('2026-09-24T08:50:00.000Z'),
+            }]);
+            // 只查本人、只查未决策、只查未过期：过期的待办不该出现在抽屉里误导用户。
+            const query = harness.prisma.assistantActionDraft.findMany.mock.calls[0][0] as { where: Record<string, unknown>; select: Record<string, unknown> };
+            expect(query.where).toEqual(expect.objectContaining({
+                tenantId: TENANT_ID,
+                membershipId: 'm-1',
+                status: DraftStatus.PENDING_CONFIRMATION,
+                expiresAt: { gt: expect.any(Date) },
+            }));
+            // 列表接口不返回参数快照，确认时仍以服务端快照为准。
+            expect(query.select).not.toHaveProperty('arguments');
         });
     });
 });
