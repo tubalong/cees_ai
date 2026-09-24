@@ -2280,6 +2280,7 @@
         grid-template-columns: 84px minmax(0, 1fr);
     }
 }
+
 .connector-action-confirmation {
     display: grid;
     gap: 12px;
@@ -2305,4 +2306,88 @@
     white-space: pre-wrap;
     overflow-wrap: anywhere;
     font-size: 12px;
+}
+
+/* 待确认入口与面板：贴在输入框正上方，**与输入框同宽居中**。
+   注意 `.message-composer` 是 `max-width: 920px; margin: 0 auto`，
+   因此这里必须用同一组宽度约束，否则面板会比输入框宽（用户反馈过这个问题）。
+   `.composer-area` 只提供左右留白，不能作为对齐依据。 */
+.composer-pending-toggle,
+.composer-pending-panel {
+    width: 100%;
+    max-width: 920px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.composer-pending-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    padding: 9px 14px;
+    border: 1px solid var(--line);
+    border-radius: var(--platform-panel-radius, 10px);
+    background: var(--primary-soft);
+    color: var(--primary);
+    font-size: 13px;
+    cursor: pointer;
+    text-align: left;
+}
+
+.composer-pending-toggle:hover {
+    border-color: var(--primary);
+}
+
+.composer-pending-toggle.is-open {
+    margin-bottom: 0;
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+}
+
+.composer-pending-caret {
+    margin-left: auto;
+    color: var(--muted);
+    font-size: 11px;
+}
+
+/* 展开后的待确认列表：紧接入口下方，宽度与输入框一致。
+   限高并内部滚动，避免待办较多时把输入框挤出可视区。 */
+.composer-pending-panel {
+    margin-bottom: 8px;
+    padding: 12px 14px;
+    border: 1px solid var(--line);
+    border-top: 0;
+    border-radius: 0 0 var(--platform-panel-radius, 10px) var(--platform-panel-radius, 10px);
+    background: var(--surface-soft);
+    max-height: 46vh;
+    overflow-y: auto;
+}
+
+.composer-pending-hint-row {
+    margin-bottom: 12px;
+}
+
+.composer-pending-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.composer-pending-list .action-confirmation {
+    margin-top: 0;
+}
+
+.composer-pending-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 12px;
+}
+
+/* 工具失败原因。
+   服务端只把固定友好文案喂给模型，真实原因（哪一行、哪个字段不合法）
+   只在这里到达客户端；不展示用户就只能反复重试。 */
+.chat-tool-failure {
+    margin-top: 12px;
 }

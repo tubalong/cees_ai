@@ -18,6 +18,28 @@ declare global {
             setZoomFactor: (factor: number) => void;
             openDevTools: () => void;
             openExternal: (url: string) => Promise<boolean>;
+            localSystem?: {
+                scanVolumes: () => Promise<Array<{ label: string; totalBytes: number; freeBytes: number; usedBytes: number }>>;
+                chooseAndScanDirectory: () => Promise<{
+                    rootLabel: string;
+                    totalBytes: number;
+                    fileCount: number;
+                    directoryCount: number;
+                    skippedCount: number;
+                    truncated: boolean;
+                    elapsedMs: number;
+                    topDirectories: Array<{ name: string; sizeBytes: number; fileCount: number }>;
+                } | null>;
+                chooseAndQuarantine: (selectionKind: 'files' | 'directory') => Promise<LocalCleanupJob | null>;
+                restoreLatest: () => Promise<LocalCleanupJob>;
+                cleanLatest: () => Promise<LocalCleanupJob>;
+                /** 另存为：目标位置由主进程系统保存对话框产生，渲染层不传路径。 */
+                saveGeneratedFile: (request: {
+                    suggestedName: string;
+                    extension: string;
+                    bytes: Uint8Array;
+                }) => Promise<{ saved: boolean; canceled: boolean; displayName: string; sizeBytes: number }>;
+            };
             /**
              * 加密会话存储（Electron 主进程 safeStorage）。
              * 浏览器预览环境下不存在，api.ts 会回退到 Web Storage。
@@ -174,6 +196,17 @@ declare global {
     interface ConnectorStatusChangedEvent {
         connectorId: string;
         status: ConnectorStatus;
+    }
+
+    interface LocalCleanupJob {
+        id: string;
+        manifestHash: string;
+        status: string;
+        createdAt: string;
+        updatedAt: string;
+        totalBytes: number;
+        itemCount: number;
+        items: Array<{ id: string; displayName: string; sizeBytes: number; kind: 'FILE' | 'DIRECTORY'; status: string; error: string | null }>;
     }
 }
 

@@ -1,5 +1,5 @@
-// export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000/api/';
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://192.168.5.29:3000/api/';
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000/api/';
+// export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://192.168.5.29:3000/api/';
 // export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://132.232.159.186:3000/api/';
 // http://192.168.5.29:3000/api/
 // http://132.232.159.186:3000/api/
@@ -679,6 +679,50 @@ export async function exportDocument(
     anchor.download = filename;
     anchor.click();
     URL.revokeObjectURL(blobUrl);
+}
+
+export async function downloadGeneratedDocumentFile(
+    documentId: string,
+    preferredName: string,
+    extension: string,
+): Promise<void> {
+    const accessToken = getStoredValue(ACCESS_TOKEN_KEY);
+    if (!accessToken) throw new Error('登录状态已失效，请重新登录');
+    const response = await fetch(new URL(`v1/documents/${encodeURIComponent(documentId)}/file`, API_BASE_URL), {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        redirect: 'follow',
+    });
+    if (!response.ok) {
+        const body = await response.json().catch(() => null) as ApiErrorBody | null;
+        throw new Error(body?.message?.toString() || body?.error?.message || '文件下载失败');
+    }
+    const blobUrl = URL.createObjectURL(await response.blob());
+    const anchor = document.createElement('a');
+    anchor.href = blobUrl;
+    anchor.download = `${preferredName}.${extension}`;
+    anchor.click();
+    URL.revokeObjectURL(blobUrl);
+}
+
+/**
+ * 取回已落盘生成文件的字节，供「另存为」使用。
+ *
+ * 与 downloadGeneratedDocumentFile 的区别：这里**不触发浏览器默认下载**，
+ * 而是把字节交回调用方，由 Electron 主进程用系统保存对话框决定落盘位置。
+ * 浏览器预览环境没有本机保存能力，调用方应先判断 window.cees.localSystem。
+ */
+export async function fetchGeneratedDocumentBytes(documentId: string): Promise<Uint8Array> {
+    const accessToken = getStoredValue(ACCESS_TOKEN_KEY);
+    if (!accessToken) throw new Error('登录状态已失效，请重新登录');
+    const response = await fetch(new URL(`v1/documents/${encodeURIComponent(documentId)}/file`, API_BASE_URL), {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        redirect: 'follow',
+    });
+    if (!response.ok) {
+        const body = await response.json().catch(() => null) as ApiErrorBody | null;
+        throw new Error(body?.message?.toString() || body?.error?.message || '读取文件内容失败');
+    }
+    return new Uint8Array(await response.arrayBuffer());
 }
 
 /**
@@ -1496,7 +1540,7 @@ export type TurnStreamEvent =
     | { type: 'status'; seq: number; phase: 'reasoning' | 'answering' | 'tool_executing' }
     | { type: 'content_delta'; seq: number; text: string }
     | { type: 'tool_call'; seq: number; toolCallId: string; name: string; arguments: Record<string, unknown> }
-    | { type: 'tool_result'; seq: number; toolCallId: string; status: 'completed' | 'failed' | 'rejected' | 'awaiting_confirmation'; resourceId?: string | null; resourceUrl?: string | null; resource?: { id: string; type: 'IMAGE' | 'DOCUMENT' } | null; sources?: Array<{ id: string; title: string; url: string; domain: string; snippet: string; publishedAt?: string | null }>; citations?: Array<{ id: string; title: string; snippet: string; pageIndex?: number | null }>; confirmation?: ToolResultConfirmation | null; error?: Record<string, unknown> | null }
+    | { type: 'tool_result'; seq: number; toolCallId: string; status: 'completed' | 'failed' | 'rejected' | 'awaiting_confirmation'; resourceId?: string | null; resourceUrl?: string | null; resource?: { id: string; type: 'IMAGE' | 'DOCUMENT' } | null; sources?: Array<{ id: string; title: string; url: string; domain: string; snippet: string; publishedAt?: string | null }>; citations?: Array<{ id: string; title: string; snippet: string; pageIndex?: number | null }>; confirmation?: ToolResultConfirmation | null; error?: { code: string; message: string } | null }
     | { type: 'usage'; seq: number; tokenUsage: Record<string, number | null> }
     | { type: 'completed'; seq: number; latencyMs: number; finishReason: string | null }
     | { type: 'error'; seq: number; error: { code: string; message: string; retryable: boolean } };
@@ -1524,7 +1568,7 @@ export async function updateConversation(conversationId: string, title: string, 
 export async function deleteConversation(conversationId: string, version: number): Promise<void> { await authorizedRequest<unknown>(`v1/conversations/${encodeURIComponent(conversationId)}?version=${encodeURIComponent(String(version))}`, { method: 'DELETE' }); }
 
 export interface ConnectorContext {
-    provider: 'DINGTALK' | 'TENCENT_MEETING' | 'WECOM' | 'GITHUB';
+    provider: 'DINGTALK' | 'TENCENT_MEETING' | 'WECOM' | 'GITHUB' | 'LOCAL_SYSTEM';
     toolId: string;
     toolName: string;
     fetchedAt: string;
@@ -1650,6 +1694,27 @@ export async function confirmActionDraft(draftId: string): Promise<ActionDraftRe
 /** 取消写操作草稿；取消后不可再确认，需重新发起对话。 */
 export async function cancelActionDraft(draftId: string): Promise<ActionDraftResolution> {
     return authorizedRequest<ActionDraftResolution>(`v1/assistant/action-drafts/${encodeURIComponent(draftId)}/cancel`, { method: 'POST' });
+}
+
+/** 待确认草稿的展示项；不含参数快照，确认时仍由服务端取快照。 */
+export interface PendingActionDraft {
+    draftId: string;
+    toolName: string;
+    title: string;
+    fields: Array<{ label: string; value: string }>;
+    expiresAt: string;
+    conversationId: string;
+    createdAt: string;
+}
+
+/**
+ * 拉取当前成员仍未决策的写操作草稿。
+ *
+ * 为什么需要它：确认卡片此前只随流式事件到达，刷新页面即消失，而服务端草稿仍在等待确认；
+ * 用户于是看不到待办、只会重复发起（表现为「一次只能建一个」）。列表让待办常驻可见。
+ */
+export async function listAssistantActionDrafts(): Promise<{ items: PendingActionDraft[] }> {
+    return authorizedRequest<{ items: PendingActionDraft[] }>('v1/assistant/action-drafts');
 }
 
 export interface ChatMessageInput {

@@ -16,6 +16,28 @@ contextBridge.exposeInMainWorld('cees', {
     setZoomFactor: (factor: number) => webFrame.setZoomFactor(factor),
     openDevTools: () => ipcRenderer.send('cees:open-devtools'),
     openExternal: (url: string): Promise<boolean> => ipcRenderer.invoke('cees:open-external', url),
+    localSystem: {
+        scanVolumes: (): Promise<import('./local-tools/disk-scanner').VolumeSummary[]> =>
+            ipcRenderer.invoke('cees:local-disk-scan-volumes'),
+        chooseAndScanDirectory: (): Promise<import('./local-tools/disk-scanner').DirectorySizeSummary | null> =>
+            ipcRenderer.invoke('cees:local-disk-choose-and-scan-directory'),
+        chooseAndQuarantine: (selectionKind: 'files' | 'directory'): Promise<import('./local-tools/cleanup-manager').PublicCleanupJob | null> =>
+            ipcRenderer.invoke('cees:local-cleanup-choose-and-quarantine', selectionKind),
+        restoreLatest: (): Promise<import('./local-tools/cleanup-manager').PublicCleanupJob> =>
+            ipcRenderer.invoke('cees:local-cleanup-restore-latest'),
+        cleanLatest: (): Promise<import('./local-tools/cleanup-manager').PublicCleanupJob> =>
+            ipcRenderer.invoke('cees:local-cleanup-clean-latest'),
+        /**
+         * 把已生成的产物另存到本机。目标路径只能由主进程的系统保存对话框产生，
+         * 渲染层只提供建议文件名、扩展名与字节。
+         */
+        saveGeneratedFile: (request: {
+            suggestedName: string;
+            extension: string;
+            bytes: Uint8Array;
+        }): Promise<import('./local-tools/file-saver').SaveGeneratedFileResult> =>
+            ipcRenderer.invoke('cees:local-save-generated-file', request),
+    },
     /**
      * 加密会话存储：令牌经主进程 safeStorage 加密后落盘，
      * 渲染层不再把刷新令牌写进 localStorage / sessionStorage。

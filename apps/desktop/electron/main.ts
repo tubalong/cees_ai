@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu, session, shell, type MenuItemConstructorOptions } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, session, shell, type MenuItemConstructorOptions } from 'electron';
 import path from 'node:path';
 import {
     ConnectorHost,
@@ -15,6 +15,9 @@ import {
     installNavigationLock,
 } from './security';
 import { SecureTokenStore } from './secure-store';
+import { scanDirectorySize, scanVolumes } from './local-tools/disk-scanner';
+import { CleanupManager, type PublicCleanupJob } from './local-tools/cleanup-manager';
+import { writeSelectedFile, assertSavableExtension, buildSuggestedFileName } from './local-tools/file-saver';
 
 const connectorRegistry = new ConnectorRegistry();
 const dingtalkConnector = new DingTalkConnectorAdapter();
@@ -154,7 +157,7 @@ function createWindow(): void {
     }
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
     const dingtalkConnector = getDingTalkConnector();
     const userDataPath = app.getPath('userData');
     dingtalkConnector.configure(userDataPath);
@@ -165,6 +168,8 @@ app.whenReady().then(() => {
     installIpcSenderGuard();
     installContentSecurityPolicy(session.defaultSession);
     const tokenStore = new SecureTokenStore(userDataPath);
+    const cleanupManager = new CleanupManager(path.join(userDataPath, 'local-agent'));
+    await cleanupManager.initialize();
     // macOS 保留系统菜单（⇆Q / ⇆C 等）；Windows / Linux 置空——判断内聚在 installApplicationMenu。
     installApplicationMenu();
     ipcMain.handle('cees:secure-store-get-all', () => tokenStore.getAll());
@@ -185,6 +190,65 @@ app.whenReady().then(() => {
         if (url.protocol !== 'https:') throw new Error('仅允许打开 HTTPS 外部链接');
         await shell.openExternal(url.toString());
         return true;
+    });
+    ipcMain.handle('cees:local-disk-scan-volumes', () => scanVolumes());
+    ipcMain.handle('cees:local-disk-choose-and-scan-directory', async () => {
+        const result = await dialog.showOpenDialog({
+            title: '选择要扫描的目录',
+            properties: ['openDirectory', 'dontAddToRecent'],
+        });
+        if (result.canceled || result.filePaths.length !== 1) return null;
+        return scanDirectorySize(result.filePaths[0]);
+    });
+    ipcMain.handle('cees:local-cleanup-choose-and-quarantine', async (_event, selectionKind: unknown) => {
+        if (selectionKind !== 'files' && selectionKind !== 'directory') throw new Error('清理选择类型无效');
+        const result = await dialog.showOpenDialog({
+            title: selectionKind === 'directory' ? '选择要隔离的目录' : '选择要隔离的文件',
+            properties: selectionKind === 'directory'
+                ? ['openDirectory', 'dontAddToRecent']
+                : ['openFile', 'multiSelections', 'dontAddToRecent'],
+        });
+        if (result.canceled || result.filePaths.length === 0) return null;
+        const plan = await cleanupManager.createPlan(result.filePaths);
+        const confirmed = await confirmCleanupPlan(plan, '隔离所选内容', '所选内容会移动到 CEES 隔离区，可稍后恢复。');
+        if (!confirmed) return plan;
+        return cleanupManager.quarantine(plan.id, plan.manifestHash);
+    });
+    ipcMain.handle('cees:local-cleanup-restore-latest', async () => {
+        const job = (await cleanupManager.listJobs()).find((item) =>
+            ['QUARANTINED', 'PARTIAL', 'RECOVERY_REQUIRED'].includes(item.status)
+            && item.items.some((entry) => entry.status === 'QUARANTINED'));
+        if (!job) throw new Error('没有可恢复的隔离任务');
+        const confirmed = await confirmCleanupPlan(job, '恢复最近的隔离任务', '恢复不会覆盖原路径已有内容；冲突项目会跳过。');
+        return confirmed ? cleanupManager.restore(job.id) : job;
+    });
+    ipcMain.handle('cees:local-cleanup-clean-latest', async () => {
+        const job = (await cleanupManager.listJobs()).find((item) =>
+            ['QUARANTINED', 'PARTIAL', 'RECOVERY_REQUIRED'].includes(item.status)
+            && item.items.some((entry) => entry.status === 'QUARANTINED'));
+        if (!job) throw new Error('隔离区没有可永久清理的任务');
+        const confirmed = await confirmCleanupPlan(job, '永久清理隔离区内容', '该操作不可恢复。只会删除已在 CEES 隔离区中的副本。', true);
+        return confirmed ? cleanupManager.cleanup(job.id) : job;
+    });
+    /**
+     * 生成产物另存为。目标路径只能由这里的系统保存对话框产生：
+     * 渲染层只提供建议文件名、扩展名与字节，永远不能指定写入位置。
+     */
+    ipcMain.handle('cees:local-save-generated-file', async (_event, request: unknown) => {
+        if (!request || typeof request !== 'object') throw new Error('保存参数无效');
+        const input = request as { suggestedName?: unknown; extension?: unknown; bytes?: unknown };
+        const extension = assertSavableExtension(input.extension);
+        const bytes = toUint8Array(input.bytes);
+        const result = await dialog.showSaveDialog({
+            title: '保存到本地',
+            defaultPath: buildSuggestedFileName(input.suggestedName, extension),
+            // 覆盖确认交给系统对话框：原生、显式、用户可见，不重复弹窗。
+            properties: ['createDirectory', 'showOverwriteConfirmation'],
+        });
+        if (result.canceled || !result.filePath) {
+            return { saved: false, canceled: true, displayName: '', sizeBytes: 0 };
+        }
+        return writeSelectedFile(result.filePath, bytes);
     });
     ipcMain.handle('cees:connector-list', () => connectorHost.list());
     ipcMain.handle('cees:connector-status', (_event, connectorId: unknown) =>
@@ -259,6 +323,44 @@ app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(
 function assertConnectorId(value: unknown): string {
     if (typeof value !== 'string') throw new Error('连接器 ID 无效');
     return value;
+}
+
+async function confirmCleanupPlan(
+    job: PublicCleanupJob,
+    title: string,
+    message: string,
+    destructive = false,
+): Promise<boolean> {
+    const names = job.items.slice(0, 8).map((item) => `• ${item.displayName} (${formatBytes(item.sizeBytes)})`).join('\n');
+    const suffix = job.items.length > 8 ? `\n…另有 ${job.items.length - 8} 项` : '';
+    const result = await dialog.showMessageBox({
+        type: destructive ? 'warning' : 'question',
+        title,
+        message,
+        detail: `${names}${suffix}\n\n共 ${job.itemCount} 项，${formatBytes(job.totalBytes)}\n清单校验：${job.manifestHash.slice(0, 12)}`,
+        buttons: [destructive ? '永久清理' : '确认', '取消'],
+        defaultId: 1,
+        cancelId: 1,
+        noLink: true,
+    });
+    return result.response === 0;
+}
+
+function formatBytes(value: number): string {
+    if (value < 1024) return `${value} B`;
+    if (value < 1024 ** 2) return `${(value / 1024).toFixed(1)} KB`;
+    if (value < 1024 ** 3) return `${(value / 1024 ** 2).toFixed(1)} MB`;
+    return `${(value / 1024 ** 3).toFixed(1)} GB`;
+}
+
+/**
+ * 校验并归一化渲染层传来的文件字节。结构化克隆可能给出 Uint8Array 或 ArrayBuffer，
+ * 其余类型一律拒绝——不接受字符串路径、URL 或任何需要再次解析的输入。
+ */
+function toUint8Array(value: unknown): Uint8Array {
+    if (value instanceof Uint8Array) return value;
+    if (value instanceof ArrayBuffer) return new Uint8Array(value);
+    throw new Error('保存内容格式无效');
 }
 
 // TODO: Add a signed auto-update provider and staged rollout policy before production release.
