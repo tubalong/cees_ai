@@ -657,7 +657,7 @@ export async function exportDocument(
     documentId: string,
     format: 'docx' | 'pdf' | 'pptx',
     preferredName?: string,
-    template: 'business-standard' | 'editorial-modern' | 'executive-dark' = 'editorial-modern',
+    template: 'business-standard' | 'editorial-modern' | 'executive-dark' | 'product-story' | 'academic-clean' | 'minimal-mono' = 'editorial-modern',
 ): Promise<void> {
     const accessToken = getStoredValue(ACCESS_TOKEN_KEY);
     if (!accessToken) throw new Error('登录状态已失效，请重新登录');

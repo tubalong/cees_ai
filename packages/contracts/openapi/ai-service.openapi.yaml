@@ -2079,7 +2079,7 @@ components:
           default: zh-CN
         template_id:
           type: string
-          enum: [business-standard, editorial-modern, executive-dark]
+          enum: [business-standard, editorial-modern, executive-dark, product-story, academic-clean, minimal-mono]
           default: editorial-modern
         include_toc:
           type: boolean

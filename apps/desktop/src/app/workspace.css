@@ -2,14 +2,10 @@
     min-width: var(--desktop-shell-min-width);
     min-height: 100vh;
     display: grid;
-    grid-template-columns: 220px minmax(0, 1fr);
+    grid-template-columns: 72px minmax(0, 1fr);
     color: var(--text);
     background: var(--workspace-bg);
     transition: grid-template-columns .2s ease;
-}
-
-.workspace-shell.nav-collapsed {
-    grid-template-columns: 72px minmax(0, 1fr);
 }
 
 .side-navigation {
@@ -19,9 +15,9 @@
     height: 100vh;
     display: flex;
     flex-direction: column;
-    padding: 14px 12px;
+    padding: 10px 7px;
     border-right: 1px solid var(--line);
-    background: var(--surface);
+    background: var(--bg-sidebar, #fbfbfc);
     overflow: hidden;
 }
 
@@ -32,11 +28,12 @@
 }
 
 .workspace-brand {
-    height: 52px;
+    height: 50px;
     display: flex;
     align-items: center;
     gap: 11px;
-    padding: 0 5px;
+    justify-content: center;
+    padding: 0;
     white-space: nowrap;
     cursor: pointer;
 }
@@ -48,7 +45,7 @@
     display: grid;
     place-items: center;
     color: #fff;
-    border-radius: 7px;
+    border-radius: 10px;
     background: var(--primary);
     font-size: 19px;
     font-weight: 700;
@@ -59,7 +56,9 @@
     height: 100%;
     display: block;
     border-radius: inherit;
-    object-fit: cover;
+    padding: 4px;
+    background: #fff;
+    object-fit: contain;
 }
 
 .workspace-brand strong,
@@ -79,12 +78,12 @@
 
 .nav-list {
     display: grid;
-    gap: 6px;
+    gap: 4px;
     align-content: start;
     flex: 1 1 auto;
     min-height: 0;
-    margin-top: 22px;
-    padding-right: 4px;
+    margin-top: 12px;
+    padding-right: 0;
     overflow-x: hidden;
     overflow-y: auto;
     overscroll-behavior: contain;
@@ -199,7 +198,7 @@
 
 .nav-bottom {
     display: grid;
-    gap: 6px;
+    gap: 4px;
     margin-top: 12px;
     padding-top: 8px;
     border-top: 1px solid var(--line);
@@ -207,17 +206,19 @@
 
 .nav-item {
     width: 100%;
-    height: 44px;
+    height: 54px;
     display: flex;
     align-items: center;
-    gap: 13px;
-    padding: 0 13px;
+    flex-direction: column;
+    justify-content: center;
+    gap: 4px;
+    padding: 0 4px;
     color: #71798a;
     border: 0;
-    border-radius: 7px;
+    border-radius: 9px;
     background: transparent;
-    font-size: 14px;
-    text-align: left;
+    font-size: 9.5px;
+    text-align: center;
     white-space: nowrap;
     cursor: pointer;
 }
@@ -229,7 +230,14 @@
 
 .nav-item>.anticon {
     flex: 0 0 auto;
-    font-size: 20px;
+    font-size: 19px;
+}
+
+.nav-item>svg {
+    width: 19px;
+    height: 19px;
+    flex: 0 0 auto;
+    stroke-width: 1.8;
 }
 
 .nav-item.is-child>.anticon {
@@ -242,32 +250,41 @@
 }
 
 .nav-item.is-active {
+    position: relative;
     color: var(--primary);
     background: var(--primary-soft);
     font-weight: 600;
 }
 
-.is-collapsed .nav-item {
-    justify-content: center;
-    padding: 0;
-}
-
-.nav-toggle {
-    color: var(--muted);
+.nav-item.is-active::before {
+    content: '';
+    position: absolute;
+    left: -7px;
+    width: 3px;
+    height: 24px;
+    border-radius: 0 999px 999px 0;
+    background: var(--primary);
 }
 
 .workspace-content {
     min-width: 0;
     height: 100vh;
+    display: grid;
+    grid-template-rows: 44px minmax(0, 1fr);
+    overflow: hidden;
+    padding: 0;
+}
+
+.workspace-content>:not(.workspace-topbar) {
+    min-height: 0;
     overflow: auto;
-    padding: var(--desktop-content-padding);
 }
 
 /* macOS：`titleBarStyle: hiddenInset` 下窗口顶部 34px 是拖拽区（红绿灯所在），
    内容区必须整体让开这段高度，否则每个页面标题右侧的操作按钮都会落在
    拖拽区里「点不动、还顺手把窗口拖走」。Windows / Linux 该令牌为 0，无影响。 */
 :root[data-platform='mac'] .workspace-content {
-    padding-top: calc(var(--desktop-content-padding) + var(--platform-drag-height));
+    padding-top: var(--platform-drag-height);
 }
 
 .workspace-page {
@@ -655,13 +672,29 @@
 .assistant-layout {
     height: 100%;
     display: grid;
-    grid-template-columns: 250px minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
     overflow: hidden;
     background: #fff;
 }
 
-.assistant-layout.has-preview {
+.assistant-layout.has-history {
+    grid-template-columns: 250px minmax(0, 1fr);
+}
+
+.assistant-layout.has-preview:not(.has-history) {
+    grid-template-columns: minmax(0, 1fr) 370px;
+}
+
+.assistant-layout.has-history.has-preview {
     grid-template-columns: 250px minmax(0, 1fr) 370px;
+}
+
+.assistant-layout.is-active-chat.has-history {
+    grid-template-columns: 210px minmax(0, 1fr);
+}
+
+.assistant-layout.is-active-chat.has-history.has-preview {
+    grid-template-columns: 190px minmax(0, 1fr) 370px;
 }
 
 .document-preview-panel {
@@ -723,6 +756,30 @@
     margin-bottom: 18px;
 }
 
+.conversation-heading>span {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.conversation-collapse {
+    width: 30px;
+    height: 30px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    color: var(--muted);
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    cursor: pointer;
+}
+
+.conversation-collapse:hover {
+    color: var(--primary);
+    background: var(--primary-soft);
+}
+
 .conversation-heading h2 {
     margin: 0;
     font-size: 17px;
@@ -763,18 +820,42 @@
 }
 
 .chat-panel {
+    position: relative;
     min-width: 0;
     min-height: 0;
     display: grid;
-    grid-template-rows: 58px minmax(0, 1fr) auto;
+    grid-template-rows: 44px minmax(0, 1fr) auto;
     background: var(--workspace-bg);
+}
+
+.history-reveal {
+    position: absolute;
+    z-index: 6;
+    top: 54px;
+    left: 0;
+    width: 25px;
+    height: 42px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    color: var(--primary);
+    border: 1px solid var(--line);
+    border-left: 0;
+    border-radius: 0 9px 9px 0;
+    background: var(--surface);
+    box-shadow: 3px 4px 12px rgba(24, 24, 27, .06);
+    cursor: pointer;
+}
+
+.history-reveal:hover {
+    background: var(--primary-soft);
 }
 
 .chat-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0 20px;
+    padding: 0 16px;
     border-bottom: 1px solid var(--line);
     background: #fff;
 }
@@ -1356,6 +1437,14 @@
     gap: 10px;
     max-width: 920px;
     margin: 0 auto;
+    transition: max-width .24s cubic-bezier(.22, 1, .36, 1);
+}
+
+.assistant-layout.is-active-chat .message-composer,
+.assistant-layout.is-active-chat .composer-auto-capabilities,
+.assistant-layout.is-active-chat .composer-pending-toggle,
+.assistant-layout.is-active-chat .composer-pending-panel {
+    max-width: 1080px;
 }
 
 /* 本轮由服务端意图识别自动启用的能力提示：可逐个关闭（方案 B）。 */
@@ -1991,7 +2080,7 @@
 
 @media (max-width: 1280px) {
     .workspace-shell {
-        grid-template-columns: 190px minmax(0, 1fr);
+        grid-template-columns: 72px minmax(0, 1fr);
     }
 
     .application-grid {
@@ -2002,15 +2091,19 @@
         grid-template-columns: 210px minmax(440px, 1fr) 230px;
     }
 
-    .assistant-layout.has-preview {
-        grid-template-columns: 220px minmax(0, 1fr);
+    .assistant-layout.has-history.has-preview,
+    .assistant-layout.is-active-chat.has-history.has-preview {
+        grid-template-columns: 210px minmax(0, 1fr);
+    }
+
+    .assistant-layout.has-preview:not(.has-history) {
+        grid-template-columns: minmax(0, 1fr);
     }
 
     .document-preview-panel {
         position: fixed;
         z-index: 5;
-        /* 侧边栏在 <=1280px 时收窄到 190px，抽屉左边界必须同步，否则会盖住对话区。 */
-        inset: 58px 0 0 190px;
+        inset: 44px 0 0 72px;
     }
 }
 
@@ -2390,4 +2483,268 @@
    只在这里到达客户端；不展示用户就只能反复重试。 */
 .chat-tool-failure {
     margin-top: 12px;
+}
+
+.workspace-topbar {
+    position: relative;
+    z-index: 9;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin: 0;
+    padding: 0 var(--desktop-content-padding);
+    border-bottom: 1px solid var(--line);
+    background: color-mix(in srgb, var(--surface) 94%, transparent);
+    backdrop-filter: blur(14px);
+}
+
+.workspace-topbar-context,
+.workspace-topbar-actions,
+.workspace-topbar-user {
+    display: flex;
+    align-items: center;
+}
+
+.workspace-topbar-context {
+    gap: 8px;
+    color: var(--muted);
+    font-size: 11px;
+}
+
+.workspace-topbar-kicker {
+    color: var(--text);
+    font-weight: 700;
+    letter-spacing: .04em;
+}
+
+.workspace-topbar-actions {
+    gap: 9px;
+}
+
+.workspace-topbar-icon,
+.workspace-topbar-user {
+    height: 34px;
+    color: var(--text);
+    border: 1px solid var(--line);
+    background: var(--surface);
+    cursor: pointer;
+}
+
+.workspace-topbar-icon {
+    width: 34px;
+    justify-content: center;
+    border-radius: 9px;
+    font-size: 16px;
+}
+
+.workspace-topbar-user {
+    gap: 7px;
+    padding: 0 10px 0 5px;
+    border-radius: 9px;
+    font-size: 12px;
+}
+
+.workspace-topbar-user>span {
+    width: 24px;
+    height: 24px;
+    display: grid;
+    place-items: center;
+    color: #fff;
+    border-radius: 7px;
+    background: var(--primary);
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.workspace-topbar-icon:hover,
+.workspace-topbar-user:hover {
+    border-color: rgba(var(--primary-rgb), .34);
+    background: var(--primary-soft);
+}
+
+:root[data-platform='mac'] .workspace-topbar {
+    top: 0;
+}
+
+.assistant-layout.is-landing {
+    display: block;
+    overflow: auto;
+    background: var(--workspace-bg);
+}
+
+.assistant-home-stage {
+    min-height: 100%;
+}
+
+.workspace-topbar-back,
+.workspace-topbar-home {
+    display: inline-flex;
+    align-items: center;
+    color: inherit;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+}
+
+.workspace-topbar-back {
+    width: 28px;
+    height: 28px;
+    justify-content: center;
+    border-radius: 7px;
+}
+
+.workspace-topbar-back:hover {
+    color: var(--primary);
+    background: var(--primary-soft);
+}
+
+.workspace-topbar-home {
+    gap: 8px;
+    padding: 0;
+    font-size: 11px;
+}
+
+.skills-page {
+    width: min(1060px, 100%);
+    min-height: 100%;
+    margin: 0 auto;
+    padding: 34px 36px 56px;
+}
+
+.skills-heading {
+    margin-bottom: 24px;
+}
+
+.skills-heading h1 {
+    margin: 4px 0 6px;
+    font-size: 26px;
+}
+
+.skills-heading p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 13px;
+}
+
+.skills-eyebrow {
+    color: var(--primary);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .08em;
+}
+
+.skills-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.skill-card {
+    --skill-color: #475569;
+    --skill-bg: #e2e8f0;
+    display: grid;
+    grid-template-columns: 42px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 13px;
+    padding: 17px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--surface);
+}
+
+.skill-card>i {
+    width: 42px;
+    height: 42px;
+    display: grid;
+    place-items: center;
+    color: var(--skill-color);
+    border-radius: 10px;
+    background: var(--skill-bg);
+    font-size: 18px;
+    font-style: normal;
+}
+
+.skill-card>i svg {
+    width: 19px;
+    height: 19px;
+}
+
+.skill-card strong {
+    font-size: 13px;
+}
+
+.skill-card p {
+    margin: 4px 0 0;
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 1.5;
+}
+
+.skill-card-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    color: var(--success-ink);
+    font-size: 10px;
+}
+
+.skill-card-status>span {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--success);
+}
+
+.skill-card.tone-blue {
+    --skill-color: #1d4ed8;
+    --skill-bg: #dbeafe;
+}
+
+.skill-card.tone-violet {
+    --skill-color: #6d28d9;
+    --skill-bg: #ede9fe;
+}
+
+.skill-card.tone-amber {
+    --skill-color: #b45309;
+    --skill-bg: #fef3c7;
+}
+
+.skill-card.tone-green {
+    --skill-color: #047857;
+    --skill-bg: #d1fae5;
+}
+
+.skill-card.tone-red {
+    --skill-color: #b91c1c;
+    --skill-bg: #fee2e2;
+}
+
+.chat-back {
+    width: 30px;
+    height: 30px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    color: var(--muted);
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    cursor: pointer;
+}
+
+.chat-back:hover {
+    color: var(--primary);
+    background: var(--primary-soft);
+}
+
+@media (max-width: 860px) {
+    .skills-page {
+        padding-inline: 20px;
+    }
+
+    .skills-grid {
+        grid-template-columns: 1fr;
+    }
 }

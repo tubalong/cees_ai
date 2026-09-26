@@ -499,6 +499,9 @@ class TemplateId(StrEnum):
     business_standard = 'business-standard'
     editorial_modern = 'editorial-modern'
     executive_dark = 'executive-dark'
+    product_story = 'product-story'
+    academic_clean = 'academic-clean'
+    minimal_mono = 'minimal-mono'
 
 
 class GenerationMode(StrEnum):

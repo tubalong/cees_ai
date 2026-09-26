@@ -46,6 +46,9 @@ import { InsertDocumentImageTool } from './tools/executors/insert-document-image
 import { WebSearchTool } from './tools/executors/web-search.tool';
 import { ListDocumentsTool } from './tools/executors/list-documents.tool';
 import { ImportFinanceLedgerTool } from './tools/executors/import-finance-ledger.tool';
+import { ListTenantMembersTool } from './tools/executors/list-tenant-members.tool';
+import { AddProjectMemberTool } from './tools/executors/add-project-member.tool';
+import { AssignTaskTool } from './tools/executors/assign-task.tool';
 
 /**
  * 统一 AI 编排核心。会话事实源、事件重放与唯一 Tool Loop 运行器都在本模块内，
@@ -90,6 +93,9 @@ import { ImportFinanceLedgerTool } from './tools/executors/import-finance-ledger
     WebSearchTool,
     ListDocumentsTool,
     ImportFinanceLedgerTool,
+    ListTenantMembersTool,
+    AddProjectMemberTool,
+    AssignTaskTool,
   ],
 })
 export class AssistantModule { }

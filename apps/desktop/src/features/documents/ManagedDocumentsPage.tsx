@@ -16,7 +16,7 @@ function DocumentEditorModal({ documentId, onClose }: { documentId?: string; onC
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
     const [exporting, setExporting] = useState<'docx' | 'pdf' | 'pptx'>();
-    const [template, setTemplate] = useState<'business-standard' | 'editorial-modern' | 'executive-dark'>('editorial-modern');
+    const [template, setTemplate] = useState<'business-standard' | 'editorial-modern' | 'executive-dark' | 'product-story' | 'academic-clean' | 'minimal-mono'>('editorial-modern');
 
     useEffect(() => {
         if (!documentId) return;
@@ -65,6 +65,9 @@ function DocumentEditorModal({ documentId, onClose }: { documentId?: string; onC
                         { value: 'editorial-modern', label: t('现代图文') },
                         { value: 'business-standard', label: t('稳重商务') },
                         { value: 'executive-dark', label: t('深色高管') },
+                        { value: 'product-story', label: t('产品叙事') },
+                        { value: 'academic-clean', label: t('研究报告') },
+                        { value: 'minimal-mono', label: t('极简黑白') },
                     ]}
                 />
                 {(['docx', 'pdf', 'pptx'] as const).map((format) => <Button key={format} icon={<Download size={15} />} loading={exporting === format} onClick={() => void exportAs(format)}>{format.toUpperCase()}</Button>)}

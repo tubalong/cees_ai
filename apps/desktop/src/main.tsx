@@ -35,7 +35,7 @@ function ThemedApplication(): JSX.Element {
         token: {
             colorPrimary: '#565cf6',
             borderRadius: 6,
-            fontFamily: '"Manrope", "Noto Sans SC", sans-serif',
+            fontFamily: '"Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", "Noto Sans SC", sans-serif',
             fontSize: preferences.fontSize === 'small' ? 13 : preferences.fontSize === 'large' ? 16 : 14,
         },
     }} locale={locale}>

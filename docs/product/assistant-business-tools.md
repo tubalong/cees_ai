@@ -57,8 +57,13 @@
 | `list_projects` | READ | `project.read` | 发现层：返回 `project_id`、状态、成员/任务数 |
 | `create_project` | WRITE+确认 | `project.create` | 新建项目，负责人默认为发起人 |
 | `list_tasks` | READ | `task.read` | 发现层：按项目列出任务（含子任务），返回 `task_id` |
+| `list_tenant_members` | READ | `member.read` | 按姓名或账号查找当前租户有效成员，返回候选供用户消歧 |
+| `add_project_member` | WRITE+确认 | `project.member.manage` | 将已确认的租户成员加入项目，可设为项目成员或项目经理 |
 | `create_task` | WRITE+确认 | `task.create` | 新建任务，执行人默认发起人并在卡片写明 |
+| `assign_task` | WRITE+确认 | `task.assignee.manage` | 将项目内任务分配给项目成员，同时保留已有协作人 |
 | `update_task_status` | WRITE+确认 | `task.status.update` | 推进任务状态（进行中/受阻/完成/取消） |
+
+项目协同聊天固定先走发现再走动作：先用 `list_projects`、`list_tasks`、`list_tenant_members` 定位候选；同名或多候选由用户消歧；写操作再生成确认草稿。`add_project_member` 和 `assign_task` 的确认阶段会再次检查项目、成员和任务可见性，执行阶段重新读取任务版本并复用业务 Service 的权限、租户、项目成员和审计校验。
 
 两个刻意的设计决定：
 
@@ -86,12 +91,12 @@ const result = await runAsTenant(this.tenantContext, context, () =>
 - 上下文里的 `roles` 与 `permissions` 取**执行瞬间**的实时解析结果，不沿用生成工具清单时的快照；
 - 需要额外能力时仍推荐提供显式入口（如 `createDepartmentForContext`），二者可共存。
 
-### 2.5 已接入工具全清单（21 个）
+### 2.5 已接入工具全清单
 
 | 风险 | 工具 |
 | --- | --- |
-| READ（有权限直接执行） | `knowledge_search`、`list_departments`、`list_documents`、`list_knowledge_bases`、`list_knowledge_documents`、`list_projects`、`list_tasks`、`web_search` |
-| WRITE + 待确认草稿 | `create_department`、`create_knowledge_base`、`create_project`、`create_task`、`update_task_status`、`import_finance_ledger` |
+| READ（有权限直接执行） | `knowledge_search`、`list_departments`、`list_documents`、`list_knowledge_bases`、`list_knowledge_documents`、`list_projects`、`list_tasks`、`list_tenant_members`、`web_search` |
+| WRITE + 待确认草稿 | `create_department`、`create_knowledge_base`、`create_project`、`add_project_member`、`create_task`、`assign_task`、`update_task_status`、`import_finance_ledger` |
 | WRITE + 专属 UI 确认 | `save_to_knowledge`（目标知识库由用户在专门弹窗里选，不走草稿）、`insert_document_image`（在用户指定的文档章节末尾追加，不重写正文） |
 | EXTERNAL（生成新资产，直接执行） | `generate_docx`、`generate_pdf`、`generate_pptx`、`generate_xlsx`、`generate_image` |
 
@@ -109,7 +114,22 @@ const result = await runAsTenant(this.tenantContext, context, () =>
 > `import_finance_ledger` 不接收模型生成的行数据：调用参数必须为空对象，行数据由服务端
 > 从本轮唯一 XLSX/CSV 附件确定性重建，避免模型转抄上百行台账时出现金额或列错位。
 
-### 2.6 不在工具清单里的本机能力
+### 2.6 文档与演示模板
+
+PDF 与 PPTX 导出共用六套确定性渲染主题：
+
+| 模板 | 定位 |
+| --- | --- |
+| `business-standard` | 稳重商务 |
+| `editorial-modern` | 现代图文 |
+| `executive-dark` | 深色高管 |
+| `product-story` | 产品发布、路线图和市场叙事 |
+| `academic-clean` | 研究报告、数据分析和方案评审 |
+| `minimal-mono` | 极简黑白、打印和正式归档 |
+
+模板只影响 PDF/PPTX 确定性渲染层的版式色板，不改变 DocumentSpec、生成内容、权限或审计边界。桌面端文档导出页可以选择主题；聊天生成的 `generate_pdf` 与 `generate_pptx` 仍走同一资源和审计链路。
+
+### 2.7 不在工具清单里的本机能力
 
 桌面端有一部分能力**刻意不注册成 AI 工具**，而是走「只读上下文 + 客户端动作」两条路径。
 它们不在上表内，评审新增本机能力前必须先读本节：

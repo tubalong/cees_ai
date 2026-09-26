@@ -1,6 +1,6 @@
 import { ApartmentOutlined, LockOutlined, SafetyCertificateFilled, UserOutlined } from '@ant-design/icons';
 import {
-    Alert, App as AntdApp, Button, Checkbox, Form, Input, Modal, Spin, Typography,
+    Alert, App as AntdApp, Button, Checkbox, Form, Input, Modal, Typography,
 } from 'antd';
 import { useEffect, useState } from 'react';
 import {
@@ -19,6 +19,22 @@ function BrandLogo(): JSX.Element {
         <span className="brand-logo-fallback">C</span>
         {imageAvailable && <img src="./assests/logo.webp" alt="CEES AI" onError={() => setImageAvailable(false)} />}
     </span>;
+}
+
+function StartupScreen(): JSX.Element {
+    return <main className="session-loading" aria-label="CEES AI 正在启动">
+        <div className="startup-mark" aria-hidden="true">
+            <svg viewBox="0 0 120 120" role="presentation">
+                <circle className="startup-orbit startup-orbit-outer" cx="60" cy="60" r="52" />
+                <circle className="startup-orbit startup-orbit-inner" cx="60" cy="60" r="39" />
+                <circle className="startup-node startup-node-one" cx="60" cy="8" r="3" />
+                <circle className="startup-node startup-node-two" cx="99" cy="60" r="2.5" />
+            </svg>
+            <BrandLogo />
+        </div>
+        <div className="startup-copy"><strong>CEES AI</strong><span>Agent Workspace</span></div>
+        <div className="startup-progress" aria-hidden="true"><span /></div>
+    </main>;
 }
 
 interface LoginFormValues {
@@ -204,7 +220,7 @@ export default function App(): JSX.Element {
         setAuthState('authenticated');
     };
 
-    if (authState === 'loading') return <main className="session-loading"><Spin size="large" /></main>;
+    if (authState === 'loading') return <StartupScreen />;
     if (authState === 'authenticated' && authDomain === 'platform' && platformContext) {
         return <PlatformWorkspace context={platformContext} onSessionExpired={() => setAuthState('anonymous')} />;
     }
