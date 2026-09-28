@@ -13,6 +13,7 @@ import { WebSearchModule } from '../web-search/web-search.module';
 import { AssistantController } from './api/assistant.controller';
 import { AssistantActionDraftController } from './api/assistant-action-draft.controller';
 import { AssistantConnectorController } from './api/assistant-connector.controller';
+import { AssistantTasksController } from './api/assistant-tasks.controller';
 import { DingTalkConnectorPlannerService } from './connectors/dingtalk-connector-planner.service';
 import { TencentMeetingConnectorPlannerService } from './connectors/tencent-meeting-connector-planner.service';
 import { WeComConnectorPlannerService } from './connectors/wecom-connector-planner.service';
@@ -21,6 +22,11 @@ import { GitHubOAuthBrokerService } from './connectors/github-oauth-broker.servi
 import { ConversationService } from './conversation/conversation.service';
 import { EventService } from './conversation/event.service';
 import { AssistantActionDraftService } from './drafts/assistant-action-draft.service';
+import { OrchestrationToolsService } from './orchestration/orchestration-tools.service';
+import { PlanService } from './orchestration/plan.service';
+import { TaskEventService } from './orchestration/task-event.service';
+import { TaskRunnerService } from './orchestration/task-runner.service';
+import { TaskService } from './orchestration/task.service';
 import { ContextBuilderService } from './runtime/context-builder.service';
 import { IntentCapabilityService } from './runtime/intent-capability.service';
 import { TurnRunnerService } from './runtime/turn-runner.service';
@@ -33,6 +39,7 @@ import { GenerateDocumentTool } from './tools/executors/generate-document.tool';
 import { GenerateImageTool } from './tools/executors/generate-image.tool';
 import { CreateDepartmentTool } from './tools/executors/create-department.tool';
 import { CreateKnowledgeBaseTool } from './tools/executors/create-knowledge-base.tool';
+import { CreateOrchestrationTaskTool } from './tools/executors/create-orchestration-task.tool';
 import { CreateProjectTool } from './tools/executors/create-project.tool';
 import { CreateTaskTool } from './tools/executors/create-task.tool';
 import { KnowledgeSearchTool } from './tools/executors/knowledge-search.tool';
@@ -56,7 +63,7 @@ import { ImportFinanceLedgerTool } from './tools/executors/import-finance-ledger
  */
 @Module({
   imports: [AiOrchestrationModule, DocumentModule, FinanceModule, ImageModule, KnowledgeModule, OrganizationModule, ProjectModule, StorageModule, TaskModule, UserMemoryModule, WebSearchModule],
-  controllers: [AssistantActionDraftController, AssistantController, AssistantConnectorController],
+  controllers: [AssistantActionDraftController, AssistantController, AssistantConnectorController, AssistantTasksController],
   providers: [
     ConversationService,
     DingTalkConnectorPlannerService,
@@ -74,7 +81,13 @@ import { ImportFinanceLedgerTool } from './tools/executors/import-finance-ledger
     AssistantActionDraftService,
     TurnRunnerService,
     TurnRecoveryService,
+    TaskEventService,
+    PlanService,
+    TaskService,
+    TaskRunnerService,
+    OrchestrationToolsService,
     CreateDepartmentTool,
+    CreateOrchestrationTaskTool,
     CreateProjectTool,
     CreateTaskTool,
     GenerateDocumentTool,

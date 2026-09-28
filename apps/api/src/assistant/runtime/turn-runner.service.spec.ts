@@ -18,6 +18,7 @@ import { IntentCapabilityService } from './intent-capability.service';
 import { TurnRunnerService } from './turn-runner.service';
 import { TurnStateService } from './turn-state.service';
 import { UserMemoryService } from '../../user-memory/user-memory.service';
+import { OrchestrationToolsService } from '../orchestration/orchestration-tools.service';
 
 describe('TurnRunnerService', () => {
     it('creates a multimodal turn, sends parts to ai-service and persists a terminal answer', async () => {
@@ -1251,6 +1252,12 @@ function createHarness(options: {
         createDraft: jest.fn(async () => ({ draftId: 'draft-1', expiresAt: new Date(Date.now() + 15 * 60 * 1000) })),
     };
 
+    // 编排门控在本 spec 中透传：门控行为（无同事移除 / 名册注入 / fail-closed）
+    // 由 orchestration-tools.service.spec.ts 单独覆盖。
+    const orchestrationTools = {
+        gate: jest.fn(async (_tenantId: string, tools: unknown[]) => tools),
+    };
+
     const service = new TurnRunnerService(
         prisma as unknown as PrismaService,
         tenantContext,
@@ -1265,6 +1272,7 @@ function createHarness(options: {
         new IntentCapabilityService(),
         userMemory as unknown as UserMemoryService,
         actionDrafts as unknown as AssistantActionDraftService,
+        orchestrationTools as unknown as OrchestrationToolsService,
     );
     return {
         service,

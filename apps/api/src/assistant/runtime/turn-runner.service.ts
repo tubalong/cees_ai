@@ -36,6 +36,7 @@ import {
 import { ConversationService } from '../conversation/conversation.service';
 import { EventService } from '../conversation/event.service';
 import { AssistantActionDraftService } from '../drafts/assistant-action-draft.service';
+import { OrchestrationToolsService } from '../orchestration/orchestration-tools.service';
 import { ToolPolicyError, ToolPolicyService } from '../tools/tool-policy.service';
 import { ToolRegistryService } from '../tools/tool-registry';
 import { KNOWLEDGE_SEARCH_TOOL_NAME, ToolExecutionError, WEB_SEARCH_TOOL_NAME } from '../tools/tool.types';
@@ -87,6 +88,7 @@ export class TurnRunnerService implements OnModuleDestroy {
     private readonly intentCapability: IntentCapabilityService,
     private readonly userMemory: UserMemoryService,
     private readonly actionDrafts: AssistantActionDraftService,
+    private readonly orchestrationTools: OrchestrationToolsService,
   ) { }
 
   onModuleDestroy(): void {
@@ -298,14 +300,21 @@ export class TurnRunnerService implements OnModuleDestroy {
         if (tool.name === WEB_SEARCH_TOOL_NAME && !input.capabilities.webSearch) return false;
         return true;
       });
-      if (gatedTools.length === 0) {
+      // 编排门控：企业没有在职 AI 同事时仅移除编排工具——对话本身与其余
+      // 工具不受任何影响；有同事时把名册注入工具描述。门控服务自身
+      // fail-closed 且不抛出，任何异常都不会波及本轮对话。
+      const orchestratedTools = await this.orchestrationTools.gate(
+        input.conversation.tenantId,
+        gatedTools,
+      );
+      if (orchestratedTools.length === 0) {
         await this.runPlainTurn(input);
         return;
       }
       await this.runToolTurn({
         ...input,
         permissions: currentAuthorization.permissions,
-        allowedTools: gatedTools,
+        allowedTools: orchestratedTools,
       });
     } catch (error) {
       await this.state.failTurn(

@@ -10,6 +10,7 @@ import { normalizeAccount } from '../src/auth/account';
 import { ensurePlatformAdministrator } from '../src/platform-auth/platform-administrator.seed';
 import { TENANT_ADMIN_ROLE_CODE, TENANT_PERMISSION_DEFINITIONS } from '../src/rbac/permission-catalog';
 import { seedAiCreditBillingConfig } from './ai-credit-billing.seed';
+import { seedDefaultAssistantAgent } from './assistant-agent.seed';
 
 const prisma = new PrismaClient();
 
@@ -123,6 +124,9 @@ async function main(): Promise<void> {
     });
 
     await seedAiCreditBillingConfig(prisma);
+
+    // 开发环境的默认 AI 同事：让多步骤任务编排链路开箱可联调；生产不执行 full seed。
+    await seedDefaultAssistantAgent(prisma, { tenantId: tenant.id, createdBy: membership.id });
 }
 
 function assertFullSeedIsNotRunningInProduction(): void {
