@@ -1,6 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
 const path = require('node:path');
+const os = require('node:os');
 
 const {
     loadRemoteMcpDefinition,
@@ -10,6 +12,7 @@ const {
     createLoopbackOAuthCallback,
     RemoteMcpOAuthProvider,
 } = require('../dist-electron/connectors/mcp/remote-mcp-oauth.js');
+const { loadDesktopEnvironment } = require('../dist-electron/runtime-env.js');
 
 const GITHUB_ENDPOINT = 'https://api.githubcopilot.com/mcp/';
 
@@ -61,5 +64,33 @@ test('loopback OAuth 回调校验 state 并返回授权码', async () => {
         assert.equal(await callback.code, 'authorization-code');
     } finally {
         await callback.close();
+    }
+});
+
+test('Desktop 开发模式读取 GitHub 环境配置且不覆盖进程变量', () => {
+    const originalId = process.env.CEES_GITHUB_OAUTH_CLIENT_ID;
+    const originalSecret = process.env.CEES_GITHUB_OAUTH_CLIENT_SECRET;
+    const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'cees-desktop-env-'));
+    const environmentFile = path.join(tempDirectory, '.env');
+    fs.writeFileSync(environmentFile, [
+        'CEES_GITHUB_OAUTH_CLIENT_ID="file-client-id"',
+        'CEES_GITHUB_OAUTH_CLIENT_SECRET=file-client-secret # local only',
+    ].join('\n'));
+    try {
+        delete process.env.CEES_GITHUB_OAUTH_CLIENT_ID;
+        delete process.env.CEES_GITHUB_OAUTH_CLIENT_SECRET;
+        loadDesktopEnvironment(false, [environmentFile]);
+        assert.equal(process.env.CEES_GITHUB_OAUTH_CLIENT_ID, 'file-client-id');
+        assert.equal(process.env.CEES_GITHUB_OAUTH_CLIENT_SECRET, 'file-client-secret');
+
+        process.env.CEES_GITHUB_OAUTH_CLIENT_ID = 'process-value';
+        loadDesktopEnvironment(false, [environmentFile]);
+        assert.equal(process.env.CEES_GITHUB_OAUTH_CLIENT_ID, 'process-value');
+    } finally {
+        if (originalId === undefined) delete process.env.CEES_GITHUB_OAUTH_CLIENT_ID;
+        else process.env.CEES_GITHUB_OAUTH_CLIENT_ID = originalId;
+        if (originalSecret === undefined) delete process.env.CEES_GITHUB_OAUTH_CLIENT_SECRET;
+        else process.env.CEES_GITHUB_OAUTH_CLIENT_SECRET = originalSecret;
+        fs.rmSync(tempDirectory, { recursive: true, force: true });
     }
 });
