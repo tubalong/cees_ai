@@ -18,9 +18,6 @@ import { SecureTokenStore } from './secure-store';
 import { scanDirectorySize, scanVolumes } from './local-tools/disk-scanner';
 import { CleanupManager, type PublicCleanupJob } from './local-tools/cleanup-manager';
 import { writeSelectedFile, assertSavableExtension, buildSuggestedFileName } from './local-tools/file-saver';
-import { loadDesktopEnvironment } from './runtime-env';
-
-loadDesktopEnvironment(app.isPackaged);
 
 const connectorRegistry = new ConnectorRegistry();
 const dingtalkConnector = new DingTalkConnectorAdapter();
@@ -256,8 +253,8 @@ app.whenReady().then(async () => {
     ipcMain.handle('cees:connector-list', () => connectorHost.list());
     ipcMain.handle('cees:connector-status', (_event, connectorId: unknown) =>
         connectorHost.status(assertConnectorId(connectorId)));
-    ipcMain.handle('cees:connector-connect', (_event, connectorId: unknown) =>
-        connectorHost.connect(assertConnectorId(connectorId)));
+    ipcMain.handle('cees:connector-connect', (_event, connectorId: unknown, options: unknown) =>
+        connectorHost.connect(assertConnectorId(connectorId), options));
     ipcMain.handle('cees:connector-disconnect', (_event, connectorId: unknown) =>
         connectorHost.disconnect(assertConnectorId(connectorId)));
     ipcMain.handle('cees:connector-tools', (_event, connectorId: unknown) =>

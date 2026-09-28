@@ -14,10 +14,18 @@ import {
 } from './github.connector';
 import { GITHUB_CONNECTOR_MANIFEST } from './github.manifest';
 
+export interface GitHubConnectorConnectionOptions {
+    apiAccessToken: string;
+    exchangeUrl: string;
+    clientId: string;
+    authorizationEndpoint: string;
+    scope: string;
+}
+
 export interface GitHubConnectorDependencies {
     configure(userDataPath: string): void;
     status(): Promise<GitHubConnectorStatus>;
-    connect(): Promise<GitHubConnectorStatus>;
+    connect(options?: unknown): Promise<GitHubConnectorStatus>;
     disconnect(): Promise<GitHubConnectorStatus>;
     resetTools(): void;
     discoverTools(): Promise<GitHubConnectorTool[]>;
@@ -46,7 +54,7 @@ export class GitHubConnectorAdapter implements ConnectorAdapter<
 
     configure(userDataPath: string): void { this.dependencies.configure(userDataPath); }
     status(): Promise<GitHubConnectorStatus> { return this.dependencies.status(); }
-    connect(): Promise<GitHubConnectorStatus> { return this.dependencies.connect(); }
+    connect(options?: unknown): Promise<GitHubConnectorStatus> { return this.dependencies.connect(options); }
     disconnect(): Promise<GitHubConnectorStatus> { return this.dependencies.disconnect(); }
     resetTools(): void { this.dependencies.resetTools(); }
     discoverTools(): Promise<GitHubConnectorTool[]> { return this.dependencies.discoverTools(); }
