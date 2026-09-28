@@ -93,6 +93,11 @@ export type { AssistantTaskPlanReadyEvent } from './models/AssistantTaskPlanRead
 export type { AssistantTaskPlanStep } from './models/AssistantTaskPlanStep';
 export { AssistantTaskStatus } from './models/AssistantTaskStatus';
 export { AssistantTaskStep } from './models/AssistantTaskStep';
+export type { AssistantTaskStepCompletedEvent } from './models/AssistantTaskStepCompletedEvent';
+export type { AssistantTaskStepFailedEvent } from './models/AssistantTaskStepFailedEvent';
+export type { AssistantTaskStepProgressEvent } from './models/AssistantTaskStepProgressEvent';
+export type { AssistantTaskStepSkippedEvent } from './models/AssistantTaskStepSkippedEvent';
+export type { AssistantTaskStepStartedEvent } from './models/AssistantTaskStepStartedEvent';
 export type { AssistantTaskStreamEvent } from './models/AssistantTaskStreamEvent';
 export type { AuditEvent } from './models/AuditEvent';
 export type { AuditEventList } from './models/AuditEventList';

@@ -8,5 +8,10 @@ import type { AssistantTaskCreatedEvent } from './AssistantTaskCreatedEvent';
 import type { AssistantTaskFailedEvent } from './AssistantTaskFailedEvent';
 import type { AssistantTaskPlanConfirmedEvent } from './AssistantTaskPlanConfirmedEvent';
 import type { AssistantTaskPlanReadyEvent } from './AssistantTaskPlanReadyEvent';
-export type AssistantTaskStreamEvent = (AssistantTaskCreatedEvent | AssistantTaskPlanReadyEvent | AssistantTaskPlanConfirmedEvent | AssistantTaskCompletedEvent | AssistantTaskFailedEvent | AssistantTaskCancelledEvent);
+import type { AssistantTaskStepCompletedEvent } from './AssistantTaskStepCompletedEvent';
+import type { AssistantTaskStepFailedEvent } from './AssistantTaskStepFailedEvent';
+import type { AssistantTaskStepProgressEvent } from './AssistantTaskStepProgressEvent';
+import type { AssistantTaskStepSkippedEvent } from './AssistantTaskStepSkippedEvent';
+import type { AssistantTaskStepStartedEvent } from './AssistantTaskStepStartedEvent';
+export type AssistantTaskStreamEvent = (AssistantTaskCreatedEvent | AssistantTaskPlanReadyEvent | AssistantTaskPlanConfirmedEvent | AssistantTaskStepStartedEvent | AssistantTaskStepProgressEvent | AssistantTaskStepCompletedEvent | AssistantTaskStepFailedEvent | AssistantTaskStepSkippedEvent | AssistantTaskCompletedEvent | AssistantTaskFailedEvent | AssistantTaskCancelledEvent);
 

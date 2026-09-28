@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CEES AI API
-  version: 0.44.0
+  version: 0.45.0
   description: 以本文件为唯一事实源的公开 API 契约。资源与操作按 docs/api 约定补充。
 
 servers:
@@ -11208,6 +11208,13 @@ components:
         summary:
           type: [string, 'null']
           description: 结果摘要（回流只存摘要与引用）
+        outputRefs:
+          type: array
+          maxItems: 20
+          default: []
+          items:
+            $ref: '#/components/schemas/ToolResultResourceReference'
+          description: 产出资产引用列表（不含签名 URL）；尚未回流时为空数组
         attemptNo:
           type: integer
           minimum: 0
@@ -11318,6 +11325,11 @@ components:
         - $ref: '#/components/schemas/AssistantTaskCreatedEvent'
         - $ref: '#/components/schemas/AssistantTaskPlanReadyEvent'
         - $ref: '#/components/schemas/AssistantTaskPlanConfirmedEvent'
+        - $ref: '#/components/schemas/AssistantTaskStepStartedEvent'
+        - $ref: '#/components/schemas/AssistantTaskStepProgressEvent'
+        - $ref: '#/components/schemas/AssistantTaskStepCompletedEvent'
+        - $ref: '#/components/schemas/AssistantTaskStepFailedEvent'
+        - $ref: '#/components/schemas/AssistantTaskStepSkippedEvent'
         - $ref: '#/components/schemas/AssistantTaskCompletedEvent'
         - $ref: '#/components/schemas/AssistantTaskFailedEvent'
         - $ref: '#/components/schemas/AssistantTaskCancelledEvent'
@@ -11327,6 +11339,11 @@ components:
           task_created: '#/components/schemas/AssistantTaskCreatedEvent'
           plan_ready: '#/components/schemas/AssistantTaskPlanReadyEvent'
           plan_confirmed: '#/components/schemas/AssistantTaskPlanConfirmedEvent'
+          step_started: '#/components/schemas/AssistantTaskStepStartedEvent'
+          step_progress: '#/components/schemas/AssistantTaskStepProgressEvent'
+          step_completed: '#/components/schemas/AssistantTaskStepCompletedEvent'
+          step_failed: '#/components/schemas/AssistantTaskStepFailedEvent'
+          step_skipped: '#/components/schemas/AssistantTaskStepSkippedEvent'
           task_completed: '#/components/schemas/AssistantTaskCompletedEvent'
           task_failed: '#/components/schemas/AssistantTaskFailedEvent'
           task_cancelled: '#/components/schemas/AssistantTaskCancelledEvent'
@@ -11366,6 +11383,102 @@ components:
         seq: { type: integer, minimum: 1 }
         version: { type: integer, minimum: 1 }
         confirmedAt: { type: string, format: date-time }
+
+    AssistantTaskStepStartedEvent:
+      type: object
+      additionalProperties: false
+      required: [type, seq, stepId, stepKey, stepNo]
+      properties:
+        type: { type: string, const: step_started }
+        seq: { type: integer, minimum: 1 }
+        stepId:
+          type: string
+          format: uuid
+          description: 运行时步骤 ID
+        stepKey:
+          type: string
+          description: 计划内稳定标识（如 s1）
+        stepNo:
+          type: integer
+          minimum: 1
+          description: 步骤序号（计划内递增）
+        title:
+          type: [string, 'null']
+          description: 步骤简短名；计划未给出时为 null
+        assigneeName:
+          type: [string, 'null']
+          description: 执行同事名称（实时解析）；档案缺失时为 null
+
+    AssistantTaskStepProgressEvent:
+      type: object
+      additionalProperties: false
+      required: [type, seq, stepId, stepKey, note]
+      properties:
+        type: { type: string, const: step_progress }
+        seq: { type: integer, minimum: 1 }
+        stepId:
+          type: string
+          format: uuid
+        stepKey:
+          type: string
+        note:
+          type: string
+          maxLength: 500
+          description: 进度说明（展示级），例如正在执行的动作
+
+    AssistantTaskStepCompletedEvent:
+      type: object
+      additionalProperties: false
+      required: [type, seq, stepId, stepKey, summary, outputRefs]
+      properties:
+        type: { type: string, const: step_completed }
+        seq: { type: integer, minimum: 1 }
+        stepId:
+          type: string
+          format: uuid
+        stepKey:
+          type: string
+        summary:
+          type: string
+          description: 步骤结果摘要（回流总管与展示）
+        outputRefs:
+          type: array
+          maxItems: 20
+          items:
+            $ref: '#/components/schemas/ToolResultResourceReference'
+          description: 步骤产出资产引用（不含签名 URL）；无产出时为空数组
+
+    AssistantTaskStepFailedEvent:
+      type: object
+      additionalProperties: false
+      required: [type, seq, stepId, stepKey]
+      properties:
+        type: { type: string, const: step_failed }
+        seq: { type: integer, minimum: 1 }
+        stepId:
+          type: string
+          format: uuid
+        stepKey:
+          type: string
+        reason:
+          type: [string, 'null']
+          description: 失败原因摘要（展示级）
+
+    AssistantTaskStepSkippedEvent:
+      type: object
+      additionalProperties: false
+      required: [type, seq, stepId, stepKey]
+      properties:
+        type: { type: string, const: step_skipped }
+        seq: { type: integer, minimum: 1 }
+        stepId:
+          type: string
+          format: uuid
+        stepKey:
+          type: string
+        reason:
+          type: [string, 'null']
+          description: 跳过原因摘要（展示级）
 
     AssistantTaskCompletedEvent:
       type: object
