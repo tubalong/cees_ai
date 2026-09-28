@@ -18,6 +18,9 @@ import { SecureTokenStore } from './secure-store';
 import { scanDirectorySize, scanVolumes } from './local-tools/disk-scanner';
 import { CleanupManager, type PublicCleanupJob } from './local-tools/cleanup-manager';
 import { writeSelectedFile, assertSavableExtension, buildSuggestedFileName } from './local-tools/file-saver';
+import { loadDesktopEnvironment } from './runtime-env';
+
+loadDesktopEnvironment(app.isPackaged);
 
 const connectorRegistry = new ConnectorRegistry();
 const dingtalkConnector = new DingTalkConnectorAdapter();

@@ -61,7 +61,7 @@ CEES_GITHUB_OAUTH_CLIENT_ID=change_me
 CEES_GITHUB_OAUTH_CLIENT_SECRET=change_me
 ```
 
-`apps/desktop/mcp.json` 只保存固定远程 MCP URL、超时和默认禁用标志：`disabled=true` 表示不自动连接，不阻止用户点击“连接”手动启用。部署方需要在 GitHub OAuth App/GitHub App 中配置与官方允许的 loopback 回调规则一致的回调地址，并将 Client ID 和 Client Secret 注入 Desktop Main Process 运行环境。不得把 Client Secret、Access Token、Refresh Token 或个人 OAuth 值写入仓库、OpenAPI、Renderer 或 API 请求体。
+`apps/desktop/mcp.json` 只保存固定远程 MCP URL、超时和默认禁用标志：`disabled=true` 表示不自动连接，不阻止用户点击“连接”手动启用。开发模式下 Desktop 会从仓库根目录 `.env` 读取这两个变量，且不会覆盖已经存在的系统环境变量；打包运行时不会自动读取仓库 `.env`，应由启动器、安装环境或平台 Secret 注入 Desktop Main Process。部署方需要在 GitHub OAuth App/GitHub App 中配置与官方允许的 loopback 回调规则一致的回调地址。不得把 Client Secret、Access Token、Refresh Token 或个人 OAuth 值写入仓库、OpenAPI、Renderer 或 API 请求体。
 
 ## 6. 暂不支持
 
