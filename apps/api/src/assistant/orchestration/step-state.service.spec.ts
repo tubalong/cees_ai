@@ -137,6 +137,84 @@ describe('StepStateService', () => {
     expect(harness.events.appendInTransaction).not.toHaveBeenCalled();
   });
 
+  it('resumes a suspended step from WAITING_USER without a new attempt or step_started event', async () => {
+    const harness = createHarness({ stepUpdateCounts: [0, 1] });
+
+    await expect(harness.service.claimStep({
+      taskId: TASK_ID,
+      stepId: STEP_ID,
+      tenantId: TENANT_ID,
+      executionOwner: EXECUTION_OWNER,
+      leaseExpiresAt: new Date('2026-09-28T10:01:00.000Z'),
+      brief: { taskGoal: '季度分析' } as Prisma.InputJsonObject,
+      stepKey: 's1',
+      stepNo: 1,
+      stepTitle: '收集数据',
+      assigneeName: '数据助理',
+    })).resolves.toBe(true);
+
+    // 先试 READY 前态失败（首次派发），再走 WAITING_USER 恢复路径。
+    expect(harness.tx.assistantTaskStep.updateMany).toHaveBeenCalledTimes(2);
+    expect(harness.tx.assistantTaskStep.updateMany).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      where: expect.objectContaining({ status: AssistantTaskStepStatus.READY }),
+      data: expect.objectContaining({ attemptNo: { increment: 1 } }),
+    }));
+    expect(harness.tx.assistantTaskStep.updateMany).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      where: expect.objectContaining({ status: AssistantTaskStepStatus.WAITING_USER }),
+      data: {
+        status: AssistantTaskStepStatus.RUNNING,
+        brief: { taskGoal: '季度分析' },
+        executionOwner: EXECUTION_OWNER,
+        leaseExpiresAt: new Date('2026-09-28T10:01:00.000Z'),
+        heartbeatAt: expect.any(Date),
+      },
+    }));
+    // 恢复是同一执行尝试的继续：不递增 attemptNo，也不重复写 step_started。
+    expect(harness.events.appendInTransaction).not.toHaveBeenCalled();
+  });
+
+  it('suspends a leased step onto the user inside the caller transaction', async () => {
+    const harness = createHarness();
+    const now = new Date('2026-09-28T10:00:00.000Z');
+
+    await expect(harness.service.suspendStepInTransaction(harness.tx as unknown as Prisma.TransactionClient, {
+      taskId: TASK_ID,
+      stepId: STEP_ID,
+      tenantId: TENANT_ID,
+      executionOwner: EXECUTION_OWNER,
+      now,
+    })).resolves.toBe(true);
+
+    // 挂起即释放步骤租约：等待期间步骤不属于任何执行者。
+    expect(harness.tx.assistantTaskStep.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: STEP_ID,
+        taskId: TASK_ID,
+        tenantId: TENANT_ID,
+        status: AssistantTaskStepStatus.RUNNING,
+        executionOwner: EXECUTION_OWNER,
+        leaseExpiresAt: { gt: now },
+      },
+      data: {
+        status: AssistantTaskStepStatus.WAITING_USER,
+        executionOwner: null,
+        leaseExpiresAt: null,
+        heartbeatAt: now,
+      },
+    });
+  });
+
+  it('refuses to suspend a step whose lease was lost', async () => {
+    const harness = createHarness({ stepUpdateCount: 0 });
+
+    await expect(harness.service.suspendStepInTransaction(harness.tx as unknown as Prisma.TransactionClient, {
+      taskId: TASK_ID,
+      stepId: STEP_ID,
+      tenantId: TENANT_ID,
+      executionOwner: EXECUTION_OWNER,
+    })).resolves.toBe(false);
+  });
+
   it('skips a pending step with the dependency failure marker and event', async () => {
     const harness = createHarness();
 
@@ -279,6 +357,52 @@ describe('StepStateService', () => {
         stepId: STEP_ID,
         role: 'TOOL',
         content: '该操作在任务步骤内暂不可用',
+        toolCallRef: TOOL_CALL_ID,
+      }),
+    }));
+  });
+
+  it('rejects a proposed call inside the caller transaction for the authorization pause', async () => {
+    const harness = createHarness();
+
+    await expect(harness.service.rejectStepToolCallInTransaction(
+      harness.tx as unknown as Prisma.TransactionClient,
+      {
+        toolCallId: TOOL_CALL_ID,
+        taskId: TASK_ID,
+        stepId: STEP_ID,
+        tenantId: TENANT_ID,
+        executionOwner: EXECUTION_OWNER,
+        code: 'AUTHORIZATION_REQUIRED',
+        summary: '该操作需要用户授权，本次未执行',
+      },
+    )).resolves.toBe(true);
+
+    // 与 rejectStepToolCall 同语义（PROPOSED → REJECTED + TOOL 窗口消息），
+    // 但复用调用方事务，保证与挂起事项创建、步骤挂起原子提交。
+    expect(harness.tx.toolCall.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        id: TOOL_CALL_ID,
+        status: ToolCallStatus.PROPOSED,
+        taskStep: {
+          is: expect.objectContaining({
+            status: AssistantTaskStepStatus.RUNNING,
+            executionOwner: EXECUTION_OWNER,
+          }),
+        },
+      }),
+      data: expect.objectContaining({
+        status: ToolCallStatus.REJECTED,
+        errorCode: 'AUTHORIZATION_REQUIRED',
+        errorMessage: '该操作需要用户授权，本次未执行',
+        leaseExpiresAt: null,
+      }),
+    }));
+    expect(harness.tx.assistantTaskStepMessage.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        stepId: STEP_ID,
+        role: 'TOOL',
+        content: '该操作需要用户授权，本次未执行',
         toolCallRef: TOOL_CALL_ID,
       }),
     }));
@@ -461,18 +585,25 @@ describe('StepStateService', () => {
 function createHarness(options: {
   taskUpdateCount?: number;
   stepUpdateCount?: number;
+  stepUpdateCounts?: number[];
   transactionError?: unknown;
   staleSteps?: Array<{ id: string; stepKey: string; tenantId: string }>;
   interruptedCalls?: Array<{ id: string; taskStepId: string | null; status: ToolCallStatus }>;
   unfinishedImages?: Array<{ id: string; status: ManagedImageStatus }>;
   existingToolCall?: Record<string, unknown> | null;
 } = {}) {
+  const stepUpdateCounts = options.stepUpdateCounts ?? [options.stepUpdateCount ?? 1];
+  let stepUpdateCall = 0;
   const tx: Record<string, any> = {
     assistantTask: {
       updateMany: jest.fn().mockResolvedValue({ count: options.taskUpdateCount ?? 1 }),
     },
     assistantTaskStep: {
-      updateMany: jest.fn().mockResolvedValue({ count: options.stepUpdateCount ?? 1 }),
+      updateMany: jest.fn().mockImplementation(() => {
+        const value = stepUpdateCounts[Math.min(stepUpdateCall, stepUpdateCounts.length - 1)] ?? 1;
+        stepUpdateCall += 1;
+        return Promise.resolve({ count: value });
+      }),
       findUniqueOrThrow: jest.fn().mockResolvedValue({ nextToolCallSeq: 3 }),
     },
     assistantTaskStepMessage: {

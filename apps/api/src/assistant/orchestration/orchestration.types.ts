@@ -108,12 +108,56 @@ export interface PublicTaskResourceRef {
   id: string;
 }
 
+export type PublicTaskInteractionType = 'AUTHORIZATION' | 'QUESTION' | 'DECISION';
+
+export type PublicTaskInteractionStatus =
+  | 'PENDING'
+  | 'RESOLVED'
+  | 'REJECTED'
+  | 'EXPIRED'
+  | 'CANCELLED';
+
+/** 临时授权范围：仅本次有效 / 本任务内多次有效。 */
+export type PublicTaskInteractionScope = 'ONCE' | 'TASK';
+
+/** 提问与裁决的候选项（与契约 AssistantTaskInteractionOption 一致）。 */
+export interface PublicTaskInteractionOption {
+  id: string;
+  label: string;
+  description?: string | null;
+}
+
+/** 挂起事项公开形态（与契约 AssistantTaskInteraction 一致）。 */
+export interface PublicTaskInteraction {
+  id: string;
+  taskId: string;
+  stepId: string | null;
+  /** 触发步骤的计划内稳定标识（展示用）；任务级事项为 null。 */
+  stepKey: string | null;
+  type: PublicTaskInteractionType;
+  status: PublicTaskInteractionStatus;
+  /** 展示级摘要：授权=要执行的动作与影响；提问=问题文本；裁决=分岔说明。 */
+  summary: string;
+  /** 需要用户介入的原因：授权理由 / 提问背景 / 裁决背景。 */
+  reason: string | null;
+  options: PublicTaskInteractionOption[];
+  /** 临时授权范围；批准后填充（仅 AUTHORIZATION）。 */
+  scope: PublicTaskInteractionScope | null;
+  /** 用户解决内容（所选候选 id / 答复文本 / approve·reject）；未解决为 null。 */
+  resolution: string | null;
+  resolvedAt: Date | null;
+  expiresAt: Date | null;
+  createdAt: Date;
+}
+
 export interface PublicTaskDetail {
   task: PublicTask;
   /** 当前最新计划版本；PENDING_CONFIRM 阶段即待确认草案。 */
   currentPlan: PublicTaskPlan | null;
   /** 当前生效计划的运行时步骤；计划确认前为空数组。 */
   steps: PublicTaskStep[];
+  /** 挂起事项列表（含已解决历史，按创建时间升序）。 */
+  interactions: PublicTaskInteraction[];
 }
 
 export interface PublicTaskListResult {
@@ -181,6 +225,34 @@ export type PublicTaskStreamEvent =
     /** 跳过原因摘要（展示级）。 */
     reason: string | null;
   }
+  | {
+    type: 'interaction_requested';
+    seq: number;
+    interactionId: string;
+    interactionType: PublicTaskInteractionType;
+    stepId: string | null;
+    stepKey: string | null;
+    /** 展示级摘要（授权动作 / 问题 / 分岔说明）。 */
+    summary: string;
+    reason: string | null;
+    options: PublicTaskInteractionOption[];
+    expiresAt: string | null;
+  }
+  | {
+    type: 'interaction_resolved';
+    seq: number;
+    interactionId: string;
+    interactionType: PublicTaskInteractionType;
+    stepId: string | null;
+    stepKey: string | null;
+    /** 解决后状态：RESOLVED 已处理；REJECTED 已拒绝；EXPIRED 超时失效；CANCELLED 任务终态清理。 */
+    status: Exclude<PublicTaskInteractionStatus, 'PENDING'>;
+    /** 所选候选 id 或答复文本；拒绝与系统清理时为 null。 */
+    value: string | null;
+    /** 临时授权范围（仅授权批准）。 */
+    scope: PublicTaskInteractionScope | null;
+    resolvedAt: string;
+  }
   | { type: 'task_completed'; seq: number }
   | { type: 'task_failed'; seq: number; reason: string | null }
   | { type: 'task_cancelled'; seq: number };
@@ -204,6 +276,8 @@ export function toAssistantTaskEventType(
     case 'step_completed': return AssistantTaskEventType.STEP_COMPLETED;
     case 'step_failed': return AssistantTaskEventType.STEP_FAILED;
     case 'step_skipped': return AssistantTaskEventType.STEP_SKIPPED;
+    case 'interaction_requested': return AssistantTaskEventType.INTERACTION_REQUESTED;
+    case 'interaction_resolved': return AssistantTaskEventType.INTERACTION_RESOLVED;
     case 'task_completed': return AssistantTaskEventType.TASK_COMPLETED;
     case 'task_failed': return AssistantTaskEventType.TASK_FAILED;
     case 'task_cancelled': return AssistantTaskEventType.TASK_CANCELLED;

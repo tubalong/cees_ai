@@ -8,6 +8,7 @@ import {
 import type { ToolDefinition } from '../tools/tool.types';
 import { ToolPolicyService } from '../tools/tool-policy.service';
 import { ToolRegistryService } from '../tools/tool-registry';
+import type { InteractionService } from './interaction.service';
 import { StepRunnerService } from './step-runner.service';
 import { StepStateService } from './step-state.service';
 import { TaskEventService } from './task-event.service';
@@ -36,6 +37,16 @@ const READ_TOOL = {
   parameters: { type: 'object', properties: { query: { type: 'string' } } },
   requiredPermissions: [],
   riskLevel: 'READ',
+};
+
+const WRITE_TOOL = {
+  name: 'import_finance_ledger',
+  version: '1.0.0',
+  displayName: '导入台账',
+  description: '导入财务台账',
+  parameters: { type: 'object', properties: {} },
+  requiredPermissions: ['finance.ledger.import'],
+  riskLevel: 'WRITE',
 };
 
 describe('StepRunnerService', () => {
@@ -166,11 +177,11 @@ describe('StepRunnerService', () => {
     expect(harness.state.succeedStep).toHaveBeenCalledWith(expect.objectContaining({ summary: '完成' }));
   });
 
-  it('prunes WRITE tools and step-excluded tools from the tool face', async () => {
+  it('keeps WRITE tools on the tool face and prunes only step-excluded tools', async () => {
     const harness = createHarness({
       tools: [
         READ_TOOL,
-        { ...READ_TOOL, name: 'create_task', riskLevel: 'WRITE' },
+        { ...READ_TOOL, name: 'create_task', riskLevel: 'WRITE', requiredPermissions: ['task.create'] },
         { ...READ_TOOL, name: 'generate_xlsx', riskLevel: 'EXTERNAL' },
         { ...READ_TOOL, name: 'create_orchestration_task', riskLevel: 'WRITE' },
       ],
@@ -182,27 +193,177 @@ describe('StepRunnerService', () => {
     await harness.service.executeStep(executionInput());
 
     const request = harness.gateway.streamToolTurn.mock.calls[0]![0] as Record<string, any>;
-    expect(request.tools).toEqual([{
-      name: 'knowledge_search',
-      description: READ_TOOL.description,
-      parameters: READ_TOOL.parameters,
-    }]);
+    expect(request.tools).toEqual([
+      {
+        name: 'knowledge_search',
+        description: READ_TOOL.description,
+        parameters: READ_TOOL.parameters,
+      },
+      {
+        name: 'create_task',
+        description: READ_TOOL.description,
+        parameters: READ_TOOL.parameters,
+      },
+    ]);
   });
 
-  it('rejects a WRITE tool call hallucinated by the model', async () => {
-    const harness = createHarness({ tools: [READ_TOOL] });
+  it('suspends the step and raises an authorization interaction when a WRITE tool has no grant', async () => {
+    const harness = createHarness({ tools: [READ_TOOL, WRITE_TOOL] });
+    harness.gateway.streamToolTurn.mockResolvedValueOnce(stream([
+      { type: 'tool_calls', tool_calls: [{ id: 'call-w1', name: 'import_finance_ledger', arguments: {} }] },
+      { type: 'completed', latency_ms: 4, finish_reason: 'tool_calls' },
+    ]));
+    const writeExecute = jest.fn();
+    harness.toolPolicy.approve.mockReturnValue({
+      definition: { ...WRITE_TOOL, execute: writeExecute },
+      parsedArguments: {},
+    });
+    harness.state.createStepToolCall.mockImplementation(echoRecord);
+
+    await harness.service.executeStep(executionInput());
+
+    expect(harness.interactions.findUsableAuthorization).toHaveBeenCalledWith(expect.objectContaining({
+      taskId: TASK_ID,
+      permissionCode: 'finance.ledger.import',
+    }));
+    // 原子挂起：工具结算 REJECTED（写 TOOL 窗口消息）→ 创建授权交互 → 步骤 WAITING_USER。
+    expect(harness.state.rejectStepToolCallInTransaction).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ toolCallId: 'tc-call-w1', code: 'AUTHORIZATION_REQUIRED' }),
+    );
+    expect(harness.interactions.createInTransaction).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        type: 'AUTHORIZATION',
+        stepId: STEP_ID,
+        stepKey: 's1',
+        permissionCode: 'finance.ledger.import',
+        toolName: 'import_finance_ledger',
+      }),
+    );
+    expect(harness.state.suspendStepInTransaction).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ taskId: TASK_ID, stepId: STEP_ID, executionOwner: EXECUTION_OWNER }),
+    );
+    // 挂起即中止本步：不执行、不继续模型轮次、不回流终态。
+    expect(writeExecute).not.toHaveBeenCalled();
+    expect(harness.gateway.streamToolTurn).toHaveBeenCalledTimes(1);
+    expect(harness.state.succeedStep).not.toHaveBeenCalled();
+    expect(harness.state.failStep).not.toHaveBeenCalled();
+  });
+
+  it('consumes a usable authorization after claiming and executes the WRITE tool', async () => {
+    const harness = createHarness({ tools: [READ_TOOL, WRITE_TOOL] });
     harness.gateway.streamToolTurn
       .mockResolvedValueOnce(stream([
-        { type: 'tool_calls', tool_calls: [{ id: 'call-9', name: 'import_finance_ledger', arguments: {} }] },
+        { type: 'tool_calls', tool_calls: [{ id: 'call-w1', name: 'import_finance_ledger', arguments: {} }] },
         { type: 'completed', latency_ms: 4, finish_reason: 'tool_calls' },
       ]))
       .mockResolvedValueOnce(stream([
-        { type: 'content_delta', text: '该操作改由用户在对话中发起。' },
+        { type: 'content_delta', text: '台账导入完成，共 128 条。' },
+        { type: 'completed', latency_ms: 4, finish_reason: 'stop' },
+      ]));
+    const writeExecute = jest.fn().mockResolvedValue({ summary: '导入 128 条', resourceType: null, resourceId: null });
+    harness.toolPolicy.approve.mockReturnValue({
+      definition: { ...WRITE_TOOL, execute: writeExecute },
+      parsedArguments: {},
+    });
+    harness.state.createStepToolCall.mockImplementation(echoRecord);
+    harness.interactions.findUsableAuthorization.mockResolvedValue({ id: 'interaction-1' });
+
+    await harness.service.executeStep(executionInput());
+
+    // 授权消费在抢占成功之后（失去租约不浪费用户批准），消费成功才执行。
+    const claimOrder = harness.state.claimStepToolExecution.mock.invocationCallOrder[0]!;
+    const consumeOrder = harness.interactions.markAuthorizationUsed.mock.invocationCallOrder[0]!;
+    expect(consumeOrder).toBeGreaterThan(claimOrder);
+    expect(harness.interactions.markAuthorizationUsed).toHaveBeenCalledWith(expect.objectContaining({
+      interactionId: 'interaction-1',
+      membershipId: MEMBERSHIP_ID,
+      tenantId: TENANT_ID,
+    }));
+    expect(writeExecute).toHaveBeenCalledTimes(1);
+    expect(harness.state.completeStepToolCall).toHaveBeenCalledWith(expect.objectContaining({ summary: '导入 128 条' }));
+    expect(harness.state.succeedStep).toHaveBeenCalledWith(expect.objectContaining({ summary: '台账导入完成，共 128 条。' }));
+  });
+
+  it('fails the tool call without executing when the grant is invalidated before consumption', async () => {
+    const harness = createHarness({ tools: [READ_TOOL, WRITE_TOOL] });
+    harness.gateway.streamToolTurn
+      .mockResolvedValueOnce(stream([
+        { type: 'tool_calls', tool_calls: [{ id: 'call-w1', name: 'import_finance_ledger', arguments: {} }] },
+        { type: 'completed', latency_ms: 4, finish_reason: 'tool_calls' },
+      ]))
+      .mockResolvedValueOnce(stream([
+        { type: 'content_delta', text: '授权已失效，未能导入。' },
         { type: 'completed', latency_ms: 4, finish_reason: 'stop' },
       ]));
     const writeExecute = jest.fn();
     harness.toolPolicy.approve.mockReturnValue({
-      definition: { ...READ_TOOL, name: 'import_finance_ledger', riskLevel: 'WRITE', displayName: '导入台账', execute: writeExecute },
+      definition: { ...WRITE_TOOL, execute: writeExecute },
+      parsedArguments: {},
+    });
+    harness.state.createStepToolCall.mockImplementation(echoRecord);
+    harness.interactions.findUsableAuthorization.mockResolvedValue({ id: 'interaction-1' });
+    harness.interactions.markAuthorizationUsed.mockResolvedValue(false);
+
+    await harness.service.executeStep(executionInput());
+
+    expect(writeExecute).not.toHaveBeenCalled();
+    expect(harness.state.failStepToolCall).toHaveBeenCalledWith(expect.objectContaining({
+      toolCallId: 'tc-call-w1',
+      code: 'AUTHORIZATION_EXPIRED',
+    }));
+    expect(harness.state.succeedStep).toHaveBeenCalledWith(expect.objectContaining({
+      summary: '授权已失效，未能导入。',
+    }));
+  });
+
+  it('rejects a repeated WRITE call after the user denied the authorization', async () => {
+    const harness = createHarness({ tools: [READ_TOOL, WRITE_TOOL] });
+    harness.gateway.streamToolTurn
+      .mockResolvedValueOnce(stream([
+        { type: 'tool_calls', tool_calls: [{ id: 'call-w2', name: 'import_finance_ledger', arguments: {} }] },
+        { type: 'completed', latency_ms: 4, finish_reason: 'tool_calls' },
+      ]))
+      .mockResolvedValueOnce(stream([
+        { type: 'content_delta', text: '缺少授权，本步骤无法完成导入。' },
+        { type: 'completed', latency_ms: 4, finish_reason: 'stop' },
+      ]));
+    harness.toolPolicy.approve.mockReturnValue({
+      definition: { ...WRITE_TOOL, execute: jest.fn() },
+      parsedArguments: {},
+    });
+    harness.state.createStepToolCall.mockImplementation(echoRecord);
+    harness.interactions.findLatestAuthorization.mockResolvedValue({ id: 'interaction-1', status: 'REJECTED' });
+
+    await harness.service.executeStep(executionInput());
+
+    expect(harness.state.rejectStepToolCall).toHaveBeenCalledWith(expect.objectContaining({
+      toolCallId: 'tc-call-w2',
+      code: 'AUTHORIZATION_REJECTED',
+    }));
+    // 拒绝后不再重复挂起；循环继续由模型给出替代结论。
+    expect(harness.interactions.createInTransaction).not.toHaveBeenCalled();
+    expect(harness.state.suspendStepInTransaction).not.toHaveBeenCalled();
+    expect(harness.state.succeedStep).toHaveBeenCalledWith(expect.objectContaining({
+      summary: '缺少授权，本步骤无法完成导入。',
+    }));
+  });
+
+  it('rejects a WRITE tool definition without declared permissions', async () => {
+    const harness = createHarness({ tools: [READ_TOOL, WRITE_TOOL] });
+    harness.gateway.streamToolTurn
+      .mockResolvedValueOnce(stream([
+        { type: 'tool_calls', tool_calls: [{ id: 'call-w3', name: 'rogue_write', arguments: {} }] },
+        { type: 'completed', latency_ms: 4, finish_reason: 'tool_calls' },
+      ]))
+      .mockResolvedValueOnce(stream([
+        { type: 'content_delta', text: '该操作不可用。' },
+        { type: 'completed', latency_ms: 4, finish_reason: 'stop' },
+      ]));
+    harness.toolPolicy.approve.mockReturnValue({
+      definition: { ...WRITE_TOOL, name: 'rogue_write', requiredPermissions: [], execute: jest.fn() },
       parsedArguments: {},
     });
     harness.state.createStepToolCall.mockImplementation(echoRecord);
@@ -210,13 +371,8 @@ describe('StepRunnerService', () => {
     await harness.service.executeStep(executionInput());
 
     expect(harness.state.rejectStepToolCall).toHaveBeenCalledWith(expect.objectContaining({
+      toolCallId: 'tc-call-w3',
       code: 'STEP_TOOL_FORBIDDEN',
-      toolCallId: 'tc-call-9',
-    }));
-    expect(writeExecute).not.toHaveBeenCalled();
-    // 拒绝后循环继续：模型下一轮给出替代结论。
-    expect(harness.state.succeedStep).toHaveBeenCalledWith(expect.objectContaining({
-      summary: '该操作改由用户在对话中发起。',
     }));
   });
 
@@ -371,6 +527,7 @@ function createHarness(options: {
         args?.select?.executedResourceType ? (options.outputRefRows ?? []) : (options.windowToolCalls ?? []),
       )),
     },
+    $transaction: jest.fn().mockImplementation(async (work: (tx: unknown) => unknown) => work({})),
   };
   const gateway = { streamToolTurn: jest.fn(), streamChat: jest.fn() };
   const toolRegistry = {
@@ -388,6 +545,14 @@ function createHarness(options: {
     completeStepToolCall: jest.fn().mockResolvedValue(true),
     failStepToolCall: jest.fn().mockResolvedValue(true),
     rejectStepToolCall: jest.fn().mockResolvedValue(true),
+    rejectStepToolCallInTransaction: jest.fn().mockResolvedValue(true),
+    suspendStepInTransaction: jest.fn().mockResolvedValue(true),
+  };
+  const interactions = {
+    findUsableAuthorization: jest.fn().mockResolvedValue(null),
+    findLatestAuthorization: jest.fn().mockResolvedValue(null),
+    markAuthorizationUsed: jest.fn().mockResolvedValue(true),
+    createInTransaction: jest.fn().mockResolvedValue({ id: 'interaction-1' }),
   };
   const taskEvents = { append: jest.fn().mockResolvedValue(1) };
   const service = new StepRunnerService(
@@ -397,8 +562,9 @@ function createHarness(options: {
     toolPolicy as unknown as ToolPolicyService,
     state as unknown as StepStateService,
     taskEvents as unknown as TaskEventService,
+    interactions as unknown as InteractionService,
   );
-  return { service, prisma, gateway, toolPolicy, state, taskEvents };
+  return { service, prisma, gateway, toolPolicy, state, taskEvents, interactions };
 }
 
 async function* stream(events: ToolTurnStreamEvent[]): AsyncGenerator<ToolTurnStreamEvent> {

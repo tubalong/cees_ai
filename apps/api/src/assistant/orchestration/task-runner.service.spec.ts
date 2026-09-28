@@ -1,4 +1,5 @@
 import type { PrismaService } from '../../database/prisma.service';
+import { InteractionService } from './interaction.service';
 import { StepRunnerService } from './step-runner.service';
 import { StepStateService } from './step-state.service';
 import { TaskEventService } from './task-event.service';
@@ -63,6 +64,11 @@ describe('TaskRunnerService', () => {
       TASK_ID,
       TENANT_ID,
       { type: 'task_completed' },
+    );
+    // 终态清理：未决挂起随任务终态批量关闭（与终态事件同一事务）。
+    expect(harness.interactions.closePendingForTaskInTransaction).toHaveBeenCalledWith(
+      harness.tx,
+      { taskId: TASK_ID, tenantId: TENANT_ID, status: 'CANCELLED', now: expect.any(Date) },
     );
   });
 
@@ -156,11 +162,105 @@ describe('TaskRunnerService', () => {
     expect(harness.stepRunner.executeStep).not.toHaveBeenCalled();
     expect(harness.taskEvents.appendInTransaction).not.toHaveBeenCalled();
   });
+
+  it('marks the task waiting for the user when a suspended step still has pending interactions', async () => {
+    const harness = createHarness({
+      steps: [{ id: STEP_ONE, stepKey: 's1', status: 'WAITING_USER', dependsOn: [], leaseExpiresAt: null }],
+      pendingTaskIds: [TASK_ID],
+    });
+
+    await harness.service.startTask(TASK_ID);
+    await waitForTaskWaiting(harness);
+
+    // 未决事项未解决：不派发、不终态；RUNNING → WAITING_USER 并释放任务租约。
+    expect(harness.stepRunner.executeStep).not.toHaveBeenCalled();
+    expect(harness.prisma.assistantTask.updateMany).toHaveBeenCalledWith({
+      where: { id: TASK_ID, status: 'RUNNING', executionOwner: harness.owner() },
+      data: {
+        status: 'WAITING_USER',
+        executionOwner: null,
+        leaseExpiresAt: null,
+        heartbeatAt: expect.any(Date),
+      },
+    });
+    expect(harness.taskEvents.appendInTransaction).not.toHaveBeenCalled();
+  });
+
+  it('keeps dispatching ready steps while another step waits on a pending interaction', async () => {
+    const harness = createHarness({
+      steps: [
+        { id: STEP_ONE, stepKey: 's1', status: 'WAITING_USER', dependsOn: [], leaseExpiresAt: null },
+        { id: STEP_TWO, stepKey: 's2', status: 'READY', dependsOn: [], leaseExpiresAt: null },
+      ],
+      pendingTaskIds: [TASK_ID],
+    });
+
+    await harness.service.startTask(TASK_ID);
+    await waitForTaskWaiting(harness);
+
+    // 挂起不阻塞：就绪步骤先派发；可执行步骤全部收敛后才转 WAITING_USER。
+    expect(harness.stepRunner.executeStep).toHaveBeenCalledTimes(1);
+    expect(harness.stepRunner.executeStep.mock.calls[0]![0].stepId).toBe(STEP_TWO);
+    expect(harness.prisma.assistantTask.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ id: TASK_ID, status: 'RUNNING' }),
+      data: expect.objectContaining({ status: 'WAITING_USER' }),
+    }));
+  });
+
+  it('re-dispatches the suspended step once its interactions are resolved', async () => {
+    const harness = createHarness({
+      steps: [{ id: STEP_ONE, stepKey: 's1', status: 'WAITING_USER', dependsOn: [], leaseExpiresAt: null }],
+    });
+
+    await harness.service.startTask(TASK_ID);
+    await waitForFinalize(harness);
+
+    // 无未决事项：挂起步骤直接重新派发（断点续跑，不经过 READY 重规划）。
+    expect(harness.interactions.hasPendingForTask).toHaveBeenCalledWith(TASK_ID);
+    expect(harness.stepRunner.executeStep).toHaveBeenCalledTimes(1);
+    expect(harness.stepRunner.executeStep.mock.calls[0]![0].stepId).toBe(STEP_ONE);
+    expect(harness.taskEvents.appendInTransaction).toHaveBeenCalledWith(
+      harness.tx,
+      TASK_ID,
+      TENANT_ID,
+      { type: 'task_completed' },
+    );
+  });
+
+  it('resumes waiting tasks without pending interactions during the recovery scan', async () => {
+    const harness = createHarness({
+      waitingTasks: [{ id: 'task-1' }, { id: 'task-2' }],
+      pendingTaskIds: ['task-1'],
+    });
+
+    await expect(harness.service.resumeWaitingTasks()).resolves.toBe(1);
+
+    // task-1 仍有未决事项：保持挂起，不迁移不调度。
+    expect(harness.prisma.assistantTask.updateMany).not.toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ id: 'task-1' }),
+    }));
+    // task-2 已无未决事项：WAITING_USER → RUNNING 后重新认领调度。
+    expect(harness.prisma.assistantTask.updateMany).toHaveBeenCalledWith({
+      where: { id: 'task-2', status: 'WAITING_USER' },
+      data: {
+        status: 'RUNNING',
+        executionOwner: null,
+        leaseExpiresAt: null,
+        heartbeatAt: expect.any(Date),
+      },
+    });
+    expect(harness.prisma.assistantTask.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ id: 'task-2', status: 'RUNNING' }),
+      data: expect.objectContaining({ executionOwner: expect.any(String) }),
+    }));
+  });
 });
 
 function createHarness(options: {
   steps?: StepRow[];
   staleTasks?: Array<{ id: string }>;
+  waitingTasks?: Array<{ id: string }>;
+  pendingTaskIds?: string[];
   activeStepTaskIds?: string[];
   claimedOwnerOverride?: string;
   executeStepBehavior?: 'succeed' | 'fail' | 'throw';
@@ -187,7 +287,11 @@ function createHarness(options: {
         if (args.data?.executionOwner) capturedOwner = args.data.executionOwner;
         return Promise.resolve({ count: 1 });
       }),
-      findMany: jest.fn().mockResolvedValue(options.staleTasks ?? []),
+      findMany: jest.fn().mockImplementation((args: { where?: { status?: string } }) => Promise.resolve(
+        args.where?.status === 'WAITING_USER'
+          ? (options.waitingTasks ?? [])
+          : (options.staleTasks ?? []),
+      )),
     },
     assistantTaskStep: {
       findMany: jest.fn().mockImplementation((args: { where: { taskId: string } }) => Promise.resolve(
@@ -263,11 +367,19 @@ function createHarness(options: {
   };
 
   const taskEvents = { appendInTransaction: jest.fn().mockResolvedValue(1) };
+  const interactions = {
+    closePendingForTaskInTransaction: jest.fn().mockResolvedValue(0),
+    expireOverdueInteractions: jest.fn().mockResolvedValue(0),
+    hasPendingForTask: jest.fn().mockImplementation(
+      async (taskId: string) => (options.pendingTaskIds ?? []).includes(taskId),
+    ),
+  };
   const service = new TaskRunnerService(
     prisma as unknown as PrismaService,
     stepRunner as unknown as StepRunnerService,
     stepState as unknown as StepStateService,
     taskEvents as unknown as TaskEventService,
+    interactions as unknown as InteractionService,
   );
   return {
     service,
@@ -277,6 +389,7 @@ function createHarness(options: {
     stepState,
     stepRunner,
     taskEvents,
+    interactions,
     owner: () => capturedOwner,
   };
 }
@@ -288,6 +401,18 @@ async function waitForFinalize(harness: { taskEvents: { appendInTransaction: jes
     await new Promise((resolve) => setImmediate(resolve));
   }
   throw new Error('task drive loop did not finalize in time');
+}
+
+/** 等待任务被挂起（markTaskWaitingUser 的迁移信号）。 */
+async function waitForTaskWaiting(harness: { prisma: Record<string, any> }): Promise<void> {
+  for (let attempt = 0; attempt < 500; attempt++) {
+    const marked = harness.prisma.assistantTask.updateMany.mock.calls.some(
+      (call: unknown[]) => (call[0] as { data?: { status?: string } }).data?.status === 'WAITING_USER',
+    );
+    if (marked) return;
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  throw new Error('task was not marked WAITING_USER in time');
 }
 
 async function flush(): Promise<void> {

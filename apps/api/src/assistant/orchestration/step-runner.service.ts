@@ -1,5 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import {
+  AssistantTaskInteraction,
+  AssistantTaskInteractionStatus,
   AssistantTaskStatus,
   AssistantTaskStepStatus,
   ConversationMessageRole,
@@ -26,7 +28,8 @@ import {
 import { canonicalJson, toToolFailure } from '../tools/tool-failure';
 import { ToolPolicyService } from '../tools/tool-policy.service';
 import { ToolRegistryService } from '../tools/tool-registry';
-import { toChatToolDefinition } from '../tools/tool.types';
+import { toChatToolDefinition, type ToolDefinition } from '../tools/tool.types';
+import { InteractionService } from './interaction.service';
 import type { PublicTaskPlanStep, PublicTaskResourceRef } from './orchestration.types';
 import { StepStateService } from './step-state.service';
 import {
@@ -43,9 +46,9 @@ const MAX_STEP_INSTRUCTIONS_CHARS = 32_000;
 /** 单条依赖摘要注入上限：明细按引用读取，不复制进派发书。 */
 const MAX_DEPENDENCY_SUMMARY_CHARS = 600;
 /**
- * 工具面排除清单（WRITE 风险过滤之外的双保险）：
+ * 工具面排除清单（授权链之外的双保险）：
  * - generate_xlsx 依赖「本轮上传的表格」，步骤窗口没有轮次输入；
- * - create_orchestration_task 已是 WRITE，列出防止将来风险级别调整引入步骤内嵌套建任务。
+ * - create_orchestration_task 禁止步骤内嵌套建任务。
  */
 const STEP_EXCLUDED_TOOLS: ReadonlySet<string> = new Set([
   'generate_xlsx',
@@ -96,7 +99,8 @@ interface StepExecutionContext {
  * 任务步骤执行器：一个步骤 = 一次独立执行窗口。派发书（同事人格 + 任务目标 +
  * 本步要求 + 依赖产出摘要）作为 instructions 注入；窗口消息从
  * `assistant_task_step_messages` 重建；工具面按「发起人实时权限 ∩ 步骤策略」
- * 裁剪，绝不开放 WRITE。终态回流「摘要 + 产出引用」并写任务事件。
+ * 裁剪，WRITE 工具经授权链把关（临时授权放行 / 挂起等用户批准）。终态回流
+ * 「摘要 + 产出引用」并写任务事件。
  *
  * 与轮次运行器的分工：两者共享工具批准链、结算模式与失败映射；但步骤窗口
  * 与用户会话隔离（不写对话消息、不压缩、不进对话列表），任务状态推进由
@@ -113,6 +117,7 @@ export class StepRunnerService {
     private readonly toolPolicy: ToolPolicyService,
     private readonly state: StepStateService,
     private readonly taskEvents: TaskEventService,
+    private readonly interactions: InteractionService,
   ) { }
 
   /** 执行一个 READY 步骤；返回时步骤通常已终态（失去租约或中止时由恢复扫描收束）。 */
@@ -143,9 +148,16 @@ export class StepRunnerService {
         dependsOn: true,
       },
     });
-    if (!step || step.taskId !== task.id || step.status !== AssistantTaskStepStatus.READY) {
+    if (
+      !step
+      || step.taskId !== task.id
+      || (step.status !== AssistantTaskStepStatus.READY
+        && step.status !== AssistantTaskStepStatus.WAITING_USER)
+    ) {
       return;
     }
+    // WAITING_USER 是挂起恢复入口：挂起事项全部解决后，调度器重新派发该步骤
+    // （claimStep 走恢复路径，attemptNo 不变，断点续跑）。
 
     const planSteps = await this.loadPlanSteps(task.id, step.planVersion);
     const planStep = planSteps.find((candidate) => candidate.stepKey === step.stepKey) ?? null;
@@ -356,6 +368,8 @@ export class StepRunnerService {
       });
       processedToolCalls += Math.min(suggestedCalls.length, remainingToolCalls);
 
+      // 挂起等待用户授权：步骤已转 WAITING_USER，本循环立即退出（等待恢复派发）。
+      if (execution.suspended) return;
       if (execution.ownershipLost) return;
       if (execution.limitExceeded) {
         await this.failStepWith(
@@ -434,7 +448,7 @@ export class StepRunnerService {
 
   /**
    * 执行一轮模型建议的工具调用：记录 → 一致性校验 → 实时权限批准 →
-   * WRITE 防御 → 进度播报 → 抢占 → 执行 → 结算。串行执行保证同一步骤的
+   * WRITE 授权链 → 进度播报 → 抢占 → 执行 → 结算。串行执行保证同一步骤的
    * 窗口消息 seq 无并发竞争。
    */
   private async executeStepToolCalls(
@@ -446,7 +460,7 @@ export class StepRunnerService {
       maxExecutable: number;
       assistantContent: string;
     },
-  ): Promise<{ limitExceeded: boolean; ownershipLost: boolean }> {
+  ): Promise<{ limitExceeded: boolean; ownershipLost: boolean; suspended?: boolean }> {
     for (let index = 0; index < round.calls.length; index++) {
       if (input.signal.aborted) return { limitExceeded: false, ownershipLost: true };
       const call = round.calls[index];
@@ -535,20 +549,60 @@ export class StepRunnerService {
         continue;
       }
 
-      // WRITE 防御：写操作在任务步骤内不开放（挂起交互与临时授权留 M3）。
-      // 工具面已排除 WRITE，模型仍发起调用说明是幻觉或绕过，直接拒绝。
+      // WRITE 工具授权链（M3）：命中临时授权 → 消费后执行；最近一次已被用户拒绝
+      // → 直接拒绝本次调用（不重复挂起）；否则创建授权交互并挂起步骤等待用户批准。
+      let authorizationToConsume: AssistantTaskInteraction | null = null;
       if (approval.definition.riskLevel === 'WRITE') {
-        const settled = await this.state.rejectStepToolCall({
-          toolCallId: effectiveToolCallId,
-          taskId: context.task.id,
-          stepId: context.step.id,
+        // 授权以工具声明的主权限项为粒度（WRITE 必须声明权限，登记约束）。
+        const permissionCode = approval.definition.requiredPermissions[0] ?? null;
+        if (!permissionCode) {
+          const settled = await this.state.rejectStepToolCall({
+            toolCallId: effectiveToolCallId,
+            taskId: context.task.id,
+            stepId: context.step.id,
+            tenantId: context.task.tenantId,
+            executionOwner: input.executionOwner,
+            code: 'STEP_TOOL_FORBIDDEN',
+            summary: '该操作在任务步骤内暂不可用；如确需此操作，请告知用户在对话中直接发起',
+          });
+          if (!settled) return { limitExceeded: false, ownershipLost: true };
+          continue;
+        }
+        const usable = await this.interactions.findUsableAuthorization({
           tenantId: context.task.tenantId,
-          executionOwner: input.executionOwner,
-          code: 'STEP_TOOL_FORBIDDEN',
-          summary: '该操作在任务步骤内暂不可用；如确需此操作，请告知用户在对话中直接发起',
+          taskId: context.task.id,
+          permissionCode,
         });
-        if (!settled) return { limitExceeded: false, ownershipLost: true };
-        continue;
+        if (!usable) {
+          const latest = await this.interactions.findLatestAuthorization({
+            tenantId: context.task.tenantId,
+            taskId: context.task.id,
+            permissionCode,
+          });
+          if (latest?.status === AssistantTaskInteractionStatus.REJECTED) {
+            const settled = await this.state.rejectStepToolCall({
+              toolCallId: effectiveToolCallId,
+              taskId: context.task.id,
+              stepId: context.step.id,
+              tenantId: context.task.tenantId,
+              executionOwner: input.executionOwner,
+              code: 'AUTHORIZATION_REJECTED',
+              summary: '用户已拒绝此操作的授权，请不要重复发起；如确实无法完成本步骤，请说明原因',
+            });
+            if (!settled) return { limitExceeded: false, ownershipLost: true };
+            continue;
+          }
+          const suspended = await this.suspendForAuthorization(context, input, {
+            toolCallId: effectiveToolCallId,
+            definition: approval.definition,
+            permissionCode,
+            // 已有未决请求（防御场景）：只重新挂起步骤，不重复创建交互。
+            createRequested: latest?.status !== AssistantTaskInteractionStatus.PENDING,
+          });
+          if (!suspended) return { limitExceeded: false, ownershipLost: true };
+          return { limitExceeded: false, ownershipLost: false, suspended: true };
+        }
+        authorizationToConsume = usable;
       }
 
       // 进度播报只用工具显示名（服务端固定文案），绝不透出参数或内部引用。
@@ -570,6 +624,31 @@ export class StepRunnerService {
         leaseExpiresAt: nextTaskLease(),
       });
       if (!claimed) return { limitExceeded: false, ownershipLost: true };
+
+      // 临时授权消费在抢占成功后：抢占失败（失去租约）不浪费用户批准；
+      // 消费失败（过期/已被使用）时本调用未执行，模型可重新发起（将重新挂起）。
+      if (authorizationToConsume) {
+        const consumed = await this.interactions.markAuthorizationUsed({
+          tenantId: context.task.tenantId,
+          interactionId: authorizationToConsume.id,
+          membershipId: context.task.membershipId,
+          requestId: context.requestId,
+        });
+        if (!consumed) {
+          const settled = await this.state.failStepToolCall({
+            toolCallId: effectiveToolCallId,
+            taskId: context.task.id,
+            stepId: context.step.id,
+            tenantId: context.task.tenantId,
+            executionOwner: input.executionOwner,
+            executionToken,
+            code: 'AUTHORIZATION_EXPIRED',
+            summary: '临时授权已失效，请重新发起本操作',
+          });
+          if (!settled) return { limitExceeded: false, ownershipLost: true };
+          continue;
+        }
+      }
 
       let result: Awaited<ReturnType<typeof approval.definition.execute>>;
       try {
@@ -630,6 +709,63 @@ export class StepRunnerService {
       limitExceeded: round.calls.length > round.maxExecutable,
       ownershipLost: false,
     };
+  }
+
+  /**
+   * 授权挂起（原子事务）：工具结算（PROPOSED → REJECTED，写 TOOL 窗口消息）→
+   * 创建授权交互（写 interaction_requested 事件）→ 步骤 RUNNING → WAITING_USER
+   * 并释放租约。失败整体回滚（条件更新共享同一租约事实），由调度器按「失去执行权」收束本步骤。
+   */
+  private async suspendForAuthorization(
+    context: StepExecutionContext,
+    input: StepExecutionInput,
+    request: {
+      toolCallId: string;
+      definition: ToolDefinition;
+      permissionCode: string;
+      /** false：该权限项已有未决请求（数据异常防御），只挂起步骤不重复创建交互。 */
+      createRequested: boolean;
+    },
+  ): Promise<boolean> {
+    try {
+      return await this.prisma.$transaction(async (transaction) => {
+        const settled = await this.state.rejectStepToolCallInTransaction(transaction, {
+          toolCallId: request.toolCallId,
+          taskId: context.task.id,
+          stepId: context.step.id,
+          tenantId: context.task.tenantId,
+          executionOwner: input.executionOwner,
+          code: 'AUTHORIZATION_REQUIRED',
+          summary: '该操作需要用户授权，本次未执行；授权请求已发送，用户处理完成后请重新发起本调用',
+        });
+        if (!settled) return false;
+        if (request.createRequested) {
+          await this.interactions.createInTransaction(transaction, {
+            tenantId: context.task.tenantId,
+            taskId: context.task.id,
+            stepId: context.step.id,
+            stepKey: context.step.stepKey,
+            type: 'AUTHORIZATION',
+            summary: `允许执行「${request.definition.displayName}」`,
+            reason: '该操作会修改或新增企业业务数据，需要你授权后 AI 同事才能继续执行',
+            permissionCode: request.permissionCode,
+            toolName: request.definition.name,
+          });
+        }
+        const suspended = await this.state.suspendStepInTransaction(transaction, {
+          taskId: context.task.id,
+          stepId: context.step.id,
+          tenantId: context.task.tenantId,
+          executionOwner: input.executionOwner,
+        });
+        // 前两步已有写入，挂起冲突必须抛错回滚而非半截提交。
+        if (!suspended) throw new Error(`step ${context.step.id} suspend conflict`);
+        return true;
+      });
+    } catch (error) {
+      this.logger.warn(`step ${context.step.id} authorization suspend failed: ${String(error)}`);
+      return false;
+    }
   }
 
   /**
@@ -713,13 +849,14 @@ export class StepRunnerService {
   }
 
   /**
-   * 步骤工具面：发起人实时权限 ∩ 步骤策略。WRITE 一律排除（写操作确认与
-   * 挂起授权在 M3 引入前，步骤内不执行任何业务写），再剔除显式排除项。
+   * 步骤工具面：发起人实时权限 ∩ 步骤策略。WRITE 工具同样进入工具面——
+   * 调用时经授权链二次把关（临时授权放行 / 无授权挂起等用户批准），
+   * 仅剔除显式排除项。
    */
   private resolveToolFace(permissions: string[]): ChatToolDefinition[] {
     return this.toolRegistry
       .listAllowedDefinitions(permissions)
-      .filter((tool) => tool.riskLevel !== 'WRITE' && !STEP_EXCLUDED_TOOLS.has(tool.name))
+      .filter((tool) => !STEP_EXCLUDED_TOOLS.has(tool.name))
       .map(toChatToolDefinition);
   }
 
@@ -820,8 +957,9 @@ function buildStepInstructions(input: {
     '执行说明：',
     '1. 你正在企业任务中独立执行一个步骤：聚焦本步要求，不要扩大范围；',
     '2. 需要内部资料或外部信息时使用可用工具检索，不要凭记忆编造；',
-    '3. 完成后直接给出本步结果摘要：做了什么、结论与关键数据，保持简洁；',
-    '4. 不要向用户提问或等待确认；确实无法完成时说明原因，不要假装完成。',
+    '3. 涉及写操作（新增或修改企业数据）时直接调用相应工具：系统会在必要时自动向用户申请授权；',
+    '4. 完成后直接给出本步结果摘要：做了什么、结论与关键数据，保持简洁；',
+    '5. 不要向用户提问或等待确认；确实无法完成时说明原因，不要假装完成。',
   );
   const text = lines.join('\n');
   return text.length > MAX_STEP_INSTRUCTIONS_CHARS

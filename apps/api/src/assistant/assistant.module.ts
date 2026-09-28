@@ -13,6 +13,7 @@ import { WebSearchModule } from '../web-search/web-search.module';
 import { AssistantController } from './api/assistant.controller';
 import { AssistantActionDraftController } from './api/assistant-action-draft.controller';
 import { AssistantConnectorController } from './api/assistant-connector.controller';
+import { AssistantTaskInteractionsController } from './api/assistant-task-interactions.controller';
 import { AssistantTasksController } from './api/assistant-tasks.controller';
 import { DingTalkConnectorPlannerService } from './connectors/dingtalk-connector-planner.service';
 import { TencentMeetingConnectorPlannerService } from './connectors/tencent-meeting-connector-planner.service';
@@ -22,6 +23,7 @@ import { GitHubOAuthBrokerService } from './connectors/github-oauth-broker.servi
 import { ConversationService } from './conversation/conversation.service';
 import { EventService } from './conversation/event.service';
 import { AssistantActionDraftService } from './drafts/assistant-action-draft.service';
+import { InteractionService } from './orchestration/interaction.service';
 import { OrchestrationToolsService } from './orchestration/orchestration-tools.service';
 import { PlanService } from './orchestration/plan.service';
 import { StepRunnerService } from './orchestration/step-runner.service';
@@ -65,7 +67,7 @@ import { ImportFinanceLedgerTool } from './tools/executors/import-finance-ledger
  */
 @Module({
   imports: [AiOrchestrationModule, DocumentModule, FinanceModule, ImageModule, KnowledgeModule, OrganizationModule, ProjectModule, StorageModule, TaskModule, UserMemoryModule, WebSearchModule],
-  controllers: [AssistantActionDraftController, AssistantController, AssistantConnectorController, AssistantTasksController],
+  controllers: [AssistantActionDraftController, AssistantController, AssistantConnectorController, AssistantTaskInteractionsController, AssistantTasksController],
   providers: [
     ConversationService,
     DingTalkConnectorPlannerService,
@@ -85,6 +87,7 @@ import { ImportFinanceLedgerTool } from './tools/executors/import-finance-ledger
     TurnRecoveryService,
     TaskEventService,
     PlanService,
+    InteractionService,
     TaskService,
     StepStateService,
     StepRunnerService,

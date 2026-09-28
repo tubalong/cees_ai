@@ -7,7 +7,6 @@ import {
 } from '@nestjs/common';
 import {
   AssistantTask,
-  AssistantTaskInteractionStatus,
   AssistantTaskOriginType,
   AssistantTaskPlan,
   AssistantTaskStatus,
@@ -17,6 +16,7 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { TenantContext } from '../../tenant/tenant-context';
+import { InteractionService, toPublicInteraction } from './interaction.service';
 import {
   AnswerInput,
   ClarificationDraft,
@@ -92,6 +92,7 @@ export class TaskService {
     private readonly plans: PlanService,
     private readonly runner: TaskRunnerService,
     private readonly stepState: StepStateService,
+    private readonly interactions: InteractionService,
   ) { }
 
   /**
@@ -211,7 +212,7 @@ export class TaskService {
     };
   }
 
-  /** 任务详情：任务 + 最新计划版本（待确认时为草案）+ 生效计划的运行时步骤。 */
+  /** 任务详情：任务 + 最新计划版本（待确认时为草案）+ 生效计划的运行时步骤 + 挂起事项。 */
   async getDetail(taskId: string): Promise<PublicTaskDetail> {
     const task = await this.requireOwnTask(taskId);
     const plan = await this.prisma.assistantTaskPlan.findFirst({
@@ -225,10 +226,15 @@ export class TaskService {
       })
       : [];
     const stepNames = await this.loadAgentNames(steps);
+    const interactions = await this.prisma.assistantTaskInteraction.findMany({
+      where: { taskId: task.id },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    });
     return {
       task: toPublicTask(task),
       currentPlan: plan ? toPublicPlan(plan) : null,
       steps: steps.map((step) => toPublicStep(step, stepNames)),
+      interactions: interactions.map(toPublicInteraction),
     };
   }
 
@@ -273,11 +279,12 @@ export class TaskService {
         await this.taskEvents.appendInTransaction(transaction, task.id, task.tenantId, {
           type: 'task_cancelled',
         });
-        // 契约：取消关闭未决挂起事项。M1 尚无挂起写入方（M3 引入），
-        // 这里保证语义完整：已有的 PENDING 事项随取消关闭。
-        await transaction.assistantTaskInteraction.updateMany({
-          where: { taskId: task.id, status: AssistantTaskInteractionStatus.PENDING },
-          data: { status: AssistantTaskInteractionStatus.CANCELLED, resolvedAt: completedAt },
+        // 契约：取消关闭未决挂起事项（CANCELLED）并逐条写 interaction_resolved。
+        await this.interactions.closePendingForTaskInTransaction(transaction, {
+          taskId: task.id,
+          tenantId: task.tenantId,
+          status: 'CANCELLED',
+          now: completedAt,
         });
         // 步骤收束：非终态步骤随任务取消置 SKIPPED（逐个写 step_skipped 事件，
         // 保证事件流完整）；未执行/执行中的工具调用同步收束——状态不确定的
@@ -334,6 +341,29 @@ export class TaskService {
       });
     }
     return this.getDetail(task.id);
+  }
+
+  /**
+   * 交互解决后的即时恢复（由解决接口调用）：任务仍 WAITING_USER 且已无未决
+   * 事项时转回 RUNNING 并重新调度；仍有未决事项或任务本就在跑时静默返回。
+   */
+  async resumeAfterInteractionResolved(taskId: string): Promise<void> {
+    const task = await this.requireOwnTask(taskId);
+    if (task.status !== AssistantTaskStatus.WAITING_USER) return;
+    if (await this.interactions.hasPendingForTask(task.id)) return;
+    const resumed = await this.prisma.assistantTask.updateMany({
+      where: { id: task.id, tenantId: task.tenantId, status: AssistantTaskStatus.WAITING_USER },
+      data: {
+        status: AssistantTaskStatus.RUNNING,
+        executionOwner: null,
+        leaseExpiresAt: null,
+        heartbeatAt: new Date(),
+      },
+    });
+    if (resumed.count !== 1) return;
+    void this.runner.startTask(task.id).catch((error) => {
+      this.logger.error(`failed to resume waiting task ${task.id}: ${String(error)}`);
+    });
   }
 
   private async startPlan(task: AssistantTask, answers: AnswerInput[]): Promise<PublicTaskDetail> {

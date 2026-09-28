@@ -488,6 +488,35 @@ export class CancelAssistantTaskRequestDto {
   reason?: string | null;
 }
 
+export class ResolveTaskInteractionRequestDto {
+  @ApiProperty({
+    description: '解决动作：approve / reject 授权批准或拒绝（仅 AUTHORIZATION）；answer 提问答复（仅 QUESTION）；choose 裁决选项（仅 DECISION）',
+    enum: ['approve', 'reject', 'answer', 'choose'],
+  })
+  @IsIn(['approve', 'reject', 'answer', 'choose'])
+  decision!: 'approve' | 'reject' | 'answer' | 'choose';
+
+  @ApiPropertyOptional({
+    description: '临时授权范围（仅 decision=approve）；ONCE 仅本次（缺省），TASK 本任务内允许多次使用',
+    enum: ['ONCE', 'TASK'],
+    nullable: true,
+  })
+  @IsOptional()
+  @IsIn(['ONCE', 'TASK'])
+  scope?: 'ONCE' | 'TASK' | null;
+
+  @ApiPropertyOptional({
+    description: '所选候选 id 或答复文本（answer / choose 必填；approve / reject 忽略）',
+    nullable: true,
+    maxLength: 2000,
+  })
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(2000)
+  value?: string | null;
+}
+
 export class ReplayTaskEventsQueryDto {
   @ApiPropertyOptional({
     description: '只返回该序号之后的事件；默认 0（从头重放）',

@@ -98,8 +98,11 @@ export class StepStateService {
   }
 
   /**
-   * 派发步骤：READY → RUNNING 条件抢占，写入派发书快照、租约与
-   * step_started 事件（状态与事件原子提交，不出现「已运行但无开始事件」）。
+   * 派发步骤（两类入口，条件更新原子抢占）：
+   * - 首次派发：READY → RUNNING，attemptNo + 1，写派发书快照、租约与 step_started 事件；
+   * - 挂起恢复：WAITING_USER → RUNNING（attemptNo 不变，断点续跑），只重写租约，
+   *   不重复写 step_started——恢复是同一执行尝试的继续，不是新一次尝试。
+   * 状态与事件原子提交，不出现「已运行但无开始事件」。
    */
   async claimStep(input: {
     taskId: string;
@@ -114,6 +117,15 @@ export class StepStateService {
     assigneeName: string | null;
   }): Promise<boolean> {
     const now = new Date();
+    const ownershipWhere = {
+      task: {
+        is: {
+          status: AssistantTaskStatus.RUNNING,
+          executionOwner: input.executionOwner,
+          leaseExpiresAt: { gt: now },
+        },
+      },
+    };
     return this.prisma.$transaction(async (transaction) => {
       const updated = await transaction.assistantTaskStep.updateMany({
         where: {
@@ -121,13 +133,7 @@ export class StepStateService {
           taskId: input.taskId,
           tenantId: input.tenantId,
           status: AssistantTaskStepStatus.READY,
-          task: {
-            is: {
-              status: AssistantTaskStatus.RUNNING,
-              executionOwner: input.executionOwner,
-              leaseExpiresAt: { gt: now },
-            },
-          },
+          ...ownershipWhere,
         },
         data: {
           status: AssistantTaskStepStatus.RUNNING,
@@ -139,17 +145,64 @@ export class StepStateService {
           startedAt: now,
         },
       });
-      if (updated.count !== 1) return false;
-      await this.events.appendInTransaction(transaction, input.taskId, input.tenantId, {
-        type: 'step_started',
-        stepId: input.stepId,
-        stepKey: input.stepKey,
-        stepNo: input.stepNo,
-        title: input.stepTitle,
-        assigneeName: input.assigneeName,
+      if (updated.count === 1) {
+        await this.events.appendInTransaction(transaction, input.taskId, input.tenantId, {
+          type: 'step_started',
+          stepId: input.stepId,
+          stepKey: input.stepKey,
+          stepNo: input.stepNo,
+          title: input.stepTitle,
+          assigneeName: input.assigneeName,
+        });
+        return true;
+      }
+      // 恢复路径：挂起事项全部解决后由调度器重新派发；不重复写 step_started。
+      const resumed = await transaction.assistantTaskStep.updateMany({
+        where: {
+          id: input.stepId,
+          taskId: input.taskId,
+          tenantId: input.tenantId,
+          status: AssistantTaskStepStatus.WAITING_USER,
+          ...ownershipWhere,
+        },
+        data: {
+          status: AssistantTaskStepStatus.RUNNING,
+          brief: input.brief,
+          executionOwner: input.executionOwner,
+          leaseExpiresAt: input.leaseExpiresAt,
+          heartbeatAt: now,
+        },
       });
-      return true;
+      return resumed.count === 1;
     });
+  }
+
+  /**
+   * 授权挂起（须在调用方事务内执行）：RUNNING → WAITING_USER 条件更新并释放
+   * 步骤租约——等待期间步骤不属于任何执行者；与工具结算、挂起事项创建同事务提交。
+   */
+  async suspendStepInTransaction(
+    transaction: Prisma.TransactionClient,
+    input: { taskId: string; stepId: string; tenantId: string; executionOwner: string; now?: Date },
+  ): Promise<boolean> {
+    const now = input.now ?? new Date();
+    const updated = await transaction.assistantTaskStep.updateMany({
+      where: {
+        id: input.stepId,
+        taskId: input.taskId,
+        tenantId: input.tenantId,
+        status: AssistantTaskStepStatus.RUNNING,
+        executionOwner: input.executionOwner,
+        leaseExpiresAt: { gt: now },
+      },
+      data: {
+        status: AssistantTaskStepStatus.WAITING_USER,
+        executionOwner: null,
+        leaseExpiresAt: null,
+        heartbeatAt: now,
+      },
+    });
+    return updated.count === 1;
   }
 
   /** 依赖满足：PENDING → READY（无事件；就绪不是对外可见的状态迁移）。 */
@@ -393,6 +446,30 @@ export class StepStateService {
     });
   }
 
+  /** 同 rejectStepToolCall，但复用调用方事务：授权挂起与工具拒绝结果原子提交。 */
+  async rejectStepToolCallInTransaction(
+    transaction: Prisma.TransactionClient,
+    input: {
+      toolCallId: string;
+      taskId: string;
+      stepId: string;
+      tenantId: string;
+      executionOwner: string;
+      code: string;
+      summary: string;
+      errorMessage?: string;
+    },
+  ): Promise<boolean> {
+    return this.settleStepToolCallInTransaction(transaction, {
+      ...input,
+      expectedStatus: ToolCallStatus.PROPOSED,
+      status: ToolCallStatus.REJECTED,
+      executionToken: null,
+      errorMessage: input.errorMessage ?? input.summary,
+      result: { summary: input.summary, resourceType: null, resourceId: null, sources: [] },
+    });
+  }
+
   /** 步骤成功回流：SUCCEEDED、终稿窗口消息与 step_completed 事件原子提交。 */
   async succeedStep(input: {
     taskId: string;
@@ -591,49 +668,69 @@ export class StepStateService {
     errorMessage?: string;
     result: StepToolResult;
   }): Promise<boolean> {
+    return this.prisma.$transaction((transaction) =>
+      this.settleStepToolCallInTransaction(transaction, input));
+  }
+
+  /** 结算的事务内实现；授权挂起路径与工具拒绝结果同事务提交（见 rejectStepToolCallInTransaction）。 */
+  private async settleStepToolCallInTransaction(
+    transaction: Prisma.TransactionClient,
+    input: {
+      toolCallId: string;
+      taskId: string;
+      stepId: string;
+      tenantId: string;
+      executionOwner: string;
+      expectedStatus: ToolCallStatus;
+      status: ToolCallStatus;
+      executionToken: string | null;
+      code?: string;
+      summary: string;
+      errorMessage?: string;
+      result: StepToolResult;
+    },
+  ): Promise<boolean> {
     const settled = input.status === ToolCallStatus.COMPLETED;
-    return this.prisma.$transaction(async (transaction) => {
-      const now = new Date();
-      const updated = await transaction.toolCall.updateMany({
-        where: {
-          id: input.toolCallId,
-          taskStepId: input.stepId,
-          tenantId: input.tenantId,
-          status: input.expectedStatus,
-          taskStep: {
-            is: {
-              id: input.stepId,
-              taskId: input.taskId,
-              status: AssistantTaskStepStatus.RUNNING,
-              executionOwner: input.executionOwner,
-              leaseExpiresAt: { gt: now },
-            },
-          },
-          ...(input.executionToken
-            ? { executionToken: input.executionToken, leaseExpiresAt: { gt: now } }
-            : {}),
-        },
-        data: {
-          status: input.status,
-          completedAt: now,
-          leaseExpiresAt: null,
-          result: input.result as unknown as Prisma.InputJsonObject,
-          errorCode: settled ? null : input.code ?? 'TOOL_EXECUTION_FAILED',
-          errorMessage: settled ? null : input.errorMessage ?? input.summary,
-          executedResourceType: input.result.resourceType,
-          executedResourceId: input.result.resourceId,
-        },
-      });
-      if (updated.count !== 1) return false;
-      await writeStepMessage(transaction, {
+    const now = new Date();
+    const updated = await transaction.toolCall.updateMany({
+      where: {
+        id: input.toolCallId,
+        taskStepId: input.stepId,
         tenantId: input.tenantId,
-        stepId: input.stepId,
-        role: ConversationMessageRole.TOOL,
-        content: input.summary,
-        toolCallRef: input.toolCallId,
-      });
-      return true;
+        status: input.expectedStatus,
+        taskStep: {
+          is: {
+            id: input.stepId,
+            taskId: input.taskId,
+            status: AssistantTaskStepStatus.RUNNING,
+            executionOwner: input.executionOwner,
+            leaseExpiresAt: { gt: now },
+          },
+        },
+        ...(input.executionToken
+          ? { executionToken: input.executionToken, leaseExpiresAt: { gt: now } }
+          : {}),
+      },
+      data: {
+        status: input.status,
+        completedAt: now,
+        leaseExpiresAt: null,
+        result: input.result as unknown as Prisma.InputJsonObject,
+        errorCode: settled ? null : input.code ?? 'TOOL_EXECUTION_FAILED',
+        errorMessage: settled ? null : input.errorMessage ?? input.summary,
+        executedResourceType: input.result.resourceType,
+        executedResourceId: input.result.resourceId,
+      },
     });
+    if (updated.count !== 1) return false;
+    await writeStepMessage(transaction, {
+      tenantId: input.tenantId,
+      stepId: input.stepId,
+      role: ConversationMessageRole.TOOL,
+      content: input.summary,
+      toolCallRef: input.toolCallId,
+    });
+    return true;
   }
 
   /**

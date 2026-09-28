@@ -6,6 +6,7 @@ import {
 } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../../database/prisma.service';
+import { InteractionService } from './interaction.service';
 import { StepRunnerService } from './step-runner.service';
 import { StepStateService } from './step-state.service';
 import { TaskEventService } from './task-event.service';
@@ -66,6 +67,7 @@ export class TaskRunnerService implements OnModuleInit, OnModuleDestroy {
     private readonly stepRunner: StepRunnerService,
     private readonly state: StepStateService,
     private readonly taskEvents: TaskEventService,
+    private readonly interactions: InteractionService,
   ) { }
 
   onModuleInit(): void {
@@ -191,37 +193,110 @@ export class TaskRunnerService implements OnModuleInit, OnModuleDestroy {
         // 3) 派发最早的就绪步骤：一次一步（窗口串行独占，进度可按 stepNo 追踪）。
         const ready = steps.find((step) => step.status === AssistantTaskStepStatus.READY);
         if (ready) {
-          try {
-            await this.stepRunner.executeStep({
-              taskId,
-              stepId: ready.id,
-              executionOwner: this.executionOwner,
-              signal: execution.abortController.signal,
-            });
-          } catch (error) {
-            // 执行器抛出的未处理错误（如数据库/上游异常）：把仍 RUNNING 的步骤
-            // 按失败收束，避免任务卡在无执行者的中间态；收束失败说明失去执行权。
-            this.logger.error(`task ${taskId} step ${ready.id} execution threw: ${String(error)}`);
-            if (!(await this.failStepAfterError(task, ready.id, error))) return;
-          }
+          if (!(await this.dispatchStep(task, execution, ready.id))) return;
           continue;
         }
 
-        // 4) 防御：无 READY 也无 RUNNING，但仍有未终态步骤（依赖图异常 / M3 挂起）
-        //    → 交还执行权，等待交互解决或恢复扫描。
-        const stalled = steps.some(
-          (step) => step.status === AssistantTaskStepStatus.PENDING
-            || step.status === AssistantTaskStepStatus.WAITING_USER,
+        // 4) 挂起步骤：有未决事项 → 任务转 WAITING_USER 并释放租约等待用户介入；
+        //    全部已解决 → 重新派发（断点续跑）——挂起不阻塞其它步骤（第 3 步已覆盖）。
+        const waitingSteps = steps.filter(
+          (step) => step.status === AssistantTaskStepStatus.WAITING_USER,
         );
-        if (stalled) return;
+        if (waitingSteps.length > 0) {
+          if (await this.interactions.hasPendingForTask(taskId)) {
+            await this.markTaskWaitingUser(taskId);
+            return;
+          }
+          if (!(await this.dispatchStep(task, execution, waitingSteps[0].id))) return;
+          continue;
+        }
 
-        // 5) 全部步骤终态：任务终态判定与终态事件原子提交。
+        // 5) 防御：仍有 PENDING 步骤（依赖图异常）→ 交还执行权，等待恢复扫描。
+        if (steps.some((step) => step.status === AssistantTaskStepStatus.PENDING)) return;
+
+        // 6) 全部步骤终态：任务终态判定与终态事件原子提交。
         await this.finalizeTask(task);
         return;
       }
     } finally {
       this.stopExecution(taskId);
     }
+  }
+
+  /**
+   * 派发/恢复单个步骤：执行器抛出的未处理错误（如数据库/上游异常）按失败收束，
+   * 避免任务卡在无执行者的中间态；收束失败说明已失去执行权。
+   */
+  private async dispatchStep(
+    task: TaskSnapshotRow,
+    execution: TaskExecution,
+    stepId: string,
+  ): Promise<boolean> {
+    try {
+      await this.stepRunner.executeStep({
+        taskId: task.id,
+        stepId,
+        executionOwner: this.executionOwner,
+        signal: execution.abortController.signal,
+      });
+      return true;
+    } catch (error) {
+      this.logger.error(`task ${task.id} step ${stepId} execution threw: ${String(error)}`);
+      return this.failStepAfterError(task, stepId, error);
+    }
+  }
+
+  /**
+   * 挂起等待用户：RUNNING → WAITING_USER 条件更新并释放任务租约；
+   * 心跳随调度循环退出停止，恢复由交互解决（TaskService）或恢复扫描兜底。
+   */
+  private async markTaskWaitingUser(taskId: string): Promise<void> {
+    await this.prisma.assistantTask.updateMany({
+      where: {
+        id: taskId,
+        status: AssistantTaskStatus.RUNNING,
+        executionOwner: this.executionOwner,
+      },
+      data: {
+        status: AssistantTaskStatus.WAITING_USER,
+        executionOwner: null,
+        leaseExpiresAt: null,
+        heartbeatAt: new Date(),
+      },
+    });
+  }
+
+  /**
+   * 挂起恢复兜底：WAITING_USER 且已无未决事项的任务转回 RUNNING 并重新调度。
+   * 主路径是交互解决接口即时恢复；此扫描补偿接口调用中断等残留场景。
+   */
+  async resumeWaitingTasks(): Promise<number> {
+    const waiting = await this.prisma.assistantTask.findMany({
+      where: { status: AssistantTaskStatus.WAITING_USER },
+      orderBy: { updatedAt: 'asc' },
+      take: TASK_RECOVERY_BATCH_LIMIT,
+      select: { id: true },
+    });
+    let resumed = 0;
+    for (const task of waiting) {
+      try {
+        if (await this.interactions.hasPendingForTask(task.id)) continue;
+        const claimed = await this.prisma.assistantTask.updateMany({
+          where: { id: task.id, status: AssistantTaskStatus.WAITING_USER },
+          data: {
+            status: AssistantTaskStatus.RUNNING,
+            executionOwner: null,
+            leaseExpiresAt: null,
+            heartbeatAt: new Date(),
+          },
+        });
+        if (claimed.count !== 1) continue;
+        if (await this.scheduleTask(task.id)) resumed++;
+      } catch (error) {
+        this.logger.error(`failed to resume waiting task ${task.id}: ${String(error)}`);
+      }
+    }
+    return resumed;
   }
 
   /**
@@ -332,6 +407,13 @@ export class TaskRunnerService implements OnModuleInit, OnModuleDestroy {
         },
       });
       if (claimed.count !== 1) return false;
+      // 终态清理：关闭未决挂起（CANCELLED）并逐条写 interaction_resolved，与终态事件同一事务。
+      await this.interactions.closePendingForTaskInTransaction(transaction, {
+        taskId: task.id,
+        tenantId: task.tenantId,
+        status: 'CANCELLED',
+        now,
+      });
       await this.taskEvents.appendInTransaction(transaction, task.id, task.tenantId, failureReason
         ? { type: 'task_failed', reason: failureReason }
         : { type: 'task_completed' });
@@ -385,9 +467,19 @@ export class TaskRunnerService implements OnModuleInit, OnModuleDestroy {
 
   private async runRecoveryScan(): Promise<void> {
     try {
+      // 超时策略：先关闭已过 expiresAt 的挂起事项（写 interaction_resolved），再恢复失联任务。
+      const expired = await this.interactions.expireOverdueInteractions();
+      if (expired > 0) {
+        this.logger.warn(`expired ${expired} overdue interaction(s)`);
+      }
       const rescheduled = await this.recoverStaleTasks();
       if (rescheduled > 0) {
         this.logger.warn(`rescheduled ${rescheduled} stale task(s)`);
+      }
+      // 挂起恢复兜底：交互已解决/关闭但恢复未落地的 WAITING_USER 任务。
+      const resumed = await this.resumeWaitingTasks();
+      if (resumed > 0) {
+        this.logger.warn(`resumed ${resumed} waiting task(s)`);
       }
     } catch (error) {
       this.logger.error(`task recovery scan failed: ${String(error)}`);
