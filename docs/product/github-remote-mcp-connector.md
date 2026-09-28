@@ -63,7 +63,7 @@ CEES_GITHUB_OAUTH_CLIENT_ID=change_me
 CEES_GITHUB_OAUTH_CLIENT_SECRET=change_me
 ```
 
-`apps/desktop/mcp.json` 只保存固定远程 MCP URL、超时和默认禁用标志：`disabled=true` 表示不自动连接，不阻止用户点击“连接”手动启用。API 部署环境通过 `CEES_GITHUB_OAUTH_CLIENT_ID` 和 `CEES_GITHUB_OAUTH_CLIENT_SECRET` 配置 OAuth App；Desktop 不读取这两个环境变量，而是通过 `GET /assistant/connectors/github/oauth/config` 获取公开配置，并通过 `POST /assistant/connectors/github/oauth/exchange` 完成授权码换码。API 不持久化 GitHub Token，Desktop 只将当前用户 Token 保存到本机安全存储。部署方需要在 GitHub OAuth App/GitHub App 中配置与官方允许的 loopback 回调规则一致的回调地址。不得把 Client Secret、Access Token、Refresh Token 或个人 OAuth 值写入仓库、OpenAPI、Renderer 或普通日志。
+`apps/desktop/mcp.json` 只保存固定远程 MCP URL、超时和默认禁用标志：`disabled=true` 表示不自动连接，不阻止用户点击“连接”手动启用。API 部署环境通过 `CEES_GITHUB_OAUTH_CLIENT_ID` 和 `CEES_GITHUB_OAUTH_CLIENT_SECRET` 配置 OAuth App；部署编排必须将这两个变量显式注入 API 容器，Desktop 不读取这两个环境变量，而是通过 `GET /assistant/connectors/github/oauth/config` 获取公开配置，并通过 `POST /assistant/connectors/github/oauth/exchange` 完成授权码换码。API 不持久化 GitHub Token，Desktop 只将当前用户 Token 保存到本机安全存储。部署方需要在 GitHub OAuth App/GitHub App 中配置与官方允许的 loopback 回调规则一致的回调地址。不得把 Client Secret、Access Token、Refresh Token 或个人 OAuth 值写入仓库、OpenAPI、Renderer 或普通日志。
 
 ## 6. 暂不支持
 
