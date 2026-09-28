@@ -5,6 +5,7 @@
 import type { AssistantTaskCancelRequest } from '../models/AssistantTaskCancelRequest';
 import type { AssistantTaskConfirmRequest } from '../models/AssistantTaskConfirmRequest';
 import type { AssistantTaskDetailResponseEnvelope } from '../models/AssistantTaskDetailResponseEnvelope';
+import type { AssistantTaskInteractionResolveRequest } from '../models/AssistantTaskInteractionResolveRequest';
 import type { AssistantTaskListResponseEnvelope } from '../models/AssistantTaskListResponseEnvelope';
 import type { AssistantTaskStatus } from '../models/AssistantTaskStatus';
 import type { AssistantTaskStreamEvent } from '../models/AssistantTaskStreamEvent';
@@ -194,6 +195,41 @@ export class AssistantTasksService {
                 403: `缺少任务查看权限`,
                 404: `任务不存在或不属于当前成员`,
                 409: `任务已处于终态，不能取消`,
+            },
+        });
+    }
+    /**
+     * 解决挂起事项（授权批准/拒绝、提问答复、裁决选项）
+     * 按交互类型提交解决内容：授权（approve / reject，可选范围）、提问（answer）、裁决（choose）。
+     * 解决动作幂等：重复提交按当前状态返回而不报错；任务进入终态后不可解决（由终态清理关闭）。
+     *
+     * @returns AssistantTaskDetailResponseEnvelope 返回更新后的任务详情
+     * @throws ApiError
+     */
+    public static resolveAssistantTaskInteraction({
+        interactionId,
+        requestBody,
+    }: {
+        /**
+         * 挂起事项 ID
+         */
+        interactionId: string,
+        requestBody: AssistantTaskInteractionResolveRequest,
+    }): CancelablePromise<AssistantTaskDetailResponseEnvelope> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/assistant/task-interactions/{interactionId}/resolve',
+            path: {
+                'interactionId': interactionId,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                400: `请求字段校验失败或解决内容与事项类型不符`,
+                401: `登录状态无效、已过期或缺少有效租户成员身份`,
+                403: `缺少任务查看权限`,
+                404: `挂起事项不存在或不属于当前成员的任务`,
+                409: `任务已进入终态，挂起事项不可解决`,
             },
         });
     }

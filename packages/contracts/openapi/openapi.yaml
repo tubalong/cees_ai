@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CEES AI API
-  version: 0.45.0
+  version: 0.46.0
   description: 以本文件为唯一事实源的公开 API 契约。资源与操作按 docs/api 约定补充。
 
 servers:
@@ -1068,6 +1068,68 @@ paths:
                 $ref: '#/components/schemas/ErrorResponseEnvelope'
         '409':
           description: 任务已处于终态，不能取消
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+  /assistant/task-interactions/{interactionId}/resolve:
+    post:
+      summary: 解决挂起事项（授权批准/拒绝、提问答复、裁决选项）
+      description: |
+        按交互类型提交解决内容：授权（approve / reject，可选范围）、提问（answer）、裁决（choose）。
+        解决动作幂等：重复提交按当前状态返回而不报错；任务进入终态后不可解决（由终态清理关闭）。
+      operationId: resolveAssistantTaskInteraction
+      tags: [Assistant Tasks]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: interactionId
+          in: path
+          required: true
+          description: 挂起事项 ID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssistantTaskInteractionResolveRequest'
+      responses:
+        '200':
+          description: 返回更新后的任务详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssistantTaskDetailResponseEnvelope'
+        '400':
+          description: 请求字段校验失败或解决内容与事项类型不符
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '401':
+          description: 登录状态无效、已过期或缺少有效租户成员身份
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '403':
+          description: 缺少任务查看权限
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '404':
+          description: 挂起事项不存在或不属于当前成员的任务
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '409':
+          description: 任务已进入终态，挂起事项不可解决
           content:
             application/json:
               schema:
@@ -11242,6 +11304,12 @@ components:
           description: 当前生效计划的运行时步骤；计划确认前为空数组
           items:
             $ref: '#/components/schemas/AssistantTaskStep'
+        interactions:
+          type: array
+          default: []
+          description: 挂起事项列表（含已解决历史，按创建时间升序；拍板视图按 status=PENDING 过滤）
+          items:
+            $ref: '#/components/schemas/AssistantTaskInteraction'
 
     AssistantTaskListResult:
       type: object
@@ -11320,6 +11388,108 @@ components:
           type: [string, 'null']
           maxLength: 500
 
+    AssistantTaskInteractionResolveRequest:
+      type: object
+      additionalProperties: false
+      required: [decision]
+      properties:
+        decision:
+          type: string
+          enum: [approve, reject, answer, choose]
+          description: |
+            解决动作：approve / reject 授权批准或拒绝（仅 AUTHORIZATION）；
+            answer 提问答复（仅 QUESTION）；choose 裁决选项（仅 DECISION）。
+        scope:
+          type: [string, 'null']
+          enum: [ONCE, TASK]
+          description: 临时授权范围（仅 decision=approve）；ONCE 仅本次（缺省）；TASK 本任务内允许多次使用
+        value:
+          type: [string, 'null']
+          maxLength: 2000
+          description: 所选候选 id 或答复文本（answer / choose 必填；approve / reject 忽略）
+
+    AssistantTaskInteraction:
+      type: object
+      additionalProperties: false
+      required: [id, taskId, type, status, summary, options, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        taskId:
+          type: string
+          format: uuid
+        stepId:
+          type: [string, 'null']
+          format: uuid
+          description: 触发的步骤；任务级事项为 null
+        stepKey:
+          type: [string, 'null']
+          description: 触发步骤的计划内稳定标识（展示用）；任务级事项为 null
+        type:
+          $ref: '#/components/schemas/AssistantTaskInteractionType'
+        status:
+          $ref: '#/components/schemas/AssistantTaskInteractionStatus'
+        summary:
+          type: string
+          maxLength: 1000
+          description: 展示级摘要：授权=要执行的动作与影响；提问=问题文本；裁决=待拍板的分岔说明
+        reason:
+          type: [string, 'null']
+          maxLength: 1000
+          description: 需要用户介入的原因：授权理由 / 提问背景 / 裁决背景
+        options:
+          type: array
+          maxItems: 10
+          description: 提问与裁决的候选项（用户可从中选择或提交自定义答复）；授权为空数组
+          items:
+            $ref: '#/components/schemas/AssistantTaskInteractionOption'
+        scope:
+          type: [string, 'null']
+          enum: [ONCE, TASK]
+          description: 临时授权范围；批准后填充（仅 AUTHORIZATION）
+        resolution:
+          type: [string, 'null']
+          maxLength: 2000
+          description: 用户解决内容（所选候选 id 或答复文本）；未解决为 null
+        resolvedAt:
+          type: [string, 'null']
+          format: date-time
+        expiresAt:
+          type: [string, 'null']
+          format: date-time
+          description: 超时失效时间；不限时为 null
+        createdAt:
+          type: string
+          format: date-time
+
+    AssistantTaskInteractionType:
+      type: string
+      enum: [AUTHORIZATION, QUESTION, DECISION]
+      description: 授权申请 / 主动问人 / 待用户裁决
+
+    AssistantTaskInteractionStatus:
+      type: string
+      enum: [PENDING, RESOLVED, REJECTED, EXPIRED, CANCELLED]
+      description: |
+        PENDING 待处理；RESOLVED 已处理（批准 / 答复 / 选择）；REJECTED 已拒绝；
+        EXPIRED 超时失效；CANCELLED 任务终态清理。
+
+    AssistantTaskInteractionOption:
+      type: object
+      additionalProperties: false
+      required: [id, label]
+      properties:
+        id:
+          type: string
+          maxLength: 64
+        label:
+          type: string
+          maxLength: 200
+        description:
+          type: [string, 'null']
+          maxLength: 500
+
     AssistantTaskStreamEvent:
       oneOf:
         - $ref: '#/components/schemas/AssistantTaskCreatedEvent'
@@ -11330,6 +11500,8 @@ components:
         - $ref: '#/components/schemas/AssistantTaskStepCompletedEvent'
         - $ref: '#/components/schemas/AssistantTaskStepFailedEvent'
         - $ref: '#/components/schemas/AssistantTaskStepSkippedEvent'
+        - $ref: '#/components/schemas/AssistantTaskInteractionRequestedEvent'
+        - $ref: '#/components/schemas/AssistantTaskInteractionResolvedEvent'
         - $ref: '#/components/schemas/AssistantTaskCompletedEvent'
         - $ref: '#/components/schemas/AssistantTaskFailedEvent'
         - $ref: '#/components/schemas/AssistantTaskCancelledEvent'
@@ -11344,6 +11516,8 @@ components:
           step_completed: '#/components/schemas/AssistantTaskStepCompletedEvent'
           step_failed: '#/components/schemas/AssistantTaskStepFailedEvent'
           step_skipped: '#/components/schemas/AssistantTaskStepSkippedEvent'
+          interaction_requested: '#/components/schemas/AssistantTaskInteractionRequestedEvent'
+          interaction_resolved: '#/components/schemas/AssistantTaskInteractionResolvedEvent'
           task_completed: '#/components/schemas/AssistantTaskCompletedEvent'
           task_failed: '#/components/schemas/AssistantTaskFailedEvent'
           task_cancelled: '#/components/schemas/AssistantTaskCancelledEvent'
@@ -11479,6 +11653,73 @@ components:
         reason:
           type: [string, 'null']
           description: 跳过原因摘要（展示级）
+
+    AssistantTaskInteractionRequestedEvent:
+      type: object
+      additionalProperties: false
+      required: [type, seq, interactionId, interactionType, summary, options]
+      properties:
+        type: { type: string, const: interaction_requested }
+        seq: { type: integer, minimum: 1 }
+        interactionId:
+          type: string
+          format: uuid
+          description: 挂起事项 ID（解决时使用）
+        interactionType:
+          $ref: '#/components/schemas/AssistantTaskInteractionType'
+        stepId:
+          type: [string, 'null']
+          format: uuid
+        stepKey:
+          type: [string, 'null']
+        summary:
+          type: string
+          maxLength: 1000
+          description: 展示级摘要（授权动作 / 问题 / 分岔说明）
+        reason:
+          type: [string, 'null']
+          maxLength: 1000
+        options:
+          type: array
+          maxItems: 10
+          items:
+            $ref: '#/components/schemas/AssistantTaskInteractionOption'
+        expiresAt:
+          type: [string, 'null']
+          format: date-time
+
+    AssistantTaskInteractionResolvedEvent:
+      type: object
+      additionalProperties: false
+      required: [type, seq, interactionId, interactionType, status, resolvedAt]
+      properties:
+        type: { type: string, const: interaction_resolved }
+        seq: { type: integer, minimum: 1 }
+        interactionId:
+          type: string
+          format: uuid
+        interactionType:
+          $ref: '#/components/schemas/AssistantTaskInteractionType'
+        stepId:
+          type: [string, 'null']
+          format: uuid
+        stepKey:
+          type: [string, 'null']
+        status:
+          type: string
+          enum: [RESOLVED, REJECTED, EXPIRED, CANCELLED]
+          description: 解决后状态：RESOLVED 已处理（批准/答复/选择）；REJECTED 已拒绝；EXPIRED 超时失效；CANCELLED 任务终态清理
+        value:
+          type: [string, 'null']
+          maxLength: 2000
+          description: 所选候选 id 或答复文本；拒绝与系统清理时为 null
+        scope:
+          type: [string, 'null']
+          enum: [ONCE, TASK]
+          description: 临时授权范围（仅授权批准）
+        resolvedAt:
+          type: string
+          format: date-time
 
     AssistantTaskCompletedEvent:
       type: object

@@ -7,7 +7,8 @@
 
 ### 契约版本与迁移
 
-- **0.45.0**：当前开发基线。AI 任务编排 M2（子执行与窗口隔离）：任务事件流新增 5 个步骤级事件（`step_started` / `step_progress` / `step_completed` / `step_failed` / `step_skipped`），`AssistantTaskStep` 新增产出引用 `outputRefs`（复用 `ToolResultResourceReference`，尚未回流时为空数组）。均为兼容新增，客户端需要重新生成。详见 [AI 任务编排技术设计](../architecture/ai-orchestration-technical.md)。
+- **0.46.0**：当前开发基线。AI 任务编排 M3（重编排与交互）：新增挂起事项解决操作 `POST /assistant/task-interactions/{interactionId}/resolve`（授权批准/拒绝、提问答复、裁决选项，解决动作幂等），`AssistantTaskDetail` 新增挂起事项列表 `interactions`（含已解决历史），任务事件流新增 `interaction_requested` / `interaction_resolved` 两个事件（类型 AUTHORIZATION / QUESTION / DECISION；状态 RESOLVED / REJECTED / EXPIRED / CANCELLED）。均为兼容新增，客户端需要重新生成。详见 [AI 任务编排技术设计](../architecture/ai-orchestration-technical.md)。
+- **0.45.0**：AI 任务编排 M2（子执行与窗口隔离）：任务事件流新增 5 个步骤级事件（`step_started` / `step_progress` / `step_completed` / `step_failed` / `step_skipped`），`AssistantTaskStep` 新增产出引用 `outputRefs`（复用 `ToolResultResourceReference`，尚未回流时为空数组）。均为兼容新增，客户端需要重新生成。详见 [AI 任务编排技术设计](../architecture/ai-orchestration-technical.md)。
 - **0.44.0**：新增 AI 任务编排任务面 API：`/assistant/tasks` 共 5 个操作（任务列表、任务详情、任务事件 SSE、计划确认、任务取消），新增权限码 `assistant.task.create/read`；客户端需要重新生成。详见 [AI 任务编排（需求设计）](../product/ai-orchestration.md) 与 [AI 任务编排技术设计](../architecture/ai-orchestration-technical.md)。
 - **0.43.0**：新增平台 AI Credit 配置管理 API：`/platform/ai-credit/*` 共 21 个操作（能力目录、档位、费率、订阅参数、加油包、全局计费配置），列表响应统一为 `{ items }` 信封，权限码 `platform.aiCredit.read/write`。客户端需要重新生成。详见 [AI 计费系统设计](../product/ai-credit-system-design.md)。
 - **0.43.0**：新增 GitHub OAuth Broker 配置与授权码换码接口，并保留官方远程 MCP 规划接口；客户端需重新生成。详见 [GitHub 连接器 API](github-connector-api.md)。

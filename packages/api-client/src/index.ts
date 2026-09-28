@@ -84,6 +84,13 @@ export type { AssistantTaskCreatedEvent } from './models/AssistantTaskCreatedEve
 export type { AssistantTaskDetail } from './models/AssistantTaskDetail';
 export type { AssistantTaskDetailResponseEnvelope } from './models/AssistantTaskDetailResponseEnvelope';
 export type { AssistantTaskFailedEvent } from './models/AssistantTaskFailedEvent';
+export { AssistantTaskInteraction } from './models/AssistantTaskInteraction';
+export type { AssistantTaskInteractionOption } from './models/AssistantTaskInteractionOption';
+export type { AssistantTaskInteractionRequestedEvent } from './models/AssistantTaskInteractionRequestedEvent';
+export { AssistantTaskInteractionResolvedEvent } from './models/AssistantTaskInteractionResolvedEvent';
+export { AssistantTaskInteractionResolveRequest } from './models/AssistantTaskInteractionResolveRequest';
+export { AssistantTaskInteractionStatus } from './models/AssistantTaskInteractionStatus';
+export { AssistantTaskInteractionType } from './models/AssistantTaskInteractionType';
 export type { AssistantTaskListResponseEnvelope } from './models/AssistantTaskListResponseEnvelope';
 export type { AssistantTaskListResult } from './models/AssistantTaskListResult';
 export { AssistantTaskOriginType } from './models/AssistantTaskOriginType';
