@@ -95,9 +95,17 @@ export interface PublicTaskStep {
   assigneeAgentId: string | null;
   assigneeName: string | null;
   summary: string | null;
+  /** 产出资产引用列表；尚未回流时为空数组（与契约 ToolResultResourceReference 一致）。 */
+  outputRefs: PublicTaskResourceRef[];
   attemptNo: number;
   startedAt: Date | null;
   completedAt: Date | null;
+}
+
+/** 产出资产引用（与契约 ToolResultResourceReference 一致）；不含签名 URL。 */
+export interface PublicTaskResourceRef {
+  type: 'IMAGE' | 'DOCUMENT';
+  id: string;
 }
 
 export interface PublicTaskDetail {
@@ -115,7 +123,7 @@ export interface PublicTaskListResult {
 
 /**
  * 任务事件流（SSE）联合，与契约 AssistantTaskStreamEvent 一一对应；
- * M1 只产出任务级六个事件，步骤级事件随执行器在 M2 引入。
+ * 步骤级事件（step_*）由执行器（task-runner / step-runner）在 M2 产出。
  * 事件 payload 直接以 JSON 落库并原样透传，时间字段使用 ISO 字符串。
  */
 export type PublicTaskStreamEvent =
@@ -128,6 +136,51 @@ export type PublicTaskStreamEvent =
     clarifications: PublicTaskClarification[];
   }
   | { type: 'plan_confirmed'; seq: number; version: number; confirmedAt: string }
+  | {
+    type: 'step_started';
+    seq: number;
+    stepId: string;
+    stepKey: string;
+    stepNo: number;
+    /** 步骤简短名；计划未给出时为 null。 */
+    title: string | null;
+    /** 执行同事名称（实时解析）；档案缺失时为 null。 */
+    assigneeName: string | null;
+  }
+  | {
+    type: 'step_progress';
+    seq: number;
+    stepId: string;
+    stepKey: string;
+    /** 进度说明（展示级），例如正在执行的动作。 */
+    note: string;
+  }
+  | {
+    type: 'step_completed';
+    seq: number;
+    stepId: string;
+    stepKey: string;
+    /** 步骤结果摘要（回流总管与展示）。 */
+    summary: string;
+    /** 产出资产引用；无产出时为空数组。 */
+    outputRefs: PublicTaskResourceRef[];
+  }
+  | {
+    type: 'step_failed';
+    seq: number;
+    stepId: string;
+    stepKey: string;
+    /** 失败原因摘要（展示级）。 */
+    reason: string | null;
+  }
+  | {
+    type: 'step_skipped';
+    seq: number;
+    stepId: string;
+    stepKey: string;
+    /** 跳过原因摘要（展示级）。 */
+    reason: string | null;
+  }
   | { type: 'task_completed'; seq: number }
   | { type: 'task_failed'; seq: number; reason: string | null }
   | { type: 'task_cancelled'; seq: number };
@@ -146,6 +199,11 @@ export function toAssistantTaskEventType(
     case 'task_created': return AssistantTaskEventType.TASK_CREATED;
     case 'plan_ready': return AssistantTaskEventType.PLAN_READY;
     case 'plan_confirmed': return AssistantTaskEventType.PLAN_CONFIRMED;
+    case 'step_started': return AssistantTaskEventType.STEP_STARTED;
+    case 'step_progress': return AssistantTaskEventType.STEP_PROGRESS;
+    case 'step_completed': return AssistantTaskEventType.STEP_COMPLETED;
+    case 'step_failed': return AssistantTaskEventType.STEP_FAILED;
+    case 'step_skipped': return AssistantTaskEventType.STEP_SKIPPED;
     case 'task_completed': return AssistantTaskEventType.TASK_COMPLETED;
     case 'task_failed': return AssistantTaskEventType.TASK_FAILED;
     case 'task_cancelled': return AssistantTaskEventType.TASK_CANCELLED;

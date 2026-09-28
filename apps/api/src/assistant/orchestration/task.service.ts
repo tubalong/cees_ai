@@ -12,6 +12,7 @@ import {
   AssistantTaskPlan,
   AssistantTaskStatus,
   AssistantTaskStep,
+  AssistantTaskStepStatus,
   Prisma,
 } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
@@ -24,6 +25,7 @@ import {
 } from './plan.service';
 import { TaskEventService } from './task-event.service';
 import { TaskRunnerService } from './task-runner.service';
+import { StepStateService } from './step-state.service';
 import {
   isTerminalTaskStatus,
   PublicTask,
@@ -32,6 +34,7 @@ import {
   PublicTaskListResult,
   PublicTaskPlan,
   PublicTaskPlanStep,
+  PublicTaskResourceRef,
   PublicTaskStatus,
   PublicTaskStep,
 } from './orchestration.types';
@@ -88,6 +91,7 @@ export class TaskService {
     private readonly taskEvents: TaskEventService,
     private readonly plans: PlanService,
     private readonly runner: TaskRunnerService,
+    private readonly stepState: StepStateService,
   ) { }
 
   /**
@@ -275,6 +279,58 @@ export class TaskService {
           where: { taskId: task.id, status: AssistantTaskInteractionStatus.PENDING },
           data: { status: AssistantTaskInteractionStatus.CANCELLED, resolvedAt: completedAt },
         });
+        // 步骤收束：非终态步骤随任务取消置 SKIPPED（逐个写 step_skipped 事件，
+        // 保证事件流完整）；未执行/执行中的工具调用同步收束——状态不确定的
+        // 执行中调用标 RECOVERY_REQUIRED，绝不因取消而盲目重放副作用。
+        const openSteps = await transaction.assistantTaskStep.findMany({
+          where: {
+            taskId: task.id,
+            tenantId: task.tenantId,
+            status: {
+              in: [
+                AssistantTaskStepStatus.PENDING,
+                AssistantTaskStepStatus.READY,
+                AssistantTaskStepStatus.RUNNING,
+                AssistantTaskStepStatus.WAITING_USER,
+              ],
+            },
+          },
+          orderBy: { stepNo: 'asc' },
+          select: { id: true, stepKey: true, status: true },
+        });
+        if (openSteps.length > 0) {
+          await this.stepState.reconcileTaskStepTools(transaction, {
+            tenantId: task.tenantId,
+            stepIds: openSteps.map((step) => step.id),
+            now: completedAt,
+            executingCode: 'TOOL_EXECUTION_CANCELLED',
+            executingMessage: '任务已取消，该操作的结果状态未能确认，请留意核对',
+            pendingCode: 'TASK_CANCELLED',
+            pendingMessage: '任务已取消，该操作未执行',
+          });
+          for (const step of openSteps) {
+            const skipped = await transaction.assistantTaskStep.updateMany({
+              where: { id: step.id, taskId: task.id, status: step.status },
+              data: {
+                status: AssistantTaskStepStatus.SKIPPED,
+                error: {
+                  code: 'TASK_CANCELLED',
+                  message: '任务已取消，本步骤未执行',
+                } as Prisma.InputJsonObject,
+                completedAt,
+                executionOwner: null,
+                leaseExpiresAt: null,
+              },
+            });
+            if (skipped.count !== 1) continue;
+            await this.taskEvents.appendInTransaction(transaction, task.id, task.tenantId, {
+              type: 'step_skipped',
+              stepId: step.id,
+              stepKey: step.stepKey,
+              reason: '任务已取消',
+            });
+          }
+        }
       });
     }
     return this.getDetail(task.id);
@@ -352,7 +408,7 @@ export class TaskService {
       });
     });
 
-    // 计划已确认：启动任务调度。M1 的 runner 是骨架（记录日志），M2 接上执行循环。
+    // 计划已确认：启动任务调度循环（任务级租约，多实例下单执行者）。
     void this.runner.startTask(task.id).catch((error) => {
       this.logger.error(`failed to start task runner for ${task.id}: ${String(error)}`);
     });
@@ -502,10 +558,16 @@ function toPublicStep(step: AssistantTaskStep, agentNames: Map<string, string>):
     assigneeAgentId: step.assigneeAgentId,
     assigneeName: agentNames.get(step.assigneeAgentId) ?? null,
     summary: step.summary,
+    outputRefs: toOutputRefs(step.outputRefs),
     attemptNo: step.attemptNo,
     startedAt: step.startedAt,
     completedAt: step.completedAt,
   };
+}
+
+/** 产出引用 JSON 由步骤回流写入，读取时形状可信；防御性回退为空数组。 */
+function toOutputRefs(value: Prisma.JsonValue | null): PublicTaskResourceRef[] {
+  return Array.isArray(value) ? (value as unknown as PublicTaskResourceRef[]) : [];
 }
 
 /** 计划快照 JSON 由本服务写入，读取时形状可信；防御性回退为空数组。 */

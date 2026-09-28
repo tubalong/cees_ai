@@ -24,6 +24,8 @@ import { EventService } from './conversation/event.service';
 import { AssistantActionDraftService } from './drafts/assistant-action-draft.service';
 import { OrchestrationToolsService } from './orchestration/orchestration-tools.service';
 import { PlanService } from './orchestration/plan.service';
+import { StepRunnerService } from './orchestration/step-runner.service';
+import { StepStateService } from './orchestration/step-state.service';
 import { TaskEventService } from './orchestration/task-event.service';
 import { TaskRunnerService } from './orchestration/task-runner.service';
 import { TaskService } from './orchestration/task.service';
@@ -84,6 +86,8 @@ import { ImportFinanceLedgerTool } from './tools/executors/import-finance-ledger
     TaskEventService,
     PlanService,
     TaskService,
+    StepStateService,
+    StepRunnerService,
     TaskRunnerService,
     OrchestrationToolsService,
     CreateDepartmentTool,
