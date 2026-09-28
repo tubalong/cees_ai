@@ -113,7 +113,7 @@ Renderer -> CEES API GitHubConnectorPlannerService
     -> 仅规划 tools/list 返回的动态工具调用，不持有 Token，不执行 MCP
 ```
 
-GitHub Manifest 使用 `REMOTE_MCP`、`DESKTOP`、`OAUTH`，不自动安装第三方 CLI。OAuth Token 由 Main Process 使用 Electron `safeStorage` 保存在 `userData/connectors/github/oauth.secure`；API、数据库和 Renderer 不读取 Token。官方 Resource Metadata 或 `WWW-Authenticate` challenge 决定实际授权 scope，不能把连接成功解释为拥有全部仓库权限。GitHub 远程 MCP 端点由 Adapter 固定，暂不支持 GHES。
+GitHub Manifest 使用 `REMOTE_MCP`、`DESKTOP`、`OAUTH`，不自动安装第三方 CLI。通用 `RemoteMcpClient` 从打包的 `apps/desktop/mcp.json` 读取固定 HTTPS 端点和超时；`disabled=true` 仅禁止启动时自动连接，不阻止用户显式连接。OAuth Client ID/Secret 由 Main Process 环境变量读取，Token 由 Main Process 使用 Electron `safeStorage` 保存在 `userData/connectors/github/oauth.secure`；API、数据库和 Renderer 不读取任何 OAuth 凭据。官方 Resource Metadata 或 `WWW-Authenticate` challenge 决定实际授权 scope，不能把连接成功解释为拥有全部仓库权限。GitHub 远程 MCP 端点由 Adapter 固定，暂不支持 GHES。
 
 ## 5. Remote MCP Transport
 

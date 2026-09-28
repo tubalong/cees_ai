@@ -7,7 +7,8 @@ GitHub 连接器采用 GitHub 官方远程 MCP 服务、GitHub OAuth、官方 MC
 - 固定远程端点：`https://api.githubcopilot.com/mcp/`；用户不能在配置或对话中替换端点；
 - Desktop Main Process 使用 `@modelcontextprotocol/sdk@1.30.1` 完成 Streamable HTTP、初始化、会话、OAuth PKCE、刷新令牌和断线重连；
 - OAuth 回调使用 `127.0.0.1` 动态端口，State 由本地回调服务校验；
-- GitHub OAuth Client ID 由部署方通过 `CEES_GITHUB_OAUTH_CLIENT_ID` 提供，不能把 Client Secret 或真实值提交到仓库；
+- GitHub OAuth Client ID 和 Client Secret 由部署方通过 `CEES_GITHUB_OAUTH_CLIENT_ID`、`CEES_GITHUB_OAUTH_CLIENT_SECRET` 提供，不能把真实值提交到仓库；
+- Client Secret 仅由 Desktop Main Process 读取，用于 GitHub OAuth 的 `client_secret_basic`，不会进入 `mcp.json`、Renderer、API 请求或对话上下文；
 - Token 只保存在当前电脑的 Electron `safeStorage` 加密文件 `userData/connectors/github/oauth.secure`，不会上传 `apps/api`；
 - Desktop 连接后调用 `tools/list` 动态发现工具，最多接收 256 个工具；API 只规划调用，Desktop 执行；
 - `READ` 工具直接执行，`WRITE` 和 `DESTRUCTIVE` 工具在外部调用前必须二次确认；未知风险按 `DESTRUCTIVE` 处理；
@@ -57,9 +58,10 @@ GitHub Resource Metadata 可能声明多个支持的 scope。官方 MCP SDK 按 
 
 ```env
 CEES_GITHUB_OAUTH_CLIENT_ID=change_me
+CEES_GITHUB_OAUTH_CLIENT_SECRET=change_me
 ```
 
-部署方需要在 GitHub OAuth App/GitHub App 中配置与官方允许的 loopback 回调规则一致的回调地址，并将 Client ID 注入 Desktop 运行环境。不得把 Client Secret、Access Token、Refresh Token 或个人 OAuth 值写入仓库、OpenAPI、Renderer 或 API 请求体。
+`apps/desktop/mcp.json` 只保存固定远程 MCP URL、超时和默认禁用标志：`disabled=true` 表示不自动连接，不阻止用户点击“连接”手动启用。部署方需要在 GitHub OAuth App/GitHub App 中配置与官方允许的 loopback 回调规则一致的回调地址，并将 Client ID 和 Client Secret 注入 Desktop Main Process 运行环境。不得把 Client Secret、Access Token、Refresh Token 或个人 OAuth 值写入仓库、OpenAPI、Renderer 或 API 请求体。
 
 ## 6. 暂不支持
 

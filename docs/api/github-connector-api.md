@@ -70,6 +70,14 @@ Desktop 提交用户问题和从 GitHub 官方远程 MCP `tools/list` 动态发�
 ## 4. 执行责任
 
 - API：验证租户会话、限制工具目录、规划调用并拒绝目录外工具；
-- Desktop Main Process：固定官方端点、处理 OAuth、保存 Token、动态发现和执行 MCP；
+- Desktop Main Process：从 `mcp.json` 读取固定端点和超时，处理 OAuth、保存 Token、动态发现和执行 MCP；`CEES_GITHUB_OAUTH_CLIENT_ID` 与 `CEES_GITHUB_OAUTH_CLIENT_SECRET` 只在 Main Process 使用；
 - Renderer：展示连接状态、发起规划、展示写操作二次确认；
 - GitHub：按用户权限、组织策略、OAuth scope 与 MCP scope challenge 决定最终可见能力。
+
+## 5. 凭据与部署约束
+
+- `apps/desktop/mcp.json` 不保存 Client ID、Client Secret、Access Token 或 Refresh Token，只保存固定的 GitHub MCP 地址、超时和 `disabled` 配置；
+- `disabled: true` 只表示禁止启动时自动连接，用户显式点击“连接”时仍允许授权；
+- 部署方必须通过 `CEES_GITHUB_OAUTH_CLIENT_ID` 和 `CEES_GITHUB_OAUTH_CLIENT_SECRET` 注入 Desktop Main Process；两者缺失时状态分别返回 `GITHUB_OAUTH_CLIENT_ID_MISSING` 或 `GITHUB_OAUTH_CLIENT_SECRET_MISSING`；
+- OAuth Token 只写入本机安全存储，API、数据库、Renderer 和连接器规划请求均不得接触 Token 或 Client Secret；
+- 当前不支持由租户管理员在控制台替换 GitHub MCP URL，也不支持 GHES 自定义端点。

@@ -438,6 +438,9 @@ export default function ConnectorMarketplacePage(): JSX.Element {
                 {selectedManifest.id === 'github' && selectedStatus.issueCode === 'GITHUB_OAUTH_CLIENT_ID_MISSING'
                     ? <div className="connector-version-message is-error">{t('GitHub OAuth Client ID 尚未配置。请由部署方设置 CEES_GITHUB_OAUTH_CLIENT_ID 后重启桌面端。')}</div>
                     : null}
+                {selectedManifest.id === 'github' && selectedStatus.issueCode === 'GITHUB_OAUTH_CLIENT_SECRET_MISSING'
+                    ? <div className="connector-version-message is-error">{t('GitHub OAuth Client Secret 尚未配置。请由部署方设置 CEES_GITHUB_OAUTH_CLIENT_SECRET 后重启桌面端。')}</div>
+                    : null}
                 {selectedManifest.id === 'dingtalk' && selectedDingTalkStatus.state === 'PROFILE_REQUIRED'
                     ? <DingTalkProfileSelector
                         status={selectedDingTalkStatus}
