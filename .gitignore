@@ -42,3 +42,6 @@ apps/ai-service/tmp_*
 scripts/_*.log
 scripts/_*.ps1
 scripts/_*.diff
+
+# 原型 demo 稿（design handoff / prototype / screenshots，仅本地参考，不入库）
+projectdemo/
