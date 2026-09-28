@@ -1336,7 +1336,7 @@ const sendMessage = async (overrideContent?: string, forcedConnector?: 'wecom' |
             }
         }
         const githubConnector = window.cees?.connectors;
-        const mentionsGitHub = /github|git hub|issue|pull request|\bpr\b|actions/i.test(content) || preferredConnector === 'github' || forcedConnector === 'github';
+        const mentionsGitHub = /github|git hub|issue|pull request|\bpr\b|actions|commit|commits|提交记录|提交总结|私有仓库|private repository/i.test(content) || preferredConnector === 'github' || forcedConnector === 'github';
         if (githubConnector && mentionsGitHub) {
             const status = await githubConnector.status('github') as GitHubConnectorStatus;
             if (status.state !== 'READY') throw new Error(status.error || '请先在连接器页面连接 GitHub');
