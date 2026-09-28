@@ -24,6 +24,8 @@
 - [GitHub 官方远程 MCP 连接器](github-remote-mcp-connector.md)：GitHub OAuth、官方 MCP SDK、动态工具发现与 Desktop 本地执行。
 - [分配策略与人财法](assignment-and-hr-finance-legal.md)：AssignmentPolicy、完整 HR 与 Finance 已实现；Legal 契约已冻结待实现。
 - [AI 助手业务写操作](assistant-business-tools.md)：聊天式部门与知识库写入、待确认草稿与确认卡片、缺参追问与同名消歧、确认前无副作用。
+- [AI 同事：定位与关系说明](ai-colleague.md)：四个主体（企业/用户/总管/同事）的定义与关系、两种运行模式（前台对话与编排执行）、能力构成（职能定义/数据源挂载/学习记录/工作记录/权限边界）、权限与临时授权模型、多人共用一致性原则与术语边界。
+- [AI 任务编排（需求设计）](ai-orchestration.md)：双通道（前台对话与编排执行）、任务全流程（计划/派发前确认/逐步执行/草稿验收/沉淀）、三层上下文与三不变量、JEV 三方职责与置信度分流、建议/临时授权/主动问人三类交互、知识同步与分块实施。
 
 待补充。建议按以下维度维护：
 

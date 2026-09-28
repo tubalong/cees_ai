@@ -1,0 +1,453 @@
+# AI 任务编排：技术设计
+
+> 状态：设计定稿（2026-09-28）
+> 实施进展（2026-09-28）：**M1 已落地**——同事表与任务五表（含统一交互表、`Conversation.agentId` 扩展）迁移、任务面契约（`/assistant/tasks` 5 操作，契约 0.44.0）、权限码 `ai.task.create/read`、编排服务骨架（`task` / `plan` / `task-event` / `task-runner`）、`create_orchestration_task` 工具与「无在职 AI 同事时编排工具不出现、对话与其余工具不受影响」的降级门控、任务接口（含 SSE 重放）与开发环境默认同事 seed。**M2**（子执行与窗口隔离）、**M3**（重编排与交互）、**M4**（融合与沉淀）尚未实施；文中步骤运行器、决策器与建议系统等章节均为待实施设计。
+> 性质：技术方案文档。定义数据模型、状态机、接口契约、上下文组装算法、编排决策抽象、调度运行器与实现落点。
+> 需求与功能设计见 [AI 任务编排（需求设计）](../product/ai-orchestration.md)；主体定义见 [AI 同事：定位与关系说明](../product/ai-colleague.md)。
+> 读者：服务端、AI 服务、桌面端 / 移动端工程师与测试。
+
+## 1. 总体架构
+
+### 1.1 组件图
+
+```
+┌─────────────────────────── apps/api（唯一编排中心） ───────────────────────────┐
+│                                                                              │
+│  对话入口（现有）                        编排层（新增 orchestration/）             │
+│  ├─ 轮次运行器（turn-runner）             ├─ 任务服务（生命周期、幂等、查询）         │
+│  ├─ 意图与能力识别（intent-capability）    ├─ 编排运行器（task-runner：调度循环、租约、恢复）│
+│  └─ 复杂度分流 ──────────────▶           ├─ 步骤运行器（step-runner：派发、挂起、回流）│
+│                                          ├─ 计划管理（plan：版本化、重编排）          │
+│  同事资产（新增 agents/）                  └─ 编排决策器（decider：抽象位，v1/v2）      │
+│  ├─ 同事定义（职能、权限上限、数据源挂载）                                               │
+│  ├─ 学习记录 / 工作记录                                                          │
+│  └─ 前台对话运行时（复用轮次管线，按同事人格组装上下文）                                  │
+│                                                                              │
+│  既有基座（复用）：工具注册与批准（tools/）、写操作确认（drafts/）、事件与重放（conversation/）、│
+│  数据范围解析、审计、幂等、额度计量                                                     │
+└──────────────────────────────────────────────────────────────────────────────┘
+                    │ 内部契约（内部 Token 鉴权）
+                    ▼
+┌─────────────────────── apps/ai-service（模型执行，无业务流程） ──────────────────────┐
+│  轮次执行管线（现有）：消息组装 → 模型调用 → 工具循环 → 流式事件                        │
+│  新增：步骤执行模式（派发书 → 执行窗口 → 产出与依据事件）                               │
+│  新增：编排决策调用（结构化输出：选项 + 置信度；模型角色 orchestration_decision）        │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 1.2 分层原则
+
+- **app/api 掌握一切流程事实**：任务状态、计划、挂起、授权、审计都在 NestJS；ai-service 只做"单次模型执行"与"决策建议"，不持任务状态；
+- **编排层叠加在既有轮次管线之上**：步骤执行复用 turn 执行器（消息 + 工具循环 + 事件流 + 幂等批准），编排层负责"何时、以什么上下文、执行哪一步"；
+- **一切长生命周期对象都落库**：任务可断线、可重启、可跨终端，任何内存态都只是缓存。
+
+## 2. 数据模型
+
+新增模型全部遵循既有约定：`id` uuid 主键、`tenantId` 隔离、`@map` 蛇形表名、中文 `///` 注释说明设计意图、状态用 Prisma 枚举、序号字段原子分配（沿用 `nextEventSeq` 模式，避免 max+1 并发冲突）。
+
+### 2.1 同事资产（agents/）
+
+**AssistantAgent**（`assistant_agents`）——同事定义（岗位说明书）：
+
+- `name` / `title`（职责定位）/ `icon` / `description`
+- `instructions`（执行指令：工作方式、输出标准）
+- `permissions Json`：三级权限清单（自决 / 需签字 / 禁止），固定模式校验
+- `toolPolicy Json`：可用工具与动作清单（与权限清单联动）
+- `dataSources`：数据源挂载（独立表，见下）
+- `visibility Json`：可调度 / 可对话的角色范围
+- `budget Json`：单次执行与单任务预算上限（调用次数、token 上限）
+- `status`：DRAFT / ACTIVE / ARCHIVED；`version`（乐观锁，改配置不重写历史执行）
+
+**AssistantAgentDataSource**（`assistant_agent_data_sources`）——数据源挂载：`agentId`、`type`（KNOWLEDGE_BASE / BUSINESS / CONNECTOR）、`refId`、`config Json`（如知识库的推荐标签）。只存引用，不复制数据。
+
+**AssistantAgentLesson**（`assistant_agent_lessons`）——学习记录（程序性知识，append-only）：
+
+- `agentId`、`content`（经验条目）
+- `scopeType`：GLOBAL / USER / SCENARIO；`scopeMembershipId`（USER 时）、`scopeKey`（SCENARIO 时）
+- `sourceType`：FEEDBACK / PATTERN / RETROSPECT / CORRECTION / EXTERNAL；`sourceRef`（来源任务或轮次）
+- `status`：PENDING_CONFIRM / ACTIVE / RETIRED；`supersededById`（取代链，不原地修改）
+- **所有对人的引用使用 membershipId**，不存姓名字符串；展示层实时解析
+
+**AssistantAgentWorkRecord**（`assistant_agent_work_records`）——工作记录（情景记忆，append-only）：
+
+- `agentId`、`kind`（TASK / DIALOG）、`taskId?`、`initiatorMembershipId`
+- `summary`（摘要级）、`stepRefs Json`、`outputRefs Json`（产出资产引用）、`result`（结果与复盘要点）
+
+### 2.2 任务编排（orchestration/）
+
+**AssistantTask**（`assistant_tasks`）——任务主体：
+
+- `conversationId`（发起会话）、`userId` / `membershipId`（发起人）
+- `title` / `goal`（目标原文）、`originType`：CONVERSATION / AGENT_CHAT / AUTO
+- `status`：CREATED / PENDING_CONFIRM / RUNNING / WAITING_USER / COMPLETED / FAILED / CANCELLED
+- `planVersion`（当前生效计划版本）、`nextEventSeq`（任务事件序号原子分配）
+- 执行租约：`executionOwner` / `leaseExpiresAt` / `heartbeatAt`（沿用轮次租约模式）
+- 幂等：`@@unique([conversationId, idempotencyKey])`；`requestHash` 校验键内容一致
+- `completedAt` / `failedReason` / `createdAt` / `updatedAt`
+
+**AssistantTaskPlan**（`assistant_task_plans`）——计划版本（append-only）：
+
+- `taskId`、`version`、`steps Json`（计划快照：每步的职责、执行同事、输入引用、预期产出）、`createdBy`（用户确认 / 系统采纳）、`confirmedAt`
+- `clarifications Json?`（PENDING_CONFIRM 阶段的关键待定项：问题 + 选项；确认请求携带答复，答复并入生效版本）
+- **版本化而非原地修改**：重编排与"调整要求"产生新版本，历史版本保留，审计可回溯"第 3 版计划为什么被替换"
+
+**AssistantTaskStep**（`assistant_task_steps`）——运行时步骤（当前计划版本的展开）：
+
+- `taskId`、`planVersion`、`stepNo`、`stepKey`（计划内稳定标识）
+- `assigneeAgentId`（执行同事）、`brief Json`（派发书快照：本步要求、依赖产出引用、工具面）
+- `dependsOn Json`（前置 stepKey 列表）
+- `status`：PENDING / READY / RUNNING / WAITING_USER / SUCCEEDED / FAILED / SKIPPED
+- `attemptNo`（重试计数）、`summary`（结果摘要）、`outputRefs Json`（产出引用）
+- 执行租约：`executionOwner` / `leaseExpiresAt` / `heartbeatAt`
+- `startedAt` / `completedAt` / `error`
+
+**AssistantTaskStepMessage**（`assistant_task_step_messages`）——执行窗口消息（随步骤生灭）：
+
+- `stepId`、`seq`、`role`、`content`、`toolCallRef`（关联 ToolCall）
+- **独立于 Conversation 存储**：不进入用户会话、不进对话列表、不参与主会话压缩；步骤终态后按保留策略清理（如保留 30 天供排障，可配置）
+
+**AssistantTaskEvent**（`assistant_task_events`）——任务事件（展示与重放）：
+
+- `taskId`、`seq`（原子分配）、`type`、`payload Json`
+- `@@unique([taskId, seq])`：断线重连按 `(taskId, seq)` 重放，与轮次事件同构
+- 事件类型：`task_created` / `plan_ready` / `plan_confirmed` / `step_started` / `step_progress` / `step_completed` / `step_failed` / `step_skipped` / `interaction_requested` / `interaction_resolved` / `output_confirmed` / `task_completed` / `task_failed` / `task_cancelled`
+- **任务事件不写入对话消息流**：对话流中的任务卡片只是一条轻量引用消息，卡片内容由任务事件流实时驱动——避免任务过程进入主会话 LLM 上下文（三不变量之"隔离"）
+
+**AssistantTaskInteraction**（`assistant_task_interactions`）——用户介入事项（挂起/恢复的统一载体）：
+
+- `taskId`、`stepId`、`type`：AUTHORIZATION / QUESTION / DECISION
+- `payload Json`（按 type 固定模式：授权=权限项与理由；提问=问题与候选；裁决=分岔方案）
+- `status`：PENDING / RESOLVED / REJECTED / EXPIRED / CANCELLED
+- `resolution Json?` / `resolvedByMembershipId` / `resolvedAt` / `expiresAt`
+- 授权专用字段：`scope`（ONCE / TASK）、`usedAt`（使用时间；"全量使用记录"写审计事件）
+- **为什么三类交互合一张表**：挂起、推送、恢复、审计的骨架完全相同，差异仅在 payload 模式与恢复动作；分三张表会复制三套管道，合并后 type 层校验、骨架层复用
+
+### 2.3 会话扩展、建议与既有模型的衔接
+
+- **`Conversation` 最小扩展**：新增可空 `agentId`（null = 总管），承载"一条会话固定一个对话对象"；列表查询沿用既有 `[tenantId, ownerMembershipId, updatedAt]` 索引，按对象筛选在其上追加条件（筛选变高频再评估组合索引）。这是对既有表的唯一结构变更；
+- **建议（Suggestion）不新增持久化表**（一期）：轮后建议沿用 `AssistantTurn.relatedQuestions`（随轮次存储、随事件重放）；开场建议走短 TTL 缓存（Redis，按用户维度），不落库；
+- 统一抽象以服务契约对象表达（见第 9 节），后续若需要建议使用率统计再评估独立表；
+- **不修改** `AssistantTurn` / `AssistantEvent` / `AssistantActionDraft` 结构；步骤执行的模型调用通过 `AIInvocationLog.metadata` 记录 `taskId` / `stepId`（不新增列）。
+
+### 2.4 产出归档（与知识库体系的衔接）
+
+**不新增表、不新建存储机制**：任务产出的归档复用 knowledge 模块既有转存链路——`KnowledgeDocument` 按 `sourceType=DOCUMENT`（AI 生成文档）锚定来源，同源重复转存追加 `DocumentVersion`，审计沿用 `KNOWLEDGE_DOCUMENT_CREATED`（已含 `visibilityScope` / `sourceType` / `sourceId`）；知识库四档归属（`visibilityScope`：PRIVATE / DEPARTMENT / PROJECT / TENANT）与成员权限（`KnowledgeBaseMember`：READER / EDITOR / MANAGER）全部复用。
+
+**归档目标解析（v1）**：
+
+- 规则路径（确定性）：发起人有部门 → 默认其部门锚定的 DEPARTMENT 库；任务关联项目 → 建议 PROJECT 库；
+- 无明确归属（无部门 / 跨部门 / 高层角色）：不猜测，由 LLM 基于产出主题生成候选项与推荐理由（结构化约束），候选集 = 发起人对目标库具 **EDITOR 及以上** 权限的库，服务端硬过滤（与建议系统同一原则：不出现无权选项）；
+- 目标库不存在（部门尚无库）：提示创建（需建库权限）或由用户在候选内另选。
+
+**确认承载**：产出的内容验收与归档确认合并为一个动作——`POST /assistant/tasks/{id}/outputs/confirm` 逐产出携带 `knowledgeBaseId`；服务端校验（目标库 EDITOR+ → 转存 → 写事件 `output_confirmed`（payload：`documentId` / `knowledgeBaseId` / `knowledgeDocumentId` / `visibilityScope`））；无明确归属时，确认提交前先完成"选择存储位置"的问答（属于确认表单的一部分，**不产生挂起事项**：任务已在终态验收阶段，未选择则提交不成立，无需建立交互记录）。
+
+**可见范围提示**：确认卡片展示目标库 `visibilityScope` 的可见面（公司库=全员可检索 / 部门库=本部门 / 项目库=项目成员 / 个人库=仅本人），随候选由服务端下发，前端仅展示。
+
+## 3. 状态机
+
+### 3.1 任务状态
+
+```
+CREATED（计划生成中）
+   │ 计划草案就绪（含完整步骤清单与关键待定项）
+   ▼
+PENDING_CONFIRM（派发前确认：展示步骤清单；答复澄清项；"调整要求"生成新草案）
+   │ 用户确认携带澄清答复（或自动采纳策略）；确认前不派发
+   ▼
+RUNNING ◀─────────────────────────┐
+   │ 步骤触发挂起                    │ 交互解决（授权批准 / 答复 / 裁决）
+   ▼                              │
+WAITING_USER ─────────────────────┘
+   │ 全部步骤终态
+   ▼
+COMPLETED / FAILED / CANCELLED（终态：关闭未决挂起、联动失效临时授权）
+```
+
+规则：
+
+- 状态不倒退：终态不可回到运行态；需要继续工作 → 新任务（保持历史不可变）；
+- WAITING_USER 是"存在挂起事项"的展示态，实际调度以**步骤级状态**为准（有步骤 RUNNING 则任务实际仍在跑）；
+- 所有转换用**条件更新抢占**（`UPDATE ... WHERE status = 期望前态`），重复事件不产生二次转换。
+
+### 3.2 步骤状态
+
+```
+PENDING（依赖未满足）──依赖完成──▶ READY ──调度派发──▶ RUNNING
+                                                        │
+              ┌──────────────┬──────────────┬───────────┤
+              ▼              ▼              ▼           ▼
+         WAITING_USER     SUCCEEDED      FAILED      （超时/中断）
+              │ 交互解决         │           │ 处置阶梯        │ 租约回收
+              └──▶ RUNNING     │           ├─ 重试（attemptNo+1）─┐
+                               │           ├─ 重排（生成新计划版本）│
+                               │           ├─ SKIPPED             │
+                               │           └─ 升级用户 ◀──────────┘
+                               ▼
+                         （任务进入下一步判定）
+```
+
+规则：
+
+- 单步骤串行：同一步骤同一时刻只有一个执行尝试（租约保证）；
+- 挂起不阻塞：WAITING_USER 的步骤不影响无依赖步骤的调度；
+- 重试上限可配置（默认 3），超限走"重排 / 跳过 / 升级"阶梯。
+
+### 3.3 交互状态
+
+`PENDING → RESOLVED`（用户批准 / 答复）/ `REJECTED`（拒绝）/ `EXPIRED`（超时策略触发）/ `CANCELLED`（任务终态清理）。
+
+- 解决动作幂等：`PENDING → RESOLVED` 条件更新，重复提交返回当前状态而非报错；
+- 授权"仅本次"在用于当次执行后置 `usedAt`；"本任务内"允许多次使用，每次使用写审计事件；
+- 任务终态时批量校验并失效所有 PENDING 授权（联动"临时授权任务期失效"硬约束）。
+
+## 4. 接口与契约
+
+### 4.1 对外 HTTP（OpenAPI，packages/contracts）
+
+| 操作 | 说明 |
+| --- | --- |
+| `GET /assistant/tasks` | 任务列表（按状态 / 发起人 / 时间过滤；分页沿用既有列表约定） |
+| `GET /assistant/tasks/{id}` | 任务详情：当前计划版本、步骤、挂起事项、产出引用、事件摘要 |
+| `GET /assistant/tasks/{id}/events` | 事件重放（`since` 序号游标）+ SSE 增量订阅（断线重连） |
+| `POST /assistant/tasks/{id}/confirm` | 确认计划：请求体 `decision`（`start` 开始执行 / `revise` 生成新草案）与澄清项答复 `answers`；幂等；**确认前不派发任何步骤** |
+| `POST /assistant/tasks/{id}/cancel` | 取消任务（终态清理） |
+| `POST /assistant/tasks/{id}/outputs/confirm` | 产出验收与归档：逐产出携带 `knowledgeBaseId`，校验目标库权限后触发既有转存链路；幂等 |
+| `POST /assistant/task-interactions/{id}/resolve` | 解决挂起事项（授权批准/拒绝、提问答复、裁决选项）；幂等 |
+| `GET /assistant/agents`、`GET /assistant/agents/{id}` | 同事列表与档案（含学习记录、工作记录分页） |
+| `POST /assistant/suggestions` | 拉取建议（`scene`：conversation_starter 等）；轮后建议仍随轮次流下发 |
+| `GET /assistant/conversations` | 会话列表：沿用既有列表操作，新增对话对象筛选参数（`agentId`，缺省 = 全部） |
+| `POST /assistant/conversations` | 创建会话：`agentId` 指定对话对象（缺省 = 总管）；与某同事已有会话时可定位复用 |
+
+- 契约以**新增为主**：不改动既有操作的请求/响应结构；需要复用会话的事件结构时引用既有 schema；会话接口是**扩展参数**而非重构（`agentId` 可空、缺省语义与现状一致）；
+- 契约变更后重新生成 `packages/api-client`，并同步 Dart / Python 客户端使用面；
+- 新增权限码（沿用既有命名风格）在权限清单登记：任务查看、任务管理、授权审批、同事管理、同事对话等，并纳入角色模板默认集评审。
+
+### 4.2 任务事件推送
+
+- 任务事件流与轮次事件流**并行存在**：客户端在会话页同时订阅两个流，渲染层合并（任务卡片实时更新）；
+- 重放语义与轮次一致：`(taskId, seq)` 游标，客户端记录 `lastSeq`，重连补拉；
+- 事件 payload 只含展示字段（步骤名、同事名、状态、摘要、产出引用），不含内部权限与敏感参数；`plan_ready` 携带完整步骤清单与待澄清项（供确认卡片渲染）。
+
+### 4.3 ai-service 内部契约
+
+| 能力 | 说明 |
+| --- | --- |
+| 步骤执行 | 复用轮次执行管线：输入（同事人格指令、派发书、窗口消息、工具清单、预算）→ 输出（流式事件 + 终态产出：摘要 + 产出引用 + 依据引用）；无任务状态 |
+| 编排决策 | 输入（决策类型 + 任务状态快照 + 步骤结果）→ 输出（选项 + 置信度 + 理由，结构化约束）；模型角色 `orchestration_decision` |
+| 建议生成 | 开场建议：输入（权限筛选后的可用场景 + 企业动作摘要）→ 输出（建议列表，结构化约束） |
+| 上下文压缩 | 复用现有：仅用于前台对话（主会话流）；步骤窗口不压缩（天然短），超预算时截断历史轮次保留尾部 |
+
+- 鉴权沿用手册内 Token（`AI_INTERNAL_TOKEN`）与既有内部调用链路；
+- 步骤执行与轮次执行共享"工具循环 + 事件协议"，差异仅在人格注入、预算护栏与回流格式。
+
+## 5. 上下文组装与回流（派发书）
+
+### 5.1 派发书结构
+
+步骤派发时由 NestJS 组装（`brief Json` 快照）：
+
+```
+{
+  taskGoal:         任务目标（总管理解后的完整表述）
+  stepRequirement:  本步要求（做什么、完成标准、输出格式）
+  assignee:         同事身份摘要（名称、职责定位）
+  dependencies:     依赖产出的引用列表（摘要 + 资产引用，按需深读）
+  lessons:          相关学习记录（相关性 + 适用范围过滤后）
+  recentWork:       同事近期工作记录摘要（连续性）
+  toolPolicy:       本步可用工具面（权限 = 发起人 ∩ 上限，服务端硬过滤）
+  budget:           本步预算（调用次数 / token）
+  outputContract:   产出格式约定（摘要必填、引用格式）
+}
+```
+
+**组装原则**：只注入"执行本步必需"的内容；依赖产出以"摘要 + 引用"注入，原始内容由工具按需读取（保持读时最新）。
+
+### 5.2 执行窗口
+
+- 窗口 = 系统指令（同事人格 + 派发书）+ 窗口消息流（本步的模型轮次与工具调用）+ 工具面；
+- 窗口消息写入 `assistant_task_step_messages`，与用户会话完全隔离；
+- 工具调用沿用既有批准链：注册表校验 → 权限与数据范围 → 幂等 → 执行 → 审计；"需签字"级动作在步骤内触发挂起（第 3.3 节）；
+- 超预算行为：先截断窗口早期轮次；仍超 → 步骤标记 FAILED（预算原因），走处置阶梯。
+
+### 5.3 回流（摘要 + 引用）
+
+步骤终态时回写三样（不变量之"回流永远是摘要 + 引用"）：
+
+1. **summary**（摘要，必填，限长）：给状态总线、下游步骤与汇总使用；
+2. **outputRefs**（产出引用）：生成文档 / 图片 / 业务资源的稳定引用（不存签名 URL，遵循既有 ToolCall 结果约定）；
+3. **依据引用**：本步读过的关键数据源与工具调用记录（供"依据"视图与审计）。
+
+长文本一律留在产出资产中；下游步骤需要全文时按引用读取（工具），不复制进派发书。
+
+### 5.4 与既有压缩机制的关系
+
+| 空间 | 机制 |
+| --- | --- |
+| 主会话流 | 现有压缩（阈值触发：LLM 摘要 + 保留近期消息）——总管生成计划、汇总答复依赖它 |
+| 步骤窗口 | 不压缩；依赖"天然短"（无历史对话）+ 超预算截断 |
+| 任务状态总线 | 不是消息流，不压缩；每次调度从数据库现读 |
+
+## 6. 编排决策器（OrchestrationDecider）
+
+### 6.1 接口
+
+```ts
+// apps/api/src/assistant/orchestration/decider/
+interface OrchestrationDecider {
+  decide(input: DecisionInput): Promise<Decision>;
+}
+
+type DecisionInput = {
+  decisionType: 'SUFFICIENCY_CHECK' | 'ROUTING' | 'COMPLETION_CHECK'
+              | 'RISK_SCORE' | 'REPLAN_TRIGGER';
+  taskSnapshot: TaskSnapshot;   // 结构化状态：目标、计划、步骤状态、步骤摘要
+  stepResult?: StepResult;      // 判定场景下的当前步骤产出摘要
+};
+
+type Decision = {
+  choice: string;               // 选项（如 continue_next / ask_user / replan / complete）
+  confidence: number;           // 0~1
+  rationale?: string;           // 理由（进审计与排障）
+};
+```
+
+### 6.2 首版实现（v1：规则 + LLM 组合）
+
+- **规则路径**（确定性场景，不调模型）：无剩余步骤 = 完成；依赖未满足 = 不路由；重试超限 = 升级；
+- **LLM 路径**（模糊场景）：结构化输出约束（JSON Schema 校验 + 失败重试一次），走 `orchestration_decision` 模型角色；
+- **置信度分流**：`>= highThreshold`（默认 0.9）自动执行；`[lowThreshold, highThreshold)` 保守分支（继续但标记复核 / 轻量确认）；`< lowThreshold`（默认 0.6）升级用户裁决；阈值按租户可配置。
+
+### 6.3 演进（v2：JEV）
+
+- JEV 以 Choice / Score / Noul 原子原语实现同一接口，返回带置信度的选项；
+- 替换点只有工厂装配（配置项切换实现），流程代码零改动；
+- 验证方式：同一批任务快照回放两套实现，对比决策差异与置信度校准。
+
+## 7. 调度运行器
+
+### 7.1 task-runner（任务级循环）
+
+- **驱动方式**：事件驱动 + 租约续跑——步骤终态事件触发"任务步进"（检查依赖 → 推进 READY → 判定完成/重排）；
+- **执行租约**：复用轮次执行器的 `executionOwner` / `leaseExpiresAt` / `heartbeatAt` 模式，抢占式条件更新，杜绝双执行；
+- **断点恢复**：服务启动扫描"RUNNING 且租约过期"的任务与步骤，续跑或按阶梯处置（对齐 `turn-recovery` 的既有思路）；
+- **并发边界**：一个任务同一时刻只被一个运行器实例推进；步骤内并行受依赖图约束（无依赖步骤可并行派发）。
+
+### 7.2 step-runner（步骤级执行）
+
+1. 校验步骤状态（READY → RUNNING 条件更新）与预算；
+2. 组装派发书（第 5.1 节）→ 调 ai-service 步骤执行 → 流式写窗口消息 + 任务事件；
+3. 工具互动：批准链内联；需用户介入 → 创建 Interaction、步骤转 WAITING_USER、任务事件推送、**释放执行权**（不占用租约）；
+4. 终态回流：摘要 + 引用写回 → 步骤 SUCCEEDED/FAILED → 触发 task-runner 步进；
+5. 交互解决后：步骤 `WAITING_USER → RUNNING`（attemptNo 不变，从断点继续），重入执行窗口。
+
+### 7.3 幂等清单
+
+| 对象 | 幂等键 |
+| --- | --- |
+| 任务创建 | `(conversationId, idempotencyKey)` + requestHash |
+| 计划确认 / 任务取消 | 状态条件更新（重复提交返回当前态） |
+| 步骤执行 | `(stepId, attemptNo)` 租约独占；工具调用沿用 `ToolCall` 幂等键 |
+| 交互解决 | `PENDING → RESOLVED` 条件更新 |
+| 事件消费（客户端） | `(taskId, seq)` 去重 |
+
+## 8. 权限与安全落地
+
+- **权限推导链**（每步执行时实时求值，不缓存快照）：发起人实时权限 ∩ 同事 `permissions` 上限 → 生成工具面；工具注册表与 `tool-policy` 在工具调用点二次校验（纵深防御）；
+- **三级映射**：自决 = 直接执行；需签字 = 生成 AUTHORIZATION 交互挂起（批准后临时授权生效，仅任务期）；禁止 = 拒绝并让模型转向替代方案；
+- **临时授权校验链**：批准记录（Interaction）→ 使用时刻校验（任务未终态、scope 未耗尽、权限项匹配）→ 使用写审计；
+- **数据范围**：全部读写不绕过数据范围解析；步骤产出对用户的可见性按产出资产自身的权限规则执行；
+- **审计事件**（沿用既有审计体系）：任务创建 / 计划确认 / 每次派发与工具调用 / 挂起与恢复 / 授权申请·决定·使用 / 产出确认 / 终态清理；记录租户、操作者（membershipId）、请求、资源与元数据；
+- **敏感边界**：任务事件与卡片 payload 只含展示字段；派发书与步骤消息属内部数据，不通过公开接口整体暴露（详情接口按角色折叠）。
+
+## 9. 建议系统技术方案
+
+### 9.1 Provider 抽象（服务端）
+
+```ts
+interface SuggestionProvider {
+  scene: SuggestionScene;           // conversation_starter / turn_follow_up / task_follow_up
+  canGenerate(ctx: SuggestionContext): Promise<boolean>;
+  generate(ctx: SuggestionContext): Promise<Suggestion[]>;
+}
+```
+
+- `Suggestion = { scene, text, rank, source, expiresAt }`；注册表按场景装配，可插拔；
+- **权限硬过滤在 Provider 外层统一执行**：生成的建议逐条做权限预检（涉及的动作 / 数据当前用户可达），不可达即丢弃——绝不出现无权建议。
+
+### 9.2 场景实现
+
+| 场景 | 实现 |
+| --- | --- |
+| 轮后建议（follow_up） | 现状接入：ai-service 随答复生成 → 契约事件 `related_questions` → 持久化 `AssistantTurn.relatedQuestions` → 桌面端渲染（前端接入是本项的直接工作） |
+| 任务建议（task_follow_up） | 任务完成事件触发：基于产出摘要生成下一步建议（如"转为 PPT"），随任务事件下发 |
+| 开场建议（starter） | 服务端聚合：用户权限筛选可用场景 × 企业动作摘要（进行中任务、近期产出、动态）→ ai-service 生成 → Redis 短 TTL 缓存（按用户维度，避免高频调用）；拉取接口见 4.1 |
+
+### 9.3 前端接入点
+
+- 桌面端：会话页建议条（点击即以该文本发起轮次）；开场建议位于输入框上方（保护现有输入框组件形态）；
+- 移动端：复用同一契约事件与拉取接口，形态按端设计。
+
+## 10. 实现落点
+
+### 10.1 app/api（NestJS）
+
+| 目录 | 内容 |
+| --- | --- |
+| `src/assistant/orchestration/` | `task.service.ts` / `task-runner.service.ts` / `step-runner.service.ts` / `plan.service.ts` / `interaction.service.ts` / `decider/`（接口 + 规则实现 + LLM 实现 + 工厂装配） |
+| `src/assistant/agents/` | `agent.service.ts` / `lesson.service.ts` / `work-record.service.ts` |
+| `src/assistant/suggestions/` | Provider 注册表 + 各场景 Provider + 权限预检 |
+| `src/assistant/api/` | 任务 / 交互 / 同事 / 建议控制器（沿用既有控制器与 DTO 风格） |
+| `prisma/migrations/` | 新增模型迁移（全为新增表，无破坏性变更） |
+
+### 10.2 apps/ai-service（Python）
+
+- 步骤执行模式：在既有轮次执行管线上扩展（人格注入、派发书输入、产出契约输出）；
+- 编排决策调用：`orchestration_decision` 模型角色 + 结构化输出校验；
+- 开场建议生成任务（复用现有建议生成的提示组织方式）。
+
+### 10.3 apps/desktop / apps/mobile
+
+- 任务视图：任务列表（进行中 / 等你拍板 / 已完成 / 未完成）+ 详情（步骤流、产出、依据、挂起事项）；
+- 会话页：任务卡片（订阅任务事件流实时更新）、建议条、确认卡片与授权卡片（复用写操作确认的卡片组件形态）；
+- api-client 由契约生成后接入（不手写接口层）。
+
+### 10.4 契约与生成物
+
+- `packages/contracts/openapi.yaml` 新增任务 / 交互 / 同事 / 建议相关操作与 schema；
+- 重新生成 `packages/api-client`；Dart / Python 客户端按需同步；`docs/api` 更新。
+
+## 11. 配置与迁移
+
+| 配置项 | 说明 | 默认 |
+| --- | --- | --- |
+| `ORCHESTRATION_DECIDER` | 决策器实现选择（`rule_llm` / `jev`） | `rule_llm` |
+| `ORCHESTRATION_CONFIDENCE_HIGH` | 高置信阈值 | 0.9 |
+| `ORCHESTRATION_CONFIDENCE_LOW` | 低置信阈值 | 0.6 |
+| `ORCHESTRATION_STEP_RETRY_MAX` | 步骤重试上限 | 3 |
+| `ORCHESTRATION_STEP_MSG_RETENTION_DAYS` | 步骤消息保留天数 | 30 |
+| `ORCHESTRATION_MAX_STEPS` | 单任务步骤上限（护栏） | 配置化，默认 20 |
+| 模型角色 | `orchestration_decision` / `step_execution` 在模型配置中登记 | 沿用 `config/models.*.toml` |
+
+- **迁移顺序**：同事资产表 → 任务五表 → 交互表 →（M4）建议缓存 —— 全为新增，无既有数据变更；
+- **兼容性**：既有对话链路零破坏；`related_questions` 字段与流程保持；新增事件类型不影响旧客户端（未知类型忽略）。
+
+## 12. 验证矩阵（对齐工程约定第 6 节）
+
+| 范围 | 验证 |
+| --- | --- |
+| NestJS 编排层 | jest 受影响模块：状态机转换、幂等、租约抢占、挂起恢复、权限推导、决策分流 |
+| ai-service | pytest：步骤执行模式、结构化输出校验、决策调用 |
+| 契约 | 校验 + 重新生成 api-client + 受影响端集成验证 |
+| 桌面端 | TypeScript 检查 + 生产构建；任务视图与卡片交互走查 |
+| 端到端 | M1-M4 验收场景（需求设计第 10 节）逐条走查：双通道、计划确认、挂起恢复、临时授权约束、断线续做、沉淀正确 |
+
+## 13. 风险与开放问题
+
+| 风险 / 开放项 | 应对 |
+| --- | --- |
+| 模型生成计划的结构稳定性 | JSON Schema 校验 + 校验失败重试一次 + 兜底"澄清提问"；计划必须经用户确认才生效 |
+| 长任务成本失控 | 预算护栏（单步 / 单任务上限）、超预算截断与失败升级、用量按现有口径记录 |
+| 步骤消息的存储增长 | 保留策略（默认 30 天，可配置）+ 摘要回流后原文价值低 |
+| JEV v2 接口对齐（外部决策引擎形态） | 先用同一批任务快照回放对比；接口只依赖 Choice / Score / Noul 三原语与置信度 |
+| 开场建议的质量与延迟 | 权限前置筛选 + 短 TTL 缓存 + 可配置开关（效果未达预期可下线该场景，不影响其他场景） |
+| 自动任务（定时触发）扩展 | 复用任务模型与流水线；触发调度不在本期范围，先保留 `originType=AUTO` 语义位 |
