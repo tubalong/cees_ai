@@ -1,0 +1,9 @@
+{
+  "connectors": {
+    "connector:github": {
+      "url": "https://api.githubcopilot.com/mcp/",
+      "timeout": 600000,
+      "disabled": true
+    }
+  }
+}

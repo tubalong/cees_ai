@@ -1,14 +1,6 @@
-import { randomBytes } from 'node:crypto';
-import { createServer, type Server } from 'node:http';
-import { shell } from 'electron';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { UnauthorizedError, type OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import type {
-    OAuthClientInformationMixed,
-    OAuthClientMetadata,
-    OAuthTokens,
-} from '@modelcontextprotocol/sdk/shared/auth.js';
+import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js';
+import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import type { OAuthTokens } from '@modelcontextprotocol/sdk/shared/auth.js';
 import type {
     ConnectorContext,
     ConnectorPlannedCall,
@@ -16,6 +8,17 @@ import type {
     ConnectorTool,
 } from '../core/connector.types';
 import { SecureTokenStore } from '../../secure-store';
+import {
+    defaultMcpConfigPath,
+    loadRemoteMcpDefinition,
+    type RemoteMcpConnectorDefinition,
+} from '../mcp/mcp.config';
+import { createRemoteMcpClient } from '../mcp/remote-mcp-client';
+import {
+    buildLoopbackRedirectUrl,
+    createLoopbackOAuthCallback,
+    RemoteMcpOAuthProvider,
+} from '../mcp/remote-mcp-oauth';
 
 export const GITHUB_MCP_ENDPOINT = 'https://api.githubcopilot.com/mcp/';
 export const GITHUB_MCP_TOOLSETS = 'context,issues,pull_requests,repos,users,actions,notifications';
@@ -26,7 +29,6 @@ const MAX_CONTEXT_BYTES = 56 * 1024;
 const MAX_TOOL_SCHEMA_BYTES = 32 * 1024;
 const CONNECT_TIMEOUT_MS = 30_000;
 const TOOL_TIMEOUT_MS = 120_000;
-const AUTHORIZATION_TIMEOUT_MS = 5 * 60 * 1000;
 const TOKEN_STORE_FILE = 'connectors/github/oauth.secure';
 const TOKEN_STORE_KEY = 'github.oauth.tokens';
 const IDENTITY_STORE_KEY = 'github.oauth.identity';
@@ -53,28 +55,20 @@ interface StoredGitHubIdentity {
     login: string | null;
 }
 
-interface ConnectedGitHubClient {
-    client: Client;
-    close(): Promise<void>;
-}
-
-interface OAuthCallback {
-    redirectUrl: string;
-    code: Promise<string>;
-    close(): Promise<void>;
-}
-
 let tokenStore: SecureTokenStore | undefined;
 let toolCache: GitHubConnectorTool[] | undefined;
 let authorizationInProgress = false;
+let mcpDefinition: RemoteMcpConnectorDefinition | undefined;
 
 export function configureGitHubConnector(userDataPath: string): void {
     tokenStore = new SecureTokenStore(userDataPath, TOKEN_STORE_FILE, true);
+    mcpDefinition = loadRemoteMcpDefinition(defaultMcpConfigPath(__dirname), 'connector:github', GITHUB_MCP_ENDPOINT);
 }
 
 export async function getGitHubConnectorStatus(): Promise<GitHubConnectorStatus> {
     const checkedAt = new Date().toISOString();
-    if (!githubClientId()) return configurationErrorStatus(checkedAt);
+    if (!githubClientId()) return configurationErrorStatus(checkedAt, 'GITHUB_OAUTH_CLIENT_ID_MISSING', 'GitHub OAuth Client ID 未配置，请由 CEES 部署方设置 CEES_GITHUB_OAUTH_CLIENT_ID');
+    if (!githubClientSecret()) return configurationErrorStatus(checkedAt, 'GITHUB_OAUTH_CLIENT_SECRET_MISSING', 'GitHub OAuth Client Secret 未配置，请由 CEES 部署方设置 CEES_GITHUB_OAUTH_CLIENT_SECRET');
     if (authorizationInProgress) return authRequiredStatus(checkedAt, 'AUTHORIZING');
     if (!await hasStoredTokens()) return authRequiredStatus(checkedAt, 'UNAUTHORIZED');
     try {
@@ -93,26 +87,36 @@ export async function getGitHubConnectorStatus(): Promise<GitHubConnectorStatus>
 export async function connectGitHubConnector(): Promise<GitHubConnectorStatus> {
     const clientId = githubClientId();
     if (!clientId) throw new Error('GitHub OAuth Client ID 未配置，请设置 CEES_GITHUB_OAUTH_CLIENT_ID');
+    const clientSecret = githubClientSecret();
+    if (!clientSecret) throw new Error('GitHub OAuth Client Secret 未配置，请设置 CEES_GITHUB_OAUTH_CLIENT_SECRET');
     if (authorizationInProgress) return authRequiredStatus(new Date().toISOString(), 'AUTHORIZING');
     authorizationInProgress = true;
     toolCache = undefined;
-    const expectedState = randomBytes(24).toString('base64url');
-    const callback = await createOAuthCallback(expectedState);
-    const provider = new GitHubOAuthProvider({
+    const callback = await createLoopbackOAuthCallback(GITHUB_OAUTH_CALLBACK_PATH, getMcpTimeout());
+    const provider = new RemoteMcpOAuthProvider({
         clientId,
+        clientSecret,
         redirectUrl: callback.redirectUrl,
-        expectedState,
+        expectedState: callback.state,
+        clientName: 'CEES AI Desktop',
+        scope: 'repo read:org read:user user:email notifications offline_access',
         interactive: true,
+        isAuthorizationUrlAllowed: isAllowedGitHubAuthorizationUrl,
+        allowedResource: allowGitHubResourceUrl,
+        readTokens: readStoredTokens,
+        saveTokens: saveStoredTokens,
+        invalidateTokens: clearStoredCredentials,
     });
     try {
-        const initial = createMcpClient(provider);
+        const initial = createGitHubMcpClient(provider);
         try {
-            await initial.client.connect(initial.transport, { timeout: CONNECT_TIMEOUT_MS });
-            await initial.client.close();
+            await initial.client.connect(initial.transport, { timeout: getMcpTimeout() });
         } catch (error) {
             if (!isUnauthorizedError(error)) throw error;
             const authorizationCode = await callback.code;
             await initial.transport.finishAuth(authorizationCode);
+        } finally {
+            await initial.close();
         }
         const connected = await openAuthenticatedClient();
         try {
@@ -236,38 +240,46 @@ export function sanitizeGitHubResult(value: unknown): Record<string, unknown> {
 
 async function openAuthenticatedClient(): Promise<ConnectedGitHubClient> {
     if (!githubClientId()) throw new Error('GitHub OAuth Client ID 未配置，请设置 CEES_GITHUB_OAUTH_CLIENT_ID');
+    if (!githubClientSecret()) throw new Error('GitHub OAuth Client Secret 未配置，请设置 CEES_GITHUB_OAUTH_CLIENT_SECRET');
     if (!await hasStoredTokens()) throw new UnauthorizedError('GitHub 尚未授权');
-    const provider = new GitHubOAuthProvider({
+    const provider = new RemoteMcpOAuthProvider({
         clientId: githubClientId()!,
-        redirectUrl: 'http://127.0.0.1/oauth/github/callback',
+        clientSecret: githubClientSecret()!,
+        redirectUrl: buildLoopbackRedirectUrl(GITHUB_OAUTH_CALLBACK_PATH),
         expectedState: '',
+        clientName: 'CEES AI Desktop',
+        scope: 'repo read:org read:user user:email notifications offline_access',
         interactive: false,
+        isAuthorizationUrlAllowed: isAllowedGitHubAuthorizationUrl,
+        allowedResource: allowGitHubResourceUrl,
+        readTokens: readStoredTokens,
+        saveTokens: saveStoredTokens,
+        invalidateTokens: clearStoredCredentials,
     });
-    const { client, transport } = createMcpClient(provider);
-    await client.connect(transport, { timeout: CONNECT_TIMEOUT_MS });
+    const { client, transport } = createGitHubMcpClient(provider);
+    await client.connect(transport, { timeout: getMcpTimeout() });
     return { client, close: () => client.close() };
 }
 
-function createMcpClient(provider: GitHubOAuthProvider): {
+interface ConnectedGitHubClient {
     client: Client;
-    transport: StreamableHTTPClientTransport;
+    close(): Promise<void>;
+}
+
+function createGitHubMcpClient(provider: RemoteMcpOAuthProvider): {
+    client: Client;
+    transport: ReturnType<typeof createRemoteMcpClient>['transport'];
+    close(): Promise<void>;
 } {
-    const client = new Client({ name: 'cees-ai-desktop', version: '0.1.2' }, { capabilities: {} });
-    const transport = new StreamableHTTPClientTransport(new URL(GITHUB_MCP_ENDPOINT), {
+    const definition = requireMcpDefinition();
+    const { client, transport } = createRemoteMcpClient({
+        definition,
         authProvider: provider,
-        requestInit: {
-            headers: {
-                'X-MCP-Toolsets': GITHUB_MCP_TOOLSETS,
-            },
-        },
-        reconnectionOptions: {
-            initialReconnectionDelay: 1000,
-            maxReconnectionDelay: 10_000,
-            reconnectionDelayGrowFactor: 1.5,
-            maxRetries: 2,
-        },
+        requestHeaders: { 'X-MCP-Toolsets': GITHUB_MCP_TOOLSETS },
+        clientName: 'cees-ai-desktop',
+        clientVersion: '0.1.2',
     });
-    return { client, transport };
+    return { client, transport, close: () => client.close() };
 }
 
 async function listAndNormalizeTools(client: Client): Promise<GitHubConnectorTool[]> {
@@ -300,123 +312,41 @@ async function cacheGitHubIdentity(client: Client, tools: GitHubConnectorTool[])
     }
 }
 
-class GitHubOAuthProvider implements OAuthClientProvider {
-    readonly clientMetadata: OAuthClientMetadata;
-    private codeVerifierValue = '';
-
-    constructor(private readonly options: {
-        clientId: string;
-        redirectUrl: string;
-        expectedState: string;
-        interactive: boolean;
-    }) {
-        this.clientMetadata = {
-            client_name: 'CEES AI Desktop',
-            redirect_uris: [options.redirectUrl],
-            grant_types: ['authorization_code', 'refresh_token'],
-            response_types: ['code'],
-            token_endpoint_auth_method: 'none',
-            scope: 'repo read:org read:user user:email notifications offline_access',
-        };
-    }
-
-    get redirectUrl(): string { return this.options.redirectUrl; }
-    state(): string { return this.options.expectedState; }
-    clientInformation(): OAuthClientInformationMixed { return { client_id: this.options.clientId }; }
-    async tokens(): Promise<OAuthTokens | undefined> { return readStoredTokens(); }
-    async saveTokens(tokens: OAuthTokens): Promise<void> {
-        await requireTokenStore().set(TOKEN_STORE_KEY, JSON.stringify(tokens));
-    }
-    async redirectToAuthorization(authorizationUrl: URL): Promise<void> {
-        if (!this.options.interactive) throw new UnauthorizedError('GitHub 授权已失效，请重新连接');
-        if (authorizationUrl.protocol !== 'https:' || authorizationUrl.hostname !== 'github.com' || authorizationUrl.pathname !== '/login/oauth/authorize') {
-            throw new Error('GitHub OAuth 授权地址无效');
-        }
-        await shell.openExternal(authorizationUrl.toString());
-    }
-    saveCodeVerifier(codeVerifier: string): void { this.codeVerifierValue = codeVerifier; }
-    codeVerifier(): string {
-        if (!this.codeVerifierValue) throw new Error('GitHub OAuth PKCE 校验器不存在');
-        return this.codeVerifierValue;
-    }
-    async invalidateCredentials(scope: 'all' | 'client' | 'tokens' | 'verifier' | 'discovery'): Promise<void> {
-        if (scope === 'all' || scope === 'tokens') await clearStoredCredentials();
-        if (scope === 'all' || scope === 'verifier') this.codeVerifierValue = '';
-    }
-    async validateResourceURL(_serverUrl: string | URL, resource?: string): Promise<URL> {
-        const url = new URL(resource ?? GITHUB_MCP_ENDPOINT);
-        if (url.origin !== 'https://api.githubcopilot.com' || !url.pathname.startsWith('/mcp/')) {
-            throw new Error('GitHub MCP OAuth 资源地址无效');
-        }
-        return new URL(GITHUB_MCP_ENDPOINT);
-    }
-}
-
-async function createOAuthCallback(expectedState: string): Promise<OAuthCallback> {
-    let server: Server | undefined;
-    let settled = false;
-    let resolveCode!: (code: string) => void;
-    let rejectCode!: (error: Error) => void;
-    const code = new Promise<string>((resolve, reject) => {
-        resolveCode = resolve;
-        rejectCode = reject;
-    });
-    server = createServer((request, response) => {
-        const requestUrl = new URL(request.url ?? '/', 'http://127.0.0.1');
-        if (requestUrl.pathname !== GITHUB_OAUTH_CALLBACK_PATH) {
-            response.writeHead(404).end();
-            return;
-        }
-        const error = requestUrl.searchParams.get('error');
-        const authorizationCode = requestUrl.searchParams.get('code');
-        const state = requestUrl.searchParams.get('state');
-        if (error || !authorizationCode || state !== expectedState) {
-            response.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' });
-            response.end(oauthResultHtml(false));
-            if (!settled) {
-                settled = true;
-                rejectCode(new Error(error ? `GitHub OAuth 授权失败：${error}` : 'GitHub OAuth 回调校验失败'));
-            }
-            return;
-        }
-        response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-        response.end(oauthResultHtml(true));
-        if (!settled) {
-            settled = true;
-            resolveCode(authorizationCode);
-        }
-    });
-    await new Promise<void>((resolve, reject) => {
-        server!.once('error', reject);
-        server!.listen(0, '127.0.0.1', resolve);
-    });
-    const address = server.address();
-    if (!address || typeof address === 'string') throw new Error('无法启动 GitHub OAuth 回调服务');
-    const timeout = setTimeout(() => {
-        if (!settled) {
-            settled = true;
-            rejectCode(new Error('GitHub OAuth 授权已超时'));
-        }
-    }, AUTHORIZATION_TIMEOUT_MS);
-    return {
-        redirectUrl: `http://127.0.0.1:${address.port}${GITHUB_OAUTH_CALLBACK_PATH}`,
-        code,
-        close: async () => {
-            clearTimeout(timeout);
-            await new Promise<void>((resolve) => server!.close(() => resolve()));
-        },
-    };
-}
-
-function oauthResultHtml(success: boolean): string {
-    const title = success ? 'GitHub 连接成功' : 'GitHub 连接失败';
-    const message = success ? '可以关闭此页面并返回 CEES。' : '请返回 CEES 后重新连接。';
-    return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>${title}</title></head><body><h1>${title}</h1><p>${message}</p></body></html>`;
-}
-
 function githubClientId(): string | null {
     const value = process.env.CEES_GITHUB_OAUTH_CLIENT_ID?.trim();
     return value && value !== 'change_me' ? value : null;
+}
+
+function githubClientSecret(): string | null {
+    const value = process.env.CEES_GITHUB_OAUTH_CLIENT_SECRET?.trim();
+    return value && value !== 'change_me' ? value : null;
+}
+
+function requireMcpDefinition(): RemoteMcpConnectorDefinition {
+    if (!mcpDefinition) throw new Error('GitHub MCP 连接器尚未配置');
+    return mcpDefinition;
+}
+
+function getMcpTimeout(): number {
+    return Math.max(CONNECT_TIMEOUT_MS, requireMcpDefinition().timeout);
+}
+
+async function saveStoredTokens(tokens: OAuthTokens): Promise<void> {
+    await requireTokenStore().set(TOKEN_STORE_KEY, JSON.stringify(tokens));
+}
+
+function isAllowedGitHubAuthorizationUrl(url: URL): boolean {
+    return url.protocol === 'https:'
+        && url.hostname === 'github.com'
+        && url.pathname === '/login/oauth/authorize';
+}
+
+function allowGitHubResourceUrl(resource: string | URL): URL {
+    const url = new URL(resource || GITHUB_MCP_ENDPOINT);
+    if (url.origin !== 'https://api.githubcopilot.com' || !url.pathname.startsWith('/mcp/')) {
+        throw new Error('GitHub MCP OAuth 资源地址无效');
+    }
+    return new URL(GITHUB_MCP_ENDPOINT);
 }
 
 async function hasStoredTokens(): Promise<boolean> {
@@ -476,11 +406,14 @@ function authRequiredStatus(checkedAt: string, authorizationState: 'UNAUTHORIZED
     };
 }
 
-function configurationErrorStatus(checkedAt: string): GitHubConnectorStatus {
+function configurationErrorStatus(
+    checkedAt: string,
+    issueCode: 'GITHUB_OAUTH_CLIENT_ID_MISSING' | 'GITHUB_OAUTH_CLIENT_SECRET_MISSING',
+    error: string,
+): GitHubConnectorStatus {
     return {
         state: 'ERROR', installed: true, authenticated: false, version: 'remote', checkedAt,
-        issueCode: 'GITHUB_OAUTH_CLIENT_ID_MISSING', recoveryAction: 'NONE',
-        error: 'GitHub OAuth Client ID 未配置，请由 CEES 部署方设置 CEES_GITHUB_OAUTH_CLIENT_ID',
+        issueCode, recoveryAction: 'NONE', error,
         source: 'REMOTE_MCP', authorizationState: 'UNAUTHORIZED', authorizedLogin: null, toolCount: 0,
         enabledToolsets: GITHUB_MCP_TOOLSETS.split(','),
     };
