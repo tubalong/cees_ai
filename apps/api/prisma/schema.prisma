@@ -2415,13 +2415,19 @@ model AssistantEvent {
 }
 
 /// 模型提出的工具调用：批准结论、执行结果与正式资源引用；回填 TOOL 消息时使用本表 ID。
+/// 执行载体二选一：轮次（turnId）或任务步骤（taskStepId）——步骤执行窗口与用户会话隔离，
+/// 但复用同一张工具调用事实表（批准链、幂等、审计口径一致）。
 model ToolCall {
   id                   String         @id @default(uuid()) @db.Uuid
   tenantId             String         @map("tenant_id") @db.Uuid
   conversationId       String         @map("conversation_id") @db.Uuid
-  turnId               String         @map("turn_id") @db.Uuid
-  turn                 AssistantTurn  @relation(fields: [turnId], references: [id], onDelete: Cascade)
-  /// 轮次内工具调用序号，从 1 开始。
+  /// 轮次执行载体的轮次 ID；任务步骤内发起的调用为 null（见 taskStepId）。
+  turnId               String?        @map("turn_id") @db.Uuid
+  turn                 AssistantTurn? @relation(fields: [turnId], references: [id], onDelete: Cascade)
+  /// 任务步骤执行载体的步骤 ID；轮次内发起的调用为 null（见 turnId）。
+  taskStepId           String?        @map("task_step_id") @db.Uuid
+  taskStep             AssistantTaskStep? @relation(fields: [taskStepId], references: [id], onDelete: Cascade)
+  /// 执行载体内工具调用序号（轮次内 / 步骤内），从 1 开始。
   seq                  Int
   /// 发起该工具调用的模型调用序号；同一模型调用内的多个工具共享该值。
   modelStep            Int            @default(1) @map("model_step")
@@ -2455,6 +2461,8 @@ model ToolCall {
 
   @@unique([turnId, seq])
   @@unique([turnId, modelStep, upstreamCallId])
+  @@unique([taskStepId, seq])
+  @@unique([taskStepId, modelStep, upstreamCallId])
   @@index([tenantId, createdAt])
   @@index([status, leaseExpiresAt])
   @@map("tool_calls")
@@ -2652,13 +2660,16 @@ model AssistantTaskStep {
   executionOwner  String?                 @map("execution_owner")
   leaseExpiresAt  DateTime?               @map("lease_expires_at")
   heartbeatAt     DateTime?               @map("heartbeat_at")
+  /// 步内工具调用序号原子分配（同 AssistantTurn.nextToolCallSeq 模式）。
+  nextToolCallSeq Int                     @default(1) @map("next_tool_call_seq")
   error           Json?
   startedAt       DateTime?               @map("started_at")
   completedAt     DateTime?               @map("completed_at")
   createdAt       DateTime                @default(now()) @map("created_at")
   updatedAt       DateTime                @updatedAt @map("updated_at")
 
-  messages AssistantTaskStepMessage[]
+  messages  AssistantTaskStepMessage[]
+  toolCalls ToolCall[]
 
   @@unique([taskId, planVersion, stepKey])
   @@index([status, leaseExpiresAt])

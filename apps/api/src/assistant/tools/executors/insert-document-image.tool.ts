@@ -2,7 +2,12 @@ import { Injectable, OnModuleInit } from '@nestjs/common';
 import { DocumentService } from '../../../document/document.service';
 import { AssistantMessageContentService } from '../../runtime/message-content.service';
 import { ToolRegistryService } from '../tool-registry';
-import type { ToolDefinition, ToolExecutionContext, ToolExecutionResult } from '../tool.types';
+import {
+    ToolExecutionError,
+    type ToolDefinition,
+    type ToolExecutionContext,
+    type ToolExecutionResult,
+} from '../tool.types';
 
 const MAX_CAPTION_LENGTH = 300;
 const MAX_TITLE_LENGTH = 200;
@@ -67,7 +72,20 @@ export class InsertDocumentImageTool implements OnModuleInit {
         context: ToolExecutionContext,
         input: Record<string, unknown>,
     ): Promise<ToolExecutionResult> {
-        const imageObjectKey = await this.resolveImageObjectKey(context, input.image_index as number | undefined);
+        // 本工具依赖「本轮上传或生成的图片」；任务步骤执行窗口没有轮次输入，
+        // 工具面已排除 WRITE 工具，这里兜底防御绕过（模型编造调用时拒绝）。
+        if (context.turnId === null) {
+            throw new ToolExecutionError(
+                'TURN_INPUT_REQUIRED',
+                'insert_document_image requires an active turn with image references',
+                '插入图片需要基于当前消息中的图片。请告知用户：在对话中上传或生成图片后重试。',
+            );
+        }
+        const imageObjectKey = await this.resolveImageObjectKey(
+            context,
+            context.turnId,
+            input.image_index as number | undefined,
+        );
         const result = await this.documentService.insertDocumentImage({
             tenantId: context.tenantId,
             userId: context.userId,
@@ -95,9 +113,10 @@ export class InsertDocumentImageTool implements OnModuleInit {
     /** 把模型给出的 1-based 图片序号解析为本轮图片的稳定对象键。 */
     private async resolveImageObjectKey(
         context: ToolExecutionContext,
+        turnId: string,
         imageIndex: number | undefined,
     ): Promise<string> {
-        const references = await this.messageContent.resolveTurnImageReferences(context.turnId, {
+        const references = await this.messageContent.resolveTurnImageReferences(turnId, {
             tenantId: context.tenantId,
             userId: context.userId,
             membershipId: context.membershipId,
