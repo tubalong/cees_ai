@@ -251,6 +251,11 @@ export type { GitHubConnectorPlanResponseEnvelope } from './models/GitHubConnect
 export type { GitHubConnectorPlanResult } from './models/GitHubConnectorPlanResult';
 export type { GitHubConnectorTool } from './models/GitHubConnectorTool';
 export { GitHubConnectorToolRisk } from './models/GitHubConnectorToolRisk';
+export type { GitHubOAuthConfig } from './models/GitHubOAuthConfig';
+export type { GitHubOAuthConfigResponseEnvelope } from './models/GitHubOAuthConfigResponseEnvelope';
+export type { GitHubOAuthExchangeRequest } from './models/GitHubOAuthExchangeRequest';
+export type { GitHubOAuthTokens } from './models/GitHubOAuthTokens';
+export type { GitHubOAuthTokensResponseEnvelope } from './models/GitHubOAuthTokensResponseEnvelope';
 export type { HrAttendanceImportResult } from './models/HrAttendanceImportResult';
 export type { HrAttendanceImportResultResponseEnvelope } from './models/HrAttendanceImportResultResponseEnvelope';
 export { HrAttendanceRecord } from './models/HrAttendanceRecord';

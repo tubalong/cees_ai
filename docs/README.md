@@ -44,7 +44,7 @@
 | [钉钉组织架构与人员同步 API](api/dingtalk-organization-sync-api.md) | 钉钉绑定、组织人员同步和同步任务查询 |
 | [腾讯会议连接器 API](api/tencent-meeting-connector-api.md) | `0.40.0` 官方 CLI 规划语义、本地 OAuth 边界与迁移说明 |
 | [企业微信连接器 API](api/wecom-connector-api.md) | `0.39.0` 动态 CLI 工具规划与 `WECOM` 会话上下文 |
-| [GitHub 连接器 API](api/github-connector-api.md) | `0.42.0` 官方远程 MCP 工具规划与 `GITHUB` 会话上下文 |
+| [GitHub 连接器 API](api/github-connector-api.md) | `0.43.0` OAuth Broker、官方远程 MCP 工具规划与 `GITHUB` 会话上下文 |
 | [分配策略与人财法 API](api/assignment-and-hr-finance-legal-api.md) | AssignmentPolicy、HR 与 Finance 已实现；Legal 契约已冻结待实现 |
 | [database](database/README.md) | 数据模型与迁移约定 |
 | [security](security/README.md) | 安全模型、租户隔离与审计 |

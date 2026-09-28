@@ -84,7 +84,7 @@ declare global {
             connectors?: {
                 list: () => Promise<ConnectorManifest[]>;
                 status: (connectorId: string) => Promise<ConnectorStatus>;
-                connect: (connectorId: string) => Promise<ConnectorStatus>;
+                connect: (connectorId: string, options?: unknown) => Promise<ConnectorStatus>;
                 disconnect: (connectorId: string) => Promise<ConnectorStatus>;
                 tools: (connectorId: string) => Promise<ConnectorTool[]>;
                 execute: (connectorId: string, calls: ConnectorPlannedCall[]) => Promise<ConnectorContext<'DINGTALK' | 'TENCENT_MEETING' | 'WECOM' | 'GITHUB'>[]>;

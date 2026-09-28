@@ -17,6 +17,7 @@ import { DingTalkConnectorPlannerService } from './connectors/dingtalk-connector
 import { TencentMeetingConnectorPlannerService } from './connectors/tencent-meeting-connector-planner.service';
 import { WeComConnectorPlannerService } from './connectors/wecom-connector-planner.service';
 import { GitHubConnectorPlannerService } from './connectors/github-connector-planner.service';
+import { GitHubOAuthBrokerService } from './connectors/github-oauth-broker.service';
 import { ConversationService } from './conversation/conversation.service';
 import { EventService } from './conversation/event.service';
 import { AssistantActionDraftService } from './drafts/assistant-action-draft.service';
@@ -62,6 +63,7 @@ import { ImportFinanceLedgerTool } from './tools/executors/import-finance-ledger
     TencentMeetingConnectorPlannerService,
     WeComConnectorPlannerService,
     GitHubConnectorPlannerService,
+    GitHubOAuthBrokerService,
     EventService,
     ContextBuilderService,
     IntentCapabilityService,

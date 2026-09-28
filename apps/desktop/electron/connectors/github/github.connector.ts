@@ -1,3 +1,5 @@
+import { createHash, randomBytes } from 'node:crypto';
+import { shell } from 'electron';
 import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import type { OAuthTokens } from '@modelcontextprotocol/sdk/shared/auth.js';
@@ -32,6 +34,7 @@ const TOOL_TIMEOUT_MS = 120_000;
 const TOKEN_STORE_FILE = 'connectors/github/oauth.secure';
 const TOKEN_STORE_KEY = 'github.oauth.tokens';
 const IDENTITY_STORE_KEY = 'github.oauth.identity';
+const CLIENT_ID_STORE_KEY = 'github.oauth.client-id';
 const SENSITIVE_KEY_PATTERN = /(?:token|secret|cookie|authorization|credential|password|private[_-]?key)/i;
 const BINARY_KEY_PATTERN = /^(?:data|blob|content_base64|base64)$/i;
 const TOOL_ID_PATTERN = /^[A-Za-z][A-Za-z0-9._-]{0,119}$/;
@@ -55,6 +58,14 @@ interface StoredGitHubIdentity {
     login: string | null;
 }
 
+export interface GitHubConnectorConnectOptions {
+    apiAccessToken: string;
+    exchangeUrl: string;
+    clientId: string;
+    authorizationEndpoint: string;
+    scope: string;
+}
+
 let tokenStore: SecureTokenStore | undefined;
 let toolCache: GitHubConnectorTool[] | undefined;
 let authorizationInProgress = false;
@@ -67,8 +78,6 @@ export function configureGitHubConnector(userDataPath: string): void {
 
 export async function getGitHubConnectorStatus(): Promise<GitHubConnectorStatus> {
     const checkedAt = new Date().toISOString();
-    if (!githubClientId()) return configurationErrorStatus(checkedAt, 'GITHUB_OAUTH_CLIENT_ID_MISSING', 'GitHub OAuth Client ID 未配置，请由 CEES 部署方设置 CEES_GITHUB_OAUTH_CLIENT_ID');
-    if (!githubClientSecret()) return configurationErrorStatus(checkedAt, 'GITHUB_OAUTH_CLIENT_SECRET_MISSING', 'GitHub OAuth Client Secret 未配置，请由 CEES 部署方设置 CEES_GITHUB_OAUTH_CLIENT_SECRET');
     if (authorizationInProgress) return authRequiredStatus(checkedAt, 'AUTHORIZING');
     if (!await hasStoredTokens()) return authRequiredStatus(checkedAt, 'UNAUTHORIZED');
     try {
@@ -84,40 +93,20 @@ export async function getGitHubConnectorStatus(): Promise<GitHubConnectorStatus>
     }
 }
 
-export async function connectGitHubConnector(): Promise<GitHubConnectorStatus> {
-    const clientId = githubClientId();
-    if (!clientId) throw new Error('GitHub OAuth Client ID 未配置，请设置 CEES_GITHUB_OAUTH_CLIENT_ID');
-    const clientSecret = githubClientSecret();
-    if (!clientSecret) throw new Error('GitHub OAuth Client Secret 未配置，请设置 CEES_GITHUB_OAUTH_CLIENT_SECRET');
+export async function connectGitHubConnector(options: unknown = undefined): Promise<GitHubConnectorStatus> {
+    const input = parseConnectOptions(options);
     if (authorizationInProgress) return authRequiredStatus(new Date().toISOString(), 'AUTHORIZING');
     authorizationInProgress = true;
     toolCache = undefined;
     const callback = await createLoopbackOAuthCallback(GITHUB_OAUTH_CALLBACK_PATH, getMcpTimeout());
-    const provider = new RemoteMcpOAuthProvider({
-        clientId,
-        clientSecret,
-        redirectUrl: callback.redirectUrl,
-        expectedState: callback.state,
-        clientName: 'CEES AI Desktop',
-        scope: 'repo read:org read:user user:email notifications offline_access',
-        interactive: true,
-        isAuthorizationUrlAllowed: isAllowedGitHubAuthorizationUrl,
-        allowedResource: allowGitHubResourceUrl,
-        readTokens: readStoredTokens,
-        saveTokens: saveStoredTokens,
-        invalidateTokens: clearStoredCredentials,
-    });
     try {
-        const initial = createGitHubMcpClient(provider);
-        try {
-            await initial.client.connect(initial.transport, { timeout: getMcpTimeout() });
-        } catch (error) {
-            if (!isUnauthorizedError(error)) throw error;
-            const authorizationCode = await callback.code;
-            await initial.transport.finishAuth(authorizationCode);
-        } finally {
-            await initial.close();
-        }
+        const codeVerifier = createCodeVerifier();
+        const authorizationUrl = buildGitHubAuthorizationUrl(input, callback.redirectUrl, callback.state, codeVerifier);
+        await shell.openExternal(authorizationUrl.toString());
+        const authorizationCode = await callback.code;
+        const tokens = await exchangeGitHubAuthorizationCode(input, authorizationCode, codeVerifier, callback.redirectUrl);
+        await saveStoredTokens(tokens);
+        await saveStoredClientId(input.clientId);
         const connected = await openAuthenticatedClient();
         try {
             const tools = await listAndNormalizeTools(connected.client);
@@ -239,12 +228,11 @@ export function sanitizeGitHubResult(value: unknown): Record<string, unknown> {
 }
 
 async function openAuthenticatedClient(): Promise<ConnectedGitHubClient> {
-    if (!githubClientId()) throw new Error('GitHub OAuth Client ID 未配置，请设置 CEES_GITHUB_OAUTH_CLIENT_ID');
-    if (!githubClientSecret()) throw new Error('GitHub OAuth Client Secret 未配置，请设置 CEES_GITHUB_OAUTH_CLIENT_SECRET');
+    const clientId = await readStoredClientId();
+    if (!clientId) throw new Error('GitHub OAuth Client ID 尚未初始化，请重新连接 GitHub');
     if (!await hasStoredTokens()) throw new UnauthorizedError('GitHub 尚未授权');
     const provider = new RemoteMcpOAuthProvider({
-        clientId: githubClientId()!,
-        clientSecret: githubClientSecret()!,
+        clientId,
         redirectUrl: buildLoopbackRedirectUrl(GITHUB_OAUTH_CALLBACK_PATH),
         expectedState: '',
         clientName: 'CEES AI Desktop',
@@ -312,16 +300,6 @@ async function cacheGitHubIdentity(client: Client, tools: GitHubConnectorTool[])
     }
 }
 
-function githubClientId(): string | null {
-    const value = process.env.CEES_GITHUB_OAUTH_CLIENT_ID?.trim();
-    return value && value !== 'change_me' ? value : null;
-}
-
-function githubClientSecret(): string | null {
-    const value = process.env.CEES_GITHUB_OAUTH_CLIENT_SECRET?.trim();
-    return value && value !== 'change_me' ? value : null;
-}
-
 function requireMcpDefinition(): RemoteMcpConnectorDefinition {
     if (!mcpDefinition) throw new Error('GitHub MCP 连接器尚未配置');
     return mcpDefinition;
@@ -364,6 +342,104 @@ async function readStoredTokens(): Promise<OAuthTokens | undefined> {
     }
 }
 
+async function saveStoredClientId(clientId: string): Promise<void> {
+    await requireTokenStore().set(CLIENT_ID_STORE_KEY, clientId);
+}
+
+async function readStoredClientId(): Promise<string | undefined> {
+    const value = (await requireTokenStore().getAll())[CLIENT_ID_STORE_KEY]?.trim();
+    return value || undefined;
+}
+
+function parseConnectOptions(value: unknown): GitHubConnectorConnectOptions {
+    if (!isRecord(value)
+        || typeof value.apiAccessToken !== 'string'
+        || !value.apiAccessToken.trim()
+        || typeof value.exchangeUrl !== 'string'
+        || typeof value.clientId !== 'string'
+        || !value.clientId.trim()
+        || typeof value.authorizationEndpoint !== 'string'
+        || typeof value.scope !== 'string') {
+        throw new Error('GitHub OAuth 配置无效，请重新读取测试环境配置');
+    }
+    return {
+        apiAccessToken: value.apiAccessToken,
+        exchangeUrl: value.exchangeUrl,
+        clientId: value.clientId,
+        authorizationEndpoint: value.authorizationEndpoint,
+        scope: value.scope,
+    };
+}
+
+function createCodeVerifier(): string {
+    return randomBytes(32).toString('base64url');
+}
+
+function buildGitHubAuthorizationUrl(
+    options: GitHubConnectorConnectOptions,
+    redirectUri: string,
+    state: string,
+    codeVerifier: string,
+): URL {
+    const endpoint = new URL(options.authorizationEndpoint);
+    if (endpoint.protocol !== 'https:' || endpoint.hostname !== 'github.com' || endpoint.pathname !== '/login/oauth/authorize') {
+        throw new Error('GitHub OAuth 授权地址无效');
+    }
+    const codeChallenge = createHash('sha256').update(codeVerifier).digest('base64url');
+    endpoint.search = new URLSearchParams({
+        client_id: options.clientId,
+        redirect_uri: redirectUri,
+        response_type: 'code',
+        scope: options.scope,
+        state,
+        code_challenge: codeChallenge,
+        code_challenge_method: 'S256',
+    }).toString();
+    return endpoint;
+}
+
+async function exchangeGitHubAuthorizationCode(
+    options: GitHubConnectorConnectOptions,
+    code: string,
+    codeVerifier: string,
+    redirectUri: string,
+): Promise<OAuthTokens> {
+    const endpoint = new URL(options.exchangeUrl);
+    if (!/^https?:$/.test(endpoint.protocol) || !endpoint.pathname.endsWith('/assistant/connectors/github/oauth/exchange')) {
+        throw new Error('GitHub OAuth 换码地址无效');
+    }
+    const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${options.apiAccessToken}`,
+        },
+        body: JSON.stringify({ code, codeVerifier, redirectUri }),
+        signal: AbortSignal.timeout(30_000),
+        redirect: 'error',
+    });
+    let body: unknown;
+    try { body = await response.json(); } catch { body = undefined; }
+    if (!response.ok || !isRecord(body) || body.success !== true || !isRecord(body.data)) {
+        throw new Error(readExchangeError(body));
+    }
+    const data = body.data;
+    if (typeof data.accessToken !== 'string' || !data.accessToken.trim()) throw new Error('GitHub OAuth 换码响应无访问令牌');
+    return {
+        access_token: data.accessToken,
+        token_type: typeof data.tokenType === 'string' ? data.tokenType : 'bearer',
+        ...(typeof data.expiresIn === 'number' ? { expires_in: data.expiresIn } : {}),
+        ...(typeof data.refreshToken === 'string' ? { refresh_token: data.refreshToken } : {}),
+        ...(typeof data.scope === 'string' ? { scope: data.scope } : {}),
+    };
+}
+
+function readExchangeError(body: unknown): string {
+    if (isRecord(body) && isRecord(body.error) && typeof body.error.message === 'string') return body.error.message;
+    return 'GitHub OAuth 授权失败，请稍后重试';
+}
+
 async function readStoredIdentity(): Promise<StoredGitHubIdentity> {
     const raw = (await requireTokenStore().getAll())[IDENTITY_STORE_KEY];
     if (!raw) return { login: null };
@@ -379,7 +455,7 @@ async function readStoredIdentity(): Promise<StoredGitHubIdentity> {
 
 async function clearStoredCredentials(): Promise<void> {
     const store = requireTokenStore();
-    await Promise.all([store.remove(TOKEN_STORE_KEY), store.remove(IDENTITY_STORE_KEY)]);
+    await Promise.all([store.remove(TOKEN_STORE_KEY), store.remove(IDENTITY_STORE_KEY), store.remove(CLIENT_ID_STORE_KEY)]);
 }
 
 function requireTokenStore(): SecureTokenStore {
@@ -402,19 +478,6 @@ function authRequiredStatus(checkedAt: string, authorizationState: 'UNAUTHORIZED
         issueCode: authorizationState === 'AUTHORIZING' ? 'GITHUB_AUTHORIZING' : 'GITHUB_AUTH_REQUIRED',
         recoveryAction: 'AUTHORIZE', error: null,
         source: 'REMOTE_MCP', authorizationState, authorizedLogin: null, toolCount: 0,
-        enabledToolsets: GITHUB_MCP_TOOLSETS.split(','),
-    };
-}
-
-function configurationErrorStatus(
-    checkedAt: string,
-    issueCode: 'GITHUB_OAUTH_CLIENT_ID_MISSING' | 'GITHUB_OAUTH_CLIENT_SECRET_MISSING',
-    error: string,
-): GitHubConnectorStatus {
-    return {
-        state: 'ERROR', installed: true, authenticated: false, version: 'remote', checkedAt,
-        issueCode, recoveryAction: 'NONE', error,
-        source: 'REMOTE_MCP', authorizationState: 'UNAUTHORIZED', authorizedLogin: null, toolCount: 0,
         enabledToolsets: GITHUB_MCP_TOOLSETS.split(','),
     };
 }

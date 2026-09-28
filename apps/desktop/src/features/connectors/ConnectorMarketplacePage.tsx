@@ -2,6 +2,7 @@ import { DingdingOutlined, GithubOutlined, LinkOutlined, MessageOutlined, PlusOu
 import { App as AntdApp, Button, Modal, Select, Space, Spin, Tag } from 'antd';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { API_BASE_URL, getAccessTokenForConnector, getGitHubOAuthConfig } from '../../core/api';
 import { useI18n } from '../../core/i18n';
 
 const EMPTY_STATUS: DesktopConnectorStatus = {
@@ -154,11 +155,21 @@ export default function ConnectorMarketplacePage(): JSX.Element {
         }
         setConnectingId(manifest.id);
         try {
-            const nextStatus = manifest.id === 'dingtalk'
-                    && currentDingTalkStatus.state === 'PROFILE_REQUIRED'
-                    && connectors.dingtalk
-                    ? await connectors.dingtalk.selectProfile(selectedProfile ?? '')
-                    : await connectors.connect(manifest.id);
+            let nextStatus: DesktopConnectorStatus;
+            if (manifest.id === 'dingtalk' && currentDingTalkStatus.state === 'PROFILE_REQUIRED' && connectors.dingtalk) {
+                nextStatus = await connectors.dingtalk.selectProfile(selectedProfile ?? '');
+            } else if (manifest.id === 'github') {
+                const oauthConfig = await getGitHubOAuthConfig();
+                nextStatus = await connectors.connect(manifest.id, {
+                    apiAccessToken: getAccessTokenForConnector(),
+                    exchangeUrl: new URL(oauthConfig.exchangePath.replace(/^\/+/, ''), API_BASE_URL.endsWith('/') ? API_BASE_URL : `${API_BASE_URL}/`).toString(),
+                    clientId: oauthConfig.clientId,
+                    authorizationEndpoint: oauthConfig.authorizationEndpoint,
+                    scope: oauthConfig.scope,
+                });
+            } else {
+                nextStatus = await connectors.connect(manifest.id);
+            }
             updateStatus(manifest.id, nextStatus);
             if (nextStatus.state === 'PROFILE_REQUIRED') {
                 setSelectedConnectorId(manifest.id);
@@ -435,12 +446,6 @@ export default function ConnectorMarketplacePage(): JSX.Element {
                 </div>
                 <h2>{t('连接 {name}', { name: selectedManifest.name })}</h2>
                 <p className="connector-connected-description">{t(selectedManifest.description)}</p>
-                {selectedManifest.id === 'github' && selectedStatus.issueCode === 'GITHUB_OAUTH_CLIENT_ID_MISSING'
-                    ? <div className="connector-version-message is-error">{t('GitHub OAuth Client ID 尚未配置。请由部署方设置 CEES_GITHUB_OAUTH_CLIENT_ID 后重启桌面端。')}</div>
-                    : null}
-                {selectedManifest.id === 'github' && selectedStatus.issueCode === 'GITHUB_OAUTH_CLIENT_SECRET_MISSING'
-                    ? <div className="connector-version-message is-error">{t('GitHub OAuth Client Secret 尚未配置。请由部署方设置 CEES_GITHUB_OAUTH_CLIENT_SECRET 后重启桌面端。')}</div>
-                    : null}
                 {selectedManifest.id === 'dingtalk' && selectedDingTalkStatus.state === 'PROFILE_REQUIRED'
                     ? <DingTalkProfileSelector
                         status={selectedDingTalkStatus}
