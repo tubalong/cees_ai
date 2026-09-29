@@ -2801,7 +2801,31 @@ model AuditLog {
   @@index([tenantId, actorMembershipId, createdAt])
   @@index([tenantId, requestId])
   @@index([tenantId, resourceType, resourceId])
+  @@index([createdAt, id])
+  @@index([action, createdAt])
   @@map("audit_logs")
+}
+
+/// 审计归档表：租户审计超过保留期后从 audit_logs 迁移至此，字段与 audit_logs 一致，仅增加 archived_at。
+/// 平台审计 platform_audit_logs 永久保留，不参与归档或清理。
+model AuditLogArchive {
+  id                String       @id @db.Uuid
+  tenantId          String       @map("tenant_id") @db.Uuid
+  actorUserId       String?      @map("actor_user_id") @db.Uuid
+  actorMembershipId String?      @map("actor_membership_id") @db.Uuid
+  action            String
+  outcome           AuditOutcome @default(SUCCESS)
+  resourceType      String       @map("resource_type")
+  resourceId        String?      @map("resource_id") @db.Uuid
+  requestId         String       @map("request_id")
+  ipAddress         String?      @map("ip_address")
+  userAgent         String?      @map("user_agent")
+  metadata          Json?
+  createdAt         DateTime     @map("created_at")
+  archivedAt        DateTime     @default(now()) @map("archived_at")
+
+  @@index([tenantId, createdAt])
+  @@map("audit_logs_archive")
 }
 
 model PlatformAuditLog {

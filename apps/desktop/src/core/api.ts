@@ -284,6 +284,28 @@ interface ApiErrorBody {
 let refreshPromise: Promise<TokenPair> | undefined;
 let platformRefreshPromise: Promise<TokenPair> | undefined;
 
+/**
+ * 会话失效回调。
+ *
+ * 刷新令牌不可用时，若只丢掉令牌不通知应用层，界面会停留在工作台：
+ * 已缓存的查询看起来正常，而后台的 60s 轮询会持续 401，用户既看不到
+ * 真实数据，也得不到“请重新登录”的提示。因此由 API 层统一上报，
+ * 应用层负责清理状态并回到登录页。
+ */
+let sessionExpiredHandler: (() => void) | undefined;
+
+export function setSessionExpiredHandler(handler?: () => void): void {
+    sessionExpiredHandler = handler;
+}
+
+function notifySessionExpired(): void {
+    try {
+        sessionExpiredHandler?.();
+    } catch {
+        // 宿主回调异常不能影响原始请求错误的传播。
+    }
+}
+
 /** 会话令牌的键；用于开机时的加密存储迁移与清理。 */
 const SESSION_TOKEN_KEYS = [ACCESS_TOKEN_KEY, REFRESH_TOKEN_KEY, PLATFORM_ACCESS_TOKEN_KEY, PLATFORM_REFRESH_TOKEN_KEY];
 
@@ -803,7 +825,11 @@ async function refreshTokens(): Promise<TokenPair> {
     if (refreshPromise) return refreshPromise;
     refreshPromise = (async () => {
         const refreshToken = getStoredValue(REFRESH_TOKEN_KEY);
-        if (!refreshToken) throw new Error('登录状态已失效，请重新登录');
+        if (!refreshToken) {
+            clearSession();
+            notifySessionExpired();
+            throw new Error('登录状态已失效，请重新登录');
+        }
         try {
             const tokens = await publicRequest<TokenPair>('v1/auth/refresh', {
                 method: 'POST',
@@ -815,6 +841,7 @@ async function refreshTokens(): Promise<TokenPair> {
             return tokens;
         } catch (error) {
             clearSession();
+            notifySessionExpired();
             throw error;
         }
     })();
@@ -983,7 +1010,11 @@ async function refreshPlatformTokens(): Promise<TokenPair> {
     if (platformRefreshPromise) return platformRefreshPromise;
     platformRefreshPromise = (async () => {
         const refreshToken = getStoredValue(PLATFORM_REFRESH_TOKEN_KEY);
-        if (!refreshToken) throw new Error('平台登录状态已失效，请重新登录');
+        if (!refreshToken) {
+            clearPlatformSession();
+            notifySessionExpired();
+            throw new Error('平台登录状态已失效，请重新登录');
+        }
         try {
             const tokens = await publicRequest<TokenPair>('v1/platform/auth/refresh', {
                 method: 'POST',
@@ -995,6 +1026,7 @@ async function refreshPlatformTokens(): Promise<TokenPair> {
             return tokens;
         } catch (error) {
             clearPlatformSession();
+            notifySessionExpired();
             throw error;
         }
     })();

@@ -26,6 +26,7 @@ describe('loadWebSearchConfig', () => {
       timeoutMs: 8000,
       maxResults: 7,
       maxSnippetChars: 1200,
+      searchDepth: 'advanced',
     });
   });
 
@@ -34,13 +35,23 @@ describe('loadWebSearchConfig', () => {
     delete process.env.WEB_SEARCH_TIMEOUT_MS;
     delete process.env.WEB_SEARCH_MAX_RESULTS;
     delete process.env.WEB_SEARCH_MAX_SNIPPET_CHARS;
+    delete process.env.WEB_SEARCH_SEARCH_DEPTH;
 
     expect(loadWebSearchConfig()).toEqual(expect.objectContaining({
       provider: 'tavily',
-      timeoutMs: 10_000,
+      timeoutMs: 15_000,
       maxResults: 5,
       maxSnippetChars: 1_500,
+      searchDepth: 'advanced',
     }));
+  });
+
+  it('accepts an explicit basic depth and rejects unknown depths', () => {
+    process.env.WEB_SEARCH_SEARCH_DEPTH = 'BASIC';
+    expect(loadWebSearchConfig().searchDepth).toBe('basic');
+
+    process.env.WEB_SEARCH_SEARCH_DEPTH = 'deepest';
+    expect(() => loadWebSearchConfig()).toThrow('WEB_SEARCH_SEARCH_DEPTH must be basic or advanced');
   });
 
   it('rejects providers other than Tavily in this release', () => {

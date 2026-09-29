@@ -1258,9 +1258,9 @@ SUSPENDED ---------存在有效管理员---> ACTIVE
   → 写入租户审计
 ```
 
-后台任务由 API 进程定时触发，每次执行先尝试获得 Redis 锁 `jobs:notification-center-runner`。成功获得锁的实例依次处理过期上传会话、过期 AI 动作草稿和前一天未提交日报提醒。日报提醒使用租户内 `dedupKey`，重复轮询不会重复创建通知。
+后台任务由 API 进程定时触发，每次执行先尝试获得 Redis 锁 `jobs:notification-center-runner`。成功获得锁的实例依次处理过期上传会话、过期 AI 动作草稿、前一天未提交日报提醒、合同到期流转、人事异动生效和审计保留清理。日报提醒使用租户内 `dedupKey`，重复轮询不会重复创建通知。
 
-可通过 `BACKGROUND_JOBS_ENABLED=false` 关闭任务，通过 `BACKGROUND_JOBS_INTERVAL_SECONDS` 调整轮询间隔。关闭任务不影响通知查询和已读接口。
+可通过 `BACKGROUND_JOBS_ENABLED=false` 关闭任务，通过 `BACKGROUND_JOBS_INTERVAL_SECONDS` 调整轮询间隔。关闭任务不影响通知查询和已读接口，但会停止审计保留清理。审计保留的保留期、批量与开关见 [审计日志保留策略](../architecture/audit-log-retention.md)，清理结果见 §18.3 与 §18.5。
 
 ### 10.9 工作台与数据看板
 
@@ -2081,6 +2081,11 @@ Chat operation 使用 `chat.invoke`、`chat.stream`、`chat.compact`；原通用
 | `metadata` | 操作前后值、原因等扩展 JSON |
 | `created_at` | 审计发生时间 |
 
+保留策略（契约 `0.48.0`）：本表按分级保留清理。连接器只读逐条审计（`resource_type = CONNECTOR`、
+`action = CONNECTOR_READ_OPERATION`、`metadata.aggregated = false`）保留 90 天后物理删除；其余租户审计
+保留 3 年后迁入 `audit_logs_archive`，因此超期事件不再出现在列表与详情接口中；`platform_audit_logs`
+永久保留。详见 [审计日志保留策略](../architecture/audit-log-retention.md)。
+
 ### 18.4 `platform_audit_logs`
 
 平台管理审计表，与租户审计分开保存。
@@ -2099,6 +2104,29 @@ Chat operation 使用 `chat.invoke`、`chat.stream`、`chat.compact`；原通用
 | `user_agent` | 客户端 User-Agent |
 | `metadata` | 停用原因、前后状态等扩展 JSON |
 | `created_at` | 审计发生时间 |
+
+### 18.5 `audit_logs_archive`
+
+租户审计归档表，字段与 `audit_logs` 完全一致（含 `id` 与 `created_at` 原值），只新增 `archived_at`。
+
+| 字段 | 含义 |
+| --- | --- |
+| `id` | 审计 UUID，与原行一致 |
+| `tenant_id` | 所属租户 |
+| `actor_user_id` | 操作者全局 User UUID |
+| `actor_membership_id` | 操作者 Membership UUID |
+| `action` | 操作动作编码 |
+| `outcome` | `SUCCESS` 或 `FAILURE` |
+| `resource_type` | 操作资源类型 |
+| `resource_id` | 操作资源 UUID，可空 |
+| `request_id` | HTTP 请求追踪 ID |
+| `ip_address` | 客户端 IP |
+| `user_agent` | 客户端 User-Agent |
+| `metadata` | 操作前后值、原因等扩展 JSON |
+| `created_at` | 审计发生时间，与原行一致 |
+| `archived_at` | 归档时间；归档后不再参与热表查询与分级清理 |
+
+归档数据不通过公开接口暴露，`GET /audit-events` 与详情只查 `audit_logs`；需要查归档时按运维流程直接读库。
 
 ## 19. Navicat 常用只读查询
 

@@ -141,7 +141,8 @@ capabilities = ["chat", "vision", "tool_calling"]
 - 压缩摘要为空或无效：`CHAT_SUMMARY_INVALID`，HTTP 502；
 - 压缩达到输出上限：`CHAT_COMPACTION_TRUNCATED`，HTTP 502；
 - 流开始后瞬时中断：终止 `CHAT_STREAM_INTERRUPTED` SSE 事件；
-- 流开始后永久失败：终止 `CHAT_STREAM_FAILED` SSE 事件。
+- 流开始后永久失败：终止 `CHAT_STREAM_FAILED` SSE 事件；
+- 工具调用参数不是合法 JSON（常见于参数被输出上限截断，例如把长文档内联进工具参数）：终止 `LLM_TOOL_ARGUMENTS_INVALID` SSE 事件（`retryable: false`）；NestJS 映射为 HTTP 502 并给出可执行的中文提示（缩小请求范围、长文档改走引用）。不归入笼统的 `INTERNAL_ERROR`，否则用户只看到无信息量的失败且排障需要翻服务器日志。
 
 非流式回答为空、摘要无效或摘要达到输出上限时，Provider 已经产生实际调用成本。此类内部错误响应会携带可选 `execution` 元数据供 NestJS 记录 Token；请求校验、配置未就绪和模型调用前失败不携带该字段，避免把未执行请求误记为模型用量。
 

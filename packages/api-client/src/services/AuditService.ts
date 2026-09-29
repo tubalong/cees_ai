@@ -11,6 +11,7 @@ import { request as __request } from '../core/request';
 export class AuditService {
     /**
      * 查询当前租户审计事件
+     * 只返回仍在 audit_logs 热表中的租户审计。超过保留期的租户审计已迁移到 audit_logs_archive，不再通过本接口返回；其中连接器只读逐条审计量级最高，保留期短于其他审计并到期后物理删除。保留期与归档范围见 docs/architecture/audit-log-retention.md。
      * @returns AuditEventListResponseEnvelope 当前租户审计事件列表
      * @throws ApiError
      */
@@ -64,6 +65,7 @@ export class AuditService {
     }
     /**
      * 获取当前租户审计事件详情
+     * 只查询仍在 audit_logs 热表中的审计事件；已归档或已清理的事件按不存在处理，返回 404。
      * @returns AuditEventResponseEnvelope 审计事件详情
      * @throws ApiError
      */

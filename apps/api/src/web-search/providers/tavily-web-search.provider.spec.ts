@@ -61,7 +61,7 @@ describe('TavilyWebSearchProvider', () => {
         body: JSON.stringify({
           api_key: 'test-key',
           query: 'CEES',
-          search_depth: 'basic',
+          search_depth: 'advanced',
           topic: 'general',
           time_range: 'week',
           include_domains: ['example.com'],
@@ -71,6 +71,19 @@ describe('TavilyWebSearchProvider', () => {
           include_images: false,
         }),
       }),
+    );
+  });
+
+  it('honours WEB_SEARCH_SEARCH_DEPTH when building the request body', async () => {
+    process.env.WEB_SEARCH_SEARCH_DEPTH = 'basic';
+    fetchMock.mockResolvedValue(jsonResponse({ query: 'CEES', results: [] }));
+
+    const provider = new TavilyWebSearchProvider();
+    await provider.search({ query: 'CEES', recency: 'any', domains: [], maxResults: 1 });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.tavily.com/search',
+      expect.objectContaining({ body: expect.stringContaining('"search_depth":"basic"') }),
     );
   });
 

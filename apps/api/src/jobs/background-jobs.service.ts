@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { DraftStatus, MembershipStatus, Prisma, UserStatus, WorkReportStatus, WorkReportType } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
+import { AuditRetentionService } from '../audit/audit-retention.service';
 import { dateKeyToUtcMidnight, DEFAULT_TENANT_TIMEZONE, shiftLocalDateKey } from '../common/tenant-time';
 import { PrismaService } from '../database/prisma.service';
 import { LegalService } from '../legal/legal.service';
@@ -15,6 +16,8 @@ export interface BackgroundJobRunResult {
     workReportReminderNotifications: number;
     legalContractTransitions: number;
     hrEmployeeChangesApplied: number;
+    purgedConnectorReadEvents: number;
+    archivedAuditEvents: number;
 }
 
 const DEFAULT_INTERVAL_SECONDS = 60;
@@ -32,6 +35,7 @@ export class BackgroundJobsService implements OnModuleInit, OnModuleDestroy {
         private readonly notifications: NotificationService,
         private readonly legalService: LegalService,
         private readonly hrService: HrService,
+        private readonly auditRetention: AuditRetentionService,
     ) { }
 
     onModuleInit(): void {
@@ -54,6 +58,8 @@ export class BackgroundJobsService implements OnModuleInit, OnModuleDestroy {
             workReportReminderNotifications: 0,
             legalContractTransitions: 0,
             hrEmployeeChangesApplied: 0,
+            purgedConnectorReadEvents: 0,
+            archivedAuditEvents: 0,
         };
         try {
             const expiredUploadSessions = await this.expireUploadSessions(now);
@@ -61,6 +67,7 @@ export class BackgroundJobsService implements OnModuleInit, OnModuleDestroy {
             const workReportReminderNotifications = await this.createDailyReportReminders(now);
             const legalContractTransitions = await this.legalService.processLifecycle(now);
             const hrEmployeeChangesApplied = await this.hrService.processApprovedEmployeeChanges(now);
+            const { purgedConnectorReadEvents, archivedAuditEvents } = await this.auditRetention.runOnce(now);
             return {
                 skipped: false,
                 expiredUploadSessions,
@@ -68,6 +75,8 @@ export class BackgroundJobsService implements OnModuleInit, OnModuleDestroy {
                 workReportReminderNotifications,
                 legalContractTransitions,
                 hrEmployeeChangesApplied,
+                purgedConnectorReadEvents,
+                archivedAuditEvents,
             };
         } finally {
             await this.redis.deleteIfValue(LOCK_KEY, lockToken);

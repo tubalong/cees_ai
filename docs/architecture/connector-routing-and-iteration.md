@@ -209,7 +209,7 @@ Renderer -> 仅对被激活的 provider 调 POST /assistant/connectors/<provider
 - `ConnectorContext` 增加可选 `riskLevel`（`READ|WRITE|DESTRUCTIVE`）与 `confirmed`（boolean），兼容新增；省略即旧行为（按 `DESTRUCTIVE` 逐条审计）；
 - `TenantDetail` 增加必填 `connectorReadAuditEnabled`，`UpdateTenantRequest` 增加同名可选字段；
 - 租户配置 `connector_read_audit_enabled`（默认 `false`）由迁移 `20260929120000_connector_read_audit_toggle` 添加，存量租户按默认值回填；
-- `docs/security/README.md` 与 `docs/database/README.md` 已同步审计口径；审计保留策略仍待确认（§10）。
+- `docs/security/README.md` 与 `docs/database/README.md` 已同步审计口径；审计保留策略已决定并落地，见 §10 与 [审计日志保留策略](audit-log-retention.md)。
 
 ### 5.5 验收
 
@@ -258,10 +258,10 @@ Renderer -> 仅对被激活的 provider 调 POST /assistant/connectors/<provider
 | 连接器读操作轮次级聚合审计 | 已落地（默认，`CONNECTOR_READ_OPERATION` 每轮一条） |
 | 租户级读审计开关 | 已落地（`tenants.connector_read_audit_enabled`，经 `PATCH /tenants/current` 修改） |
 
-## 10. 待确认问题
+## 10. 待确认问题（均已决定）
 
 1. ~~**第二轮触发判据**：由模型返回 `followUpMayBeNeeded` 提示，还是由 Desktop 按「意图含写操作或多连接器」的确定性规则判断？~~ **已决定**：由模型通过控制工具返回 `followUpMayBeNeeded` 提示（更贴合语义），但 Desktop 只把它当作「可以进入第二轮」的许可，判据、轮数与上限都在客户端；提示缺失或非法一律不进入第二轮。
 2. ~~**两轮的总调用上限**：保持合计 ≤ 3，还是放宽到每轮 ≤ 3（合计最多 6）？~~ **已决定**：保持合计 ≤ 3，沿用既有「单轮最多三个连接器调用」不变；放宽会同时放大确认次数与上下文体积。
 3. ~~**路由成本**：每个未点名品牌的问题都会多一次路由模型调用。是否只在「已连接连接器 ≥ 2」时才启用路由，单连接器直接命中？~~ **已决定**：就绪连接器 ≤ 1 时不调用模型，直接返回确定性结果（无就绪连接器返回空，单就绪连接器直接命中）；≥ 2 时才做一次路由模型调用，且未点名的问题才需要它。
 4. ~~**读操作审计默认值**：默认关闭是否足够？~~ **已决定**：默认即写入一条轮次级聚合审计（`CONNECTOR_READ_OPERATION`），开关 `connectorReadAuditEnabled` 只决定是否进一步逐条。因此「默认关闭」不会让只读调用完全无痕；开启后按次留痕，代价是审计量级上升。
-5. **审计保留策略**：连接器审计量级远高于现有业务审计，`audit_logs` 是否需要保留期与归档策略（当前未见相关约定）。
+5. ~~**审计保留策略**：连接器审计量级远高于现有业务审计，`audit_logs` 是否需要保留期与归档策略（当前未见相关约定）。~~ **已决定**：采用分级保留——连接器只读逐条审计保留 `90` 天后物理删除，其余租户审计保留 `3` 年后迁入 `audit_logs_archive`，`platform_audit_logs` 永久保留。执行入口是既有后台任务（Redis 锁内串行），配置项、索引取舍与失败语义见 [审计日志保留策略](audit-log-retention.md)（契约 `0.48.0`）。

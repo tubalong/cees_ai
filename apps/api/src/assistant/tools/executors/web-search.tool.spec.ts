@@ -34,10 +34,14 @@ describe('WebSearchTool', () => {
 
     expect(definition).toEqual(expect.objectContaining({
       name: 'web_search',
-      version: '1.1.0',
+      version: '1.2.0',
       requiredPermissions: ['ai.web.search'],
       riskLevel: 'READ',
     }));
+    // 描述是提升检索命中的第一手段：必须引导模型构造“主体 + 指标 + 时间范围 + 权威来源”
+    // 的关键词，并在只拿到目录页时改写查询重试。
+    expect(definition?.description).toEqual(expect.stringContaining('主体 + 指标 + 时间范围 + 权威来源'));
+    expect(definition?.description).toEqual(expect.stringContaining('目录页'));
     expect(definition?.parameters).toEqual(expect.objectContaining({
       required: ['query'],
     }));

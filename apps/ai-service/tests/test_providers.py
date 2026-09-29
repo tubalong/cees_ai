@@ -282,6 +282,66 @@ class FakeStreamingToolChatModel:
         )
 
 
+class FakeTruncatedToolStreamChatModel:
+    """模拟工具参数被输出上限截断：JSON 中途断开，finish_reason 为 length。"""
+
+    def __init__(self) -> None:
+        self.bind_calls: list[tuple[list[dict[str, Any]], dict[str, Any]]] = []
+
+    def bind_tools(
+        self, tools: list[dict[str, Any]], **kwargs: Any
+    ) -> FakeTruncatedToolStreamChatModel:
+        self.bind_calls.append((tools, kwargs))
+        return self
+
+    async def astream(
+        self, messages: list[object], **kwargs: Any
+    ) -> AsyncIterator[AIMessageChunk]:
+        yield AIMessageChunk(
+            content="",
+            tool_call_chunks=[
+                {
+                    "name": "save_to_knowledge",
+                    "args": '{"knowledgeBaseId":"kb-1","content":"# 员工手册',
+                    "id": "call_1",
+                    "index": 0,
+                }
+            ],
+        )
+        yield AIMessageChunk(content="", response_metadata={"finish_reason": "length"})
+
+
+@pytest.mark.asyncio
+async def test_stream_with_tools_reports_truncated_arguments_as_output_error() -> None:
+    """参数被输出上限截断时必须给出「截断」这一具体原因，而不是笼统的 JSON 解析失败。
+
+    这类失败的实际来源是把长文档内联进工具参数：JSON 在输出预算耗尽时中途断开，
+    上层需要据此给出「缩小请求范围」的可执行提示。
+    """
+    chat_model = FakeTruncatedToolStreamChatModel()
+    provider = object.__new__(OpenAICompatibleProvider)
+    provider.profile = profile()
+    provider.chat_model = chat_model
+    options = InvocationOptions(
+        temperature=0.2,
+        max_output_tokens=256,
+        output_mode=OutputMode.text,
+        tools=(
+            {
+                "name": "save_to_knowledge",
+                "description": "Save content",
+                "parameters": {"type": "object"},
+            },
+        ),
+    )
+
+    with pytest.raises(ProviderOutputError, match="truncated by the output token limit"):
+        async for _ in provider.stream_with_tools(
+            [ChatMessage(role="user", content="save this handbook")], options
+        ):
+            pass
+
+
 @pytest.mark.asyncio
 async def test_invoke_with_tools_binds_tools_and_returns_tool_calls() -> None:
     chat_model = FakeToolChatModel()

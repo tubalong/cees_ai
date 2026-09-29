@@ -21,7 +21,18 @@ AI 调用与 Token 指标见 [AI 调用与 Token 计量](../architecture/public-
 
 - `tenants.connector_read_audit_enabled`（默认 `false`）由 `20260929120000_connector_read_audit_toggle` 添加，控制连接器**只读**调用是否逐条审计；写与破坏性调用始终逐条审计，不受该开关影响；
 - 开关只通过 `PATCH /tenants/current` 修改（`tenant.update` 权限），单字段修改写 `TENANT_CONNECTOR_READ_AUDIT_CHANGED` 审计；
-- 连接器审计写入既有 `audit_logs`（`resource_type = CONNECTOR`，action 为 `CONNECTOR_READ_OPERATION` / `CONNECTOR_WRITE_OPERATION`），不新增审计表；保留期与归档策略仍待确认。
+- 连接器审计写入既有 `audit_logs`（`resource_type = CONNECTOR`，action 为 `CONNECTOR_READ_OPERATION` / `CONNECTOR_WRITE_OPERATION`），不单独建审计表；到期后按下方「审计保留与归档」处理。
+
+## 审计保留与归档
+
+- 分级保留（契约 `0.48.0`，迁移 `20260929163000_audit_log_retention`）：连接器只读逐条审计
+  （`resource_type = 'CONNECTOR'`、`action = 'CONNECTOR_READ_OPERATION'`、`metadata.aggregated = false`）
+  保留 90 天后物理删除；其余租户审计保留 3 年后迁入 `audit_logs_archive`；`platform_audit_logs` 永久保留。
+- `audit_logs_archive` 字段与 `audit_logs` 一致，只增加 `archived_at`；迁移同时给 `audit_logs` 增加
+  `(created_at, id)` 与 `(action, created_at)` 两个跨租户扫描索引。
+- 执行入口是 `BackgroundJobsService` 内的后台任务，`AUDIT_RETENTION_ENABLED`、
+  `AUDIT_CONNECTOR_READ_RETENTION_DAYS`、`AUDIT_ARCHIVE_AFTER_DAYS`、`AUDIT_RETENTION_BATCH_SIZE`、
+  `AUDIT_RETENTION_MAX_BATCHES` 可覆盖默认值；设计与失败语义见 [审计日志保留策略](../architecture/audit-log-retention.md)。
 
 ## HR 模型
 

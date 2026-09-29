@@ -8,17 +8,30 @@ interface PreferencesContextValue {
     resolvedTheme: 'light' | 'dark';
     fontSize: FontSizeMode;
     fontScale: number;
+    /**
+     * 上一次使用过的检索开关状态；从未主动切换过时为 `null`，由各入口决定自己的默认值。
+     * 检索开关不猜隐含意图，因此不能靠“默认打开”解决发现性——改为记住用户的上一次选择：
+     * 用户开过一次后，新会话就不再需要重复开启。
+     */
+    webSearchPreference: boolean | null;
+    knowledgeSearchPreference: boolean | null;
     setThemeMode: (mode: ThemeMode) => void;
     setFontSize: (mode: FontSizeMode) => void;
+    setWebSearchPreference: (enabled: boolean) => void;
+    setKnowledgeSearchPreference: (enabled: boolean) => void;
 }
 
 const THEME_KEY = 'cees.preferences.theme';
 const FONT_SIZE_KEY = 'cees.preferences.fontSize';
+const WEB_SEARCH_KEY = 'cees.preferences.webSearchEnabled';
+const KNOWLEDGE_SEARCH_KEY = 'cees.preferences.knowledgeSearchEnabled';
 const PreferencesContext = createContext<PreferencesContextValue | undefined>(undefined);
 
 export function PreferencesProvider({ children }: { children: ReactNode }): JSX.Element {
     const [themeMode, setThemeModeState] = useState<ThemeMode>(() => readThemeMode());
     const [fontSize, setFontSizeState] = useState<FontSizeMode>(() => readFontSize());
+    const [webSearchPreference, setWebSearchPreferenceState] = useState<boolean | null>(() => readBoolean(WEB_SEARCH_KEY));
+    const [knowledgeSearchPreference, setKnowledgeSearchPreferenceState] = useState<boolean | null>(() => readBoolean(KNOWLEDGE_SEARCH_KEY));
     const [systemTheme, setSystemTheme] = useState<'light' | 'dark'>(() => getSystemTheme());
     const resolvedTheme = themeMode === 'system' ? systemTheme : themeMode;
     const fontScale = fontSize === 'small' ? 0.9 : fontSize === 'large' ? 1.12 : 1;
@@ -68,6 +81,8 @@ export function PreferencesProvider({ children }: { children: ReactNode }): JSX.
         resolvedTheme,
         fontSize,
         fontScale,
+        webSearchPreference,
+        knowledgeSearchPreference,
         setThemeMode: (mode) => {
             localStorage.setItem(THEME_KEY, mode);
             setThemeModeState(mode);
@@ -76,7 +91,15 @@ export function PreferencesProvider({ children }: { children: ReactNode }): JSX.
             localStorage.setItem(FONT_SIZE_KEY, mode);
             setFontSizeState(mode);
         },
-    }), [fontScale, fontSize, resolvedTheme, themeMode]);
+        setWebSearchPreference: (enabled) => {
+            localStorage.setItem(WEB_SEARCH_KEY, String(enabled));
+            setWebSearchPreferenceState(enabled);
+        },
+        setKnowledgeSearchPreference: (enabled) => {
+            localStorage.setItem(KNOWLEDGE_SEARCH_KEY, String(enabled));
+            setKnowledgeSearchPreferenceState(enabled);
+        },
+    }), [fontScale, fontSize, knowledgeSearchPreference, resolvedTheme, themeMode, webSearchPreference]);
 
     return <PreferencesContext.Provider value={value}>{children}</PreferencesContext.Provider>;
 }
@@ -118,6 +141,14 @@ function readThemeMode(): ThemeMode {
 function readFontSize(): FontSizeMode {
     const value = localStorage.getItem(FONT_SIZE_KEY);
     return value === 'small' || value === 'large' ? value : 'standard';
+}
+
+/** 读取三态布尔偏好：未设置返回 null，与显式的 false 区分开。 */
+function readBoolean(key: string): boolean | null {
+    const value = localStorage.getItem(key);
+    if (value === 'true') return true;
+    if (value === 'false') return false;
+    return null;
 }
 
 function getSystemTheme(): 'light' | 'dark' {
