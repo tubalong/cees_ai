@@ -162,6 +162,8 @@ GitHub Manifest 使用 `REMOTE_MCP`、`DESKTOP`、`OAUTH`，不自动安装第�
 
 GitHub 目录超过候选上限时，规划器固定保留 `search_repositories`、`list_commits`、`get_file_contents`、`list_branches`、`list_pull_requests`、`list_issues` 等仓库类只读工具作为候选（最多 12 个），再由选择器补充其他候选。否则选择器可能在 50 个以上工具里裁掉全部仓库类工具，使「查看我的私有仓库」这类问题只能拿到账号公开资料。
 
+语义路由、受控多步接力和连接器调用审计目前仍是设计草案，均未实现；目标、契约改动与实施顺序见 [连接器语义路由、多步接力与调用审计](connector-routing-and-iteration.md)。
+
 ## 8. 安全边界
 
 - 模型不能指定本地可执行文件、Shell、环境变量、网络地址、Header 或 Token；
@@ -196,3 +198,4 @@ GitHub 目录超过候选上限时，规划器固定保留 `search_repositories`
 
 腾讯会议详细设计见 [腾讯会议连接器](../product/tencent-meeting-connector.md)。
 GitHub 详细设计见 [GitHub 官方远程 MCP 连接器](../product/github-remote-mcp-connector.md)。
+连接器语义路由、多步接力与调用审计设计草案见 [连接器语义路由、多步接力与调用审计](connector-routing-and-iteration.md)。
