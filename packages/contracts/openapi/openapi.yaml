@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CEES AI API
-  version: 0.44.0
+  version: 0.45.0
   description: 以本文件为唯一事实源的公开 API 契约。资源与操作按 docs/api 约定补充。
 
 servers:
@@ -1054,7 +1054,7 @@ paths:
     get:
       summary: 查询当前成员的用户级记忆列表
       description: |
-        返回当前成员在该租户内的全部未删除记忆，按创建时间升序（即注入对话上下文的顺序），至多 30 条。
+        返回当前成员在该租户内的全部未删除记忆，按创建时间升序（即注入对话上下文的顺序），至多 50 条。
         记忆只属于成员本人：AI 仅提议记忆内容，写入与删除一律以本人操作为准。
       operationId: listUserMemories
       tags:
@@ -15461,7 +15461,7 @@ components:
         content:
           type: string
           minLength: 1
-          maxLength: 1000
+          maxLength: 200
           description: 记忆正文，一条自包含的关于用户本人的陈述
         version:
           type: integer
@@ -15480,7 +15480,7 @@ components:
       properties:
         items:
           type: array
-          maxItems: 30
+          maxItems: 50
           items:
             $ref: "#/components/schemas/UserMemory"
 
@@ -15493,7 +15493,7 @@ components:
         content:
           type: string
           minLength: 1
-          maxLength: 1000
+          maxLength: 200
           description: 记忆正文；与 type 至少提供一个
         type:
           $ref: "#/components/schemas/UserMemoryType"
