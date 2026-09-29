@@ -5074,6 +5074,11 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
+        '409':
+          description: 同租户内已存在同名知识库（KNOWLEDGE_BASE_NAME_TAKEN）；名称按大小写不敏感、忽略首尾空格判定，软删除后释放
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
 
   /knowledge-bases/{knowledgeBaseId}:
     parameters:
@@ -5149,7 +5154,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
         '409':
-          description: version 与服务端当前版本不一致
+          description: version 与服务端当前版本不一致（RESOURCE_VERSION_CONFLICT），或新名称与同租户内其他知识库重复（KNOWLEDGE_BASE_NAME_TAKEN）
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
