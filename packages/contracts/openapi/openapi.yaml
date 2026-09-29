@@ -5614,6 +5614,11 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
+        '409':
+          description: 同租户内已存在同名知识库（KNOWLEDGE_BASE_NAME_TAKEN）；名称按大小写不敏感、忽略首尾空格判定，软删除后释放
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
 
   /knowledge-bases/{knowledgeBaseId}:
     parameters:
@@ -5689,7 +5694,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
         '409':
-          description: version 与服务端当前版本不一致
+          description: version 与服务端当前版本不一致（RESOURCE_VERSION_CONFLICT），或新名称与同租户内其他知识库重复（KNOWLEDGE_BASE_NAME_TAKEN）
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponseEnvelope' }
@@ -11181,7 +11186,7 @@ components:
     ConversationMessage:
       type: object
       additionalProperties: false
-      required: [id, role, content, imageFileIds, connectorContexts, resources, createdAt]
+      required: [id, role, content, imageFileIds, documentFileIds, connectorContexts, resources, createdAt]
       properties:
         id:
           type: string
@@ -11198,6 +11203,15 @@ components:
           maxItems: 8
           uniqueItems: true
           description: 用户消息引用的稳定图片文件 ID（用户输入的附件），仅用户消息可能非空；展示/下载地址由前端通过文件接口按需获取
+          items:
+            type: string
+            format: uuid
+        documentFileIds:
+          type: array
+          maxItems: 8
+          uniqueItems: true
+          default: []
+          description: 用户消息引用的稳定文档附件文件 ID（pdf/docx/xlsx/pptx/csv/md/txt/json），仅用户消息可能非空；用于在会话历史中恢复附件并提供「存入知识库」入口（sourceType=FILE_OBJECT 的 sourceId），不携带签名 URL
           items:
             type: string
             format: uuid

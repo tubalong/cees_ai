@@ -462,6 +462,90 @@ describe('KnowledgeService', () => {
         expect(deleteIndexesSpy).toHaveBeenCalledWith(TENANT_ID, USER_ID, KNOWLEDGE_BASE_ID);
     });
 
+    it('normalizes the name for uniqueness and turns a duplicate into an actionable conflict', async () => {
+        const created = createPrismaMock();
+        created.knowledgeBase.create.mockResolvedValue(knowledgeBaseRecord({ name: 'Company KB' }));
+        created.knowledgeBaseMember.create.mockResolvedValue(knowledgeBaseMemberRecord());
+
+        await createService(created, ['knowledge_base.create']).createKnowledgeBase({ name: '  Company KB  ' });
+
+        // 归一值只用于唯一性判定（大小写与首尾空格不敏感），展示名保留用户输入。
+        expect(created.knowledgeBase.create).toHaveBeenCalledWith({
+            data: expect.objectContaining({ name: 'Company KB', normalizedName: 'company kb' }),
+            select: expect.anything(),
+        });
+
+        const duplicated = createPrismaMock();
+        duplicated.knowledgeBase.create.mockRejectedValue(
+            new Prisma.PrismaClientKnownRequestError('duplicate', { code: 'P2002', clientVersion: '6.19.3' }),
+        );
+
+        // 唯一约束是最终权威：并发创建时应用层预检挡不住，必须把 P2002 翻译成重名提示，
+        // 否则用户只看到「操作失败」，不知道换个名字就能成功。
+        await expect(createService(duplicated, ['knowledge_base.create']).createKnowledgeBase({ name: 'company kb' }))
+            .rejects.toMatchObject({ response: expect.objectContaining({ code: 'KNOWLEDGE_BASE_NAME_TAKEN' }) });
+    });
+
+    it('updates the normalized name when renaming', async () => {
+        const prisma = createPrismaMock();
+        prisma.knowledgeBase.findFirst.mockResolvedValue(knowledgeBaseRecord());
+        prisma.knowledgeBaseMember.findUnique.mockResolvedValue({ permission: 'MANAGER' });
+        prisma.knowledgeBase.updateMany.mockResolvedValue({ count: 1 });
+        prisma.knowledgeBaseMember.count.mockResolvedValue(1);
+        const service = createService(prisma, ['knowledge_base.read']);
+
+        await service.updateKnowledgeBase(KNOWLEDGE_BASE_ID, { name: '  Company KB ', version: 1 });
+
+        expect(prisma.knowledgeBase.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+            data: expect.objectContaining({ name: 'Company KB', normalizedName: 'company kb' }),
+        }));
+    });
+
+    it('rejects a rename that collides with an existing name', async () => {
+        const prisma = createPrismaMock();
+        prisma.knowledgeBase.findFirst.mockResolvedValue(knowledgeBaseRecord());
+        prisma.knowledgeBaseMember.findUnique.mockResolvedValue({ permission: 'MANAGER' });
+        prisma.knowledgeBase.updateMany.mockRejectedValue(
+            new Prisma.PrismaClientKnownRequestError('duplicate', { code: 'P2002', clientVersion: '6.19.3' }),
+        );
+        const service = createService(prisma, ['knowledge_base.read']);
+
+        await expect(service.updateKnowledgeBase(KNOWLEDGE_BASE_ID, { name: '市场部知识库', version: 1 }))
+            .rejects.toMatchObject({ response: expect.objectContaining({ code: 'KNOWLEDGE_BASE_NAME_TAKEN' }) });
+    });
+
+    it('releases the name on soft delete so it can be reused', async () => {
+        const prisma = createPrismaMock();
+        prisma.knowledgeBase.findFirst.mockResolvedValue(knowledgeBaseRecord());
+        prisma.knowledgeBaseMember.findUnique.mockResolvedValue({ permission: 'MANAGER' });
+        prisma.knowledgeBase.updateMany.mockResolvedValue({ count: 1 });
+        const service = createService(prisma, ['knowledge_base.read'], undefined, {
+            deleteKnowledgeBaseIndexes: jest.fn().mockResolvedValue(undefined),
+        });
+
+        await service.deleteKnowledgeBase(KNOWLEDGE_BASE_ID, { version: 1 });
+
+        // 归一值追加主键后不再占用名称；否则用户删库后用同名重建会被唯一约束拒绝。
+        expect(prisma.knowledgeBase.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+            data: expect.objectContaining({ normalizedName: `产品知识库#${KNOWLEDGE_BASE_ID}` }),
+        }));
+    });
+
+    it('answers whether a name is still available, ignoring case and surrounding spaces', async () => {
+        const prisma = createPrismaMock();
+        prisma.knowledgeBase.findFirst.mockResolvedValue(null);
+        const service = createService(prisma, ['knowledge_base.create']);
+
+        await expect(service.isKnowledgeBaseNameAvailable(TENANT_ID, '  Company KB ')).resolves.toBe(true);
+        expect(prisma.knowledgeBase.findFirst).toHaveBeenCalledWith({
+            where: { tenantId: TENANT_ID, normalizedName: 'company kb', deletedAt: null },
+            select: { id: true },
+        });
+
+        prisma.knowledgeBase.findFirst.mockResolvedValue({ id: KNOWLEDGE_BASE_ID });
+        await expect(service.isKnowledgeBaseNameAvailable(TENANT_ID, 'company kb')).resolves.toBe(false);
+    });
+
     it('rejects AI queries for anchor readers who are not real members', async () => {
         const prisma = createPrismaMock();
         prisma.knowledgeBase.findFirst.mockResolvedValue(knowledgeBaseRecord({ visibilityScope: 'TENANT' }));

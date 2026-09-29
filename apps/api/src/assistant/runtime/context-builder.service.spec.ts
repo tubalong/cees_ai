@@ -1,8 +1,9 @@
 import { ConversationMessageRole } from '@prisma/client';
-import { ContextBuilderService } from './context-builder.service';
+import { ContextBuilderService, MODEL_MESSAGE_LIMIT, trimToModelMessageLimit } from './context-builder.service';
 import type { PrismaService } from '../../database/prisma.service';
 import type { AiServiceGateway } from '../../ai-orchestration/ai-service-gateway.service';
 import type { UserMemoryService } from '../../user-memory/user-memory.service';
+import type { ToolTurnMessage } from '@cees/ai-service-client';
 
 const TENANT_ID = '10000000-0000-0000-0000-000000000001';
 const USER_ID = '10000000-0000-0000-0000-000000000002';
@@ -290,10 +291,14 @@ describe('ContextBuilderService compaction triggers', () => {
 
         expect(gateway.compactChat).toHaveBeenCalledTimes(1);
         const [body] = gateway.compactChat.mock.calls[0];
-        expect(body.messages).toHaveLength(61);
-        expect(request.messages).toHaveLength(20);
-        expect(request.messages[0].id).toBe('m61');
-        expect(request.messages[19].id).toBe('m80');
+        // 单批压缩有上限：一次只压最老的 20 条，剩余前缀留到后续轮次继续压缩。
+        // 把 61 条一次性交给固定输出预算（compaction_max_output_tokens=2048）的摘要调用，
+        // 必然被截断成 CHAT_COMPACTION_TRUNCATED，而且失败不落库会让该会话每一轮都失败。
+        expect(body.messages).toHaveLength(20);
+        expect(body.messages[0].id).toBe('m0');
+        expect(request.messages).toHaveLength(61);
+        expect(request.messages[0].id).toBe('m20');
+        expect(request.messages[60].id).toBe('m80');
     });
 
     it('uses budgets fetched from ai-service instead of the built-in default', async () => {
@@ -372,5 +377,146 @@ describe('ContextBuilderService compaction triggers', () => {
         await service.buildChatRequest(buildInput());
 
         expect(userMemory.applyCandidates).not.toHaveBeenCalled();
+    });
+
+    it('bounds the assembled tool-turn messages to the model message limit', async () => {
+        // 工具调用密集的会话会先在「总条数」上越界：压缩阈值只看文本消息，
+        // 而这里统计的是文本 + TOOL 消息 + 为每个工具步骤合成的 assistant(tool_calls)。
+        // 越界后 ai-service 以 INVALID_INVOCATION_REQUEST 拒绝该会话的每一轮。
+        const history: HistoryMessageRow[] = [
+            { id: 'u0', role: ConversationMessageRole.USER, content: '统计所有项目', turnId: null, toolCallId: null },
+            ...Array.from({ length: 70 }, (_, index) => ({
+                id: `t${index}`,
+                role: ConversationMessageRole.TOOL,
+                content: `结果 ${index}`,
+                turnId: `turn-${index}`,
+                toolCallId: `tc-${index}`,
+            })),
+        ];
+        const toolCalls = Array.from({ length: 70 }, (_, index) => ({
+            id: `tc-${index}`,
+            turnId: `turn-${index}`,
+            upstreamCallId: `call_${index}`,
+            name: 'list_projects',
+            arguments: {},
+        }));
+        const { service } = createService(history, toolCalls);
+
+        const result = await service.buildToolTurnMessages(buildInput());
+
+        expect(result.items.length).toBeLessThanOrEqual(MODEL_MESSAGE_LIMIT);
+        // 首条不能是悬空的 tool 结果（缺少配对的 assistant(tool_calls) 会被 provider 拒绝）。
+        expect(result.items[0].role).not.toBe('tool');
+        // 保留最新一段：最后一条工具结果必须还在。
+        expect(result.items[result.items.length - 1]).toEqual(expect.objectContaining({ role: 'tool' }));
+    });
+
+    it('bounds the history handed to a single compaction call', async () => {
+        // ai-service 用固定输出预算**一次性**为整批消息生成摘要：输入过大必然被截断，
+        // 返回 CHAT_COMPACTION_TRUNCATED 且不落库，于是该会话每一轮都失败。
+        const history: HistoryMessageRow[] = Array.from({ length: 120 }, (_, index) => ({
+            id: `m${index}`,
+            role: (index % 2 === 0 ? ConversationMessageRole.USER : ConversationMessageRole.ASSISTANT) as ConversationMessageRole,
+            content: '内容'.repeat(50),
+            turnId: `turn-${index}`,
+            toolCallId: null,
+        }));
+        const { service, gateway } = createService(history, []);
+
+        await service.buildChatRequest(buildInput());
+
+        const [request] = gateway.compactChat.mock.calls[0] as [{ messages: unknown[] }];
+        expect(request.messages.length).toBeLessThanOrEqual(20);
+    });
+
+    it('keeps whole turns in a compaction batch', async () => {
+        // 每轮 3 条消息：批次必须按整轮收敛，不能把某一轮从中间切开，
+        // 否则会把用户请求压进摘要、却把该轮回答留在增量区间。
+        const history: HistoryMessageRow[] = Array.from({ length: 120 }, (_, index) => ({
+            id: `m${index}`,
+            role: (index % 3 === 0 ? ConversationMessageRole.USER : ConversationMessageRole.ASSISTANT) as ConversationMessageRole,
+            content: '内容',
+            turnId: `turn-${Math.floor(index / 3)}`,
+            toolCallId: null,
+        }));
+        const { service, gateway } = createService(history, []);
+
+        await service.buildChatRequest(buildInput());
+
+        const [request] = gateway.compactChat.mock.calls[0] as [{ messages: unknown[] }];
+        expect(request.messages.length % 3).toBe(0);
+        expect(request.messages.length).toBeLessThanOrEqual(20);
+    });
+
+    it('continues the turn when compaction fails instead of failing the conversation', async () => {
+        // 压缩是上下文优化，不是本轮的必要条件：失败必须降级继续，
+        // 否则一次压缩故障会让该会话每一轮都失败，用户无法自救。
+        const history: HistoryMessageRow[] = Array.from({ length: 90 }, (_, index) => ({
+            id: `m${index}`,
+            role: (index % 2 === 0 ? ConversationMessageRole.USER : ConversationMessageRole.ASSISTANT) as ConversationMessageRole,
+            content: `消息 ${index}`,
+            turnId: `turn-${index}`,
+            toolCallId: null,
+        }));
+        const { service, gateway, prisma } = createService(history, []);
+        gateway.compactChat.mockRejectedValue(new Error('CHAT_COMPACTION_TRUNCATED'));
+
+        const request = await service.buildChatRequest(buildInput());
+
+        expect(gateway.compactChat).toHaveBeenCalled();
+        expect(request.messages.length).toBeGreaterThan(0);
+        // 没有成功摘要就不应写入摘要边界，否则会丢掉未被摘要覆盖的历史。
+        expect(request.conversation_summary).toBeNull();
+        expect(prisma.conversationSummary.create).not.toHaveBeenCalled();
+    });
+});
+
+describe('trimToModelMessageLimit', () => {
+    /** 构造「assistant(tool_calls) + tool 结果」交替的工具步骤消息。 */
+    function toolStepItems(steps: number): ToolTurnMessage[] {
+        const items: ToolTurnMessage[] = [];
+        for (let index = 0; index < steps; index += 1) {
+            items.push({
+                role: 'assistant',
+                content: null,
+                tool_calls: [{ id: `call_${index}`, name: 'list_projects', arguments: {} }],
+            });
+            items.push({
+                role: 'tool',
+                content: [{ type: 'text', text: `结果 ${index}` }],
+                tool_call_id: `call_${index}`,
+                name: 'list_projects',
+            });
+        }
+        return items;
+    }
+
+    it('keeps the newest slice within the limit', () => {
+        const items = toolStepItems(80);
+        const trimmed = trimToModelMessageLimit(items);
+
+        expect(items.length).toBeGreaterThan(MODEL_MESSAGE_LIMIT);
+        expect(trimmed.length).toBeLessThanOrEqual(MODEL_MESSAGE_LIMIT);
+        expect(trimmed[trimmed.length - 1]).toEqual(items[items.length - 1]);
+    });
+
+    it('never leaves a leading tool result without its assistant(tool_calls)', () => {
+        // 裁剪点落在轮次中间时，开头悬空的 tool 结果必须一并丢弃；
+        // provider 只接受「tool 消息紧随其配对的 assistant(tool_calls)」的结构。
+        const items: ToolTurnMessage[] = [
+            { role: 'user', content: [{ type: 'text', text: '开始' }] },
+            { role: 'assistant', content: [{ type: 'text', text: '好的' }] },
+            ...toolStepItems(80),
+        ];
+        const trimmed = trimToModelMessageLimit(items);
+
+        expect(trimmed.length).toBeLessThanOrEqual(MODEL_MESSAGE_LIMIT);
+        expect(trimmed[0].role).not.toBe('tool');
+    });
+
+    it('returns the same array when already within the limit', () => {
+        const items = toolStepItems(2);
+
+        expect(trimToModelMessageLimit(items)).toBe(items);
     });
 });

@@ -158,6 +158,7 @@ POST /knowledge-bases/{knowledgeBaseId}/query
 | `KNOWLEDGE_BASE_UPDATE_EMPTY` | 修改请求没有可修改字段 |
 | `RESOURCE_VERSION_CONFLICT` | 提交的版本不是当前版本 |
 | `KNOWLEDGE_BASE_MEMBER_EXISTS` | 成员已经加入知识库 |
+| `KNOWLEDGE_BASE_NAME_TAKEN` | 同租户内已存在同名知识库（大小写不敏感、忽略首尾空格；软删除后释放） |
 | `KNOWLEDGE_BASE_OWNER_REQUIRED` | 创建者不能降级或移除 |
 | `KNOWLEDGE_BASE_LAST_MANAGER` | 不能移除最后一名 MANAGER |
 | `KNOWLEDGE_DOCUMENT_NOT_FOUND` | 文档不存在、已删除或不属于该知识库 |

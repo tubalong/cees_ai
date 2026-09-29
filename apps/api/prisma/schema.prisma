@@ -1955,6 +1955,11 @@ model KnowledgeBase {
   id              String          @id @default(uuid()) @db.Uuid
   tenantId        String          @map("tenant_id") @db.Uuid
   name            String
+  /// 名称唯一性归一值：存活行为 `lower(btrim(name))`，软删除时改写为
+  /// `<归一名称>#<id>` 以释放名称。用独立列而不是直接约束 `name`：
+  /// 既能做到大小写不敏感，又能让软删除后的同名重建可用，
+  /// 而且完全由 Prisma schema 表达（不依赖部分唯一索引，避免迁移漂移）。
+  normalizedName  String          @map("normalized_name")
   description     String?
   /// 库级归属：PRIVATE 仅成员（个人库，默认）、DEPARTMENT 部门树成员、PROJECT 项目成员、TENANT 租户全员（公司库）。
   /// 锚点人群为动态虚拟 READER，不物化成员行；显式成员授权独立于锚点。
@@ -1971,6 +1976,7 @@ model KnowledgeBase {
 
   @@index([tenantId])
   @@index([tenantId, visibilityScope])
+  @@unique([tenantId, normalizedName])
   @@map("knowledge_bases")
 }
 

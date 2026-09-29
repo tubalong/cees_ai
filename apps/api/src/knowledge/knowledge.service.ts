@@ -37,6 +37,7 @@ import {
     KnowledgeDocumentStatus,
     KnowledgeQueryResult,
 } from './knowledge.types';
+import { normalizeKnowledgeBaseName, releasedKnowledgeBaseName } from './knowledge-base-name';
 
 const knowledgeBaseSelect = {
     id: true,
@@ -341,6 +342,21 @@ export class KnowledgeService {
         }, input);
     }
 
+    /**
+     * 建库前的名称可用性预检（只读，不产生副作用）。
+     *
+     * 存在的理由：草稿生成后用户点确认才发现重名，草稿就白建了，用户还得重新
+     * 描述需求。提前拒绝能把「重名」变成模型可纠正的工具拒绝，模型可以直接问
+     * 用户要新名称。注意这只是降低概率：唯一约束仍是最终权威，并发创建靠它兜住。
+     */
+    async isKnowledgeBaseNameAvailable(tenantId: string, name: string): Promise<boolean> {
+        const existing = await this.prisma.knowledgeBase.findFirst({
+            where: { tenantId, normalizedName: normalizeKnowledgeBaseName(name), deletedAt: null },
+            select: { id: true },
+        });
+        return !existing;
+    }
+
     private async createKnowledgeBaseRecord(
         context: Pick<RequestTenantContext, 'tenantId' | 'userId' | 'membershipId' | 'requestId'>,
         input: Pick<CreateKnowledgeBaseDto, 'name' | 'description' | 'visibilityScope' | 'departmentId' | 'projectId'>,
@@ -353,11 +369,12 @@ export class KnowledgeService {
             input.departmentId,
             input.projectId,
         );
-        const record = await this.prisma.$transaction(async (transaction) => {
+        const record = await this.guardKnowledgeBaseName(() => this.prisma.$transaction(async (transaction) => {
             const knowledgeBase = await transaction.knowledgeBase.create({
                 data: {
                     tenantId: context.tenantId,
                     name,
+                    normalizedName: normalizeKnowledgeBaseName(name),
                     description,
                     visibilityScope: scope.visibilityScope,
                     departmentId: scope.departmentId,
@@ -382,7 +399,7 @@ export class KnowledgeService {
                 projectId: scope.projectId,
             });
             return knowledgeBase;
-        });
+        }));
         return { ...this.toKnowledgeBaseScopeShape(record), memberCount: 1, myPermission: 'MANAGER' as KnowledgeBaseMemberPermission };
     }
 
@@ -434,14 +451,17 @@ export class KnowledgeService {
             version: { increment: 1 },
             updatedBy: context.userId,
         };
-        if (input.name !== undefined) data.name = input.name.trim();
+        if (input.name !== undefined) {
+            data.name = input.name.trim();
+            data.normalizedName = normalizeKnowledgeBaseName(input.name);
+        }
         if (input.description !== undefined) data.description = normalizeDescription(input.description);
         if (scope) {
             data.visibilityScope = scope.visibilityScope;
             data.departmentId = scope.departmentId;
             data.projectId = scope.projectId;
         }
-        await this.prisma.$transaction(async (transaction) => {
+        await this.guardKnowledgeBaseName(() => this.prisma.$transaction(async (transaction) => {
             const updated = await transaction.knowledgeBase.updateMany({
                 where: {
                     id: knowledgeBaseId,
@@ -468,13 +488,13 @@ export class KnowledgeService {
                     projectId: scope ? scope.projectId : current.projectId,
                 },
             });
-        });
+        }));
         return this.getKnowledgeBase(knowledgeBaseId);
     }
 
     async deleteKnowledgeBase(knowledgeBaseId: string, input: DeleteKnowledgeBaseQueryDto): Promise<void> {
         const context = this.tenantContext.require();
-        await this.requireKnowledgeBase(context.tenantId, knowledgeBaseId);
+        const current = await this.requireKnowledgeBase(context.tenantId, knowledgeBaseId);
         await this.requireKnowledgeBasePermission(knowledgeBaseId, 'MANAGER');
         await this.prisma.$transaction(async (transaction) => {
             const deleted = await transaction.knowledgeBase.updateMany({
@@ -486,6 +506,11 @@ export class KnowledgeService {
                 },
                 data: {
                     deletedAt: new Date(),
+                    // 软删除必须释放名称：否则用户删掉同名库后再建会被唯一约束拒绝。
+                    normalizedName: releasedKnowledgeBaseName(
+                        normalizeKnowledgeBaseName(current.name),
+                        knowledgeBaseId,
+                    ),
                     updatedBy: context.userId,
                     version: { increment: 1 },
                 },
@@ -1271,6 +1296,34 @@ export class KnowledgeService {
 
     private memberConflict(): ConflictException {
         return new ConflictException({ code: 'KNOWLEDGE_BASE_MEMBER_EXISTS', message: '该成员已经加入知识库' });
+    }
+
+    /**
+     * 同租户内知识库重名。
+     *
+     * 文案必须能让用户直接照做（换名字）：这条消息会经助手确认流展示到界面，
+     * 也可能被回喂给模型，所以不能出现约束名、字段名等内部信息。
+     */
+    private nameConflict(): ConflictException {
+        return new ConflictException({
+            code: 'KNOWLEDGE_BASE_NAME_TAKEN',
+            message: '当前租户下已存在同名知识库，请换一个名称',
+        });
+    }
+
+    /**
+     * 知识库创建/改名统一收口：把唯一约束冲突翻译成可执行的重名提示。
+     *
+     * 唯一约束仍是最终权威——应用层的可用性预检只能降低概率，并发创建时
+     * 依然要靠数据库拒绝，因此这里必须兜住 P2002。
+     */
+    private async guardKnowledgeBaseName<T>(operation: () => Promise<T>): Promise<T> {
+        try {
+            return await operation();
+        } catch (error) {
+            if (isPrismaError(error, 'P2002')) throw this.nameConflict();
+            throw error;
+        }
     }
 
     private ownerPermissionConflict(): ConflictException {

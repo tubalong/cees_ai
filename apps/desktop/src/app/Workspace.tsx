@@ -282,6 +282,14 @@ interface LocalChatMessage {
      * 不展示就等于「操作没成功，但用户不知道为何」，只能反复重试。
      */
     toolFailures?: ToolFailureNotice[];
+    /**
+     * 本轮用户消息引用的文档附件 FileObject ID。
+     *
+     * 模型拿不到这些 ID（附件正文是以提取文本进上下文的），因此它无法自行调用
+     * save_to_knowledge 的 FILE_OBJECT 路径；历史里带上 ID 后，用户至少有一键
+     * 「存入知识库」的兜底入口，不必重新上传。
+     */
+    documentFileIds?: string[];
     /** 已持久化的历史消息才有稳定 message id，才能转存到知识库（块 7c）。 */
     persisted?: boolean;
 }
@@ -1272,6 +1280,7 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
         }
         const restored: LocalChatMessage[] = detail.messages.filter((item) => item.role !== 'TOOL').map((item) => {
             const message: LocalChatMessage = { id: item.id, role: item.role === 'USER' ? 'user' : 'assistant', content: item.content, persisted: true };
+            if (item.role === 'USER' && item.documentFileIds?.length) message.documentFileIds = item.documentFileIds;
             if (item.role === 'ASSISTANT' && item.turnId) {
                 message.resources = [...(resourcesByTurn.get(item.turnId)?.values() ?? [])];
                 message.sources = sourcesByTurn.get(item.turnId);
@@ -1560,7 +1569,7 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
                 });
             }
             setAutoEnabledCapabilities([]);
-            const userMessage: LocalChatMessage = { id: `m-${Date.now()}`, role: 'user', content };
+            const userMessage: LocalChatMessage = { id: `m-${Date.now()}`, role: 'user', content, documentFileIds: fileIds.length ? fileIds : undefined };
             pendingQuestionFocus.current = userMessage.id;
             setMessages((items) => [...items, userMessage]);
             const conversationId = activeConversationId ?? (await createConversation()).id;
@@ -1763,6 +1772,7 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
                             <div className="chat-message-actions">
                                 <button className="chat-copy" type="button" onClick={() => void copyText(item.content)}><CopyOutlined />{t('复制')}</button>
                                 {item.persisted && canSaveToKnowledge && <button className="chat-copy chat-save-to-knowledge" type="button" onClick={() => setSaveTarget({ sourceType: 'MESSAGE', sourceId: item.id })}><Save size={13} />{t('存入知识库')}</button>}
+                                {canSaveToKnowledge && item.documentFileIds?.map((fileId, attachmentIndex) => <button key={fileId} className="chat-copy chat-save-to-knowledge" type="button" onClick={() => setSaveTarget({ sourceType: 'FILE_OBJECT', sourceId: fileId })}><Save size={13} />{t('存入知识库（附件 {index}）', { index: String(attachmentIndex + 1) })}</button>)}
                             </div>
                         </div>
                     </div>)}

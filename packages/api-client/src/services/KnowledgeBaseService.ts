@@ -84,6 +84,7 @@ export class KnowledgeBaseService {
                 400: `请求字段校验失败或归属锚点无效（KNOWLEDGE_BASE_SCOPE_INVALID）`,
                 401: `登录状态无效或缺少有效租户成员身份`,
                 403: `缺少 knowledge_base.create 权限`,
+                409: `同租户内已存在同名知识库（KNOWLEDGE_BASE_NAME_TAKEN）；名称按大小写不敏感、忽略首尾空格判定，软删除后释放`,
             },
         });
     }
@@ -142,7 +143,7 @@ export class KnowledgeBaseService {
                 401: `登录状态无效或缺少有效租户成员身份`,
                 403: `缺少知识库 MANAGER 权限`,
                 404: `知识库不存在或当前成员无权访问`,
-                409: `version 与服务端当前版本不一致`,
+                409: `version 与服务端当前版本不一致（RESOURCE_VERSION_CONFLICT），或新名称与同租户内其他知识库重复（KNOWLEDGE_BASE_NAME_TAKEN）`,
             },
         });
     }

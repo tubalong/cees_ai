@@ -22,6 +22,10 @@ export type ConversationMessage = {
      */
     imageFileIds: Array<string>;
     /**
+     * 用户消息引用的稳定文档附件文件 ID（pdf/docx/xlsx/pptx/csv/md/txt/json），仅用户消息可能非空；用于在会话历史中恢复附件并提供「存入知识库」入口（sourceType=FILE_OBJECT 的 sourceId），不携带签名 URL
+     */
+    documentFileIds: Array<string>;
+    /**
      * 用户消息在该轮提交的已脱敏连接器上下文；其他角色固定为空数组。用于恢复连接器授权提示等确定性交互，不作为 CEES 权限或业务事实依据
      */
     connectorContexts: Array<ConnectorContext>;

@@ -10,7 +10,13 @@ import './knowledge.css';
  */
 const ACCEPT_EXTENSIONS = ['.pdf', '.docx', '.xlsx', '.pptx', '.csv', '.md', '.txt', '.json', '.jpg', '.jpeg', '.png', '.webp'];
 const ACCEPT = ACCEPT_EXTENSIONS.join(',');
-const MAX_SIZE_BYTES = 500 * 1024 * 1024;
+/**
+ * 与服务端 `TENCENT_COS_UPLOAD_MAX_BYTES` 的默认值（100 MiB）对齐。
+ * 服务端才是权威：它会在超限时返回 413 并带上真实上限；这里只是一次快速预检，
+ * 二者不一致时会出现「前端放行、服务端拒绝」的困惑体验（此前前端写 500MiB 就是这样）。
+ */
+const MAX_SIZE_BYTES = 100 * 1024 * 1024;
+const MAX_SIZE_MB = Math.floor(MAX_SIZE_BYTES / (1024 * 1024));
 
 export interface KnowledgeDocumentUploadInput {
     file: File;
@@ -49,7 +55,7 @@ export default function KnowledgeDocumentUploader({ open, submitting, onCancel, 
             return;
         }
         if (candidate.size > MAX_SIZE_BYTES) {
-            message.error(t('文件不能超过 500MB'));
+            message.error(t('文件不能超过 {size}MB', { size: String(MAX_SIZE_MB) }));
             return;
         }
         setFile(candidate);
