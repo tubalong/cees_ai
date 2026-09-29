@@ -5,6 +5,7 @@ import { useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { getDashboardHomepage, type DashboardHomepage, type MeResult } from '../../core/api';
 import { useI18n } from '../../core/i18n';
+import { usePreferences } from '../../app/preferences';
 import './ai-workspace-home.css';
 
 type BoardDefinition = {
@@ -36,9 +37,12 @@ export default function AiWorkspaceHome({ authContext, onStartConversation }: Ai
     const { t } = useI18n();
     const navigate = useNavigate();
     const location = useLocation();
+    const preferences = usePreferences();
     const [prompt, setPrompt] = useState('');
-    const [webSearch, setWebSearch] = useState(false);
-    const [knowledgeSearch, setKnowledgeSearch] = useState(true);
+    // 记住上次的检索开关：开关不会猜测隐含意图，靠默认值无法解决发现性，
+    // 因此用户开过一次后，后续新会话直接沿用，不再需要重复开启。
+    const [webSearch, setWebSearch] = useState(preferences.webSearchPreference ?? false);
+    const [knowledgeSearch, setKnowledgeSearch] = useState(preferences.knowledgeSearchPreference ?? true);
     const query = useQuery({ queryKey: ['dashboard-home'], queryFn: getDashboardHomepage, refetchInterval: 120_000 });
     const boardsOnly = location.pathname === '/workbench';
     const visibleBoards = useMemo(() => boards.filter((board) => !board.permissions || board.permissions.some((permission) => authContext.permissions.includes(permission))), [authContext.permissions]);
@@ -62,8 +66,8 @@ export default function AiWorkspaceHome({ authContext, onStartConversation }: Ai
                 <div className="ai-home-composer">
                     <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); startConversation(); } }} placeholder={t('问任何问题，创建任何事务…')} rows={2} />
                     <div className="ai-home-composer-actions">
-                        <button type="button" className={webSearch ? 'is-active' : ''} onClick={() => setWebSearch((value) => !value)}><Network size={15} />{t('联网')}</button>
-                        <button type="button" className={knowledgeSearch ? 'is-active' : ''} onClick={() => setKnowledgeSearch((value) => !value)}><BookOpen size={15} />{t('知识库')}</button>
+                        <button type="button" className={webSearch ? 'is-active' : ''} onClick={() => setWebSearch((value) => { preferences.setWebSearchPreference(!value); return !value; })}><Network size={15} />{t('联网')}</button>
+                        <button type="button" className={knowledgeSearch ? 'is-active' : ''} onClick={() => setKnowledgeSearch((value) => { preferences.setKnowledgeSearchPreference(!value); return !value; })}><BookOpen size={15} />{t('知识库')}</button>
                         <span />
                         <Button type="primary" shape="circle" icon={<Send size={16} />} disabled={!prompt.trim()} onClick={() => startConversation()} aria-label={t('发送')} />
                     </div>
