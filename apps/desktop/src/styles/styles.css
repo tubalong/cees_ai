@@ -1,5 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap');
-
 :root {
     /* 语义设计令牌（唯一来源） */
     --workspace-bg: #f4f6f9;
@@ -50,7 +48,7 @@
 
     color: var(--text);
     background: var(--workspace-bg);
-    font-family: "Manrope", "Noto Sans SC", sans-serif;
+    font-family: "Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", "Noto Sans SC", sans-serif;
 }
 
 :root[data-platform='mac'] {
@@ -219,8 +217,160 @@ body {
 
 .session-loading {
     min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 18px;
+    overflow: hidden;
+    background:
+        linear-gradient(rgba(255, 255, 255, .78), rgba(255, 255, 255, .78)),
+        repeating-linear-gradient(90deg, transparent 0 39px, rgba(86, 92, 246, .035) 39px 40px),
+        repeating-linear-gradient(0deg, transparent 0 39px, rgba(86, 92, 246, .035) 39px 40px),
+        var(--workspace-bg);
+}
+
+.startup-mark {
+    position: relative;
+    width: 120px;
+    height: 120px;
     display: grid;
     place-items: center;
+}
+
+.startup-mark>svg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+}
+
+.startup-mark .brand-logo {
+    width: 54px;
+    height: 54px;
+    flex-basis: 54px;
+    border-radius: 14px;
+    box-shadow: 0 16px 36px rgba(var(--primary-rgb), .18);
+    animation: startup-logo-enter .62s cubic-bezier(.22, 1, .36, 1) both;
+}
+
+.startup-orbit {
+    fill: none;
+    stroke: rgba(var(--primary-rgb), .18);
+    stroke-width: 1;
+    stroke-dasharray: 7 8;
+    transform-origin: 60px 60px;
+}
+
+.startup-orbit-outer {
+    animation: startup-orbit 7s linear infinite;
+}
+
+.startup-orbit-inner {
+    stroke: rgba(var(--primary-rgb), .3);
+    stroke-dasharray: 2 7;
+    animation: startup-orbit 5s linear infinite reverse;
+}
+
+.startup-node {
+    fill: var(--primary);
+    transform-origin: 60px 60px;
+}
+
+.startup-node-one {
+    animation: startup-orbit 3.4s linear infinite;
+}
+
+.startup-node-two {
+    opacity: .55;
+    animation: startup-orbit 4.8s linear infinite reverse;
+}
+
+.startup-copy {
+    display: grid;
+    gap: 3px;
+    text-align: center;
+    animation: startup-copy-enter .5s .12s ease both;
+}
+
+.startup-copy strong {
+    color: var(--text);
+    font-size: 20px;
+    letter-spacing: .04em;
+}
+
+.startup-copy span {
+    color: var(--muted);
+    font-size: 11px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+}
+
+.startup-progress {
+    width: 118px;
+    height: 2px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: rgba(var(--primary-rgb), .1);
+}
+
+.startup-progress span {
+    width: 42%;
+    height: 100%;
+    display: block;
+    border-radius: inherit;
+    background: var(--primary);
+    animation: startup-progress 1.15s cubic-bezier(.65, 0, .35, 1) infinite;
+}
+
+@keyframes startup-orbit {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@keyframes startup-logo-enter {
+    from {
+        opacity: 0;
+        transform: scale(.72);
+    }
+
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+@keyframes startup-copy-enter {
+    from {
+        opacity: 0;
+        transform: translateY(6px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes startup-progress {
+    from {
+        transform: translateX(-115%);
+    }
+
+    to {
+        transform: translateX(275%);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+    .startup-mark *,
+    .startup-copy,
+    .startup-progress span {
+        animation: none !important;
+    }
 }
 
 .app-shell {

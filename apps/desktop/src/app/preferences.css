@@ -94,6 +94,59 @@ body {
     background: var(--app-surface);
 }
 
+:root[data-theme='dark'] .message-editor,
+:root[data-theme='dark'] .ai-home-composer,
+:root[data-theme='dark'] .page-assistant-popover,
+:root[data-theme='dark'] .page-assistant-composer,
+:root[data-theme='dark'] .chat-resource,
+:root[data-theme='dark'] .chat-resource-footer,
+:root[data-theme='dark'] .generation-options-bar,
+:root[data-theme='dark'] .ai-board-card,
+:root[data-theme='dark'] .ai-board-card-main {
+    color: var(--app-text);
+    border-color: var(--app-border);
+    background: var(--app-surface);
+}
+
+:root[data-theme='dark'] .message-editor .ant-input,
+:root[data-theme='dark'] .ai-home-composer textarea,
+:root[data-theme='dark'] .page-assistant-composer .ant-input,
+:root[data-theme='dark'] .chat-markdown,
+:root[data-theme='dark'] .ai-board-card-main>p {
+    color: var(--app-text);
+    background: var(--app-surface-soft);
+}
+
+:root[data-theme='dark'] .composer-area,
+:root[data-theme='dark'] .message-stream,
+:root[data-theme='dark'] .page-assistant-messages,
+:root[data-theme='dark'] .ai-board-wall,
+:root[data-theme='dark'] .chat-resource-media {
+    background: var(--app-background);
+}
+
+:root[data-theme='dark'] .chat-resource-title strong,
+:root[data-theme='dark'] .generation-options-label,
+:root[data-theme='dark'] .page-assistant-header strong,
+:root[data-theme='dark'] .ai-board-card-head strong {
+    color: var(--app-text);
+}
+
+:root[data-theme='dark'] .chat-resource-actions .ant-btn,
+:root[data-theme='dark'] .generation-option-group button,
+:root[data-theme='dark'] .document-template-swatch {
+    color: var(--app-muted);
+    border-color: var(--app-border);
+    background: var(--app-surface-soft);
+}
+
+:root[data-theme='dark'] .chat-resource-actions .ant-btn:hover:not(:disabled),
+:root[data-theme='dark'] .generation-option-group button.is-selected,
+:root[data-theme='dark'] .document-template-swatch.is-selected {
+    color: var(--primary);
+    background: var(--primary-soft);
+}
+
 :root[data-theme='dark'] .nav-item:hover,
 :root[data-theme='dark'] .member-table button:hover,
 :root[data-theme='dark'] .member-table button.is-selected,

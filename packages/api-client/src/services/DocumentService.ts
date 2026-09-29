@@ -184,7 +184,7 @@ export class DocumentService {
         template = 'editorial-modern',
     }: {
         documentId: string,
-        template?: 'business-standard' | 'editorial-modern' | 'executive-dark',
+        template?: 'business-standard' | 'editorial-modern' | 'executive-dark' | 'product-story' | 'academic-clean' | 'minimal-mono',
     }): CancelablePromise<Blob> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -215,7 +215,7 @@ export class DocumentService {
         template = 'editorial-modern',
     }: {
         documentId: string,
-        template?: 'business-standard' | 'editorial-modern' | 'executive-dark',
+        template?: 'business-standard' | 'editorial-modern' | 'executive-dark' | 'product-story' | 'academic-clean' | 'minimal-mono',
     }): CancelablePromise<Blob> {
         return __request(OpenAPI, {
             method: 'GET',

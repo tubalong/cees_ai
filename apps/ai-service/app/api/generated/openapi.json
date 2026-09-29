@@ -3275,7 +3275,10 @@
             "enum": [
               "business-standard",
               "editorial-modern",
-              "executive-dark"
+              "executive-dark",
+              "product-story",
+              "academic-clean",
+              "minimal-mono"
             ],
             "default": "editorial-modern"
           },

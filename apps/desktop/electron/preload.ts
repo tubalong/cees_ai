@@ -23,9 +23,9 @@ contextBridge.exposeInMainWorld('cees', {
             ipcRenderer.invoke('cees:local-disk-choose-and-scan-directory'),
         chooseAndQuarantine: (selectionKind: 'files' | 'directory'): Promise<import('./local-tools/cleanup-manager').PublicCleanupJob | null> =>
             ipcRenderer.invoke('cees:local-cleanup-choose-and-quarantine', selectionKind),
-        restoreLatest: (): Promise<import('./local-tools/cleanup-manager').PublicCleanupJob> =>
+        restoreLatest: (): Promise<import('./local-tools/cleanup-manager').PublicCleanupJob | null> =>
             ipcRenderer.invoke('cees:local-cleanup-restore-latest'),
-        cleanLatest: (): Promise<import('./local-tools/cleanup-manager').PublicCleanupJob> =>
+        cleanLatest: (): Promise<import('./local-tools/cleanup-manager').PublicCleanupJob | null> =>
             ipcRenderer.invoke('cees:local-cleanup-clean-latest'),
         /**
          * 把已生成的产物另存到本机。目标路径只能由主进程的系统保存对话框产生，

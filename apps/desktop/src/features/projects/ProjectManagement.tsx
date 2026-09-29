@@ -1,11 +1,12 @@
 import { PlusOutlined, SearchOutlined } from '@ant-design/icons';
-import { App as AntdApp, Button, Empty, Input, Modal, Select, Spin, Switch } from 'antd';
+import { App as AntdApp, Button, Card, Empty, Input, Modal, Progress, Select, Spin, Switch, Tag } from 'antd';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
     createProject, createTask, deleteProject, hasStoredSession, listDepartments, listProjects,
     listProjectMembers, listTasks, listTenantMembers, transitionProject, transitionTask, updateProject,
-    type CreateTaskInput, type MeResult, type ProjectStatus, type ProjectSummary,
+    type CreateTaskInput, type MeResult, type PageAssistantContext, type ProjectStatus, type ProjectSummary,
     type ProjectTransitionAction, type TaskPriority, type TaskStatus, type TaskSummary,
 } from '../../core/api';
 import { useI18n } from '../../core/i18n';
@@ -16,6 +17,7 @@ import TransitionPromptModal from './TransitionPromptModal';
 import { isReadOnlyProject, projectStatusLabels, projectTransitions, taskPriorityLabels } from './project-constants';
 import '../../styles/shared.css';
 import './project.css';
+import PageAssistant from '../assistant/PageAssistant';
 
 interface TaskFormValues {
     title: string;
@@ -45,6 +47,7 @@ interface ProjectManagementProps {
 export default function ProjectManagement({ authContext, onSessionExpired }: ProjectManagementProps): JSX.Element {
     const { message } = AntdApp.useApp();
     const { t } = useI18n();
+    const navigate = useNavigate();
     const queryClient = useQueryClient();
     const permissions = useMemo(() => new Set(authContext.permissions), [authContext.permissions]);
 
@@ -234,12 +237,27 @@ export default function ProjectManagement({ authContext, onSessionExpired }: Pro
     };
 
     const readOnly = selected ? isReadOnlyProject(selected.status) : false;
+    const pageAssistantContext: PageAssistantContext = {
+        source: 'project-management',
+        role: '项目管理助手',
+        selected: selected ? { id: selected.id, name: selected.name, code: selected.code, status: selected.status } : undefined,
+        summary: selected ? { memberCount: selected.memberCount ?? 0, taskCount: selected.taskCount ?? 0, visibleTaskCount: tasksQuery.data?.items.length ?? 0 } : { projectCount: projects.length },
+    };
+    const activeProjectCount = projects.filter((project) => project.status === 'ACTIVE').length;
+    const overdueTaskCount = allTasks.filter((task) => task.dueDate && new Date(task.dueDate).getTime() < Date.now() && !['DONE', 'CANCELLED'].includes(task.status)).length;
+    const completionRate = allTasks.length ? Math.round((allTasks.filter((task) => task.status === 'DONE').length / allTasks.length) * 100) : 0;
 
     return <div className="workspace-page project-management-page">
         <header className="workspace-page-header">
             <div><h1>{t('项目管理')}</h1><p>{t('项目全生命周期：规划、执行、暂停、完成与归档')}</p></div>
             {permissions.has('project.create') && <div className="header-actions"><Button type="primary" icon={<PlusOutlined />} onClick={openCreateProject}>{t('新建项目')}</Button></div>}
         </header>
+        <section className="project-signal-grid">
+            <Card bordered={false}><span>当前项目</span><strong>{projects.length}</strong><small>{activeProjectCount} 个进行中</small></Card>
+            <Card bordered={false}><span>当前任务</span><strong>{selected ? allTasks.length : '-'}</strong><small>{overdueTaskCount ? `${overdueTaskCount} 个逾期` : '暂无逾期'}</small></Card>
+            <Card bordered={false}><span>完成进度</span><Progress type="circle" percent={completionRate} size={54} strokeColor="var(--primary)" /><small>{selected ? selected.name : '选择项目查看'}</small></Card>
+            <Card bordered={false}><span>协作状态</span><Tag color={selected ? 'processing' : 'default'}>{selected ? '已连接项目上下文' : '等待选择项目'}</Tag><small>可直接询问 AI</small></Card>
+        </section>
         <div className="project-layout">
             <aside className="surface-panel project-list-panel">
                 <div className="task-toolbar">
@@ -340,5 +358,10 @@ export default function ProjectManagement({ authContext, onSessionExpired }: Pro
             onClose={() => setTaskDetail(null)}
             onRefreshTasks={refreshTasks}
         />}
+        <PageAssistant
+            context={pageAssistantContext}
+            suggestions={['查看当前项目进度', '找出延期风险任务', '把任务分配给某位成员', '把部门成员加入当前项目']}
+            onExpand={(context, conversationId) => navigate('/', { state: { ...(conversationId ? { conversationId } : { createNewConversation: true }), forceChat: true, assistantContext: context } })}
+        />
     </div>;
 }

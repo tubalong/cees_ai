@@ -1,6 +1,6 @@
 import { ApartmentOutlined, LockOutlined, SafetyCertificateFilled, UserOutlined } from '@ant-design/icons';
 import {
-    Alert, App as AntdApp, Button, Checkbox, Form, Input, Modal, Spin, Typography,
+    Alert, App as AntdApp, Button, Checkbox, Form, Input, Modal, Typography,
 } from 'antd';
 import { useEffect, useState } from 'react';
 import {
@@ -12,6 +12,7 @@ import {
 import PlatformWorkspace from '../features/platform/PlatformWorkspace';
 import Workspace from './Workspace';
 import { LanguageSwitcher, useI18n } from '../core/i18n';
+import { toUserErrorMessage } from '../core/user-error';
 
 function BrandLogo(): JSX.Element {
     const [imageAvailable, setImageAvailable] = useState(true);
@@ -19,6 +20,22 @@ function BrandLogo(): JSX.Element {
         <span className="brand-logo-fallback">C</span>
         {imageAvailable && <img src="./assests/logo.webp" alt="CEES AI" onError={() => setImageAvailable(false)} />}
     </span>;
+}
+
+function StartupScreen(): JSX.Element {
+    return <main className="session-loading" aria-label="CEES AI 正在启动">
+        <div className="startup-mark" aria-hidden="true">
+            <svg viewBox="0 0 120 120" role="presentation">
+                <circle className="startup-orbit startup-orbit-outer" cx="60" cy="60" r="52" />
+                <circle className="startup-orbit startup-orbit-inner" cx="60" cy="60" r="39" />
+                <circle className="startup-node startup-node-one" cx="60" cy="8" r="3" />
+                <circle className="startup-node startup-node-two" cx="99" cy="60" r="2.5" />
+            </svg>
+            <BrandLogo />
+        </div>
+        <div className="startup-copy"><strong>CEES AI</strong><span>Agent Workspace</span></div>
+        <div className="startup-progress" aria-hidden="true"><span /></div>
+    </main>;
 }
 
 interface LoginFormValues {
@@ -55,7 +72,7 @@ function LoginPage({ onTenantLogin, onPlatformLogin }: { onTenantLogin: (result:
                 message.success(t('欢迎回来，{name}', { name: result.user.displayName }));
             }
         } catch (error) {
-            message.error(error instanceof Error ? error.message : t('登录失败，请稍后重试'));
+            message.error(toUserErrorMessage(error, t('登录失败，请稍后重试')));
         } finally {
             setSubmitting(false);
         }
@@ -90,7 +107,7 @@ function LoginPage({ onTenantLogin, onPlatformLogin }: { onTenantLogin: (result:
             form.setFieldsValue({ tenantCode: values.tenantCode.trim(), account: values.account.trim().toLowerCase(), password: '' });
             message.success(t('账号激活成功，请使用新密码登录'));
         } catch (error) {
-            message.error(error instanceof Error ? error.message : t('账号激活失败'));
+            message.error(toUserErrorMessage(error, t('账号激活失败')));
         } finally {
             setActivating(false);
         }
@@ -204,7 +221,7 @@ export default function App(): JSX.Element {
         setAuthState('authenticated');
     };
 
-    if (authState === 'loading') return <main className="session-loading"><Spin size="large" /></main>;
+    if (authState === 'loading') return <StartupScreen />;
     if (authState === 'authenticated' && authDomain === 'platform' && platformContext) {
         return <PlatformWorkspace context={platformContext} onSessionExpired={() => setAuthState('anonymous')} />;
     }

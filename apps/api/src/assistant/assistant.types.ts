@@ -16,6 +16,19 @@ export interface ConnectorContextInput {
   fetchedAt: string;
   data: Record<string, unknown>;
 }
+export interface PageAssistantContextInput {
+  source: 'project-management' | 'finance-management' | 'legal-contracts' | 'knowledge-management' | 'organization-management' | 'hr-management';
+  role: string;
+  selected?: Record<string, string | number | boolean | null>;
+  summary?: Record<string, string | number | boolean | null>;
+}
+
+export interface GenerationOptionsInput {
+  kind: 'image' | 'document';
+  aspectRatio?: 'square' | 'landscape' | 'portrait';
+  quality?: 'standard' | 'high';
+  template?: 'business-standard' | 'editorial-modern' | 'executive-dark' | 'product-story' | 'academic-clean' | 'minimal-mono';
+}
 
 export interface DingTalkConnectorToolInput {
   toolId: string;

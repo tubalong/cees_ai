@@ -27,6 +27,8 @@ import type {
   TencentMeetingConnectorToolInput,
   WeComConnectorToolInput,
   GitHubConnectorToolInput,
+  PageAssistantContextInput,
+  GenerationOptionsInput,
 } from './assistant.types';
 
 export class ConnectorContextDto implements ConnectorContextInput {
@@ -371,6 +373,19 @@ export class CreateTurnRequestDto {
   @Type(() => ConnectorContextDto)
   @ValidateNested({ each: true })
   connectorContexts?: ConnectorContextDto[];
+  @ApiPropertyOptional({
+    description: '当前管理页面提供的结构化 AI 助手上下文；只用于本轮回答，不作为业务写入或权限依据',
+    type: 'object',
+    additionalProperties: true,
+  })
+  @IsOptional()
+  @IsObject()
+  assistantContext?: PageAssistantContextInput;
+
+  @ApiPropertyOptional({ type: 'object', additionalProperties: true, description: '当前生成图片或文档的结构化界面选项，不作为用户正文保存' })
+  @IsOptional()
+  @IsObject()
+  generationOptions?: GenerationOptionsInput;
 
   @ApiPropertyOptional({
     description: '本轮对话执行模式；省略时使用会话的默认模式',
