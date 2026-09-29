@@ -286,6 +286,34 @@ describe('AssistantActionDraftService', () => {
             expect(draftUpdate.data.errorCode).toEqual('ACTION_EXECUTION_FAILED');
         });
 
+        it('surfaces curated business 4xx messages to the user but keeps the model summary generic', async () => {
+            harness.prisma.assistantActionDraft.findFirst.mockResolvedValue(pendingDraft());
+            harness.prisma.assistantActionDraft.updateMany.mockResolvedValue({ count: 1 });
+            harness.prisma.toolCall.updateMany.mockResolvedValue({ count: 1 });
+            harness.prisma.conversationMessage.create.mockResolvedValue({});
+            harness.prisma.conversationMessage.upsert.mockResolvedValue({});
+            harness.prisma.auditLog.create.mockResolvedValue({});
+            // 业务层抛出的 4xx 自带「用户该怎么做」的文案（如重名），必须透出，
+            // 否则用户只看到通用失败、不知道换个名字就能成功。
+            harness.execute.mockRejectedValue(new ConflictException({
+                code: 'KNOWLEDGE_BASE_NAME_TAKEN',
+                message: '当前租户下已存在同名知识库，请换一个名称',
+            }));
+
+            const result = await harness.service.confirm(DRAFT_ID);
+
+            expect(result.status).toEqual('FAILED');
+            expect(result.summary).toBe('当前租户下已存在同名知识库，请换一个名称');
+            const toolCallUpdate = harness.prisma.toolCall.updateMany.mock.calls[0][0] as {
+                data: { result: { summary: string }; errorMessage: string };
+            };
+            // 模型只拿固定文案：错误码、约束名、上游响应都不能进模型上下文。
+            expect(toolCallUpdate.data.result.summary).not.toContain('同名知识库');
+            expect(toolCallUpdate.data.result.summary).toContain('该操作未能完成');
+            // 客户端展示真实原因，排障与用户下一步动作都依赖它。
+            expect(toolCallUpdate.data.errorMessage).toBe('当前租户下已存在同名知识库，请换一个名称');
+        });
+
         it('executes the same draft only once across repeated confirmations', async () => {
             harness.prisma.assistantActionDraft.findFirst
                 .mockResolvedValueOnce(pendingDraft())

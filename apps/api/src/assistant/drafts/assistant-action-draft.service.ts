@@ -1,6 +1,7 @@
 import {
     ConflictException,
     ForbiddenException,
+    HttpException,
     Injectable,
     Logger,
     NotFoundException,
@@ -12,7 +13,7 @@ import { isActiveMembership, resolveMembershipAuthorization } from '../../rbac/a
 import { EventService } from '../conversation/event.service';
 import { ToolPolicyError, ToolPolicyService } from '../tools/tool-policy.service';
 import { ToolRegistryService } from '../tools/tool-registry';
-import type { ToolConfirmationRequest, ToolExecutionContext } from '../tools/tool.types';
+import { ToolExecutionError, type ToolConfirmationRequest, type ToolExecutionContext } from '../tools/tool.types';
 
 /**
  * 待确认草稿的有效期。过期后确认接口返回 409，用户必须重新发起对话，
@@ -208,12 +209,17 @@ export class AssistantActionDraftService {
             };
         } catch (error) {
             const message = error instanceof Error ? error.message : '操作执行失败';
-            // 不能断言「未产生业务写入」：工具可能已经把写入提交、随后在结算阶段失败，
-            // 旧措辞会让用户以为没生效而重试，从而产生重复数据。
-            const summary = '操作执行失败，请刷新对话确认结果；若未生效可重试。';
+            // 业务服务抛出的 4xx 自带面向用户写好的文案（重名、版本冲突、参数不合法等），
+            // 直接透出，让用户知道下一步该做什么；未识别的错误仍用通用文案，
+            // 既不泄露约束名/上游响应等内部细节，也不假装知道原因。
+            // 同时不能断言「未产生业务写入」：工具可能已提交写入、随后在结算阶段失败，
+            // 旧措辞会诱导用户重试并产生重复数据。
+            const userSummary = curatedUserMessage(error) ?? '操作执行失败，请刷新对话确认结果；若未生效可重试。';
+            // 回喂模型的摘要必须是无细节的固定文案：权限码、约束名、上游响应不进模型上下文。
+            const modelSummary = '该操作未能完成，请告知用户查看界面提示，或在用户提供新参数后重试';
             this.logger.error(`action draft execution failed: draft=${draft.id} tool=${draft.toolName} error=${message}`);
-            await this.settleExecuted(draft, DraftStatus.FAILED, summary, null, null, 'ACTION_EXECUTION_FAILED');
-            return { draftId: draft.id, status: 'FAILED', summary, resource: null };
+            await this.settleExecuted(draft, DraftStatus.FAILED, userSummary, null, null, 'ACTION_EXECUTION_FAILED', modelSummary);
+            return { draftId: draft.id, status: 'FAILED', summary: userSummary, resource: null };
         }
     }
 
@@ -450,4 +456,26 @@ export class AssistantActionDraftService {
 
 function truncate(value: string): string {
     return value.length > SUMMARY_MAX_LENGTH ? `${value.slice(0, SUMMARY_MAX_LENGTH - 1)}…` : value;
+}
+
+/**
+ * 取出可以直接展示给用户的业务文案。
+ *
+ * 只有「业务层自带的 4xx」与「工具层受控错误」才允许透出：这两类文案是
+ * 为终端用户写的（如「当前租户下已存在同名知识库，请换一个名称」）。
+ * 5xx、通用 Error 一律返回 undefined，由调用方使用通用兜底文案，
+ * 避免 Prisma 约束名、上游响应或堆栈进到界面。
+ */
+function curatedUserMessage(error: unknown): string | undefined {
+    if (error instanceof ToolExecutionError) {
+        const message = error.message.trim();
+        return message || undefined;
+    }
+    if (!(error instanceof HttpException) || error.getStatus() >= 500) return undefined;
+    const response = error.getResponse();
+    if (typeof response === 'object' && response !== null && !Array.isArray(response)) {
+        const message = (response as { message?: unknown }).message;
+        if (typeof message === 'string' && message.trim()) return message.trim();
+    }
+    return undefined;
 }

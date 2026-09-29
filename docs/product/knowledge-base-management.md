@@ -109,6 +109,8 @@
 
 权限码（租户级开关）收敛为五码：`knowledge_base.create`（创建）、`knowledge_base.read`（查看自己可访问的知识库，所有写操作的基础门槛）、`knowledge_base.query`（知识库问答的 AI 额度）、`knowledge_base.read_all`（只读查看当前租户全部知识库）与 `knowledge_base.manage_all`（读写管理当前租户全部知识库）。写操作的深度由库内成员等级校验（对象级）：编辑资料/成员管理要求 `MANAGER`，文档写入与删除要求 `EDITOR`。
 
+**名称唯一**：同一租户内知识库名称不能重复，判定按**大小写不敏感 + 忽略首尾空格**（归一值 `lower(btrim(name))`），冲突返回 `409 KNOWLEDGE_BASE_NAME_TAKEN`。名称在**软删除后释放**，因此删掉「公司共用库」之后可以再用同名重建；释放的做法是软删除时把归一值改写为 `<归一名称>#<id>`。归一值只用于唯一性判定，列表与详情始终展示用户输入的原始名称。助手建库会在生成确认草稿前先做一次可用性预检，重名时直接告诉模型「换一个名称」，而不是先建一份注定失败的草稿。
+
 ### 4.1 创建示例
 
 ```json
@@ -153,6 +155,7 @@
 | `404` | `KNOWLEDGE_BASE_MEMBER_NOT_FOUND` | 目标成员不存在、非当前租户成员或已失效 |
 | `409` | `RESOURCE_VERSION_CONFLICT` | 知识库版本已被其他请求更新 |
 | `409` | `KNOWLEDGE_BASE_MEMBER_EXISTS` | 成员已经加入该知识库 |
+| `409` | `KNOWLEDGE_BASE_NAME_TAKEN` | 同租户内已存在同名知识库（大小写不敏感、忽略首尾空格；软删除后释放） |
 | `409` | `KNOWLEDGE_BASE_OWNER_REQUIRED` | 创建者必须保留 MANAGER，不能降级或移除 |
 | `409` | `KNOWLEDGE_BASE_LAST_MANAGER` | 不能移除最后一名 MANAGER |
 | `404` | `KNOWLEDGE_DOCUMENT_NOT_FOUND` | 文档不存在、已删除或不属于该知识库 |

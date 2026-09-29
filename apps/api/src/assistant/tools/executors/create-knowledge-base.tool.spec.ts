@@ -4,16 +4,25 @@ import { CreateKnowledgeBaseTool } from './create-knowledge-base.tool';
 
 describe('CreateKnowledgeBaseTool', () => {
     let registry: ToolRegistryService;
-    let knowledgeService: jest.Mocked<Pick<KnowledgeService, 'createKnowledgeBaseForAssistant'>>;
+    let knowledgeService: jest.Mocked<Pick<KnowledgeService, 'createKnowledgeBaseForAssistant' | 'isKnowledgeBaseNameAvailable'>>;
     let definition: ReturnType<ToolRegistryService['get']>;
 
     beforeEach(() => {
         registry = new ToolRegistryService();
-        knowledgeService = { createKnowledgeBaseForAssistant: jest.fn() };
+        knowledgeService = { createKnowledgeBaseForAssistant: jest.fn(), isKnowledgeBaseNameAvailable: jest.fn() };
         const tool = new CreateKnowledgeBaseTool(registry, knowledgeService as unknown as KnowledgeService);
         tool.onModuleInit();
         definition = registry.get('create_knowledge_base');
     });
+
+    const confirmationContext = {
+        tenantId: 't-1',
+        userId: 'u-1',
+        membershipId: 'm-1',
+        requestId: 'r-1',
+        turnId: 'turn-1',
+        permissions: ['knowledge_base.create'],
+    };
 
     it('self-registers as a WRITE tool with the create permission', () => {
         expect(definition).toBeDefined();
@@ -101,5 +110,32 @@ describe('CreateKnowledgeBaseTool', () => {
         expect(result.userSummary).not.toContain('kb-1');
         expect(result.userSummary).not.toContain('MANAGER');
         expect(result.userSummary).not.toContain('instruction');
+    });
+
+    it('refuses to build a confirmation for a taken name so the model can ask for another one', async () => {
+        knowledgeService.isKnowledgeBaseNameAvailable.mockResolvedValue(false);
+
+        await expect(definition!.buildConfirmation!(confirmationContext, { name: '公司共用库' })).rejects.toMatchObject({
+            code: 'KNOWLEDGE_BASE_NAME_TAKEN',
+            // 用户文案要能直接照做：告诉他换个名称。
+            message: expect.stringContaining('请换一个名称'),
+            // 模型摘要也必须点明「重名」，否则 toToolFailure 会退化成「请稍后重试」，
+            // 模型只会道歉而不会向用户要新名称。
+            userFacingSummary: expect.stringContaining('换一个名称'),
+        });
+        expect(knowledgeService.isKnowledgeBaseNameAvailable).toHaveBeenCalledWith('t-1', '公司共用库');
+    });
+
+    it('builds the confirmation when the name is still available', async () => {
+        knowledgeService.isKnowledgeBaseNameAvailable.mockResolvedValue(true);
+
+        const confirmation = await definition!.buildConfirmation!(confirmationContext, { name: '公司共用库' });
+
+        expect(confirmation.title).toBe('创建知识库');
+        expect(confirmation.fields).toEqual([
+            { label: '知识库名称', value: '公司共用库' },
+            { label: '知识库说明', value: '（未填写）' },
+        ]);
+        expect(confirmation.summary).toContain('公司共用库');
     });
 });
