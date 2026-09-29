@@ -1,18 +1,4 @@
 # Development defaults. Production must point AI_MODEL_CONFIG_PATH at a deployment-owned file.
-[profiles.mock]
-enabled = true
-provider = "mock"
-model = "mock-text-v1"
-modes = ["text"]
-capabilities = ["chat"]
-temperature = 0.7
-default_max_output_tokens = 1024
-max_output_tokens_limit = 4096
-timeout_seconds = 30.0
-max_retries = 0
-structured_output_method = "function_calling"
-
-# Example profiles are disabled until their API key environment variables are configured.
 [profiles.primary]
 enabled = true
 provider = "deepseek"
@@ -32,7 +18,7 @@ structured_output_method = "function_calling"
 enabled = true
 provider = "openai_compatible"
 model = "qwen-max"
-base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+base_url = "https://maas.qianwenaiapi.com/compatible-mode/v1"
 api_key_env = "QWEN_API_KEY"
 modes = ["text", "json_schema"]
 capabilities = ["chat", "tool_calling"]
@@ -73,7 +59,7 @@ structured_output_method = "function_calling"
 enabled = true
 provider = "openai_compatible"
 model = "qwen-vl-max"
-base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+base_url = "https://maas.qianwenaiapi.com/compatible-mode/v1"
 api_key_env = "QWEN_API_KEY"
 modes = ["text"]
 capabilities = ["chat", "vision", "tool_calling"]
@@ -103,13 +89,6 @@ default_max_output_tokens = 8192
 max_output_tokens_limit = 393216
 context_budget_tokens = 1048576
 emit_reasoning_status = true
-
-[image_profiles.mock]
-enabled = false
-provider = "mock"
-model = "mock-image-v1"
-timeout_seconds = 30.0
-max_retries = 0
 
 [image_profiles.primary]
 enabled = true
