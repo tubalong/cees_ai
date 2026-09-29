@@ -42,8 +42,8 @@ export class ToolRegistryService {
   }
 
   /**
-   * 权限过滤后的完整工具定义；步骤执行器需要按 riskLevel 进一步裁剪
-   * 工具面（WRITE 工具在步骤窗口内不开放），因此保留一份未转换的视图。
+   * 权限过滤后的完整工具定义；步骤执行器在此基础上剔除显式排除项后组装
+   * 工具面（WRITE 工具保留，调用时经授权链二次把关），因此保留一份未转换的视图。
    */
   listAllowedDefinitions(permissions: string[]): ToolDefinition[] {
     return [...this.tools.values()]

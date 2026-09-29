@@ -41,7 +41,7 @@
 | [file-upload](architecture/file-upload.md) | 已落地的 COS 基础直传接口与后续权限、额度、扫描设计 |
 | [redis-foundation](architecture/redis-foundation.md) | NestJS Redis 基础 CRUD、命名空间和使用边界 |
 | [本机工具与 Excel 读写实现](architecture/local-tools-and-excel-io-plan.md) | 聊天上传并生成 Excel、本机只读扫描、隔离/恢复/永久清理的实现边界与风险登记 |
-| [AI 任务编排技术设计](architecture/ai-orchestration-technical.md) | 数据模型（同事三件套/任务五表/统一交互表）、状态机与幂等、对外契约与任务事件流、派发书与执行窗口算法、编排决策抽象（v1 规则 + LLM / v2 JEV）、调度运行器与实现落点 |
+| [AI 任务编排技术设计](architecture/ai-orchestration-technical.md) | 数据模型（同事表 / 任务五表 / 统一交互表）、状态机与幂等、对外契约与任务事件流、派发书与执行窗口算法、编排决策抽象（v1 规则 + LLM / v2 JEV）、调度运行器与实现落点 |
 | [AI 管家技术设计（草案）](architecture/proactive-assistant-technical.md) | 设计草案（未实施）：跟进记录数据模型（主表/规则表/设置表）、状态机与幂等、证据链结构、接口草案、翻译调用链与规则框架要点 |
 | [api](api/README.md) | 公开与内部契约及生成客户端约定 |
 | [项目管理 API](api/project-management-api.md) | 项目、成员、负责人和状态命令接口 |

@@ -189,7 +189,8 @@ export class TaskOutputsService {
     const outputById = new Map(outputs.map((output) => [output.documentId, output]));
     const archived = await this.loadArchivedOutputs(task.id);
 
-    // 预检：全部条目先校验通过再执行任何归档，避免部分成功后才发现非法项。
+    // 预检：先校验全部条目的产出归属与归档位置一致性（知识库权限在逐条归档时校验），
+    // 避免部分成功后才发现非法项。
     const seenTargets = new Map<string, string>();
     for (const item of input.outputs) {
       if (!outputById.has(item.documentId)) {
