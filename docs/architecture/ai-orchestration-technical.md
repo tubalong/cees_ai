@@ -1,7 +1,7 @@
 # AI 任务编排：技术设计
 
 > 状态：设计定稿（2026-09-28）
-> 实施进展（2026-09-28）：**M1 已落地**——同事表与任务五表（含统一交互表、`Conversation.agentId` 扩展）迁移、任务面契约（`/assistant/tasks` 5 操作，契约 0.44.0）、权限码 `ai.task.create/read`、编排服务骨架（`task` / `plan` / `task-event` / `task-runner`）、`create_orchestration_task` 工具与「无在职 AI 同事时编排工具不出现、对话与其余工具不受影响」的降级门控、任务接口（含 SSE 重放）与开发环境默认同事 seed。**M2 已落地**——步骤执行器与执行状态服务（派发书、执行窗口重建、工具循环、产出与依据回流）、任务调度器（任务租约抢占、依赖推进与失败级联、终态判定、心跳与失效恢复扫描）、`ToolCall` 挂接任务步骤（`taskStepId` / 序号 / 模型步）与步骤级事件契约（0.45.0）、生成类工具双载体（turn / task step）改造。**M2 口径简化（授权挂起部分已被 M3-S 取代）**：M2 期间步骤执行面不开放 WRITE 工具（一律裁剪并拒绝），租约过期步骤直接判失败、无重试阶梯。**M3 已部分落地**——交互契约（挂起事项与解决操作，契约 0.46.0）、交互服务（创建 / 解决 / 终态清理与临时授权校验链）、授权挂起与恢复全链路（WRITE 工具需签字：无可用授权时创建 AUTHORIZATION 挂起、批准后临时授权消费执行、拒绝直接收束；挂起不阻塞其它步骤；恢复语义 `WAITING_USER → RUNNING` 断点续跑；交互解决接口即时恢复 + 恢复扫描兜底）。**M3 剩余**：决策器抽象位与问人 / 裁决挂起（含挂起超时策略与授权防滥用次数上限）、失败阶梯（重试 / 重排 / 跳过 / 升级）、重编排（revise → 新草案链路）。**另有已设计但未随 M1 / M2 落地的存量项**：产出验收与归档（`outputs/confirm` 链路与产出草稿版本呈现）、派发书中的学习记录与近期工作记录注入（依赖 M4 沉淀体系）。**M4**（融合与沉淀）尚未实施；文中决策器、建议系统与重编排等章节仍为待实施设计。
+> 实施进展（2026-09-28）：**M1 已落地**——同事表与任务五表（含统一交互表、`Conversation.agentId` 扩展）迁移、任务面契约（`/assistant/tasks` 5 操作，契约 0.44.0）、权限码 `ai.task.create/read`、编排服务骨架（`task` / `plan` / `task-event` / `task-runner`）、`create_orchestration_task` 工具与「无在职 AI 同事时编排工具不出现、对话与其余工具不受影响」的降级门控、任务接口（含 SSE 重放）与开发环境默认同事 seed。**M2 已落地**——步骤执行器与执行状态服务（派发书、执行窗口重建、工具循环、产出与依据回流）、任务调度器（任务租约抢占、依赖推进与失败级联、终态判定、心跳与失效恢复扫描）、`ToolCall` 挂接任务步骤（`taskStepId` / 序号 / 模型步）与步骤级事件契约（0.45.0）、生成类工具双载体（turn / task step）改造。**M2 口径简化（授权挂起部分已被 M3-S 取代）**：M2 期间步骤执行面不开放 WRITE 工具（一律裁剪并拒绝），租约过期步骤直接判失败、无重试阶梯。**M3 已部分落地**——交互契约（挂起事项与解决操作，契约 0.46.0）、交互服务（创建 / 解决 / 终态清理与临时授权校验链）、授权挂起与恢复全链路（WRITE 工具需签字：无可用授权时创建 AUTHORIZATION 挂起、批准后临时授权消费执行、拒绝直接收束；挂起不阻塞其它步骤；恢复语义 `WAITING_USER → RUNNING` 断点续跑；交互解决接口即时恢复 + 恢复扫描兜底）、编排决策器抽象位（`decider/`：接口 + 规则 / LLM 实现 + 工厂装配；ai-service 契约 0.8.0 登记 `orchestration_decision` 模型角色）、`ask_user` 协议工具与问人 / 裁决挂起（工具面恒含 `ask_user`；决策器信息充分性判定与置信度分流；答复 / 裁决作为 USER 窗口消息注入执行窗口、断点续跑）、挂起超时策略（默认无限等待，可配按默认继续 / 跳过步骤 / 失败收束）与防滥用上限（单任务授权 / 提问创建次数）。**M3 剩余**：失败阶梯（重试 / 重排 / 跳过 / 升级）、重编排（revise → 新草案链路）。**另有已设计但未随 M1 / M2 落地的存量项**：产出验收与归档（`outputs/confirm` 链路与产出草稿版本呈现）、派发书中的学习记录与近期工作记录注入（依赖 M4 沉淀体系）。**M4**（融合与沉淀）尚未实施；文中建议系统、失败阶梯与重编排等章节仍为待实施设计。
 > 性质：技术方案文档。定义数据模型、状态机、接口契约、上下文组装算法、编排决策抽象、调度运行器与实现落点。
 > 需求与功能设计见 [AI 任务编排（需求设计）](../product/ai-orchestration.md)；主体定义见 [AI 同事：定位与关系说明](../product/ai-colleague.md)。
 > 读者：服务端、AI 服务、桌面端 / 移动端工程师与测试。
@@ -294,7 +294,7 @@ PENDING（依赖未满足）──依赖完成──▶ READY ──调度派发
 ### 6.1 接口
 
 ```ts
-// apps/api/src/assistant/orchestration/decider/
+// apps/api/src/assistant/orchestration/decider/decider.types.ts（已落地）
 interface OrchestrationDecider {
   decide(input: DecisionInput): Promise<Decision>;
 }
@@ -302,22 +302,24 @@ interface OrchestrationDecider {
 type DecisionInput = {
   decisionType: 'SUFFICIENCY_CHECK' | 'ROUTING' | 'COMPLETION_CHECK'
               | 'RISK_SCORE' | 'REPLAN_TRIGGER';
-  taskSnapshot: TaskSnapshot;   // 结构化状态：目标、计划、步骤状态、步骤摘要
-  stepResult?: StepResult;      // 判定场景下的当前步骤产出摘要
+  context: { tenantId: string; userId: string; requestId: string }; // 调用载体（模型调用与审计）
+  taskSnapshot: TaskSnapshot;   // 结构化状态：目标、计划版本、步骤状态、步骤摘要
+  stepResult?: StepResult;      // 判定场景下的当前步骤产出摘要（信息充分性附拟提问内容与防滥用统计）
 };
 
 type Decision = {
-  choice: string;               // 选项（如 continue_next / ask_user / replan / complete）
-  confidence: number;           // 0~1
+  choice: string;               // 选项（SUFFICIENCY_CHECK：ask_user / proceed）
+  confidence: number;           // 0~1（规则路径为 1；LLM 路径为模型自评）
   rationale?: string;           // 理由（进审计与排障）
 };
 ```
 
 ### 6.2 首版实现（v1：规则 + LLM 组合）
 
-- **规则路径**（确定性场景，不调模型）：无剩余步骤 = 完成；依赖未满足 = 不路由；重试超限 = 升级；
-- **LLM 路径**（模糊场景）：结构化输出约束（JSON Schema 校验 + 失败重试一次），走 `orchestration_decision` 模型角色；
-- **置信度分流**：`>= highThreshold`（默认 0.9）自动执行；`[lowThreshold, highThreshold)` 保守分支（继续但标记复核 / 轻量确认）；`< lowThreshold`（默认 0.6）升级用户裁决；阈值按租户可配置。
+- **规则路径**（确定性场景，不调模型）：v1 已落地——`SUFFICIENCY_CHECK` 的防滥用判定（提问超限 / 同类未决去重）直接判 `proceed`；其余决策类型（ROUTING / COMPLETION_CHECK 等）在 v1 由代码路径确定性处理，未接入决策器；
+- **LLM 路径**（模糊场景）：结构化输出约束（JSON Schema 校验 + 失败重试一次），走 `orchestration_decision` 模型角色；调用失败不阻塞流程——按"放行提问"兜底并留审计；
+- **置信度分流**：`ask_user` 无论置信度放行（安全方向）；`proceed` 仅 `>= highThreshold`（默认 0.9）采纳，低于阈值转为放行提问（不替用户冒险裁决）；阈值按租户可配置是目标形态，v1 以环境变量提供全局默认；
+- **实现形态**：`rule_llm`（规则先判、不可判交 LLM）与 `rule`（纯规则：无抑制条件时放行提问）两种模式，按 `ORCHESTRATION_DECIDER` 切换；v2 接入 JEV 只替换工厂装配（§6.3）。
 
 ### 6.3 演进（v2：JEV）
 
@@ -338,7 +340,7 @@ type Decision = {
 
 1. 校验步骤状态（READY → RUNNING 条件更新）与预算；
 2. 组装派发书（第 5.1 节）→ 调 ai-service 步骤执行 → 流式写窗口消息 + 任务事件；
-3. 工具互动：批准链内联；需用户介入 → 创建 Interaction、步骤转 WAITING_USER、任务事件推送、**释放执行权**（不占用租约）；
+3. 工具互动：批准链内联；协议工具 `ask_user`（不注册工具注册表、恒在执行面内）先经决策器信息充分性判定，需用户介入 → 创建 Interaction（提问 / 裁决）、步骤转 WAITING_USER、任务事件推送、**释放执行权**（不占用租约）；
 4. 终态回流：摘要 + 引用写回 → 步骤 SUCCEEDED/FAILED → 触发 task-runner 步进；
 5. 交互解决后：步骤 `WAITING_USER → RUNNING`（attemptNo 不变，从断点继续），重入执行窗口。
 
@@ -422,12 +424,16 @@ interface SuggestionProvider {
 
 | 配置项 | 说明 | 默认 |
 | --- | --- | --- |
-| `ORCHESTRATION_DECIDER` | 决策器实现选择（`rule_llm` / `jev`） | `rule_llm` |
+| `ORCHESTRATION_DECIDER` | 决策器实现选择（`rule_llm` / `rule`；v2 接入 JEV 时的语义位） | `rule_llm` |
 | `ORCHESTRATION_CONFIDENCE_HIGH` | 高置信阈值 | 0.9 |
 | `ORCHESTRATION_CONFIDENCE_LOW` | 低置信阈值 | 0.6 |
 | `ORCHESTRATION_STEP_RETRY_MAX` | 步骤重试上限 | 3 |
 | `ORCHESTRATION_STEP_MSG_RETENTION_DAYS` | 步骤消息保留天数 | 30 |
 | `ORCHESTRATION_MAX_STEPS` | 单任务步骤上限（护栏） | 配置化，默认 20 |
+| `ORCHESTRATION_MAX_AUTHORIZATIONS_PER_TASK` | 单任务授权申请创建次数上限（防滥用；0 表示不限） | 10 |
+| `ORCHESTRATION_MAX_QUESTIONS_PER_TASK` | 单任务提问 / 裁决创建次数上限（防滥用；0 表示不限） | 10 |
+| `ORCHESTRATION_SUSPEND_TIMEOUT_MINUTES` | 挂起（授权 / 提问 / 裁决）超时分钟数；0 = 无限等待 | 0 |
+| `ORCHESTRATION_SUSPEND_TIMEOUT_ACTION` | 挂起超时动作（`continue_default` / `skip_step` / `fail_task`） | `continue_default` |
 | 模型角色 | `orchestration_decision` / `step_execution` 在模型配置中登记 | 沿用 `config/models.*.toml` |
 
 - **迁移顺序**：同事资产表 → 任务五表 → 交互表 →（M4）建议缓存 —— 全为新增，无既有数据变更；
