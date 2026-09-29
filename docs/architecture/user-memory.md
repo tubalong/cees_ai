@@ -1,6 +1,6 @@
 # 用户级记忆（User Memory）
 
-> 状态：分块实施中——块 1-4（数据模型与契约、NestJS 记忆 CRUD、ai-service 提炼与 NestJS 合并落库、注入）已落地，块 5 待实施。最后更新：2026-09-21。
+> 状态：分块实施中——块 1-4（数据模型与契约、NestJS 记忆 CRUD、ai-service 提炼与 NestJS 合并落库、注入）已落地，块 5 待实施。最后更新：2026-09-29。
 
 ## 1. 目标与边界
 
@@ -111,7 +111,7 @@ LLM 只出"新增/覆盖/丢弃"的建议，真正改库由 NestJS 完成，符�
 块 3 落地要点（已实现）：
 
 - ai-service 在两个时机输出 `memory_candidates`（内部契约 `UserMemoryCandidate`：`type` / `content` / `action=create|update` / `replaces`）：压缩响应的 `CompactChatResponse.memory_candidates`，以及最终回答轮 completed 事件的 `ChatStreamCompletedEvent.memory_candidates`；随回答链路复用 `<follow_up_questions>` 块的对象格式（`questions` + `memories` 字段，兼容旧数组格式），仅最终回答轮生效，工具调用轮次不输出；
-- NestJS `UserMemoryService.applyCandidates` 统一校验（类型、长度、敏感正则兜底、update 必须携带 `replaces`）后在事务内合并：`replaces` 命中旧记忆原文片段则覆盖（乐观锁版本递增），未命中降级新增，完全重复跳过；达到 30 条上限淘汰最久未使用条目；
+- NestJS `UserMemoryService.applyCandidates` 统一校验（类型、长度、敏感正则兜底、update 必须携带 `replaces`）后在事务内合并：`replaces` 命中旧记忆原文片段则覆盖（乐观锁版本递增），未命中降级新增，完全重复跳过；达到 50 条上限淘汰最久未使用条目；
 - 每次写入均记录审计事件（`USER_MEMORY_CREATED` / `USER_MEMORY_UPDATED` / `USER_MEMORY_EVICTED`，来源 `ai_suggestion`），落库失败只记录日志，不影响本轮回答与压缩。
 
 ### 4.4 可控性（代码流程层）
@@ -122,7 +122,7 @@ LLM 只出"新增/覆盖/丢弃"的建议，真正改库由 NestJS 完成，符�
 
 ### 4.5 防乱写（代码 + prompt 混合）
 
-- **数量封顶**（代码强制）：每人记忆条目上限 **30 条**，达到上限后淘汰最久未使用条目；
+- **数量封顶**（代码强制）：每人记忆条目上限 **50 条**、单条 **200 字符**，达到数量上限后淘汰最久未使用条目；
 - **脱敏**（prompt + 代码兜底）：见 4.2 第 5 点；
 - **只记说过的**（prompt 规定）：见 4.2 第 4 点。
 
@@ -159,7 +159,7 @@ model UserMemory {
 
 要点：
 
-- 无向量字段：用户级记忆每人 30 条封顶，全量注入，无需向量检索；
+- 无向量字段：用户级记忆每人 50 条封顶，全量注入，无需向量检索；
 - 同一 subject 通过"相同主题覆盖"收敛为一条，避免同主题多条目并存；
 - `membershipId` 为纯标量无 relation（与 `Conversation.ownerMembershipId` 风格一致），归属校验由应用层结合租户上下文完成。
 
@@ -167,7 +167,7 @@ model UserMemory {
 
 - 方式：**全量注入**。每次组装上下文时，将该用户该租户的全部 `ACTIVE` 记忆作为独立 system 块注入（如"以下是关于你的长期记忆：…"）。
 - 位置：与 `conversation_summary` 分开，语义不同——摘要=本会话历史，记忆=跨会话长期事实。
-- 契约：`ChatRequest` / `ToolTurnRequest` 已新增 `user_memories` 字段（`type: [array, "null"]`，至多 30 条、每条至多 1000 字符，缺省/null 表示不注入），Python models 与 TS 客户端已重新生成（块 1 落地）。
+- 契约：`ChatRequest` / `ToolTurnRequest` 已新增 `user_memories` 字段（`type: [array, "null"]`，现为至多 50 条、每条至多 200 字符，缺省/null 表示不注入），Python models 与 TS 客户端已重新生成（块 1 落地为 30 条 / 1000 字符，上限经 2026-09-29 调整）。
 - 冲突处理：用户级记忆与知识库检索结果冲突时，**以记忆为准**（记忆是用户本人最新表述）。
 - 落地要点（块 4 已实现）：
   - NestJS `UserMemoryService.listActiveContents` 按 `createdAt` 升序读取该租户该成员全部未删除记忆内容，纯文本轮与工具轮组装上下文时都加载（工具轮每轮重建前重读）；
@@ -180,9 +180,9 @@ model UserMemory {
 
 | 维度 | 现状 |
 | --- | --- |
-| 存储上界 | 每人（每个租户 membership）**≤ 30 条**，每条 **≤ 1000 字符**（契约与 `MAX_USER_MEMORIES` 双重约束） |
-| 注入体积 | **全量注入**，因此上界约 3 万字符量级——这正是「不需要向量检索」的原因 |
-| 遗忘 ①：容量淘汰 | 达到 30 条上限时，淘汰 `updatedAt` 最早的条目（LRU），审计 `USER_MEMORY_EVICTED`，`metadata.reason = capacity_limit` |
+| 存储上界 | 每人（每个租户 membership）**≤ 50 条**，每条 **≤ 200 字符**（契约与 `MAX_USER_MEMORIES` / `MAX_USER_MEMORY_CONTENT_CHARS` 双重约束） |
+| 注入体积 | **全量注入**，因此上界约 1 万字符量级（50 × 200）——这正是「不需要向量检索」的原因 |
+| 遗忘 ①：容量淘汰 | 达到 50 条上限时，淘汰 `updatedAt` 最早的条目（LRU），审计 `USER_MEMORY_EVICTED`，`metadata.reason = capacity_limit` |
 | 遗忘 ②：同主题覆盖 | 提炼时若 `replaces` 命中既有记忆原文片段，则**覆盖**该条（乐观锁递增），而不是新增；因此"同一主题"收敛为一条 |
 | 遗忘 ③：用户手动删除 | 面板可查/可改/可删；删除为**软删**（`deletedAt`），立即停止注入，审计 `USER_MEMORY_DELETED` |
 | 时间维度 | **没有 TTL、没有时间衰减、没有自动过期**（`expiresAt` 字段不存在） |
@@ -191,14 +191,14 @@ model UserMemory {
 
 - **无物理删除**：软删后行仍在库中，用于审计与追溯。若合规要求"用户可彻底删除"，
   需新增硬删接口或定期物理清理任务；
-- **无按租户配额**：上限是"每人 30 条"，租户级总量没有独立配额；
+- **无按租户配额**：上限是"每人 50 条"，租户级总量没有独立配额；
 - **无衰减/权重**：只有 LRU 淘汰，没有"久未使用则降权或淘汰"以外的时间策略。
 
 与会话内机制的边界（两者互不替代）：
 
 | 机制 | 作用域 | 记忆什么 | 何时"忘" |
 | --- | --- | --- | --- |
-| `UserMemory` | 跨会话，绑定 membership | 用户偏好、事实、决定、习惯（≤30 条） | 容量淘汰 / 同主题覆盖 / 用户删除 |
+| `UserMemory` | 跨会话，绑定 membership | 用户偏好、事实、决定、习惯（≤50 条） | 容量淘汰 / 同主题覆盖 / 用户删除 |
 | `ConversationSummary` | 仅当前会话 | 该会话历史的压缩摘要 | 会话结束即不再复用；原文保留在 `conversation_messages` 作为重放事实源，只是不再进模型上下文 |
 | `ai_invocation_logs` | 计量 | 模型调用指标（不含对话正文） | 按运营策略归档 |
 
@@ -223,5 +223,5 @@ model UserMemory {
 | --- | --- |
 | 提炼触发时机 | 压缩时顺带 + 用户明确表达倾向时随回答输出（两时机并行，均零额外调用） |
 | 生效方式 | 自动生效 + 面板可查可删 |
-| 数量上限 | 30 条，达到上限淘汰最久未使用条目 |
+| 数量上限 | 50 条、单条 ≤200 字符，达到数量上限淘汰最久未使用条目（2026-09-21 定为 30 条 / 1000 字符，2026-09-29 调整） |
 | 记忆管理入口 | 客户端（桌面端起步） |

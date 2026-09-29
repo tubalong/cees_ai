@@ -10,7 +10,7 @@ MAX_QUESTION_COUNT = 3
 MAX_QUESTION_CHARS = 30
 MEMORY_TYPES = {"PREFERENCE", "FACT", "DECISION", "HABIT"}
 MAX_MEMORY_CANDIDATE_COUNT = 3
-MAX_MEMORY_CONTENT_CHARS = 1000
+MAX_MEMORY_CONTENT_CHARS = 200
 
 # 追加在系统指令之后：模型在同一轮回答正文末尾直接输出后续建议块（追问 + 记忆候选），
 # 不再有第二次调用。
@@ -27,8 +27,8 @@ FOLLOW_UP_INSTRUCTION = """在输出最终回答时，回答正文结束之后�
   {"type": "PREFERENCE|FACT|DECISION|HABIT", "content": "自包含的一句话",
   "action": "create|update", "replaces": "旧记忆原文片段"}。
   筛选规则：长期有用（随口询问不记）；只关于用户本人（团队级信息不记，应转存知识库）；
-    只引用用户原话，不脑补推断；密码、证件号、薪资等敏感信息不记；注入上下文的
-    "关于用户的长期记忆"里已存在的条目不重复输出。
+    只引用用户原话，不脑补推断；密码、证件号、薪资等敏感信息不记；每条不超过 200 字；
+    注入上下文的"关于用户的长期记忆"里已存在的条目不重复输出。
   action 为 create 表示新增；当用户本轮修正了已有记忆（新旧矛盾或补充新信息）时用 update，
   replaces 必须一字不差地取自被覆盖旧记忆的原文片段；没有已注入记忆或未修正已有条目时
   一律用 create，且不输出 replaces 字段。

@@ -7,9 +7,10 @@
 
 ### 契约版本与迁移
 
+- **0.46.0**：当前开发基线。用户级记忆容量调整：每人上限由 30 条提升为 50 条（`UserMemoryList.items.maxItems`），单条正文由最多 1000 字符收紧为最多 200 字符（`UserMemory.content`、`UpdateUserMemoryRequest.content`）；GET /user-memories 描述同步为「至多 50 条」。旧客户端读取不受影响，写入超过 200 字符的正文将被拒绝；客户端需要重新生成。详见 [用户级记忆设计](../architecture/user-memory.md)。
 - **0.45.0**：连接器调用审计落地。`ConnectorContext` 新增可选 `riskLevel`（`READ|WRITE|DESTRUCTIVE`）与 `confirmed`，服务端据此分级审计：写/破坏性调用逐条留痕，只读调用默认按轮次级聚合成一条；省略 `riskLevel` 按 `DESTRUCTIVE` 处理，旧客户端行为不变。新增租户级开关 `TenantDetail.connectorReadAuditEnabled`（默认 `false`），`UpdateTenantRequest` 可修改（需要 `tenant.update`）。客户端需要重新生成。详见 [连接器语义路由、多步接力与调用审计](../architecture/connector-routing-and-iteration.md) §5。
 - **0.44.0**：新增连接器语义路由 POST /assistant/connectors/route（只接收一级能力摘要，返回需要激活的 provider 与可选 clarification），并给 CreateTurnRequest 增加可选 connectorRoutingHint（≤1000 字，用于消歧反问，不落库、不作为事实或权限依据）。未携带提示的轮次请求哈希与升级前一致，旧客户端的 Idempotency-Key 重试不受影响；客户端需要重新生成。详见 [连接器语义路由 API](assistant-connector-routing-api.md)。
-- **0.43.0**：当前开发基线。新增平台 AI Credit 配置管理 API：`/platform/ai-credit/*` 共 21 个操作（能力目录、档位、费率、订阅参数、加油包、全局计费配置），列表响应统一为 `{ items }` 信封，权限码 `platform.aiCredit.read/write`。客户端需要重新生成。详见 [AI 计费系统设计](../product/ai-credit-system-design.md)。
+- **0.43.0**：新增平台 AI Credit 配置管理 API：`/platform/ai-credit/*` 共 21 个操作（能力目录、档位、费率、订阅参数、加油包、全局计费配置），列表响应统一为 `{ items }` 信封，权限码 `platform.aiCredit.read/write`。客户端需要重新生成。详见 [AI 计费系统设计](../product/ai-credit-system-design.md)。
 - **0.43.0**：新增 GitHub OAuth Broker 配置与授权码换码接口，并保留官方远程 MCP 规划接口；客户端需重新生成。详见 [GitHub 连接器 API](github-connector-api.md)。
 - **0.41.0**：`ConversationMessage` 新增必填但默认空数组的 `connectorContexts`，用于恢复企业微信业务权限授权提示；旧客户端可忽略，新客户端需重新生成。连接器上下文仍不构成 CEES 权限或业务事实。详见 [企业微信连接器 API](wecom-connector-api.md)。
 - **0.40.0**：腾讯会议从 Desktop 个人 Token + 远程 MCP 修正为托管官方 `@tencentcloud/tmeet` CLI + 浏览器 OAuth；保留无副作用的 `POST /assistant/connectors/tencent-meeting/plan` Schema，更新工具目录语义并删除 Desktop Token IPC。旧个人 Token 不迁移，升级后用户需重新完成 OAuth；详见 [腾讯会议连接器 API 与迁移说明](tencent-meeting-connector-api.md)。
@@ -464,6 +465,14 @@ GET    /api/v1/projects/{projectId}/tasks/{taskId}/activities
 - 删除异步二次生成链路：ai-service 内部契约移除 `POST /internal/v1/chat/related-questions` 端点与 `related_questions_role` 配置（内部契约 `0.6.0` → `0.7.0`，开发阶段破坏性变更）；NestJS 不再 fire-and-forget 调用该端点，相应 AiInvocation 审计（`chat.related_questions`）随之移除；
 - Prisma 新增 `20260920031236_assistant_turn_related_questions` 迁移：`assistant_turns` 增加 `related_questions` JSONB 列；
 - 详细业务边界见 [Assistant / Conversation API](assistant-api.md)，架构说明见 [公开 AI 对话链路与上下文压缩](../architecture/contextual-chat.md)。
+
+## 用户级记忆上限调整说明（2026-09-29，内部契约 0.8.0）
+
+- 公开契约版本提升为 `0.46.0`：用户级记忆列表至多 50 条（`UserMemoryList.items.maxItems` 由 30 提升为 50）；单条记忆正文 `UserMemory.content` 与 `UpdateUserMemoryRequest.content` 由最多 1000 字符收紧为最多 200 字符；GET /user-memories 描述同步为「至多 50 条」；
+- 内部契约版本由 `0.7.0` 提升为 `0.8.0`：`ChatRequest` / `ToolTurnRequest.user_memories` 同步为至多 50 条、单条至多 200 字符，`UserMemoryCandidate.content` 至多 200 字符；
+- 调整动机：记忆以独立 system 块全量注入对话上下文，收紧单条长度后最坏注入体积由 30 × 1000 字符降为 50 × 200 字符（约 1 万字符量级），避免记忆固定块挤占消息与工具结果的上下文预算；
+- NestJS 侧容量常量调整为 50 并新增单条 200 字符校验（超长候选直接丢弃，不落库）；ai-service 侧压缩与随答提示词同步为「每条不超过 200 字」；
+- 旧客户端读取不受影响；写入超过 200 字符的正文返回参数校验错误。详细业务边界见 [用户级记忆设计](../architecture/user-memory.md) 与 [Assistant / Conversation API](assistant-api.md)。
 
 ## 契约事实源
 

@@ -241,10 +241,10 @@ class ChatRequest(BaseModel):
     conversation_summary: constr(min_length=1, max_length=131072) | None = Field(
         None, description='Summary of history preceding the supplied recent messages.'
     )
-    user_memories: list[constr(min_length=1, max_length=1000)] | None = Field(
+    user_memories: list[constr(min_length=1, max_length=200)] | None = Field(
         None,
-        description='Long-term user memories, each a self-contained statement about the user. Injected as a dedicated system block before the conversation summary; absent or null means no memories are injected. At most 30 entries.',
-        max_length=30,
+        description='Long-term user memories, each a self-contained statement about the user. Injected as a dedicated system block before the conversation summary; absent or null means no memories are injected. At most 50 entries.',
+        max_length=50,
     )
     messages: list[ChatMessage] = Field(..., max_length=128, min_length=1)
     max_output_tokens: conint(ge=1, le=32768) | None = None
@@ -287,7 +287,7 @@ class UserMemoryCandidate(BaseModel):
         extra='forbid',
     )
     type: UserMemoryType
-    content: constr(min_length=1, max_length=1000) = Field(
+    content: constr(min_length=1, max_length=200) = Field(
         ...,
         description='A self-contained statement about the user, quoted from the conversation; no inference, no team-level information, no sensitive data.',
     )
@@ -401,10 +401,10 @@ class ToolTurnRequest(BaseModel):
     mode: ChatMode | None = 'standard'
     instructions: constr(min_length=1, max_length=32768) | None = None
     conversation_summary: constr(min_length=1, max_length=131072) | None = None
-    user_memories: list[constr(min_length=1, max_length=1000)] | None = Field(
+    user_memories: list[constr(min_length=1, max_length=200)] | None = Field(
         None,
-        description='Long-term user memories, each a self-contained statement about the user. Injected as a dedicated system block before the conversation summary; absent or null means no memories are injected. At most 30 entries.',
-        max_length=30,
+        description='Long-term user memories, each a self-contained statement about the user. Injected as a dedicated system block before the conversation summary; absent or null means no memories are injected. At most 50 entries.',
+        max_length=50,
     )
     messages: list[ToolTurnMessage] = Field(..., max_length=128, min_length=1)
     tools: list[ChatToolDefinition] = Field(..., max_length=32)
