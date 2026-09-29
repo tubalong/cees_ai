@@ -1060,10 +1060,65 @@ describe('TurnRunnerService', () => {
             afterSeq: 0,
         }));
 
-        expect(harness.prisma.assistantTask.findMany).not.toHaveBeenCalled();
+        // 无 revise 工具：只发生终态任务感知查询，不触发计划调整引导查询链。
+        expect(harness.prisma.assistantTask.findMany).toHaveBeenCalledTimes(1);
+        expect(harness.prisma.assistantTask.findMany).toHaveBeenCalledWith(expect.objectContaining({
+            where: expect.objectContaining({ status: { in: ['COMPLETED', 'FAILED', 'CANCELLED'] } }),
+        }));
         expect(harness.failureHandling.hasAwaitingReplan).not.toHaveBeenCalled();
         const request = harness.gateway.streamToolTurn.mock.calls[0][0] as { instructions: string | null };
         expect(request.instructions ?? '').not.toContain('revise_orchestration_task');
+    });
+
+    it('injects recently settled tasks with their outputs into the tool turn instructions', async () => {
+        const harness = createHarness({
+            allowedTools: [chatTool('generate_image')],
+            toolTurnStreams: [() => secondRoundCompletedStream()],
+            terminalTasks: [
+                { id: 'task-9', title: '季度数据周报', status: 'COMPLETED', failedReason: null },
+            ],
+            terminalTaskSteps: [
+                { taskId: 'task-9', outputRefs: [{ type: 'DOCUMENT', id: 'doc-9' }] },
+            ],
+            terminalDocuments: [{ id: 'doc-9', title: '二季度数据汇总' }],
+        });
+
+        await harness.service.startTurn({
+            conversationId: CONVERSATION_ID,
+            idempotencyKey: 'key-terminal-task-guidance',
+            content: '上次那个任务做完了吗？',
+        });
+        await consumeAll(await harness.service.subscribeTurn({
+            conversationId: CONVERSATION_ID,
+            turnId: TURN_ID,
+            afterSeq: 0,
+        }));
+
+        const request = harness.gateway.streamToolTurn.mock.calls[0][0] as { instructions: string | null };
+        expect(request.instructions).toContain('任务「季度数据周报」已完成');
+        expect(request.instructions).toContain('《二季度数据汇总》');
+        expect(request.instructions).toContain('可在任务卡片中验收');
+    });
+
+    it('does not inject settled-task guidance when the conversation has no settled tasks', async () => {
+        const harness = createHarness({
+            allowedTools: [chatTool('generate_image')],
+            toolTurnStreams: [() => secondRoundCompletedStream()],
+        });
+
+        await harness.service.startTurn({
+            conversationId: CONVERSATION_ID,
+            idempotencyKey: 'key-no-terminal-task-guidance',
+            content: '帮我生成一张图',
+        });
+        await consumeAll(await harness.service.subscribeTurn({
+            conversationId: CONVERSATION_ID,
+            turnId: TURN_ID,
+            afterSeq: 0,
+        }));
+
+        const request = harness.gateway.streamToolTurn.mock.calls[0][0] as { instructions: string | null };
+        expect(request.instructions ?? '').not.toContain('当前会话最近有任务已结束');
     });
 });
 
@@ -1085,6 +1140,9 @@ function createHarness(options: {
     guidanceRuntimeSteps?: Array<{ stepKey: string; status: string }>;
     guidanceAwaitingReplanTaskIds?: string[];
     guidanceRevisionRequestedTaskId?: string;
+    terminalTasks?: Array<{ id: string; title: string; status: string; failedReason: string | null }>;
+    terminalTaskSteps?: Array<{ taskId: string; outputRefs: unknown }>;
+    terminalDocuments?: Array<{ id: string; title: string }>;
 } = {}) {
     const events: PublicTurnStreamEvent[] = [];
     const records = new Map<string, {
@@ -1134,9 +1192,15 @@ function createHarness(options: {
                 user: { status: 'ACTIVE', deletedAt: null },
             }),
         },
-        // 计划调整引导查询（默认会话内无待处理任务）。
+        // 计划调整引导与终态任务感知共用任务/步骤查询：按状态集合与状态值区分
+        // 两类查询（调整引导 = WAITING_USER/PENDING_CONFIRM；终态感知 = 已结束）。
         assistantTask: {
-            findMany: jest.fn().mockResolvedValue(options.guidanceTasks ?? []),
+            findMany: jest.fn().mockImplementation((args: { where?: { status?: { in?: string[] } } }) => {
+                const statuses = args?.where?.status?.in ?? [];
+                return Promise.resolve(
+                    statuses.includes('COMPLETED') ? (options.terminalTasks ?? []) : (options.guidanceTasks ?? []),
+                );
+            }),
         },
         assistantTaskPlan: {
             findFirst: jest.fn().mockResolvedValue(
@@ -1144,7 +1208,14 @@ function createHarness(options: {
             ),
         },
         assistantTaskStep: {
-            findMany: jest.fn().mockResolvedValue(options.guidanceRuntimeSteps ?? []),
+            findMany: jest.fn().mockImplementation((args: { where?: { status?: unknown } }) => Promise.resolve(
+                args?.where?.status === 'SUCCEEDED'
+                    ? (options.terminalTaskSteps ?? [])
+                    : (options.guidanceRuntimeSteps ?? []),
+            )),
+        },
+        managedDocument: {
+            findMany: jest.fn().mockResolvedValue(options.terminalDocuments ?? []),
         },
         assistantTaskEvent: {
             findFirst: jest.fn().mockImplementation((args: { where: { taskId: string } }) => Promise.resolve(

@@ -43,6 +43,7 @@ import { EventService } from '../conversation/event.service';
 import { AssistantActionDraftService } from '../drafts/assistant-action-draft.service';
 import { FailureHandlingService } from '../orchestration/failure-handling.service';
 import { OrchestrationToolsService } from '../orchestration/orchestration-tools.service';
+import { PublicTaskResourceRef } from '../orchestration/orchestration.types';
 import { canonicalJson, toToolFailure } from '../tools/tool-failure';
 import { ToolPolicyService } from '../tools/tool-policy.service';
 import { ToolRegistryService } from '../tools/tool-registry';
@@ -67,6 +68,10 @@ const MAX_TOOL_STEPS = 10;
 /** 计划调整引导只在工具面开放 revise 工具时注入；单轮最多提示的任务数。 */
 const REVISE_ORCHESTRATION_TASK_TOOL = 'revise_orchestration_task';
 const MAX_TASK_GUIDANCE_TASKS = 3;
+/** 终态任务感知：单轮最多提示的最近终态任务数、每任务产出数与失败原因截断长度。 */
+const MAX_TERMINAL_TASK_GUIDANCE_TASKS = 3;
+const MAX_TERMINAL_TASK_GUIDANCE_OUTPUTS = 3;
+const MAX_TASK_REASON_GUIDANCE_CHARS = 60;
 
 export interface StartTurnResult {
   turnId: string;
@@ -370,8 +375,12 @@ export class TurnRunnerService implements OnModuleDestroy {
       mode: input.mode,
     });
     // 未启用的能力通过可信 instructions 告知模型，避免它凭记忆编造外部/内部信息，
-    // 并引导它在用户确有需求时提示开启开关或改写为明确请求。
-    const guidance = buildCapabilityGuidance(input.capabilities);
+    // 并引导它在用户确有需求时提示开启开关或改写为明确请求；已结束任务同理注入，
+    // 让纯聊天路径也能准确回答任务进展与产出去向。
+    const guidance = joinGuidance(
+      buildCapabilityGuidance(input.capabilities),
+      await this.buildTerminalTaskGuidance(input.conversation, input.membershipId),
+    );
     const instructions = combineAssistantInstructions(guidance, input.assistantContext, input.generationOptions);
     if (instructions) chatRequest.instructions = instructions;
     if (input.signal.aborted) return;
@@ -460,6 +469,15 @@ export class TurnRunnerService implements OnModuleDestroy {
         : null;
       if (input.signal.aborted) return;
 
+      // 终态任务感知：把会话里已结束任务（含产出）注入 instructions，让模型在
+      // 后续对话中准确回答任务进展与产出去向。每个模型调用前重算，长会话被
+      // 压缩后汇报消息可能不在上下文里，这里作为兜底。
+      const terminalTaskGuidance = await this.buildTerminalTaskGuidance(
+        conversation,
+        input.membershipId,
+      );
+      if (input.signal.aborted) return;
+
       const request: ToolTurnRequest = {
         request_id: input.requestId,
         tenant_id: conversation.tenantId,
@@ -467,7 +485,7 @@ export class TurnRunnerService implements OnModuleDestroy {
         conversation_id: conversation.id,
         mode: input.mode === 'ultra' ? 'ultra' : 'standard',
         instructions: combineAssistantInstructions(
-          joinGuidance(buildCapabilityGuidance(input.capabilities), taskGuidance),
+          joinGuidance(buildCapabilityGuidance(input.capabilities), taskGuidance, terminalTaskGuidance),
           input.assistantContext,
           input.generationOptions,
         ),
@@ -715,6 +733,108 @@ export class TurnRunnerService implements OnModuleDestroy {
     return `- 任务「${task.title}」（task_id：${task.id}）已被用户要求调整计划，`
       + `当前草案 v${plan?.version ?? task.planVersion} 待确认：${refs || '（步骤不可读）'}。`
       + '若用户本轮提出了具体调整内容，请生成调整后的完整计划；仅表达“确认/继续”意图时不要调用调整工具。';
+  }
+
+  /**
+   * 终态任务感知：把会话里最近的终态任务（状态、失败原因与产出文档）注入本轮
+   * instructions，让模型在后续对话中准确回答任务进展与产出去向。任何查询异常
+   * 都降级为不注入（对话本身不受影响）；无终态任务时返回 null。
+   */
+  private async buildTerminalTaskGuidance(
+    conversation: { id: string; tenantId: string },
+    membershipId: string,
+  ): Promise<string | null> {
+    try {
+      const tasks = await this.prisma.assistantTask.findMany({
+        where: {
+          conversationId: conversation.id,
+          tenantId: conversation.tenantId,
+          membershipId,
+          status: {
+            in: [
+              AssistantTaskStatus.COMPLETED,
+              AssistantTaskStatus.FAILED,
+              AssistantTaskStatus.CANCELLED,
+            ],
+          },
+        },
+        orderBy: [{ completedAt: 'desc' }, { id: 'desc' }],
+        select: { id: true, title: true, status: true, failedReason: true },
+        take: MAX_TERMINAL_TASK_GUIDANCE_TASKS,
+      });
+      if (tasks.length === 0) return null;
+      const outputTitles = await this.loadTerminalTaskOutputTitles(conversation.tenantId, tasks);
+      const notes = tasks.map((task) => {
+        const outputs = outputTitles.get(task.id) ?? [];
+        const outputNote = outputs.length > 0
+          ? `产出文档：${formatGuidanceOutputList(outputs)}`
+          : '没有文档产出';
+        if (task.status === AssistantTaskStatus.COMPLETED) {
+          return `- 任务「${task.title}」已完成；${outputNote}。`;
+        }
+        if (task.status === AssistantTaskStatus.FAILED) {
+          const reason = truncateText(
+            task.failedReason ?? '存在未成功完成的步骤',
+            MAX_TASK_REASON_GUIDANCE_CHARS,
+          );
+          return `- 任务「${task.title}」未全部成功（${reason}）；${outputNote}。`;
+        }
+        return `- 任务「${task.title}」已被取消；${outputNote}。`;
+      });
+      return [
+        '当前会话最近有任务已结束（仅当用户提及相关话题时参考，不要主动重复汇报）：',
+        ...notes,
+        '任务执行细节以任务卡片与系统汇报消息为准，不要编造进度或产出；'
+          + '用户询问产出去向时，说明可在任务卡片中验收并按提示归档到知识库。',
+      ].join('\n');
+    } catch (error) {
+      this.logger.warn(`failed to build terminal task guidance: ${String(error)}`);
+      return null;
+    }
+  }
+
+  /**
+   * 终态任务的产出文档标题：一次查询覆盖全部提示任务，SUCCEEDED 步骤的
+   * DOCUMENT 产出按顺序去重，已删除文档跳过。
+   */
+  private async loadTerminalTaskOutputTitles(
+    tenantId: string,
+    tasks: Array<{ id: string }>,
+  ): Promise<Map<string, string[]>> {
+    const steps = await this.prisma.assistantTaskStep.findMany({
+      where: {
+        taskId: { in: tasks.map((task) => task.id) },
+        status: AssistantTaskStepStatus.SUCCEEDED,
+      },
+      orderBy: [{ completedAt: 'asc' }, { stepNo: 'asc' }],
+      select: { taskId: true, outputRefs: true },
+    });
+    const idsByTask = new Map<string, string[]>();
+    for (const step of steps) {
+      if (!Array.isArray(step.outputRefs)) continue;
+      const ids = idsByTask.get(step.taskId) ?? [];
+      for (const ref of step.outputRefs as unknown as PublicTaskResourceRef[]) {
+        if (ref?.type === 'DOCUMENT' && typeof ref.id === 'string' && !ids.includes(ref.id)) {
+          ids.push(ref.id);
+        }
+      }
+      idsByTask.set(step.taskId, ids);
+    }
+    const documentIds = [...new Set([...idsByTask.values()].flat())];
+    if (documentIds.length === 0) return new Map();
+    const documents = await this.prisma.managedDocument.findMany({
+      where: { id: { in: documentIds }, tenantId, deletedAt: null },
+      select: { id: true, title: true },
+    });
+    const titleById = new Map(documents.map((document) => [document.id, document.title]));
+    const result = new Map<string, string[]>();
+    for (const [taskId, ids] of idsByTask) {
+      result.set(taskId, ids.flatMap((id) => {
+        const title = titleById.get(id);
+        return title ? [title] : [];
+      }));
+    }
+    return result;
   }
 
   private async executeToolCalls(input: {
@@ -1254,6 +1374,18 @@ function combineAssistantInstructions(guidance: string | null, assistantContext?
 function joinGuidance(...parts: Array<string | null>): string | null {
   const merged = parts.filter((part): part is string => Boolean(part));
   return merged.length > 0 ? merged.join('\n') : null;
+}
+
+/** 引导文案中的产出清单：最多列出 MAX_TERMINAL_TASK_GUIDANCE_OUTPUTS 份，超出折叠为总数。 */
+function formatGuidanceOutputList(titles: string[]): string {
+  const shown = titles.slice(0, MAX_TERMINAL_TASK_GUIDANCE_OUTPUTS).map((title) => `《${title}》`);
+  const rest = titles.length - shown.length;
+  return shown.join('、') + (rest > 0 ? ` 等 ${titles.length} 份` : '');
+}
+
+/** 引导文案截断；超长保留省略号便于模型理解。 */
+function truncateText(value: string, max: number): string {
+  return value.length > max ? `${value.slice(0, max)}…` : value;
 }
 
 function normalizeGenerationOptions(input: GenerationOptionsInput): GenerationOptionsInput {

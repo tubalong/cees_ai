@@ -2,13 +2,16 @@ import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/commo
 import {
   AssistantTaskStatus,
   AssistantTaskStepStatus,
+  AssistantTurnStatus,
   AuditOutcome,
+  ConversationMessageRole,
   Prisma,
 } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../../database/prisma.service';
 import { FailureHandlingService } from './failure-handling.service';
 import { InteractionService, type ExpiredInteractionRow } from './interaction.service';
+import { PublicTaskResourceRef } from './orchestration.types';
 import { StepRunnerService } from './step-runner.service';
 import { StepStateService } from './step-state.service';
 import { TaskEventService } from './task-event.service';
@@ -26,13 +29,20 @@ const MAX_FAILURE_DETAIL_CHARS = 1000;
 const MAX_TASK_FAILURE_REASON_CHARS = 500;
 const DEFAULT_TASK_FAILURE_REASON = '任务中有步骤未成功完成';
 
+/** 终态汇报消息的整体长度上限与产出清单展示上限（防御异常长标题撑爆会话上下文）。 */
+const MAX_TERMINAL_REPORT_CHARS = 1000;
+const MAX_TERMINAL_REPORT_OUTPUTS = 5;
+const MAX_REPORT_OUTPUT_TITLE_CHARS = 60;
+
 /** 任务行快照：每轮调度从数据库现读（不缓存在内存，跨实例安全）。 */
 interface TaskSnapshotRow {
   id: string;
   tenantId: string;
+  title: string;
   status: AssistantTaskStatus;
   executionOwner: string | null;
   planVersion: number;
+  conversationId: string | null;
 }
 
 /** 步骤行快照：依赖推进与派发只依据这份结构。 */
@@ -413,7 +423,8 @@ export class TaskRunnerService implements OnModuleInit, OnModuleDestroy {
 
   /**
    * 终态判定：存在 FAILED 步骤 → 任务 FAILED（failedReason 取失败步骤 error.message）；
-   * 否则全部 SUCCEEDED/SKIPPED → COMPLETED。终态迁移与终态事件原子提交。
+   * 否则全部 SUCCEEDED/SKIPPED → COMPLETED。终态迁移、终态事件与终态汇报
+   * 原子提交。
    */
   private async finalizeTask(task: TaskSnapshotRow): Promise<void> {
     const failedStep = await this.prisma.assistantTaskStep.findFirst({
@@ -426,6 +437,9 @@ export class TaskRunnerService implements OnModuleInit, OnModuleDestroy {
       select: { error: true },
     });
     const failureReason = failedStep ? describeStepFailure(failedStep.error) : null;
+    // 终态汇报随终态事务原子写入；构建（只读查询）在事务外完成，构建失败
+    // 降级为不写汇报，任务终态本身照常提交。
+    const report = await this.buildTerminalReport(task, failureReason);
 
     const finalized = await this.prisma.$transaction(async (transaction) => {
       const now = new Date();
@@ -455,6 +469,22 @@ export class TaskRunnerService implements OnModuleInit, OnModuleDestroy {
       await this.taskEvents.appendInTransaction(transaction, task.id, task.tenantId, failureReason
         ? { type: 'task_failed', reason: failureReason }
         : { type: 'task_completed' });
+      if (report) {
+        // 终态汇报：用户会话里追加一条助手消息并推进会话活跃时间。
+        await transaction.conversationMessage.create({
+          data: {
+            tenantId: task.tenantId,
+            conversationId: report.conversationId,
+            turnId: report.turnId,
+            role: ConversationMessageRole.ASSISTANT,
+            content: report.content,
+          },
+        });
+        await transaction.conversation.update({
+          where: { id: report.conversationId },
+          data: { lastTurnAt: now },
+        });
+      }
       return true;
     });
     if (!finalized) return;
@@ -463,6 +493,91 @@ export class TaskRunnerService implements OnModuleInit, OnModuleDestroy {
     } else {
       this.logger.log(`task ${task.id} completed`);
     }
+  }
+
+  /**
+   * 终态汇报：任务结束后在会话里补一条助手消息，让用户在对话流中直接看到
+   * 任务结果与产出去向。汇报挂「会话最后一条终态轮次」：
+   * - 不能挂空轮次——消息排序把无轮次视为 0，会排到会话最前；
+   * - 不挂进行中的轮次——会把汇报插到该轮用户消息与回答之间。
+   * conversationId 缺失、会话尚无终态轮次或查询异常时跳过：汇报是体验增强，
+   * 任务卡片与事件流始终是事实源。
+   */
+  private async buildTerminalReport(
+    task: TaskSnapshotRow,
+    failureReason: string | null,
+  ): Promise<{ conversationId: string; turnId: string; content: string } | null> {
+    if (!task.conversationId) return null;
+    try {
+      const lastTurn = await this.prisma.assistantTurn.findFirst({
+        where: {
+          conversationId: task.conversationId,
+          status: {
+            in: [
+              AssistantTurnStatus.COMPLETED,
+              AssistantTurnStatus.FAILED,
+              AssistantTurnStatus.CANCELLED,
+            ],
+          },
+        },
+        orderBy: { seq: 'desc' },
+        select: { id: true },
+      });
+      if (!lastTurn) return null;
+      const steps = await this.prisma.assistantTaskStep.findMany({
+        where: { taskId: task.id, planVersion: task.planVersion },
+        orderBy: { stepNo: 'asc' },
+        select: { status: true, outputRefs: true },
+      });
+      const outputTitles = await this.loadReportOutputTitles(task.tenantId, steps);
+      let succeeded = 0; let skipped = 0;
+      for (const step of steps) {
+        if (step.status === AssistantTaskStepStatus.SUCCEEDED) succeeded++;
+        else if (step.status === AssistantTaskStepStatus.SKIPPED) skipped++;
+      }
+      return {
+        conversationId: task.conversationId,
+        turnId: lastTurn.id,
+        content: composeTerminalReport({
+          title: task.title,
+          failureReason,
+          total: steps.length,
+          succeeded,
+          skipped,
+          outputTitles,
+        }),
+      };
+    } catch (error) {
+      this.logger.warn(`failed to build terminal report for task ${task.id}: ${String(error)}`);
+      return null;
+    }
+  }
+
+  /** 汇报用产出文档标题：SUCCEEDED 步骤的 DOCUMENT 产出按出现顺序去重，已删除文档跳过。 */
+  private async loadReportOutputTitles(
+    tenantId: string,
+    steps: Array<{ status: AssistantTaskStepStatus; outputRefs: Prisma.JsonValue | null }>,
+  ): Promise<string[]> {
+    const documentIds: string[] = [];
+    for (const step of steps) {
+      if (step.status !== AssistantTaskStepStatus.SUCCEEDED) continue;
+      if (!Array.isArray(step.outputRefs)) continue;
+      for (const ref of step.outputRefs as unknown as PublicTaskResourceRef[]) {
+        if (ref?.type === 'DOCUMENT' && typeof ref.id === 'string' && !documentIds.includes(ref.id)) {
+          documentIds.push(ref.id);
+        }
+      }
+    }
+    if (documentIds.length === 0) return [];
+    const documents = await this.prisma.managedDocument.findMany({
+      where: { id: { in: documentIds }, tenantId, deletedAt: null },
+      select: { id: true, title: true },
+    });
+    const titleById = new Map(documents.map((document) => [document.id, document.title]));
+    return documentIds.flatMap((id) => {
+      const title = titleById.get(id);
+      return title ? [title] : [];
+    });
   }
 
   /** 心跳：续约任务、活跃步骤与执行中工具；失约即中止本轮执行。 */
@@ -491,7 +606,15 @@ export class TaskRunnerService implements OnModuleInit, OnModuleDestroy {
   private loadTask(taskId: string): Promise<TaskSnapshotRow | null> {
     return this.prisma.assistantTask.findUnique({
       where: { id: taskId },
-      select: { id: true, tenantId: true, status: true, executionOwner: true, planVersion: true },
+      select: {
+        id: true,
+        tenantId: true,
+        title: true,
+        status: true,
+        executionOwner: true,
+        planVersion: true,
+        conversationId: true,
+      },
     });
   }
 
@@ -644,4 +767,41 @@ function describeStepFailure(error: Prisma.JsonValue | null): string {
 
 function truncate(value: string, max: number): string {
   return value.length > max ? value.slice(0, max) : value;
+}
+
+/** 终态汇报文案：完成与失败两套模板；整体截断防御异常长标题撑爆会话上下文。 */
+function composeTerminalReport(input: {
+  title: string;
+  failureReason: string | null;
+  total: number;
+  succeeded: number;
+  skipped: number;
+  outputTitles: string[];
+}): string {
+  const { title, failureReason, total, succeeded, skipped, outputTitles } = input;
+  const progress = `共 ${total} 个步骤，${succeeded} 个完成${skipped > 0 ? `、${skipped} 个跳过` : ''}`;
+  const lines: string[] = [];
+  if (failureReason) {
+    lines.push(`任务「${title}」已结束，但未全部成功：${failureReason}。`);
+    lines.push(`本次执行 ${progress}。`);
+    if (outputTitles.length > 0) lines.push(`已完成步骤的产出：${formatOutputList(outputTitles)}。`);
+    lines.push('可在任务卡片中查看执行详情；如需调整或重试，可以在对话中说明你的要求。');
+  } else {
+    lines.push(`任务「${title}」已完成：${progress}。`);
+    if (outputTitles.length > 0) {
+      lines.push(`产出：${formatOutputList(outputTitles)}。可在任务卡片中验收并归档到知识库。`);
+    } else {
+      lines.push('可在任务卡片中查看执行详情。');
+    }
+  }
+  return truncate(lines.join('\n'), MAX_TERMINAL_REPORT_CHARS);
+}
+
+/** 产出清单：最多列出 MAX_TERMINAL_REPORT_OUTPUTS 份，超出折叠为总数。 */
+function formatOutputList(titles: string[]): string {
+  const shown = titles
+    .slice(0, MAX_TERMINAL_REPORT_OUTPUTS)
+    .map((title) => `《${truncate(title, MAX_REPORT_OUTPUT_TITLE_CHARS)}》`);
+  const rest = titles.length - shown.length;
+  return shown.join('、') + (rest > 0 ? ` 等 ${titles.length} 份文档` : '');
 }

@@ -10,6 +10,9 @@ const TENANT_ID = '10000000-0000-0000-0000-000000000001';
 const TASK_ID = '20000000-0000-0000-0000-000000000001';
 const STEP_ONE = '30000000-0000-0000-0000-000000000001';
 const STEP_TWO = '30000000-0000-0000-0000-000000000002';
+const CONVERSATION_ID = '40000000-0000-0000-0000-000000000001';
+const TURN_ID = '40000000-0000-0000-0000-000000000002';
+const DOCUMENT_ID = '50000000-0000-0000-0000-000000000001';
 
 interface StepRow {
   id: string;
@@ -19,6 +22,7 @@ interface StepRow {
   leaseExpiresAt: Date | null;
   retryAfterAt?: Date | null;
   error?: { code: string; message: string } | null;
+  outputRefs?: unknown;
 }
 
 describe('TaskRunnerService', () => {
@@ -131,6 +135,76 @@ describe('TaskRunnerService', () => {
       TENANT_ID,
       expect.objectContaining({ type: 'task_failed' }),
     );
+  });
+
+  it('writes a completion report into the conversation when the task finishes', async () => {
+    const harness = createHarness({
+      conversationId: CONVERSATION_ID,
+      terminalTurnId: TURN_ID,
+      steps: [{
+        id: STEP_ONE,
+        stepKey: 's1',
+        status: 'READY',
+        dependsOn: [],
+        leaseExpiresAt: null,
+        outputRefs: [{ type: 'DOCUMENT', id: DOCUMENT_ID }],
+      }],
+      reportDocuments: [{ id: DOCUMENT_ID, title: '季度经营分析报告' }],
+    });
+
+    await harness.service.startTask(TASK_ID);
+    await waitForFinalize(harness);
+
+    // 汇报挂会话最后一条终态轮次，与终态同事务提交，并推进会话活跃时间。
+    const created = harness.tx.conversationMessage.create.mock.calls[0]?.[0] as
+      { data: { tenantId: string; conversationId: string; turnId: string; role: string; content: string } }
+      | undefined;
+    expect(created?.data).toEqual(expect.objectContaining({
+      tenantId: TENANT_ID,
+      conversationId: CONVERSATION_ID,
+      turnId: TURN_ID,
+      role: 'ASSISTANT',
+    }));
+    expect(created?.data.content).toContain('任务「季度经营分析」已完成');
+    expect(created?.data.content).toContain('《季度经营分析报告》');
+    expect(created?.data.content).toContain('可在任务卡片中验收并归档到知识库');
+    expect(harness.tx.conversation.update).toHaveBeenCalledWith({
+      where: { id: CONVERSATION_ID },
+      data: { lastTurnAt: expect.any(Date) },
+    });
+  });
+
+  it('writes a failure report with the reason and retry hint when the task fails', async () => {
+    const harness = createHarness({
+      conversationId: CONVERSATION_ID,
+      terminalTurnId: TURN_ID,
+      steps: [{ id: STEP_ONE, stepKey: 's1', status: 'READY', dependsOn: [], leaseExpiresAt: null }],
+      executeStepBehavior: 'fail',
+      executeStepError: { code: 'AI_SERVICE_ERROR', message: '检索服务不可用' },
+    });
+
+    await harness.service.startTask(TASK_ID);
+    await waitForFinalize(harness);
+
+    const created = harness.tx.conversationMessage.create.mock.calls[0]?.[0] as
+      { data: { role: string; content: string } } | undefined;
+    expect(created?.data.role).toBe('ASSISTANT');
+    expect(created?.data.content).toContain('任务「季度经营分析」已结束，但未全部成功：检索服务不可用');
+    expect(created?.data.content).toContain('可以在对话中说明你的要求');
+  });
+
+  it('skips the completion report when the conversation has no settled turn', async () => {
+    const harness = createHarness({
+      conversationId: CONVERSATION_ID,
+      terminalTurnId: null,
+      steps: [{ id: STEP_ONE, stepKey: 's1', status: 'READY', dependsOn: [], leaseExpiresAt: null }],
+    });
+
+    await harness.service.startTask(TASK_ID);
+    await waitForFinalize(harness);
+
+    expect(harness.tx.conversationMessage.create).not.toHaveBeenCalled();
+    expect(harness.tx.conversation.update).not.toHaveBeenCalled();
   });
 
   it('skips stale tasks whose steps are still actively leased and reschedules the rest', async () => {
@@ -459,6 +533,11 @@ function createHarness(options: {
   reconcileHandledCounts?: number[];
   applyDecisionCounts?: number[];
   awaitingReplanTaskIds?: string[];
+  /** 终态汇报用例：任务所属会话与可挂靠的最后一条终态轮次；缺省时不写汇报。 */
+  conversationId?: string | null;
+  terminalTurnId?: string | null;
+  /** 汇报产出清单的文档标题来源（managedDocument 查询结果）。 */
+  reportDocuments?: Array<{ id: string; title: string }>;
 } = {}) {
   const steps = options.steps ?? [];
   let capturedOwner: string | null = null;
@@ -466,6 +545,8 @@ function createHarness(options: {
 
   const tx = {
     assistantTask: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+    conversationMessage: { create: jest.fn().mockResolvedValue({}) },
+    conversation: { update: jest.fn().mockResolvedValue({}) },
   };
   const prisma: Record<string, any> = {
     $transaction: jest.fn().mockImplementation((callback: (transaction: unknown) => unknown) => callback(tx)),
@@ -473,9 +554,11 @@ function createHarness(options: {
       findUnique: jest.fn().mockImplementation((args: { where: { id: string } }) => Promise.resolve({
         id: args.where.id,
         tenantId: TENANT_ID,
+        title: '季度经营分析',
         status: 'RUNNING',
         executionOwner: options.claimedOwnerOverride ?? capturedOwner,
         planVersion: 1,
+        conversationId: options.conversationId ?? null,
       })),
       updateMany: jest.fn().mockImplementation((args: { data?: { executionOwner?: string } }) => {
         if (args.data?.executionOwner) capturedOwner = args.data.executionOwner;
@@ -490,7 +573,11 @@ function createHarness(options: {
     assistantTaskStep: {
       findMany: jest.fn().mockImplementation((args: { where: { taskId: string } }) => Promise.resolve(
         args.where.taskId === TASK_ID
-          ? steps.map((step) => ({ ...step, retryAfterAt: step.retryAfterAt ?? null }))
+          ? steps.map((step) => ({
+            ...step,
+            retryAfterAt: step.retryAfterAt ?? null,
+            outputRefs: step.outputRefs ?? null,
+          }))
           : [],
       )),
       findFirst: jest.fn().mockImplementation((args: { where: Record<string, unknown> }) => {
@@ -508,6 +595,14 @@ function createHarness(options: {
       }),
     },
     auditLog: { create: jest.fn().mockResolvedValue({}) },
+    assistantTurn: {
+      findFirst: jest.fn().mockResolvedValue(
+        options.terminalTurnId ? { id: options.terminalTurnId } : null,
+      ),
+    },
+    managedDocument: {
+      findMany: jest.fn().mockResolvedValue(options.reportDocuments ?? []),
+    },
   };
 
   const stepState = {
