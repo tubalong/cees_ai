@@ -54,6 +54,12 @@ _EDITORIAL_ACCENT = RGBColor(0xF2, 0x86, 0x4A)
 _EXECUTIVE = RGBColor(0xF5, 0x9E, 0x0B)
 _EXECUTIVE_COVER = RGBColor(0x0F, 0x17, 0x2A)
 _EXECUTIVE_SOFT = RGBColor(0xFE, 0xF3, 0xC7)
+_STORY = RGBColor(0xE1, 0x1D, 0x48)
+_STORY_SOFT = RGBColor(0xFF, 0xF1, 0xF2)
+_ACADEMIC = RGBColor(0x1D, 0x4E, 0xD8)
+_ACADEMIC_SOFT = RGBColor(0xEF, 0xF6, 0xFF)
+_MONO = RGBColor(0x11, 0x18, 0x27)
+_MONO_SOFT = RGBColor(0xF3, 0xF4, 0xF6)
 
 # 16:9 版心几何（英寸）。所有版式坐标都由这些常量推导，避免散落的魔法数字。
 _SLIDE_W = 13.333
@@ -204,6 +210,42 @@ def _palette(template_id: TemplateId, theme: Theme) -> dict[str, RGBColor]:
             "text": _TEXT,
             "muted": _MUTED,
             "line": RGBColor(0xCB, 0xD5, 0xE1),
+        }
+    if template_id == TemplateId.product_story:
+        return {
+            "primary": _STORY,
+            "primary_soft": _STORY_SOFT,
+            "accent": RGBColor(0xF9, 0x73, 0x16),
+            "cover": _STORY,
+            "cover_text": _WHITE,
+            "cover_muted": _STORY_SOFT,
+            "text": RGBColor(0x3B, 0x0A, 0x1E),
+            "muted": RGBColor(0x9F, 0x12, 0x39),
+            "line": RGBColor(0xFB, 0xCF, 0xE8),
+        }
+    if template_id == TemplateId.academic_clean:
+        return {
+            "primary": _ACADEMIC,
+            "primary_soft": _ACADEMIC_SOFT,
+            "accent": RGBColor(0x0E, 0x74, 0x90),
+            "cover": RGBColor(0xF8, 0xFB, 0xFF),
+            "cover_text": RGBColor(0x17, 0x25, 0x54),
+            "cover_muted": RGBColor(0x47, 0x55, 0x69),
+            "text": RGBColor(0x17, 0x25, 0x54),
+            "muted": RGBColor(0x47, 0x55, 0x69),
+            "line": RGBColor(0xBF, 0xDB, 0xFE),
+        }
+    if template_id == TemplateId.minimal_mono:
+        return {
+            "primary": _MONO,
+            "primary_soft": _MONO_SOFT,
+            "accent": RGBColor(0x6B, 0x72, 0x80),
+            "cover": _WHITE,
+            "cover_text": _MONO,
+            "cover_muted": RGBColor(0x4B, 0x55, 0x63),
+            "text": _MONO,
+            "muted": RGBColor(0x4B, 0x55, 0x63),
+            "line": RGBColor(0xD1, 0xD5, 0xDB),
         }
     if theme == Theme.neutral:
         return {

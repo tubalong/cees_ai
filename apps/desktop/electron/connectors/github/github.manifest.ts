@@ -3,7 +3,7 @@ import type { ConnectorManifest } from '../core/connector.types';
 export const GITHUB_CONNECTOR_MANIFEST = {
     id: 'github',
     name: 'GitHub',
-    description: '通过 GitHub 官方远程 MCP 查询仓库、代码、提交、Issue、Pull Request 和 Actions，并在确认后执行写操作。',
+    description: '在 GitHub 上克隆、推送代码，查看和管理仓库与 Pull Request，用自然语言完成代码协作。',
     icon: 'github',
     transportType: 'REMOTE_MCP',
     executionLocation: 'DESKTOP',

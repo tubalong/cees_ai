@@ -142,6 +142,8 @@ export class AssistantController {
         imageFileIds: input.imageFileIds,
         documentFileIds: input.fileIds,
         connectorContexts: input.connectorContexts,
+        assistantContext: input.assistantContext,
+        generationOptions: input.generationOptions,
         mode: input.mode,
         knowledgeBaseEnabled: input.knowledgeBaseEnabled,
         webSearchEnabled: input.webSearchEnabled,

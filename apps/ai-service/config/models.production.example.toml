@@ -13,12 +13,12 @@ timeout_seconds = 60.0
 max_retries = 2
 structured_output_method = "function_calling"
 
-[profiles.backup]
+[profiles.backup-qwen]
 enabled = true
 provider = "openai_compatible"
-model = "change_me"
-base_url = "https://change_me/v1"
-api_key_env = "BACKUP_LLM_API_KEY"
+model = "qwen-max"
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+api_key_env = "QWEN_API_KEY"
 modes = ["text", "json_schema"]
 capabilities = ["chat", "tool_calling"]
 temperature = 0.0
@@ -44,6 +44,23 @@ default_max_output_tokens = 2048
 max_output_tokens_limit = 393216
 timeout_seconds = 60.0
 max_retries = 2
+structured_output_method = "function_calling"
+
+# 视觉备用链路。推荐与 vision-primary 不同厂商，避免同一 provider 同时不可用。
+# orchestrator 角色的所有候选都必须声明 tool_calling。
+[profiles.vision-backup]
+enabled = true
+provider = "openai_compatible"
+model = "qwen-vl-max"
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+api_key_env = "QWEN_API_KEY"
+modes = ["text"]
+capabilities = ["chat", "vision", "tool_calling"]
+temperature = 0.0
+default_max_output_tokens = 2048
+max_output_tokens_limit = 393216
+timeout_seconds = 60.0
+max_retries = 1
 structured_output_method = "function_calling"
 
 [chat]
@@ -84,13 +101,40 @@ api_key_env = "IMAGE_GEN_BACKUP_API_KEY"
 timeout_seconds = 60.0
 max_retries = 1
 
+# Embedding 只服务知识库索引与检索。生产环境使用 pgvector 时，至少要有
+# 一个已启用的真实 embedding profile，否则 /ready 返回 503。
+# 所有已启用 profile 的 dimension 必须等于 KNOWLEDGE_VECTOR_DIMENSION。
+[embedding_profiles.primary]
+enabled = false
+provider = "openai_compatible"
+model = "text-embedding-3-small"
+base_url = "https://www.aikeyhub.top/v1"
+api_key_env = "EMBEDDING_API_KEY"
+dimension = 1536
+timeout_seconds = 60.0
+max_retries = 2
+
+# 备用 embedding。维度必须与 primary 一致，否则回退会把不同向量空间
+# 写进同一个索引版本。默认关闭，配置好 EMBEDDING_BACKUP_API_KEY 后再启用。
+[embedding_profiles.backup]
+enabled = false
+provider = "openai_compatible"
+model = "text-embedding-3-small"
+base_url = "https://www.aikeyhub.top/v1"
+api_key_env = "EMBEDDING_BACKUP_API_KEY"
+dimension = 1536
+timeout_seconds = 60.0
+max_retries = 1
+
 [roles]
-default = ["primary", "backup", "vision-primary"]
-structured = ["primary", "backup"]
-reasoning = ["primary", "backup"]
-rag = ["primary", "backup"]
-orchestrator = ["primary", "backup", "vision-primary"]
-orchestration_decision = ["primary", "backup"]
+# 候选按声明顺序回退：只有可重试的瞬时失败才会尝试下一个 profile。
+# 请求含图片时只保留声明了 vision capability 的候选（vision-primary → vision-backup）。
+default = ["primary", "backup-qwen", "vision-primary", "vision-backup"]
+structured = ["primary", "backup-qwen"]
+reasoning = ["primary", "backup-qwen"]
+rag = ["primary", "backup-qwen"]
+orchestrator = ["primary", "backup-qwen", "vision-primary", "vision-backup"]
+orchestration_decision = ["primary", "backup-qwen"]
 
 [extraction]
 max_bytes = 10485760

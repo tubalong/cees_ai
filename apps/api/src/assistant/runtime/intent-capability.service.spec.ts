@@ -8,15 +8,16 @@ describe('IntentCapabilityService', () => {
         expect(service.detect(null)).toEqual({ webSearch: false, knowledgeBase: false });
         expect(service.detect('')).toEqual({ webSearch: false, knowledgeBase: false });
         expect(service.detect('帮我写一首关于秋天的诗')).toEqual({ webSearch: false, knowledgeBase: false });
+        expect(service.detect('请根据附件更新最新版简历')).toEqual({ webSearch: false, knowledgeBase: false });
     });
 
     it('消息明确提到需要联网时启用 webSearch', () => {
         expect(service.detect('帮我联网查一下今天的汇率')).toEqual({ webSearch: true, knowledgeBase: false });
-        expect(service.detect('搜一下最新的新闻')).toEqual({ webSearch: true, knowledgeBase: false });
+        expect(service.detect('搜一下新闻')).toEqual({ webSearch: true, knowledgeBase: false });
     });
 
     it('英文联网说法同样命中（大小写不敏感）', () => {
-        expect(service.detect('Please search the web for the latest release')).toEqual({
+        expect(service.detect('Please search the web for the release')).toEqual({
             webSearch: true,
             knowledgeBase: false,
         });

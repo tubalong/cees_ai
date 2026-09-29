@@ -1,6 +1,7 @@
 .legal-page {
     height: calc(100vh - var(--page-viewport-offset));
     overflow: auto;
+    padding: 24px 28px 40px;
 }
 
 .legal-heading,

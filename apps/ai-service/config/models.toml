@@ -28,12 +28,12 @@ timeout_seconds = 60.0
 max_retries = 2
 structured_output_method = "function_calling"
 
-[profiles.backup]
+[profiles.backup-qwen]
 enabled = true
-provider = "deepseek"
-model = "deepseek-flash"
-base_url = "https://api.deepseek.com"
-api_key_env = "BACKUP_LLM_API_KEY"
+provider = "openai_compatible"
+model = "qwen-max"
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+api_key_env = "QWEN_API_KEY"
 modes = ["text", "json_schema"]
 capabilities = ["chat", "tool_calling"]
 temperature = 0.7
@@ -63,6 +63,25 @@ default_max_output_tokens = 2048
 max_output_tokens_limit = 393216
 timeout_seconds = 60.0
 max_retries = 2
+structured_output_method = "function_calling"
+
+# 视觉备用链路：主视觉 profile 失败时回退到 Qwen-VL。复用 QWEN_API_KEY，
+# 不额外引入必须配置的环境变量。orchestrator 角色的所有候选都必须声明
+# tool_calling，否则解析阶段直接报 UNSUPPORTED_TOOL_CALLING；若该模型在
+# 你的账号下不支持 function calling，请把它从 default / orchestrator 移除。
+[profiles.vision-backup]
+enabled = true
+provider = "openai_compatible"
+model = "qwen-vl-max"
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+api_key_env = "QWEN_API_KEY"
+modes = ["text"]
+capabilities = ["chat", "vision", "tool_calling"]
+temperature = 0.7
+default_max_output_tokens = 2048
+max_output_tokens_limit = 393216
+timeout_seconds = 60.0
+max_retries = 1
 structured_output_method = "function_calling"
 
 [chat]
@@ -126,13 +145,28 @@ dimension = 1536
 timeout_seconds = 60.0
 max_retries = 2
 
+# 备用 embedding。维度必须与 primary 完全一致（也与 KNOWLEDGE_VECTOR_DIMENSION
+# 一致），否则切换后会把不同向量空间写进同一个索引版本。默认关闭，
+# 配置好 EMBEDDING_BACKUP_API_KEY 后再启用。
+[embedding_profiles.backup]
+enabled = false
+provider = "openai_compatible"
+model = "text-embedding-3-small"
+base_url = "https://www.aikeyhub.top/v1"
+api_key_env = "EMBEDDING_BACKUP_API_KEY"
+dimension = 1536
+timeout_seconds = 60.0
+max_retries = 1
+
 [roles]
-default = ["primary", "backup", "vision-primary"]
-structured = ["primary", "backup"]
-reasoning = ["primary", "backup"]
-rag = ["primary", "backup"]
-orchestrator = ["primary", "backup", "vision-primary"]
-orchestration_decision = ["primary", "backup"]
+# 候选按声明顺序回退：只有可重试的瞬时失败才会尝试下一个 profile。
+# 请求含图片时只保留声明了 vision capability 的候选（vision-primary → vision-backup）。
+default = ["primary", "backup-qwen", "vision-primary", "vision-backup"]
+structured = ["primary", "backup-qwen"]
+reasoning = ["primary", "backup-qwen"]
+rag = ["primary", "backup-qwen"]
+orchestrator = ["primary", "backup-qwen", "vision-primary", "vision-backup"]
+orchestration_decision = ["primary", "backup-qwen"]
 
 [extraction]
 max_bytes = 10485760

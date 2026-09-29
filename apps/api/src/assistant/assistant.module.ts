@@ -19,7 +19,6 @@ import { DingTalkConnectorPlannerService } from './connectors/dingtalk-connector
 import { TencentMeetingConnectorPlannerService } from './connectors/tencent-meeting-connector-planner.service';
 import { WeComConnectorPlannerService } from './connectors/wecom-connector-planner.service';
 import { GitHubConnectorPlannerService } from './connectors/github-connector-planner.service';
-import { GitHubOAuthBrokerService } from './connectors/github-oauth-broker.service';
 import { ConversationService } from './conversation/conversation.service';
 import { EventService } from './conversation/event.service';
 import { AssistantActionDraftService } from './drafts/assistant-action-draft.service';
@@ -61,6 +60,9 @@ import { InsertDocumentImageTool } from './tools/executors/insert-document-image
 import { WebSearchTool } from './tools/executors/web-search.tool';
 import { ListDocumentsTool } from './tools/executors/list-documents.tool';
 import { ImportFinanceLedgerTool } from './tools/executors/import-finance-ledger.tool';
+import { ListTenantMembersTool } from './tools/executors/list-tenant-members.tool';
+import { AddProjectMemberTool } from './tools/executors/add-project-member.tool';
+import { AssignTaskTool } from './tools/executors/assign-task.tool';
 
 /**
  * 统一 AI 编排核心。会话事实源、事件重放与唯一 Tool Loop 运行器都在本模块内，
@@ -77,7 +79,6 @@ import { ImportFinanceLedgerTool } from './tools/executors/import-finance-ledger
     TencentMeetingConnectorPlannerService,
     WeComConnectorPlannerService,
     GitHubConnectorPlannerService,
-    GitHubOAuthBrokerService,
     EventService,
     ContextBuilderService,
     IntentCapabilityService,
@@ -118,6 +119,9 @@ import { ImportFinanceLedgerTool } from './tools/executors/import-finance-ledger
     WebSearchTool,
     ListDocumentsTool,
     ImportFinanceLedgerTool,
+    ListTenantMembersTool,
+    AddProjectMemberTool,
+    AssignTaskTool,
   ],
 })
 export class AssistantModule { }
