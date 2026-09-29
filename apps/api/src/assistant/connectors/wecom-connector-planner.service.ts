@@ -7,6 +7,7 @@ import type {
   WeComConnectorPlannedCall,
   WeComConnectorToolInput,
 } from '../assistant.types';
+import { buildConnectorModelToolDefinitions } from './model-tool-definition';
 
 const MAX_TOOL_CATALOG_BYTES = 512 * 1024;
 const MAX_PLANNED_CALLS = 3;
@@ -37,17 +38,13 @@ export class WeComConnectorPlannerService {
     });
     const selectedIds = await this.selectTools(query, tools, context);
     if (selectedIds.length === 0) return { calls: [] };
-    const modelToolMap = new Map<string, WeComConnectorToolInput>();
-    const definitions: ChatToolDefinition[] = selectedIds.map((toolId, index) => {
+    const { definitions, modelToolMap } = buildConnectorModelToolDefinitions('wecom', selectedIds.map((toolId) => {
       const tool = toolMap.get(toolId)!;
-      const modelToolName = `wecom_tool_${index + 1}`;
-      modelToolMap.set(modelToolName, tool);
       return {
-        name: modelToolName,
-        description: `[WeCom official CLI method=${tool.toolId}; risk=${tool.riskLevel}; confirmation=${tool.requiresConfirmation}] ${tool.name}: ${tool.description}`.slice(0, 2048),
-        parameters: tool.parameters,
+        tool,
+        description: `[WeCom official CLI method=${tool.toolId}; risk=${tool.riskLevel}; confirmation=${tool.requiresConfirmation}] ${tool.name}: ${tool.description}`,
       };
-    });
+    }));
     const calls = await requestCalls(this.gateway, {
       query,
       definitions,

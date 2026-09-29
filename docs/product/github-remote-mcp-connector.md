@@ -48,9 +48,11 @@ GitHub Resource Metadata 可能声明多个支持的 scope。CEES 同时固定�
 
 1. Desktop 使用固定 `X-MCP-Toolsets` 请求头选择 `context,issues,pull_requests,repos,users,actions,notifications` 工具集；其中 `repos` 覆盖仓库、代码和提交查询，返回结果可用于生成提交总结；
 2. MCP `tools/list` 返回工具后，Desktop 校验名称、描述、顶层参数 Schema 和工具数量；
-3. API 将工具目录当作不可信数据，最多选择 32 个候选并生成最多 3 个调用，只允许引用本次目录中的工具；
-4. Desktop 在执行前重新发现并校验工具，防止旧计划调用已变化的目录；
-5. 结果脱敏和限长后注入本轮对话。查询不会写入 CEES 数据库中的业务资源。
+3. API 将工具目录当作不可信数据，最多选择 32 个候选并生成最多 3 个调用，只允许引用本次目录中的工具；目录超过候选上限时，先固定保留 `search_repositories`、`list_commits`、`get_commit`、`get_file_contents`、`list_branches`、`search_code`、`list_pull_requests`、`get_pull_request`、`list_issues`、`get_issue` 等仓库类只读工具，再由选择器补充其他候选；
+4. 规划指令要求仓库、代码、提交、PR、Issue 类问题必须调用仓库类工具并显式传入 `is:private` 之类的可见性过滤条件，禁止只凭 `get_me` 返回的 `public_repos`、followers 等账号公开资料作答；
+5. API 下发给模型的工具名是 `github_tool_<序号>`，真实 MCP 工具名和风险标记写在描述里，描述按 ai-service 的 2048 字符上限截断，规划结果再映射回真实工具名；
+6. Desktop 在执行前重新发现并校验工具，防止旧计划调用已变化的目录；
+7. 结果脱敏和限长后注入本轮对话。查询不会写入 CEES 数据库中的业务资源。
 
 工具风险规则：工具 annotations 的 `readOnlyHint=true` 优先判为 `READ`，`destructiveHint=true` 判为 `DESTRUCTIVE`；否则按名称识别 `get/list/search/read/fetch` 等读取动作、`delete/remove/merge/run` 等破坏动作和 `create/update/edit` 等写动作；无法识别的工具按 `DESTRUCTIVE`。
 

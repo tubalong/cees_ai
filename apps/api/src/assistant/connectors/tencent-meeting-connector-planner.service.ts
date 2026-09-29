@@ -3,6 +3,7 @@ import type { ChatToolDefinition, ToolCall } from '@cees/ai-service-client';
 import { randomUUID } from 'node:crypto';
 import { AiServiceGateway } from '../../ai-orchestration/ai-service-gateway.service';
 import { TenantContext } from '../../tenant/tenant-context';
+import { buildConnectorModelToolDefinitions } from './model-tool-definition';
 import type {
   TencentMeetingConnectorPlannedCall,
   TencentMeetingConnectorToolInput,
@@ -36,14 +37,13 @@ export class TencentMeetingConnectorPlannerService {
     });
     const selectedIds = await this.selectTools(query, tools, context);
     if (selectedIds.length === 0) return { calls: [] };
-    const definitions: ChatToolDefinition[] = selectedIds.map((toolId) => {
+    const { definitions, modelToolMap } = buildConnectorModelToolDefinitions('tencent_meeting', selectedIds.map((toolId) => {
       const tool = toolMap.get(toolId)!;
       return {
-        name: tool.toolId,
-        description: `[Tencent Meeting official CLI; risk=${tool.riskLevel}; confirmation=${tool.requiresConfirmation}] ${tool.name}: ${tool.description}`.slice(0, 4000),
-        parameters: tool.parameters,
+        tool,
+        description: `[Tencent Meeting official CLI tool=${tool.toolId}; risk=${tool.riskLevel}; confirmation=${tool.requiresConfirmation}] ${tool.name}: ${tool.description}`,
       };
-    });
+    }));
     const calls = await requestCalls(this.gateway, {
       query,
       definitions,
@@ -59,7 +59,7 @@ export class TencentMeetingConnectorPlannerService {
       ].join(' '),
     });
     return {
-      calls: deduplicateCalls(calls.slice(0, MAX_PLANNED_CALLS).map((call) => validatePlannedCall(call, toolMap))),
+      calls: deduplicateCalls(calls.slice(0, MAX_PLANNED_CALLS).map((call) => validatePlannedCall(call, modelToolMap))),
     };
   }
 
@@ -169,11 +169,12 @@ function validateTool(
 
 function validatePlannedCall(
   call: ToolCall,
-  tools: Map<string, TencentMeetingConnectorToolInput>,
+  modelTools: Map<string, TencentMeetingConnectorToolInput>,
 ): TencentMeetingConnectorPlannedCall {
-  if (!tools.has(call.name)) throw new BadGatewayException('模型返回了目录外的腾讯会议 CLI 工具');
+  const tool = modelTools.get(call.name);
+  if (!tool) throw new BadGatewayException('模型返回了目录外的腾讯会议 CLI 工具');
   if (!isRecord(call.arguments)) throw new BadGatewayException('模型返回了无效的腾讯会议 CLI 工具参数');
-  return { toolId: call.name, arguments: call.arguments };
+  return { toolId: tool.toolId, arguments: call.arguments };
 }
 
 function deduplicateCalls(calls: TencentMeetingConnectorPlannedCall[]): TencentMeetingConnectorPlannedCall[] {

@@ -3,6 +3,7 @@ import type { ToolTurnStreamEvent } from '@cees/ai-service-client';
 import type { AiServiceGateway } from '../../ai-orchestration/ai-service-gateway.service';
 import type { TenantContext } from '../../tenant/tenant-context';
 import type { GitHubConnectorToolInput } from '../assistant.types';
+import { MODEL_TOOL_DESCRIPTION_MAX_LENGTH, MODEL_TOOL_NAME_PATTERN } from './model-tool-definition';
 import { GitHubConnectorPlannerService } from './github-connector-planner.service';
 
 describe('GitHubConnectorPlannerService', () => {
@@ -70,6 +71,42 @@ describe('GitHubConnectorPlannerService', () => {
     expect(streamToolTurn).toHaveBeenCalledTimes(2);
     expect(streamToolTurn.mock.calls[0]![0].tools).toHaveLength(1);
     expect(streamToolTurn.mock.calls[1]![0].tools).toEqual([expect.objectContaining({ name: 'github_tool_1' })]);
+  });
+
+  it('大目录始终把仓库类只读工具保留为候选', async () => {
+    const repositoryNames = [
+      'search_repositories', 'list_commits', 'get_commit', 'get_file_contents', 'list_branches', 'search_code',
+      'list_pull_requests', 'search_pull_requests', 'get_pull_request', 'list_issues', 'search_issues', 'get_issue',
+    ];
+    const repositoryTools = repositoryNames.map((name) => ({ ...tools[0]!, toolId: name, name }));
+    const otherTools = Array.from({ length: 41 }, (_, index): GitHubConnectorToolInput => ({
+      ...tools[0]!,
+      toolId: `list_starred_repositories_${index}`,
+      name: `list_starred_repositories_${index}`,
+    }));
+    const extra = otherTools[0]!;
+    const streamToolTurn = jest.fn()
+      .mockResolvedValueOnce(stream([
+        { type: 'tool_calls', tool_calls: [{ id: 'select-1', name: 'select_github_tools', arguments: { toolIds: [extra.toolId] } }] },
+        { type: 'completed', latency_ms: 1, finish_reason: 'tool_calls' },
+      ]))
+      .mockResolvedValueOnce(stream([
+        { type: 'completed', latency_ms: 1, finish_reason: 'stop' },
+      ]));
+    const service = createService(streamToolTurn);
+
+    await expect(service.plan('看看我的私有仓库', [...repositoryTools, ...otherTools])).resolves.toEqual({ calls: [] });
+    const definitions = streamToolTurn.mock.calls[1]![0].tools as Array<{ name: string; description: string }>;
+    expect(definitions).toHaveLength(13);
+    const descriptions = definitions.map((definition) => definition.description);
+    expect(descriptions.some((value) => value.includes('tool=search_repositories'))).toBe(true);
+    expect(descriptions.some((value) => value.includes('tool=list_commits'))).toBe(true);
+    expect(descriptions.some((value) => value.includes(`tool=${extra.toolId}`))).toBe(true);
+    definitions.forEach((definition, index) => {
+      expect(definition.name).toBe(`github_tool_${index + 1}`);
+      expect(definition.name).toMatch(MODEL_TOOL_NAME_PATTERN);
+      expect(definition.description.length).toBeLessThanOrEqual(MODEL_TOOL_DESCRIPTION_MAX_LENGTH);
+    });
   });
 
   it('上游事件流未完成时拒绝返回不完整计划', async () => {
