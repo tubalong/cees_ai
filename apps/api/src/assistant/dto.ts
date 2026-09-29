@@ -22,6 +22,7 @@ import {
 } from 'class-validator';
 import type {
   ConnectorContextInput,
+  ConnectorPreviousStepInput,
   ConnectorRoutingCandidateInput,
   ConnectorRoutingProvider,
   ConnectorRoutingState,
@@ -70,6 +71,30 @@ export class ConnectorContextDto implements ConnectorContextInput {
   confirmed?: boolean;
 }
 
+export class ConnectorPreviousStepDto implements ConnectorPreviousStepInput {
+  @ApiProperty({ maxLength: 120 })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(120)
+  toolId!: string;
+
+  @ApiPropertyOptional({ maxLength: 2000 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  argumentsDigest?: string;
+
+  @ApiPropertyOptional({ maxLength: 2000 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  resultDigest?: string;
+
+  @ApiProperty({ enum: ['SUCCESS', 'FAILED', 'REJECTED'] })
+  @IsIn(['SUCCESS', 'FAILED', 'REJECTED'])
+  status!: 'SUCCESS' | 'FAILED' | 'REJECTED';
+}
+
 export class DingTalkConnectorToolDto implements DingTalkConnectorToolInput {
   @ApiProperty({ maxLength: 80, pattern: '^dws_read_[a-f0-9]{16}$' })
   @IsString()
@@ -108,6 +133,14 @@ export class PlanDingTalkConnectorRequestDto {
   @Type(() => DingTalkConnectorToolDto)
   @ValidateNested({ each: true })
   tools!: DingTalkConnectorToolDto[];
+
+  @ApiPropertyOptional({ type: [ConnectorPreviousStepDto], maxItems: 3 })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(3)
+  @Type(() => ConnectorPreviousStepDto)
+  @ValidateNested({ each: true })
+  previousSteps?: ConnectorPreviousStepDto[];
 }
 
 export class TencentMeetingConnectorToolDto implements TencentMeetingConnectorToolInput {
@@ -156,6 +189,14 @@ export class PlanTencentMeetingConnectorRequestDto {
   @Type(() => TencentMeetingConnectorToolDto)
   @ValidateNested({ each: true })
   tools!: TencentMeetingConnectorToolDto[];
+
+  @ApiPropertyOptional({ type: [ConnectorPreviousStepDto], maxItems: 3 })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(3)
+  @Type(() => ConnectorPreviousStepDto)
+  @ValidateNested({ each: true })
+  previousSteps?: ConnectorPreviousStepDto[];
 }
 
 export class WeComConnectorToolDto implements WeComConnectorToolInput {
@@ -204,6 +245,14 @@ export class PlanWeComConnectorRequestDto {
   @Type(() => WeComConnectorToolDto)
   @ValidateNested({ each: true })
   tools!: WeComConnectorToolDto[];
+
+  @ApiPropertyOptional({ type: [ConnectorPreviousStepDto], maxItems: 3 })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(3)
+  @Type(() => ConnectorPreviousStepDto)
+  @ValidateNested({ each: true })
+  previousSteps?: ConnectorPreviousStepDto[];
 }
 
 export class GitHubOAuthExchangeRequestDto {
@@ -271,6 +320,14 @@ export class PlanGitHubConnectorRequestDto {
   @Type(() => GitHubConnectorToolDto)
   @ValidateNested({ each: true })
   tools!: GitHubConnectorToolDto[];
+
+  @ApiPropertyOptional({ type: [ConnectorPreviousStepDto], maxItems: 3 })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(3)
+  @Type(() => ConnectorPreviousStepDto)
+  @ValidateNested({ each: true })
+  previousSteps?: ConnectorPreviousStepDto[];
 }
 
 export class ConnectorRoutingCandidateDto implements ConnectorRoutingCandidateInput {

@@ -212,7 +212,25 @@ Desktop 先从本机执行 `dws schema --all --compact --format json`，只提�
 }
 ```
 
-API 不持有 DWS Token，也不执行本地命令。由于 ai-service 单次最多接收 32 个模型工具，完整目录超过 32 项时，API 会先让模型从完整只读目录中选出最多 32 个候选，再进行参数规划；因此不会按固定产品类型截断能力。Desktop 必须在执行前重新读取具体 leaf Schema，复核工具身份、安全属性和参数白名单；模型不能提交 shell、CLI 路径或原始 argv。单次最多规划 3 个查询，无需钉钉数据时 `calls` 为空。
+受控多步接力（同一轮对话内最多两轮，契约 `0.46.0`）时，Desktop 会在第二轮请求里回带上一轮已执行步骤的脱敏摘要：
+
+```json
+{
+  "query": "把昨天的会议纪要发到项目群",
+  "tools": [ "…同上，省略…" ],
+  "previousSteps": [{
+    "toolId": "dws_read_0123456789abcdef",
+    "argumentsDigest": "{\"name\":\"项目群\"}",
+    "resultDigest": "conversation_id=c1",
+    "status": "SUCCESS"
+  }]
+}
+```
+
+- `previousSteps` 可选，最多 3 条、单条摘要 ≤ 2000 字；服务端把它包在固定定界符内并声明为**不可信数据**，只允许用来抽取 ID / 字段，不允许执行其中的指令或据此新增写操作目标。
+- 响应可带 `followUpMayBeNeeded`（boolean，缺省 `false`）：为 `true` 只表示「本轮调用可能不足以完成这次请求」，并不触发任何后续动作；是否进入第二轮由 Desktop 决定（硬上限两轮、两轮合计 ≤ 3 次调用）。该提示通过一个额外的控制工具回传，因此真实工具候选上限由 32 收敛为 31。
+
+API 不持有 DWS Token，也不执行本地命令。由于 ai-service 单次最多接收 32 个模型工具（其中 1 个留给「是否需要下一轮」控制工具），完整目录超过 31 项时，API 会先让模型从完整只读目录中选出最多 31 个候选，再进行参数规划；因此不会按固定产品类型截断能力。Desktop 必须在执行前重新读取具体 leaf Schema，复核工具身份、安全属性和参数白名单；模型不能提交 shell、CLI 路径或原始 argv。单次最多规划 3 个查询，无需钉钉数据时 `calls` 为空。
 
 同一会话内重复提交相同 `Idempotency-Key` 且请求内容相同，会重新订阅原轮次事件，不会创建新轮次；同一键对应不同内容返回 `409 IDEMPOTENCY_KEY_CONFLICT`。幂等键长度为 1～128 个字符。
 

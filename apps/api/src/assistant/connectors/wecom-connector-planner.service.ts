@@ -4,17 +4,27 @@ import { randomUUID } from 'node:crypto';
 import { AiServiceGateway } from '../../ai-orchestration/ai-service-gateway.service';
 import { TenantContext } from '../../tenant/tenant-context';
 import type {
+  ConnectorPreviousStepInput,
   WeComConnectorPlannedCall,
   WeComConnectorToolInput,
 } from '../assistant.types';
-import { buildConnectorModelToolDefinitions } from './model-tool-definition';
+import {
+  buildConnectorFollowUpToolDefinition,
+  buildConnectorModelToolDefinitions,
+  connectorPreviousStepsInstructions,
+  MODEL_TOOL_LIMIT,
+  renderConnectorPreviousSteps,
+  splitConnectorFollowUpCalls,
+} from './model-tool-definition';
 
 const MAX_TOOL_CATALOG_BYTES = 512 * 1024;
 const MAX_PLANNED_CALLS = 3;
-const MAX_SELECTED_TOOLS = 32;
+/** 比 ai-service 的工具上限少 1，为「是否需要下一轮」控制工具留出名额。 */
+const MAX_SELECTED_TOOLS = MODEL_TOOL_LIMIT - 1;
 const TOOL_ID_PATTERN = /^[A-Za-z][A-Za-z0-9._-]{0,119}$/;
 const SELECTOR_TOOL_NAME = 'select_wecom_tools';
 const CURRENT_USER_PROFILE_TOOL_ID = 'cees.identity.current_user.get';
+const MODEL_TOOL_NAMESPACE = 'wecom';
 
 @Injectable()
 export class WeComConnectorPlannerService {
@@ -26,7 +36,8 @@ export class WeComConnectorPlannerService {
   async plan(
     query: string,
     tools: WeComConnectorToolInput[],
-  ): Promise<{ calls: WeComConnectorPlannedCall[] }> {
+    previousSteps: ConnectorPreviousStepInput[] = [],
+  ): Promise<{ calls: WeComConnectorPlannedCall[]; followUpMayBeNeeded: boolean }> {
     const context = this.tenantContext.require();
     if (Buffer.byteLength(JSON.stringify(tools), 'utf8') > MAX_TOOL_CATALOG_BYTES) {
       throw new BadRequestException('企业微信 CLI 工具目录过大');
@@ -37,17 +48,19 @@ export class WeComConnectorPlannerService {
       toolMap.set(tool.toolId, tool);
     });
     const selectedIds = await this.selectTools(query, tools, context);
-    if (selectedIds.length === 0) return { calls: [] };
-    const { definitions, modelToolMap } = buildConnectorModelToolDefinitions('wecom', selectedIds.map((toolId) => {
+    if (selectedIds.length === 0) return { calls: [], followUpMayBeNeeded: false };
+    const { definitions, modelToolMap } = buildConnectorModelToolDefinitions(MODEL_TOOL_NAMESPACE, selectedIds.map((toolId) => {
       const tool = toolMap.get(toolId)!;
       return {
         tool,
         description: `[WeCom official CLI method=${tool.toolId}; risk=${tool.riskLevel}; confirmation=${tool.requiresConfirmation}] ${tool.name}: ${tool.description}`,
       };
     }));
+    const followUpTool = buildConnectorFollowUpToolDefinition(MODEL_TOOL_NAMESPACE);
+    const renderedPreviousSteps = renderConnectorPreviousSteps(previousSteps);
     const calls = await requestCalls(this.gateway, {
       query,
-      definitions,
+      definitions: [...definitions, followUpTool],
       context,
       instructions: [
         'You plan WeCom official CLI tool calls for a desktop connector.',
@@ -58,10 +71,14 @@ export class WeComConnectorPlannerService {
         'For any tool marked WRITE or DESTRUCTIVE, plan only the exact action requested by the user; Desktop obtains explicit confirmation before execution.',
         'Do not plan a write or destructive call when a required target or argument is missing.',
         `Return at most ${MAX_PLANNED_CALLS} tool calls. Return no calls when required arguments are missing or the question is unrelated.`,
+        `Call ${followUpTool.name} exactly once: set needed=true only when this same request still needs another connector round after the calls you return.`,
+        ...(renderedPreviousSteps ? connectorPreviousStepsInstructions(renderedPreviousSteps) : []),
       ].join(' '),
     });
+    const { calls: plannedCalls, followUpMayBeNeeded } = splitConnectorFollowUpCalls(calls, MODEL_TOOL_NAMESPACE);
     return {
-      calls: deduplicateCalls(calls.slice(0, MAX_PLANNED_CALLS).map((call) => validatePlannedCall(call, modelToolMap))),
+      calls: deduplicateCalls(plannedCalls.slice(0, MAX_PLANNED_CALLS).map((call) => validatePlannedCall(call, modelToolMap))),
+      followUpMayBeNeeded,
     };
   }
 

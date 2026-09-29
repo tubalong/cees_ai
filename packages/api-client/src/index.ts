@@ -97,6 +97,7 @@ export { ChatMode } from './models/ChatMode';
 export type { ChatTokenUsage } from './models/ChatTokenUsage';
 export type { CompleteProjectRequest } from './models/CompleteProjectRequest';
 export { ConnectorContext } from './models/ConnectorContext';
+export { ConnectorPreviousStep } from './models/ConnectorPreviousStep';
 export { ConnectorRoutingCandidate } from './models/ConnectorRoutingCandidate';
 export { ConnectorRoutingProvider } from './models/ConnectorRoutingProvider';
 export type { ConnectorRoutingRequest } from './models/ConnectorRoutingRequest';

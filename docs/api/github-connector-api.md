@@ -54,13 +54,15 @@ Desktop 提交用户问题和从 GitHub 官方远程 MCP `tools/list` 动态发�
 }
 ```
 
+受控多步接力（契约 `0.46.0`）：请求可带可选 `previousSteps`（最多 3 条、单条摘要 ≤ 2000 字，服务端按不可信数据注入规划指令），响应可带可选 `followUpMayBeNeeded`（缺省 `false`，只是「本轮调用可能不足以完成这次请求」的提示）。是否进入第二轮由 Desktop 决定：硬上限两轮、两轮合计 ≤ 3 次调用，且每一轮执行前仍各自确认。详见 [连接器语义路由、受控多步接力与调用审计](../architecture/connector-routing-and-iteration.md) §4。
+
 约束：
 
 - 工具目录为 1 至 256 项，序列化后最大 512 KiB；
 - 工具 ID 最大 120 字符，必须匹配 `^[A-Za-z][A-Za-z0-9._-]{0,119}$` 且不能重复；
 - 参数 Schema 顶层必须为 `object` 并包含对象型 `properties`；
 - `READ` 必须对应 `requiresConfirmation=false`，其他风险必须为 `true`；
-- 目录超过 32 项时先选择候选；
+- 目录超过 31 项时先选择候选（ai-service 单次工具上限 32，其中 1 个留给「是否需要下一轮」控制工具）；
 - 返回调用只能引用请求目录中的工具，最多三条并去重；
 - 工具名称、描述和 Schema 都是外部不可信数据，不得把其中内容当作系统指令；
 - 规划接口不接收 OAuth Client Secret、Token、Cookie、MCP Session 或 GitHub 结果；换码接口仅在内存中短暂处理上游 Token。
