@@ -312,6 +312,25 @@ describe('TaskRunnerService', () => {
     );
   });
 
+  it('yields the task to plan revision when the failure decision asks for replan', async () => {
+    const harness = createHarness({
+      steps: [{ id: STEP_ONE, stepKey: 's1', status: 'WAITING_USER', dependsOn: [], leaseExpiresAt: null }],
+      awaitingReplanTaskIds: [TASK_ID],
+    });
+
+    await harness.service.startTask(TASK_ID);
+    await waitForTaskWaiting(harness);
+
+    // 选择「调整计划」：不派发、不终态；保持挂起等待 revise 工具生成新版本。
+    expect(harness.stepRunner.executeStep).not.toHaveBeenCalled();
+    expect(harness.failureHandling.hasAwaitingReplan).toHaveBeenCalledWith(TASK_ID);
+    expect(harness.prisma.assistantTask.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ id: TASK_ID, status: 'RUNNING' }),
+      data: expect.objectContaining({ status: 'WAITING_USER' }),
+    }));
+    expect(harness.taskEvents.appendInTransaction).not.toHaveBeenCalled();
+  });
+
   it('resumes waiting tasks without pending interactions during the recovery scan', async () => {
     const harness = createHarness({
       waitingTasks: [{ id: 'task-1' }, { id: 'task-2' }],
@@ -337,6 +356,24 @@ describe('TaskRunnerService', () => {
     expect(harness.prisma.assistantTask.updateMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({ id: 'task-2', status: 'RUNNING' }),
       data: expect.objectContaining({ executionOwner: expect.any(String) }),
+    }));
+  });
+
+  it('keeps replan-held tasks suspended during the recovery scan', async () => {
+    const harness = createHarness({
+      waitingTasks: [{ id: 'task-1' }, { id: 'task-2' }],
+      awaitingReplanTaskIds: ['task-1'],
+    });
+
+    await expect(harness.service.resumeWaitingTasks()).resolves.toBe(1);
+
+    // task-1 等待重排草案：保持挂起不接管；task-2 无阻碍正常恢复调度。
+    expect(harness.failureHandling.hasAwaitingReplan).toHaveBeenCalledWith('task-1');
+    expect(harness.prisma.assistantTask.updateMany).not.toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ id: 'task-1' }),
+    }));
+    expect(harness.prisma.assistantTask.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ id: 'task-2', status: 'WAITING_USER' }),
     }));
   });
 
@@ -421,6 +458,7 @@ function createHarness(options: {
   executeStepError?: { code: string; message: string };
   reconcileHandledCounts?: number[];
   applyDecisionCounts?: number[];
+  awaitingReplanTaskIds?: string[];
 } = {}) {
   const steps = options.steps ?? [];
   let capturedOwner: string | null = null;
@@ -544,6 +582,9 @@ function createHarness(options: {
     ),
     applyResolvedFailureDecisions: jest.fn().mockImplementation(
       async () => (applyDecisionCounts.length > 0 ? applyDecisionCounts.shift()! : 0),
+    ),
+    hasAwaitingReplan: jest.fn().mockImplementation(
+      async (taskId: string) => (options.awaitingReplanTaskIds ?? []).includes(taskId),
     ),
   };
   const service = new TaskRunnerService(

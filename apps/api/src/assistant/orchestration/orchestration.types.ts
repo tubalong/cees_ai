@@ -45,6 +45,8 @@ export interface PublicTaskPlanStep {
   expectedOutput?: string | null;
   /** 前置步骤的 stepKey；空数组表示可立即开始。 */
   dependsOnStepKeys: string[];
+  /** 重排沿用的历史步骤 stepKey（该步骤产出直接沿用、不再执行）；无则省略。 */
+  carriedFromStepKey?: string | null;
 }
 
 export interface PublicTaskClarificationOption {
@@ -179,6 +181,12 @@ export type PublicTaskStreamEvent =
     steps: PublicTaskPlanStep[];
     clarifications: PublicTaskClarification[];
   }
+  | {
+    type: 'plan_revision_requested';
+    seq: number;
+    /** 请求调整时的当前计划版本（调整内容在对话中提出，随后生成新版本草案）。 */
+    version: number;
+  }
   | { type: 'plan_confirmed'; seq: number; version: number; confirmedAt: string }
   | {
     type: 'step_started';
@@ -270,6 +278,7 @@ export function toAssistantTaskEventType(
   switch (type) {
     case 'task_created': return AssistantTaskEventType.TASK_CREATED;
     case 'plan_ready': return AssistantTaskEventType.PLAN_READY;
+    case 'plan_revision_requested': return AssistantTaskEventType.PLAN_REVISION_REQUESTED;
     case 'plan_confirmed': return AssistantTaskEventType.PLAN_CONFIRMED;
     case 'step_started': return AssistantTaskEventType.STEP_STARTED;
     case 'step_progress': return AssistantTaskEventType.STEP_PROGRESS;

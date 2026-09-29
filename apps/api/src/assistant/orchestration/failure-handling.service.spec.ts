@@ -110,6 +110,7 @@ describe('FailureHandlingService', () => {
           expect.objectContaining({ id: 'retry' }),
           expect.objectContaining({ id: 'skip' }),
           expect.objectContaining({ id: 'abort' }),
+          expect.objectContaining({ id: 'replan' }),
         ],
         failure: { code: 'STEP_TOOL_FORBIDDEN', message: '该操作在任务步骤内暂不可用', attemptNo: 1 },
         requestId: REQUEST_ID,
@@ -269,6 +270,41 @@ describe('FailureHandlingService', () => {
     await expect(pending.service.applyResolvedFailureDecisions(TASK_ID)).resolves.toBe(0);
     expect(pending.state.applyFailureDecision).not.toHaveBeenCalled();
   });
+
+  it('holds the step for plan revision when the user chooses to adjust the plan', async () => {
+    const harness = createHarness({
+      waitingSteps: [{ id: STEP_ID, stepKey: 's1' }],
+      interaction: {
+        status: 'RESOLVED',
+        payload: { summary: 'x', failure: { code: 'STEP_EXECUTION_ERROR', message: '连接超时', attemptNo: 3 } },
+        resolution: { decision: 'choose', value: 'replan' },
+      },
+    });
+
+    // 调整计划不落步骤状态：让行由重排链路（新版本 + 再次确认）处理。
+    await expect(harness.service.applyResolvedFailureDecisions(TASK_ID)).resolves.toBe(0);
+    expect(harness.state.applyFailureDecision).not.toHaveBeenCalled();
+
+    // 待调整判定为真：任务保持挂起等待 revise 工具生成新版本。
+    await expect(harness.service.hasAwaitingReplan(TASK_ID)).resolves.toBe(true);
+  });
+
+  it('reports no awaiting replan when the decision is settled or not a replan', async () => {
+    const retry = createHarness({
+      waitingSteps: [{ id: STEP_ID, stepKey: 's1' }],
+      interaction: {
+        status: 'RESOLVED',
+        payload: { summary: 'x', failure: { code: 'STEP_EXECUTION_ERROR', message: '连接超时', attemptNo: 3 } },
+        resolution: { decision: 'choose', value: 'retry' },
+      },
+    });
+    await expect(retry.service.hasAwaitingReplan(TASK_ID)).resolves.toBe(false);
+
+    // 无挂起步骤：直接为假，不读取交互。
+    const settled = createHarness({ waitingSteps: [] });
+    await expect(settled.service.hasAwaitingReplan(TASK_ID)).resolves.toBe(false);
+    expect(settled.prisma.assistantTaskInteraction.findFirst).not.toHaveBeenCalled();
+  });
 });
 
 describe('step-failure classification', () => {
@@ -284,6 +320,7 @@ describe('step-failure classification', () => {
     expect(isFailureDecisionAction('retry')).toBe(true);
     expect(isFailureDecisionAction('skip')).toBe(true);
     expect(isFailureDecisionAction('abort')).toBe(true);
+    expect(isFailureDecisionAction('replan')).toBe(true);
     expect(isFailureDecisionAction('approve')).toBe(false);
   });
 });

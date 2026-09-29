@@ -9,6 +9,9 @@ import {
 } from '@nestjs/common';
 import {
   AssistantEventType,
+  AssistantTaskEventType,
+  AssistantTaskStatus,
+  AssistantTaskStepStatus,
   AssistantTurnStage,
   AssistantTurnStatus,
   Prisma,
@@ -38,6 +41,7 @@ import {
 import { ConversationService } from '../conversation/conversation.service';
 import { EventService } from '../conversation/event.service';
 import { AssistantActionDraftService } from '../drafts/assistant-action-draft.service';
+import { FailureHandlingService } from '../orchestration/failure-handling.service';
 import { OrchestrationToolsService } from '../orchestration/orchestration-tools.service';
 import { canonicalJson, toToolFailure } from '../tools/tool-failure';
 import { ToolPolicyService } from '../tools/tool-policy.service';
@@ -60,6 +64,9 @@ import {
 /** 单轮硬上限：最多模型调用次数与工具调用提案数。 */
 const MAX_TOOL_TURNS = 5;
 const MAX_TOOL_STEPS = 10;
+/** 计划调整引导只在工具面开放 revise 工具时注入；单轮最多提示的任务数。 */
+const REVISE_ORCHESTRATION_TASK_TOOL = 'revise_orchestration_task';
+const MAX_TASK_GUIDANCE_TASKS = 3;
 
 export interface StartTurnResult {
   turnId: string;
@@ -92,6 +99,7 @@ export class TurnRunnerService implements OnModuleDestroy {
     private readonly userMemory: UserMemoryService,
     private readonly actionDrafts: AssistantActionDraftService,
     private readonly orchestrationTools: OrchestrationToolsService,
+    private readonly failureHandling: FailureHandlingService,
   ) { }
 
   onModuleDestroy(): void {
@@ -444,13 +452,25 @@ export class TurnRunnerService implements OnModuleDestroy {
       });
       if (input.signal.aborted) return;
 
+      // 计划调整引导：任务卡片「调整要求」与失败裁决「调整计划」都由用户在对话
+      // 中补充调整内容，这里把待调整任务、失败步骤与可沿用步骤注入 instructions，
+      // 模型才能正确调用 revise 工具。每个模型调用前重算，避免引导过期。
+      const taskGuidance = input.allowedTools.some((tool) => tool.name === REVISE_ORCHESTRATION_TASK_TOOL)
+        ? await this.buildTaskAdjustmentGuidance(conversation, input.membershipId)
+        : null;
+      if (input.signal.aborted) return;
+
       const request: ToolTurnRequest = {
         request_id: input.requestId,
         tenant_id: conversation.tenantId,
         user_id: input.userId,
         conversation_id: conversation.id,
         mode: input.mode === 'ultra' ? 'ultra' : 'standard',
-        instructions: combineAssistantInstructions(buildCapabilityGuidance(input.capabilities), input.assistantContext, input.generationOptions),
+        instructions: combineAssistantInstructions(
+          joinGuidance(buildCapabilityGuidance(input.capabilities), taskGuidance),
+          input.assistantContext,
+          input.generationOptions,
+        ),
         conversation_summary: messages.summary ?? null,
         user_memories: messages.userMemories.length > 0 ? messages.userMemories : null,
         messages: messages.items,
@@ -588,6 +608,113 @@ export class TurnRunnerService implements OnModuleDestroy {
       message: '模型调用次数超过单轮上限',
       retryable: false,
     }, this.executionOwner);
+  }
+
+  /**
+   * 计划调整引导：列出当前会话中「等待重排」与「调整要求后待确认」的任务并注入
+   * 本轮 instructions。前者给出失败步骤与可沿用的已完成步骤（模型据此生成调整
+   * 后的完整计划），后者提示模型按用户消息决定是否生成新版本草案。无匹配任务时
+   * 返回 null，轮次行为与未启用本引导时完全一致。
+   */
+  private async buildTaskAdjustmentGuidance(
+    conversation: { id: string; tenantId: string },
+    membershipId: string,
+  ): Promise<string | null> {
+    const tasks = await this.prisma.assistantTask.findMany({
+      where: {
+        conversationId: conversation.id,
+        tenantId: conversation.tenantId,
+        membershipId,
+        status: { in: [AssistantTaskStatus.WAITING_USER, AssistantTaskStatus.PENDING_CONFIRM] },
+      },
+      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+      select: { id: true, title: true, status: true, planVersion: true },
+      take: MAX_TASK_GUIDANCE_TASKS,
+    });
+    const notes: string[] = [];
+    for (const task of tasks) {
+      if (task.status === AssistantTaskStatus.WAITING_USER) {
+        if (await this.failureHandling.hasAwaitingReplan(task.id)) {
+          notes.push(await this.describeAwaitingReplanTask(task));
+        }
+        continue;
+      }
+      if (await this.hasRequestedRevision(task.id)) {
+        notes.push(await this.describeRequestedRevisionTask(task));
+      }
+    }
+    if (notes.length === 0) return null;
+    return [
+      '当前会话有以下任务正在调整计划（与本轮用户消息无关时不要调用调整工具）：',
+      ...notes,
+      `调整计划时调用 ${REVISE_ORCHESTRATION_TASK_TOOL}：给出调整后的完整步骤（全量替换），`
+        + '沿用已完成的步骤须填写其 carried_from_step_key（仅限清单中给出的可沿用步骤）；'
+        + '新草案由用户在任务卡片再次确认后才会执行，不要声称任务已继续执行。',
+    ].join('\n');
+  }
+
+  /** 任务是否存在「调整要求」事件；存在即说明用户点过卡片调整或任务经过重排。 */
+  private async hasRequestedRevision(taskId: string): Promise<boolean> {
+    const event = await this.prisma.assistantTaskEvent.findFirst({
+      where: { taskId, type: AssistantTaskEventType.PLAN_REVISION_REQUESTED },
+      select: { id: true },
+    });
+    return Boolean(event);
+  }
+
+  /** 执行中失败选择「调整计划」的挂起任务：给出失败步骤与可沿用的已完成步骤。 */
+  private async describeAwaitingReplanTask(task: {
+    id: string;
+    title: string;
+    planVersion: number;
+  }): Promise<string> {
+    const [plan, runtimeSteps] = await Promise.all([
+      this.prisma.assistantTaskPlan.findFirst({
+        where: { taskId: task.id, version: task.planVersion },
+        select: { steps: true },
+      }),
+      this.prisma.assistantTaskStep.findMany({
+        where: {
+          taskId: task.id,
+          planVersion: task.planVersion,
+          status: {
+            in: [AssistantTaskStepStatus.WAITING_USER, AssistantTaskStepStatus.SUCCEEDED],
+          },
+        },
+        orderBy: { stepNo: 'asc' },
+        select: { stepKey: true, status: true },
+      }),
+    ]);
+    const titles = stepTitleIndex(plan?.steps ?? null);
+    const failed = runtimeSteps
+      .filter((step) => step.status === AssistantTaskStepStatus.WAITING_USER)
+      .map((step) => formatStepRef(step.stepKey, titles.get(step.stepKey)));
+    const carried = runtimeSteps
+      .filter((step) => step.status === AssistantTaskStepStatus.SUCCEEDED)
+      .map((step) => formatStepRef(step.stepKey, titles.get(step.stepKey)));
+    return `- 任务「${task.title}」（task_id：${task.id}）执行中步骤 ${failed.join('、') || '（未知）'} `
+      + '失败后用户选择了「调整计划」，任务正等待调整后的新计划（生成后回到待确认，不自动执行）。'
+      + (carried.length > 0 ? `可沿用的已完成步骤：${carried.join('、')}。` : '没有可沿用的已完成步骤。');
+  }
+
+  /** 「调整要求」后的待确认任务：给出草案步骤，提示按用户消息生成新版本。 */
+  private async describeRequestedRevisionTask(task: {
+    id: string;
+    title: string;
+    planVersion: number;
+  }): Promise<string> {
+    const plan = await this.prisma.assistantTaskPlan.findFirst({
+      where: { taskId: task.id },
+      orderBy: { version: 'desc' },
+      select: { version: true, steps: true },
+    });
+    const titles = stepTitleIndex(plan?.steps ?? null);
+    const refs = [...titles.entries()]
+      .map(([stepKey, title]) => formatStepRef(stepKey, title))
+      .join('、');
+    return `- 任务「${task.title}」（task_id：${task.id}）已被用户要求调整计划，`
+      + `当前草案 v${plan?.version ?? task.planVersion} 待确认：${refs || '（步骤不可读）'}。`
+      + '若用户本轮提出了具体调整内容，请生成调整后的完整计划；仅表达“确认/继续”意图时不要调用调整工具。';
   }
 
   private async executeToolCalls(input: {
@@ -1123,6 +1250,12 @@ function combineAssistantInstructions(guidance: string | null, assistantContext?
   return instructions.length ? instructions.join('\n') : null;
 }
 
+/** 按序合并多段 guidance（段间换行）；全为空时返回 null，保持零引导语义。 */
+function joinGuidance(...parts: Array<string | null>): string | null {
+  const merged = parts.filter((part): part is string => Boolean(part));
+  return merged.length > 0 ? merged.join('\n') : null;
+}
+
 function normalizeGenerationOptions(input: GenerationOptionsInput): GenerationOptionsInput {
   if (input.kind !== 'image' && input.kind !== 'document') throw new BadRequestException({ code: 'GENERATION_OPTIONS_INVALID', message: '生成参数类型无效' });
   return { kind: input.kind, ...(input.aspectRatio ? { aspectRatio: input.aspectRatio } : {}), ...(input.quality ? { quality: input.quality } : {}), ...(input.template ? { template: input.template } : {}) };
@@ -1219,6 +1352,24 @@ function buildCapabilityGuidance(capabilities: PublicTurnCapabilities): string |
   }
   if (notes.length === 0) return null;
   return notes.join('\n');
+}
+
+/** 计划快照 steps JSON 的 stepKey → 标题索引；标题缺失时值为 null。 */
+function stepTitleIndex(steps: Prisma.JsonValue | null): Map<string, string | null> {
+  const index = new Map<string, string | null>();
+  if (!Array.isArray(steps)) return index;
+  for (const item of steps) {
+    if (!item || typeof item !== 'object') continue;
+    const row = item as { stepKey?: unknown; title?: unknown };
+    if (typeof row.stepKey !== 'string') continue;
+    index.set(row.stepKey, typeof row.title === 'string' ? row.title : null);
+  }
+  return index;
+}
+
+/** 步骤引用文案：s1「收集数据」；标题缺失时只写标识（模型仍可引用标识）。 */
+function formatStepRef(stepKey: string, title: string | null | undefined): string {
+  return title ? `${stepKey}「${title}」` : stepKey;
 }
 
 /** Omit 对联合类型会退化为公共属性；分配式 Omit 保留每个成员的结构。 */

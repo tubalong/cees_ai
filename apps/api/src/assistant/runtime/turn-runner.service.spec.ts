@@ -18,6 +18,7 @@ import { IntentCapabilityService } from './intent-capability.service';
 import { TurnRunnerService } from './turn-runner.service';
 import { TurnStateService } from './turn-state.service';
 import { UserMemoryService } from '../../user-memory/user-memory.service';
+import { FailureHandlingService } from '../orchestration/failure-handling.service';
 import { OrchestrationToolsService } from '../orchestration/orchestration-tools.service';
 
 describe('TurnRunnerService', () => {
@@ -969,6 +970,101 @@ describe('TurnRunnerService', () => {
             { conversationId: CONVERSATION_ID, turnId: TURN_ID },
         );
     });
+
+    it('injects awaiting-replan guidance with carried steps when the revise tool is available', async () => {
+        const harness = createHarness({
+            allowedTools: [chatTool('revise_orchestration_task')],
+            toolTurnStreams: [() => secondRoundCompletedStream()],
+            guidanceTasks: [
+                { id: 'task-1', title: '季度复盘', status: 'WAITING_USER', planVersion: 1 },
+            ],
+            guidanceAwaitingReplanTaskIds: ['task-1'],
+            guidanceRuntimeSteps: [
+                { stepKey: 's1', status: 'SUCCEEDED' },
+                { stepKey: 's2', status: 'WAITING_USER' },
+            ],
+            guidancePlanSteps: [
+                { stepKey: 's1', title: '收集数据' },
+                { stepKey: 's2', title: '撰写报告' },
+            ],
+        });
+
+        await harness.service.startTurn({
+            conversationId: CONVERSATION_ID,
+            idempotencyKey: 'key-replan-guidance',
+            content: '把撰写报告这一步改成先出大纲再定稿',
+        });
+        await consumeAll(await harness.service.subscribeTurn({
+            conversationId: CONVERSATION_ID,
+            turnId: TURN_ID,
+            afterSeq: 0,
+        }));
+
+        const request = harness.gateway.streamToolTurn.mock.calls[0][0] as { instructions: string | null };
+        expect(harness.failureHandling.hasAwaitingReplan).toHaveBeenCalledWith('task-1');
+        expect(request.instructions).toContain('s2「撰写报告」');
+        expect(request.instructions).toContain('可沿用的已完成步骤：s1「收集数据」');
+        expect(request.instructions).toContain('carried_from_step_key');
+    });
+
+    it('injects revision-requested guidance for a pending-confirm draft', async () => {
+        const harness = createHarness({
+            allowedTools: [chatTool('revise_orchestration_task')],
+            toolTurnStreams: [() => secondRoundCompletedStream()],
+            guidanceTasks: [
+                { id: 'task-2', title: '竞品分析', status: 'PENDING_CONFIRM', planVersion: 0 },
+            ],
+            guidanceRevisionRequestedTaskId: 'task-2',
+            guidancePlanSteps: [
+                { stepKey: 's1', title: '收集竞品' },
+                { stepKey: 's2', title: '输出报告' },
+            ],
+        });
+
+        await harness.service.startTurn({
+            conversationId: CONVERSATION_ID,
+            idempotencyKey: 'key-revision-guidance',
+            content: '第二步换成先做对比表',
+        });
+        await consumeAll(await harness.service.subscribeTurn({
+            conversationId: CONVERSATION_ID,
+            turnId: TURN_ID,
+            afterSeq: 0,
+        }));
+
+        const request = harness.gateway.streamToolTurn.mock.calls[0][0] as { instructions: string | null };
+        expect(harness.failureHandling.hasAwaitingReplan).not.toHaveBeenCalled();
+        expect(request.instructions).toContain('已被用户要求调整计划');
+        expect(request.instructions).toContain('s1「收集竞品」、s2「输出报告」');
+        expect(request.instructions).toContain('task_id：task-2');
+    });
+
+    it('skips plan-adjustment guidance when the revise tool is not allowed', async () => {
+        const harness = createHarness({
+            allowedTools: [chatTool('generate_image')],
+            toolTurnStreams: [() => secondRoundCompletedStream()],
+            guidanceTasks: [
+                { id: 'task-3', title: '季度复盘', status: 'WAITING_USER', planVersion: 1 },
+            ],
+            guidanceAwaitingReplanTaskIds: ['task-3'],
+        });
+
+        await harness.service.startTurn({
+            conversationId: CONVERSATION_ID,
+            idempotencyKey: 'key-no-revise-guidance',
+            content: '查一下报销制度',
+        });
+        await consumeAll(await harness.service.subscribeTurn({
+            conversationId: CONVERSATION_ID,
+            turnId: TURN_ID,
+            afterSeq: 0,
+        }));
+
+        expect(harness.prisma.assistantTask.findMany).not.toHaveBeenCalled();
+        expect(harness.failureHandling.hasAwaitingReplan).not.toHaveBeenCalled();
+        const request = harness.gateway.streamToolTurn.mock.calls[0][0] as { instructions: string | null };
+        expect(request.instructions ?? '').not.toContain('revise_orchestration_task');
+    });
 });
 
 const TENANT_ID = '10000000-0000-0000-0000-000000000001';
@@ -984,6 +1080,11 @@ function createHarness(options: {
     toolTurnStreams?: Array<(signal?: AbortSignal) => AsyncGenerator<ToolTurnStreamEvent>>;
     toolExecutionResult?: ToolExecutionResult;
     conversationMode?: 'standard' | 'ultra';
+    guidanceTasks?: Array<{ id: string; title: string; status: string; planVersion: number }>;
+    guidancePlanSteps?: unknown[];
+    guidanceRuntimeSteps?: Array<{ stepKey: string; status: string }>;
+    guidanceAwaitingReplanTaskIds?: string[];
+    guidanceRevisionRequestedTaskId?: string;
 } = {}) {
     const events: PublicTurnStreamEvent[] = [];
     const records = new Map<string, {
@@ -1032,6 +1133,23 @@ function createHarness(options: {
                 tenant: { status: 'ACTIVE', deletedAt: null },
                 user: { status: 'ACTIVE', deletedAt: null },
             }),
+        },
+        // 计划调整引导查询（默认会话内无待处理任务）。
+        assistantTask: {
+            findMany: jest.fn().mockResolvedValue(options.guidanceTasks ?? []),
+        },
+        assistantTaskPlan: {
+            findFirst: jest.fn().mockResolvedValue(
+                options.guidancePlanSteps ? { version: 2, steps: options.guidancePlanSteps } : null,
+            ),
+        },
+        assistantTaskStep: {
+            findMany: jest.fn().mockResolvedValue(options.guidanceRuntimeSteps ?? []),
+        },
+        assistantTaskEvent: {
+            findFirst: jest.fn().mockImplementation((args: { where: { taskId: string } }) => Promise.resolve(
+                args.where.taskId === options.guidanceRevisionRequestedTaskId ? { id: 'task-event-1' } : null,
+            )),
         },
     };
     const tenantContext = {
@@ -1258,6 +1376,12 @@ function createHarness(options: {
         gate: jest.fn(async (_tenantId: string, tools: unknown[]) => tools),
     };
 
+    // 计划调整引导依赖的失败处置查询：默认无待重排任务。
+    const failureHandling = {
+        hasAwaitingReplan: jest.fn(async (taskId: string) =>
+            (options.guidanceAwaitingReplanTaskIds ?? []).includes(taskId)),
+    };
+
     const service = new TurnRunnerService(
         prisma as unknown as PrismaService,
         tenantContext,
@@ -1273,6 +1397,7 @@ function createHarness(options: {
         userMemory as unknown as UserMemoryService,
         actionDrafts as unknown as AssistantActionDraftService,
         orchestrationTools as unknown as OrchestrationToolsService,
+        failureHandling as unknown as FailureHandlingService,
     );
     return {
         service,
@@ -1283,6 +1408,7 @@ function createHarness(options: {
         toolPolicy,
         messageContent,
         userMemory,
+        failureHandling,
         events,
     };
 }

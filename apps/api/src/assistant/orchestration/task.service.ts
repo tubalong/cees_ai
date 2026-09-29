@@ -60,6 +60,21 @@ export interface CreateTaskFromToolInput {
   agentNames: ReadonlyMap<string, string>;
 }
 
+/** 总管「调整计划」工具（revise_orchestration_task）的落库输入。 */
+export interface ReviseTaskFromToolInput {
+  taskId: string;
+  /** 工具调用 ID：本任务调整的幂等键（同一任务内去重）。 */
+  toolCallId: string;
+  /** 省略表示沿用原标题/目标。 */
+  title?: string;
+  goal?: string;
+  steps: PlannedStepDraft[];
+  /** 省略表示沿用当前草案的待定项与答复；给出（含空数组）为全量替换。 */
+  clarifications?: ClarificationDraft[];
+  /** 可用执行同事名册（agentId → 名称），用于计划快照与指派校验。 */
+  agentNames: ReadonlyMap<string, string>;
+}
+
 export interface ListTasksQuery {
   status?: PublicTaskStatus;
   conversationId?: string;
@@ -179,6 +194,194 @@ export class TaskService {
     return this.getDetail(taskId);
   }
 
+  /**
+   * 计划调整工具落库入口：在既有任务上生成新版本草案（createdBy=USER），
+   * 用户在任务卡片再次确认后才物化执行。
+   * - 草案期（PENDING_CONFIRM）：直接追加新版本，可反复调整；
+   * - 执行中（WAITING_USER，失败阶梯选「调整计划」后）：要求没有正在执行的
+   *   步骤、没有未决挂起事项，生成新版本后任务回到 PENDING_CONFIRM 等待再次确认。
+   * 已成功步骤可按 carriedFromStepKey 锚点在新版本中沿用（确认时复制产出，不重跑）。
+   * 幂等键为 revisionKey（工具调用 ID）：同一任务内重放返回已生成版本，不重复追加。
+   */
+  async reviseFromTool(input: ReviseTaskFromToolInput): Promise<PublicTaskDetail> {
+    const task = await this.requireOwnTask(input.taskId);
+    if (
+      task.status !== AssistantTaskStatus.PENDING_CONFIRM
+      && task.status !== AssistantTaskStatus.WAITING_USER
+    ) {
+      throw new ConflictException({
+        code: 'TASK_NOT_REVISABLE',
+        message: task.status === AssistantTaskStatus.CREATED
+          ? '任务计划尚未生成，无法调整'
+          : '任务当前不在可调整的状态；执行中的任务请先处理失败裁决或挂起事项',
+      });
+    }
+    // 沿用锚点先做无库校验（重复）；引用是否有效在执行事务内按库核对。
+    const carriedKeys = input.steps
+      .map((step) => step.carriedFromStepKey)
+      .filter((key): key is string => key !== undefined);
+    if (new Set(carriedKeys).size !== carriedKeys.length) {
+      throw new ConflictException({
+        code: 'TASK_REVISE_CARRY_DUPLICATED',
+        message: '沿用锚点重复：同一步骤产出只能被沿用一次',
+      });
+    }
+    const steps = this.plans.normalizeSteps(input.steps, input.agentNames);
+
+    try {
+      await this.prisma.$transaction(async (transaction) => {
+        // 幂等重放：同一工具调用已生成过版本时不再追加（以已提交版本为准）。
+        const replay = await transaction.assistantTaskPlan.findFirst({
+          where: { taskId: task.id, revisionKey: input.toolCallId },
+          select: { id: true },
+        });
+        if (replay) return;
+
+        // 执行中调整：只在没有 RUNNING 步骤与未决挂起事项时接受（干净暂停点）。
+        if (task.status === AssistantTaskStatus.WAITING_USER) {
+          const running = await transaction.assistantTaskStep.count({
+            where: {
+              taskId: task.id,
+              tenantId: task.tenantId,
+              planVersion: task.planVersion,
+              status: AssistantTaskStepStatus.RUNNING,
+            },
+          });
+          if (running > 0) {
+            throw new ConflictException({
+              code: 'TASK_REVISE_STEPS_RUNNING',
+              message: '仍有步骤正在执行，暂不能调整计划；请等待步骤结束后再试',
+            });
+          }
+          if (await this.interactions.hasPendingForTask(task.id)) {
+            throw new ConflictException({
+              code: 'TASK_REVISE_INTERACTION_PENDING',
+              message: '任务还有未决的挂起事项，请先处理后再调整计划',
+            });
+          }
+        }
+
+        const latestPlan = await transaction.assistantTaskPlan.findFirst({
+          where: { taskId: task.id },
+          orderBy: { version: 'desc' },
+        });
+        // 沿用锚点核验：只允许引用当前执行版本中已成功的步骤。
+        if (carriedKeys.length > 0) {
+          if (task.planVersion < 1) {
+            throw new ConflictException({
+              code: 'TASK_REVISE_CARRY_UNAVAILABLE',
+              message: '任务尚无已执行步骤，不能沿用历史产出',
+            });
+          }
+          const succeeded = await transaction.assistantTaskStep.findMany({
+            where: {
+              taskId: task.id,
+              tenantId: task.tenantId,
+              planVersion: task.planVersion,
+              status: AssistantTaskStepStatus.SUCCEEDED,
+              stepKey: { in: carriedKeys },
+            },
+            select: { stepKey: true },
+          });
+          const succeededKeys = new Set(succeeded.map((row) => row.stepKey));
+          const invalid = carriedKeys.find((key) => !succeededKeys.has(key));
+          if (invalid) {
+            throw new ConflictException({
+              code: 'TASK_REVISE_CARRY_INVALID',
+              message: `沿用锚点「${invalid}」不是当前执行版本中已完成的步骤`,
+            });
+          }
+        }
+
+        // 待定项：省略表示沿用当前草案（含已提交答复）；给出为全量替换，
+        // 同 key 且备选项仍有效时保留原答复。
+        const clarifications = input.clarifications === undefined
+          ? (latestPlan ? toPublicClarifications(latestPlan.clarifications) : [])
+          : carryClarificationAnswers(
+            this.plans.normalizeClarifications(input.clarifications),
+            latestPlan ? toPublicClarifications(latestPlan.clarifications) : [],
+          );
+
+        // 标题与目标：只更新显式给出的字段。
+        if (input.title !== undefined || input.goal !== undefined) {
+          await transaction.assistantTask.update({
+            where: { id: task.id },
+            data: {
+              ...(input.title !== undefined ? { title: input.title } : {}),
+              ...(input.goal !== undefined ? { goal: input.goal } : {}),
+            },
+          });
+        }
+
+        const version = (latestPlan?.version ?? 0) + 1;
+        await this.plans.createPlanVersion(transaction, {
+          tenantId: task.tenantId,
+          taskId: task.id,
+          version,
+          steps,
+          clarifications,
+          createdBy: 'USER',
+        });
+
+        // 执行中调整：回到待确认（释放执行权），确认时才物化新版本。
+        if (task.status === AssistantTaskStatus.WAITING_USER) {
+          const flipped = await transaction.assistantTask.updateMany({
+            where: {
+              id: task.id,
+              tenantId: task.tenantId,
+              status: AssistantTaskStatus.WAITING_USER,
+            },
+            data: {
+              status: AssistantTaskStatus.PENDING_CONFIRM,
+              executionOwner: null,
+              leaseExpiresAt: null,
+            },
+          });
+          if (flipped.count !== 1) {
+            throw new ConflictException({
+              code: 'TASK_STATE_CONFLICT',
+              message: '任务状态已被其他请求变更，请刷新后重试',
+            });
+          }
+        }
+
+        // 调整请求事件（去重）：用户在对话中可能多次补充要求，事件只在
+        // 「最近一条不是调整请求」时补写，卡片据此进入调整中，不刷屏。
+        const lastEvent = await transaction.assistantTaskEvent.findFirst({
+          where: { taskId: task.id },
+          orderBy: { seq: 'desc' },
+          select: { payload: true },
+        });
+        const lastType = (lastEvent?.payload as { type?: string } | null)?.type;
+        if (lastType !== 'plan_revision_requested') {
+          await this.taskEvents.appendInTransaction(transaction, task.id, task.tenantId, {
+            type: 'plan_revision_requested',
+            version: latestPlan?.version ?? task.planVersion,
+          });
+        }
+        await this.taskEvents.appendInTransaction(transaction, task.id, task.tenantId, {
+          type: 'plan_ready',
+          version,
+          steps,
+          clarifications,
+        });
+      });
+    } catch (error) {
+      // 并发重放同一工具调用：唯一约束兜底，回读已生成版本按幂等返回。
+      if (isUniqueConstraintError(error, 'revision_key')) {
+        return this.getDetail(task.id);
+      }
+      if (isUniqueConstraintError(error, 'version')) {
+        throw new ConflictException({
+          code: 'TASK_PLAN_REVISION_CONFLICT',
+          message: '计划正被并发调整，请基于最新计划重试',
+        });
+      }
+      throw error;
+    }
+    return this.getDetail(task.id);
+  }
+
   /** 当前成员发起的任务列表，按创建时间倒序；仅返回本人任务。 */
   async list(query: ListTasksQuery): Promise<PublicTaskListResult> {
     const limit = query.limit ?? DEFAULT_LIST_LIMIT;
@@ -243,7 +446,9 @@ export class TaskService {
   /**
    * 确认或调整计划（派发前确认）。
    * start：答复覆盖全部待定项后，抢占 PENDING_CONFIRM → RUNNING，物化步骤并触发执行；
-   * revise：保留当前草案、合并已提交答复，调整要求随后在对话中提出生成新草案（M3）。
+   * 执行中重排后的再次确认走同一入口（物化最新版本，按锚点沿用已完成产出）；
+   * revise：保留当前草案、合并已提交答复并记录调整请求事件；调整内容随后在对话中
+   * 提出，由 revise_orchestration_task 工具生成新版本草案。
    */
   async confirm(taskId: string, request: ConfirmTaskRequest): Promise<PublicTaskDetail> {
     const task = await this.requireOwnTask(taskId);
@@ -347,13 +552,16 @@ export class TaskService {
 
   /**
    * 交互解决后的即时恢复（由解决接口调用）：任务仍 WAITING_USER 且已无未决
-   * 事项时转回 RUNNING 并重新调度；仍有未决事项或任务本就在跑时静默返回。
+   * 事项时转回 RUNNING 并重新调度；仍有未决事项、选择「调整计划」等待重排、
+   * 或任务本就在跑时静默返回。
    */
   async resumeAfterInteractionResolved(taskId: string): Promise<void> {
     const task = await this.requireOwnTask(taskId);
     if (task.status !== AssistantTaskStatus.WAITING_USER) return;
     // 失败裁决先行落状态（重试 / 跳过 / 终止），再做挂起恢复判定。
     await this.failureHandling.applyResolvedFailureDecisions(task.id);
+    // 失败后选择「调整计划」：保持挂起等待重排草案与再次确认，不恢复执行。
+    if (await this.failureHandling.hasAwaitingReplan(task.id)) return;
     if (await this.interactions.hasPendingForTask(task.id)) return;
     const resumed = await this.prisma.assistantTask.updateMany({
       where: { id: task.id, tenantId: task.tenantId, status: AssistantTaskStatus.WAITING_USER },
@@ -397,6 +605,13 @@ export class TaskService {
         message: '任务计划缺失，无法确认',
       });
     }
+    // 防御：确认的目标版本必须晚于已物化版本（执行中重排的再次确认识别由此成立）。
+    if (plan.version <= task.planVersion) {
+      throw new ConflictException({
+        code: 'TASK_PLAN_REVISION_CONFLICT',
+        message: '计划版本已失效，请刷新后重试',
+      });
+    }
     const clarifications = toPublicClarifications(plan.clarifications);
     const steps = toPlanSteps(plan.steps);
     this.plans.assertAnswersSubmittable(clarifications, answers);
@@ -434,6 +649,8 @@ export class TaskService {
         taskId: task.id,
         planVersion: plan.version,
         steps,
+        // 执行中重排的再次确认：以已物化版本为锚，复制「沿用」步骤的已完成产出。
+        ...(task.planVersion >= 1 ? { carryFromPlanVersion: task.planVersion } : {}),
       });
       await this.taskEvents.appendInTransaction(transaction, task.id, task.tenantId, {
         type: 'plan_confirmed',
@@ -469,14 +686,31 @@ export class TaskService {
     }
     const clarifications = toPublicClarifications(plan.clarifications);
     this.plans.assertAnswersSubmittable(clarifications, answers);
-    if (clarifications.length > 0 && answers.length > 0) {
-      // 草案保留、已提交答复先合并；新计划版本由用户随后的对话调整生成（M3）。
-      const merged = this.plans.mergeAnswers(clarifications, answers);
-      await this.prisma.assistantTaskPlan.update({
-        where: { id: plan.id },
-        data: { clarifications: merged as unknown as Prisma.InputJsonValue },
+    const merged = clarifications.length > 0 && answers.length > 0
+      ? this.plans.mergeAnswers(clarifications, answers)
+      : null;
+    await this.prisma.$transaction(async (transaction) => {
+      if (merged) {
+        // 草案保留、已提交答复先合并；新计划版本由随后的 revise 工具生成。
+        await transaction.assistantTaskPlan.update({
+          where: { id: plan.id },
+          data: { clarifications: merged as unknown as Prisma.InputJsonValue },
+        });
+      }
+      // 调整请求事件（去重）：最近一条已是调整请求时不再补写，不刷屏。
+      const lastEvent = await transaction.assistantTaskEvent.findFirst({
+        where: { taskId: task.id },
+        orderBy: { seq: 'desc' },
+        select: { payload: true },
       });
-    }
+      const lastType = (lastEvent?.payload as { type?: string } | null)?.type;
+      if (lastType !== 'plan_revision_requested') {
+        await this.taskEvents.appendInTransaction(transaction, task.id, task.tenantId, {
+          type: 'plan_revision_requested',
+          version: plan.version,
+        });
+      }
+    });
     return this.getDetail(task.id);
   }
 
@@ -611,6 +845,22 @@ function toPlanSteps(value: Prisma.JsonValue): PublicTaskPlanStep[] {
 
 function toPublicClarifications(value: Prisma.JsonValue | null): PublicTaskClarification[] {
   return Array.isArray(value) ? (value as unknown as PublicTaskClarification[]) : [];
+}
+
+/** 调整计划时待定项答复的延续：同 key 且备选项仍有效时保留原答复。 */
+function carryClarificationAnswers(
+  next: PublicTaskClarification[],
+  previous: PublicTaskClarification[],
+): PublicTaskClarification[] {
+  if (previous.length === 0) return next;
+  const byKey = new Map(previous.map((clarification) => [clarification.key, clarification]));
+  return next.map((clarification) => {
+    const before = byKey.get(clarification.key);
+    if (!before?.answer) return clarification;
+    return clarification.options.some((option) => option.id === before.answer)
+      ? { ...clarification, answer: before.answer }
+      : clarification;
+  });
 }
 
 function isUniqueConstraintError(error: unknown, field: string): boolean {

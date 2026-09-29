@@ -333,6 +333,8 @@ export class StepStateService {
    * - skip：WAITING_USER → SKIPPED，写 step_skipped 事件，产出缺失由任务汇总呈现；
    * - abort：WAITING_USER → FAILED，error 标记 resolution=abort，调度收尾据此
    *   跳过再次升级、任务随之判定失败。
+   * replan（调整计划）不在此落步骤状态：步骤保持 WAITING_USER 让行，
+   * 由重排链路生成新计划版本、用户再次确认后随新版本物化收束。
    */
   async applyFailureDecision(input: {
     taskId: string;
@@ -342,6 +344,10 @@ export class StepStateService {
     action: FailureDecisionAction;
     reason: string;
   }): Promise<boolean> {
+    if (input.action === 'replan') {
+      // 防御：调整计划裁决不属于状态收束动作，误入即视为调用方接线错误。
+      throw new Error('failure decision replan is handled by the plan revision flow');
+    }
     return this.prisma.$transaction(async (transaction) => {
       const now = new Date();
       if (input.action === 'retry') {

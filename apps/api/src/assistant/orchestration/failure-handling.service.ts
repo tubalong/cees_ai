@@ -30,6 +30,7 @@ const FAILURE_DECISION_OPTIONS = [
   { id: 'retry', label: '重试该步骤', description: '再执行一次本步骤' },
   { id: 'skip', label: '跳过该步骤', description: '本步产出缺失，继续后续步骤' },
   { id: 'abort', label: '终止任务', description: '结束任务并保留已产出的内容' },
+  { id: 'replan', label: '调整计划', description: '修改后续步骤安排后重新确认执行' },
 ] as const;
 
 /**
@@ -191,7 +192,8 @@ export class FailureHandlingService {
   /**
    * 应用已解决的失败裁决（解决接口即时恢复 / 调度循环兜底调用，幂等）：
    * 对「WAITING_USER 步骤 + 最近一条已解决且携带 failure 标记的 DECISION 交互」
-   * 执行裁决动作——retry=清退避立即重试、skip=跳过、abort=失败收束。
+   * 执行裁决动作——retry=清退避立即重试、skip=跳过、abort=失败收束；
+   * replan（调整计划）不落步骤状态：保持挂起，由重排链路生成新版本后再次确认。
    * 普通（ask_user）裁决不在此处理，仍走窗口消息续跑路径。
    */
   async applyResolvedFailureDecisions(taskId: string): Promise<number> {
@@ -211,19 +213,8 @@ export class FailureHandlingService {
     });
     let applied = 0;
     for (const step of waiting) {
-      const interaction = await this.prisma.assistantTaskInteraction.findFirst({
-        where: {
-          taskId,
-          stepId: step.id,
-          type: 'DECISION',
-        },
-        orderBy: { createdAt: 'desc' },
-        select: { status: true, payload: true, resolution: true },
-      });
-      if (!interaction || interaction.status !== 'RESOLVED') continue;
-      if (!hasFailureMarker(interaction.payload)) continue;
-      const action = readResolutionValue(interaction.resolution);
-      if (!action || !isFailureDecisionAction(action)) continue;
+      const action = await this.readResolvedFailureDecision(taskId, step.id);
+      if (!action || action === 'replan') continue;
       const ok = await this.state.applyFailureDecision({
         taskId,
         stepId: step.id,
@@ -235,6 +226,49 @@ export class FailureHandlingService {
       if (ok) applied++;
     }
     return applied;
+  }
+
+  /**
+   * 是否有「待调整」的挂起失败：当前执行版本内有 WAITING_USER 步骤，且其最近
+   * 一条失败裁决已选择「调整计划」。此时任务保持挂起让行，等 revise 工具生成
+   * 新版本草案并再次确认；期间调度循环与恢复扫描不接管该任务。
+   */
+  async hasAwaitingReplan(taskId: string): Promise<boolean> {
+    const task = await this.prisma.assistantTask.findUnique({
+      where: { id: taskId },
+      select: { id: true, planVersion: true },
+    });
+    if (!task) return false;
+    const waiting = await this.prisma.assistantTaskStep.findMany({
+      where: {
+        taskId,
+        planVersion: task.planVersion,
+        status: AssistantTaskStepStatus.WAITING_USER,
+      },
+      orderBy: { stepNo: 'asc' },
+      select: { id: true },
+    });
+    for (const step of waiting) {
+      if ((await this.readResolvedFailureDecision(taskId, step.id)) === 'replan') return true;
+    }
+    return false;
+  }
+
+  /** 挂起步骤最近一条已解决失败裁决的动作；非失败裁决或未解决时为 null。 */
+  private async readResolvedFailureDecision(
+    taskId: string,
+    stepId: string,
+  ): Promise<FailureDecisionAction | null> {
+    const interaction = await this.prisma.assistantTaskInteraction.findFirst({
+      where: { taskId, stepId, type: 'DECISION' },
+      orderBy: { createdAt: 'desc' },
+      select: { status: true, payload: true, resolution: true },
+    });
+    if (!interaction || interaction.status !== 'RESOLVED') return null;
+    if (!hasFailureMarker(interaction.payload)) return null;
+    const action = readResolutionValue(interaction.resolution);
+    if (!action || !isFailureDecisionAction(action)) return null;
+    return action;
   }
 
   /** 升级用户裁决：FAILED → WAITING_USER 并创建 DECISION 交互（同事务）。 */

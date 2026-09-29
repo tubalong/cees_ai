@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
 import { AssistantTaskPlan, AssistantTaskStepStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import {
@@ -15,6 +15,11 @@ export interface PlannedStepDraft {
   expectedOutput?: string;
   /** 前置步骤序号，必须全部小于当前步骤序号，天然排除自引用与环。 */
   dependsOn?: number[];
+  /**
+   * 执行中重排的沿用锚点：引用旧执行版本（task.planVersion）中已成功步骤的
+   * stepKey，该步骤产出直接沿用、不再执行；引用合法性由 TaskService 按库校验。
+   */
+  carriedFromStepKey?: string;
 }
 
 /** 模型给出的关键待定项草稿。 */
@@ -70,6 +75,7 @@ export class PlanService {
         assigneeName,
         expectedOutput: step.expectedOutput ?? null,
         dependsOnStepKeys: [...new Set(dependsOn)].map((ref) => stepKeys[ref - 1]),
+        ...(step.carriedFromStepKey ? { carriedFromStepKey: step.carriedFromStepKey } : {}),
       };
     });
   }
@@ -185,6 +191,9 @@ export class PlanService {
   /**
    * 计划确认后把快照物化为运行时步骤行：无依赖的步骤为 READY，
    * 其余 PENDING（依赖满足由任务运行器在 M2 调度时转换）。
+   * 执行中重排的再次确认（carryFromPlanVersion）下，「沿用锚点」步骤直接落
+   * SUCCEEDED 并复制锚点版本同 stepKey 的已完成产出（摘要 / 产出引用 / 起止
+   * 时间），无需重新执行；锚点已不是已完成步骤时中止确认。
    */
   async materializeSteps(
     transaction: Prisma.TransactionClient,
@@ -193,21 +202,72 @@ export class PlanService {
       taskId: string;
       planVersion: number;
       steps: PublicTaskPlanStep[];
+      /** 沿用锚点的来源版本（执行中重排确认时传已物化版本）；缺省不复制产出。 */
+      carryFromPlanVersion?: number;
     },
   ): Promise<void> {
+    const carriedKeys = input.steps
+      .map((step) => step.carriedFromStepKey)
+      .filter((key): key is string => typeof key === 'string' && key.length > 0);
+    const carriedByKey = new Map<string, {
+      summary: string | null;
+      outputRefs: Prisma.JsonValue;
+      startedAt: Date | null;
+      completedAt: Date | null;
+    }>();
+    if (carriedKeys.length > 0) {
+      if (input.carryFromPlanVersion === undefined) {
+        throw new ConflictException({
+          code: 'TASK_REVISE_CARRY_UNAVAILABLE',
+          message: '任务尚无已执行版本，不能沿用历史产出',
+        });
+      }
+      const anchors = await transaction.assistantTaskStep.findMany({
+        where: {
+          taskId: input.taskId,
+          planVersion: input.carryFromPlanVersion,
+          stepKey: { in: carriedKeys },
+          status: AssistantTaskStepStatus.SUCCEEDED,
+        },
+        select: { stepKey: true, summary: true, outputRefs: true, startedAt: true, completedAt: true },
+      });
+      for (const anchor of anchors) carriedByKey.set(anchor.stepKey, anchor);
+      const missing = carriedKeys.find((key) => !carriedByKey.has(key));
+      if (missing) {
+        throw new ConflictException({
+          code: 'TASK_REVISE_CARRY_INVALID',
+          message: `沿用锚点「${missing}」已不是已完成步骤，无法沿用`,
+        });
+      }
+    }
     await transaction.assistantTaskStep.createMany({
-      data: input.steps.map((step) => ({
-        tenantId: input.tenantId,
-        taskId: input.taskId,
-        planVersion: input.planVersion,
-        stepKey: step.stepKey,
-        stepNo: step.stepNo,
-        assigneeAgentId: step.assigneeAgentId,
-        dependsOn: step.dependsOnStepKeys as unknown as Prisma.InputJsonValue,
-        status: step.dependsOnStepKeys.length === 0
-          ? AssistantTaskStepStatus.READY
-          : AssistantTaskStepStatus.PENDING,
-      })),
+      data: input.steps.map((step) => {
+        const anchor = step.carriedFromStepKey
+          ? carriedByKey.get(step.carriedFromStepKey)
+          : undefined;
+        return {
+          tenantId: input.tenantId,
+          taskId: input.taskId,
+          planVersion: input.planVersion,
+          stepKey: step.stepKey,
+          stepNo: step.stepNo,
+          assigneeAgentId: step.assigneeAgentId,
+          dependsOn: step.dependsOnStepKeys as unknown as Prisma.InputJsonValue,
+          ...(anchor
+            ? {
+              status: AssistantTaskStepStatus.SUCCEEDED,
+              summary: anchor.summary,
+              outputRefs: anchor.outputRefs === null ? Prisma.JsonNull : anchor.outputRefs,
+              startedAt: anchor.startedAt,
+              completedAt: anchor.completedAt,
+            }
+            : {
+              status: step.dependsOnStepKeys.length === 0
+                ? AssistantTaskStepStatus.READY
+                : AssistantTaskStepStatus.PENDING,
+            }),
+        };
+      }),
     });
   }
 }

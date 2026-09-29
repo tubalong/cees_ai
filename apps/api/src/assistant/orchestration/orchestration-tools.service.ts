@@ -6,6 +6,7 @@ import { PrismaService } from '../../database/prisma.service';
 /** 受同事门控的编排工具名；无在职 AI 同事时这些工具不进入模型工具列表。 */
 export const ORCHESTRATION_TOOL_NAMES: ReadonlySet<string> = new Set([
   'create_orchestration_task',
+  'revise_orchestration_task',
 ]);
 
 /** 在职同事名册条目：供工具描述注入与执行器指派校验。 */

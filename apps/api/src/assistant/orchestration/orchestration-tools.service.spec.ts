@@ -22,7 +22,11 @@ describe('OrchestrationToolsService', () => {
     const prisma = createPrismaMock();
     prisma.assistantAgent.findMany.mockResolvedValue([]);
     const service = new OrchestrationToolsService(prisma as unknown as PrismaService);
-    const tools = [chatTool('create_orchestration_task'), chatTool('web_search')];
+    const tools = [
+      chatTool('create_orchestration_task'),
+      chatTool('revise_orchestration_task'),
+      chatTool('web_search'),
+    ];
 
     const gated = await service.gate('tenant-1', tools);
 

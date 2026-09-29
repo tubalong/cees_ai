@@ -214,13 +214,19 @@ export class TaskRunnerService implements OnModuleInit, OnModuleDestroy {
         }
 
         // 4) 挂起步骤：先应用「已解决的失败裁决」（重试/跳过/终止落状态）；
-        //    仍有未决事项 → 任务转 WAITING_USER 并释放租约等待用户介入；
-        //    全部已解决 → 重新派发（断点续跑）——挂起不阻塞其它步骤（第 3 步已覆盖）。
+        //    选择「调整计划」→ 让行等待重排草案与再次确认；仍有未决事项 →
+        //    任务转 WAITING_USER 并释放租约等待用户介入；全部已解决 → 重新派发
+        //    （断点续跑）——挂起不阻塞其它步骤（第 3 步已覆盖）。
         const waitingSteps = steps.filter(
           (step) => step.status === AssistantTaskStepStatus.WAITING_USER,
         );
         if (waitingSteps.length > 0) {
           if (await this.failureHandling.applyResolvedFailureDecisions(taskId) > 0) continue;
+          // 失败后选择「调整计划」：保持挂起等待 revise 工具生成新版本并再次确认。
+          if (await this.failureHandling.hasAwaitingReplan(taskId)) {
+            await this.markTaskWaitingUser(taskId);
+            return;
+          }
           if (await this.interactions.hasPendingForTask(taskId)) {
             await this.markTaskWaitingUser(taskId);
             return;
@@ -299,6 +305,7 @@ export class TaskRunnerService implements OnModuleInit, OnModuleDestroy {
   /**
    * 挂起恢复兜底：WAITING_USER 且已无未决事项的任务转回 RUNNING 并重新调度。
    * 主路径是交互解决接口即时恢复；此扫描补偿接口调用中断等残留场景。
+   * 失败后选择「调整计划」的任务保持挂起，等待重排草案与再次确认，不接管调度。
    */
   async resumeWaitingTasks(): Promise<number> {
     const waiting = await this.prisma.assistantTask.findMany({
@@ -311,6 +318,7 @@ export class TaskRunnerService implements OnModuleInit, OnModuleDestroy {
     for (const task of waiting) {
       try {
         if (await this.interactions.hasPendingForTask(task.id)) continue;
+        if (await this.failureHandling.hasAwaitingReplan(task.id)) continue;
         const claimed = await this.prisma.assistantTask.updateMany({
           where: { id: task.id, status: AssistantTaskStatus.WAITING_USER },
           data: {

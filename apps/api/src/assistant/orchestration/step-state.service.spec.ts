@@ -736,6 +736,21 @@ describe('StepStateService', () => {
       reason: '用户裁决终止任务',
     });
   });
+
+  it('rejects the replan decision from the step-state settlement path', async () => {
+    const harness = createHarness();
+
+    // 调整计划不属于状态收束动作：防御性拒绝，保持挂起由重排链路处理。
+    await expect(harness.service.applyFailureDecision({
+      taskId: TASK_ID,
+      stepId: STEP_ID,
+      stepKey: 's1',
+      tenantId: TENANT_ID,
+      action: 'replan',
+      reason: '用户裁决调整计划',
+    })).rejects.toThrow('replan');
+    expect(harness.prisma.$transaction).not.toHaveBeenCalled();
+  });
 });
 
 function createHarness(options: {

@@ -49,6 +49,7 @@ import { CreateKnowledgeBaseTool } from './tools/executors/create-knowledge-base
 import { CreateOrchestrationTaskTool } from './tools/executors/create-orchestration-task.tool';
 import { CreateProjectTool } from './tools/executors/create-project.tool';
 import { CreateTaskTool } from './tools/executors/create-task.tool';
+import { ReviseOrchestrationTaskTool } from './tools/executors/revise-orchestration-task.tool';
 import { KnowledgeSearchTool } from './tools/executors/knowledge-search.tool';
 import { ListDepartmentsTool } from './tools/executors/list-departments.tool';
 import { ListKnowledgeBasesTool } from './tools/executors/list-knowledge-bases.tool';
@@ -106,6 +107,7 @@ import { AssignTaskTool } from './tools/executors/assign-task.tool';
     CreateOrchestrationTaskTool,
     CreateProjectTool,
     CreateTaskTool,
+    ReviseOrchestrationTaskTool,
     GenerateDocumentTool,
     GenerateImageTool,
     CreateKnowledgeBaseTool,

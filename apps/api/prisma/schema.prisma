@@ -465,6 +465,7 @@ enum AssistantTaskStepStatus {
 enum AssistantTaskEventType {
   TASK_CREATED
   PLAN_READY
+  PLAN_REVISION_REQUESTED
   PLAN_CONFIRMED
   STEP_STARTED
   STEP_PROGRESS
@@ -2627,10 +2628,13 @@ model AssistantTaskPlan {
   clarifications Json?                      @map("clarifications")
   /// 版本产生方：USER = 用户调整要求后重新采纳；SYSTEM = 总管/系统生成。
   createdBy      AssistantTaskPlanCreatedBy @default(SYSTEM) @map("created_by")
+  /// 重排幂等键：同一次「调整计划」工具调用重放不重复生成版本；非重排版本为 null。
+  revisionKey    String?                    @map("revision_key")
   confirmedAt    DateTime?                  @map("confirmed_at")
   createdAt      DateTime                   @default(now()) @map("created_at")
 
   @@unique([taskId, version])
+  @@unique([taskId, revisionKey])
   @@map("assistant_task_plans")
 }
 

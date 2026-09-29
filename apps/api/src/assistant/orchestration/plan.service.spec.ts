@@ -1,7 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service';
 import { PlanService } from './plan.service';
-import type { PublicTaskClarification } from './orchestration.types';
+import type { PublicTaskClarification, PublicTaskPlanStep } from './orchestration.types';
 
 /**
  * 计划规范化与答复校验是「模型草稿 → 可确认快照」的纯逻辑防御层，
@@ -47,6 +47,24 @@ describe('PlanService', () => {
         [{ requirement: '任务', assigneeAgentId: 'agent-x' }],
         roster(),
       )).toThrow('不在可用名单中');
+    });
+
+    it('passes through the carry anchor of a replanned step', () => {
+      const steps = service.normalizeSteps(
+        [{ requirement: '重新汇总', assigneeAgentId: 'agent-2', carriedFromStepKey: 's1' }],
+        roster(),
+      );
+
+      expect(steps[0].carriedFromStepKey).toBe('s1');
+    });
+
+    it('omits the carry anchor when no history step is reused', () => {
+      const steps = service.normalizeSteps(
+        [{ requirement: '收集', assigneeAgentId: 'agent-1' }],
+        roster(),
+      );
+
+      expect('carriedFromStepKey' in steps[0]).toBe(false);
     });
   });
 
@@ -122,6 +140,98 @@ describe('PlanService', () => {
       expect(clarifications[0].answer).toBeNull();
     });
   });
+
+  describe('materializeSteps', () => {
+    it('materializes steps as READY/PENDING by their dependencies', async () => {
+      const transaction = materializeTransaction();
+
+      await service.materializeSteps(transaction.client, {
+        tenantId: 'tenant-1',
+        taskId: 'task-1',
+        planVersion: 1,
+        steps: [
+          planStep({ stepNo: 1, stepKey: 's1' }),
+          planStep({ stepNo: 2, stepKey: 's2', dependsOnStepKeys: ['s1'] }),
+        ],
+      });
+
+      expect(transaction.stepDelegate.findMany).not.toHaveBeenCalled();
+      expect(transaction.stepDelegate.createMany).toHaveBeenCalledWith({
+        data: [
+          expect.objectContaining({ stepKey: 's1', status: 'READY' }),
+          expect.objectContaining({ stepKey: 's2', status: 'PENDING', dependsOn: ['s1'] }),
+        ],
+      });
+    });
+
+    it('copies the succeeded anchor outputs for carried steps on re-confirmation', async () => {
+      const transaction = materializeTransaction({
+        anchors: [{
+          stepKey: 's1',
+          summary: '上一版产出：销售汇总表',
+          outputRefs: [{ resourceType: 'document', resourceId: 'r-1' }],
+          startedAt: new Date('2026-09-29T07:00:00.000Z'),
+          completedAt: new Date('2026-09-29T07:30:00.000Z'),
+        }],
+      });
+
+      await service.materializeSteps(transaction.client, {
+        tenantId: 'tenant-1',
+        taskId: 'task-1',
+        planVersion: 2,
+        steps: [
+          planStep({ stepNo: 1, stepKey: 's1', carriedFromStepKey: 's1' }),
+          planStep({ stepNo: 2, stepKey: 's2', dependsOnStepKeys: ['s1'] }),
+        ],
+        carryFromPlanVersion: 1,
+      });
+
+      // 锚点按旧执行版本读取：只接受已成功步骤。
+      expect(transaction.stepDelegate.findMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: expect.objectContaining({
+          planVersion: 1,
+          status: 'SUCCEEDED',
+          stepKey: { in: ['s1'] },
+        }),
+      }));
+      expect(transaction.stepDelegate.createMany).toHaveBeenCalledWith({
+        data: [
+          expect.objectContaining({
+            stepKey: 's1',
+            status: 'SUCCEEDED',
+            summary: '上一版产出：销售汇总表',
+            outputRefs: [{ resourceType: 'document', resourceId: 'r-1' }],
+          }),
+          expect.objectContaining({ stepKey: 's2', status: 'PENDING' }),
+        ],
+      });
+    });
+
+    it('rejects a carried step without a source version', async () => {
+      const transaction = materializeTransaction();
+
+      await expect(service.materializeSteps(transaction.client, {
+        tenantId: 'tenant-1',
+        taskId: 'task-1',
+        planVersion: 2,
+        steps: [planStep({ stepNo: 1, stepKey: 's1', carriedFromStepKey: 's1' })],
+      })).rejects.toMatchObject({ response: { code: 'TASK_REVISE_CARRY_UNAVAILABLE' } });
+      expect(transaction.stepDelegate.createMany).not.toHaveBeenCalled();
+    });
+
+    it('rejects a carried step whose anchor is no longer succeeded', async () => {
+      const transaction = materializeTransaction({ anchors: [] });
+
+      await expect(service.materializeSteps(transaction.client, {
+        tenantId: 'tenant-1',
+        taskId: 'task-1',
+        planVersion: 2,
+        steps: [planStep({ stepNo: 1, stepKey: 's1', carriedFromStepKey: 's1' })],
+        carryFromPlanVersion: 1,
+      })).rejects.toMatchObject({ response: { code: 'TASK_REVISE_CARRY_INVALID' } });
+      expect(transaction.stepDelegate.createMany).not.toHaveBeenCalled();
+    });
+  });
 });
 
 function clarificationsFixture(): PublicTaskClarification[] {
@@ -150,4 +260,34 @@ function expectBadRequest(fn: () => unknown, code: string): void {
   }
   expect(caught).toBeInstanceOf(BadRequestException);
   expect((caught as BadRequestException).getResponse()).toMatchObject({ code });
+}
+
+function planStep(
+  overrides: Partial<PublicTaskPlanStep> & Pick<PublicTaskPlanStep, 'stepNo' | 'stepKey'>,
+): PublicTaskPlanStep {
+  return {
+    requirement: '完成本步',
+    assigneeAgentId: 'agent-1',
+    assigneeName: '数据助理',
+    expectedOutput: null,
+    dependsOnStepKeys: [],
+    ...overrides,
+  };
+}
+
+function materializeTransaction(options: {
+  anchors?: Array<{
+    stepKey: string;
+    summary: string | null;
+    outputRefs: unknown;
+    startedAt: Date | null;
+    completedAt: Date | null;
+  }>;
+} = {}) {
+  const stepDelegate = {
+    findMany: jest.fn().mockResolvedValue(options.anchors ?? []),
+    createMany: jest.fn().mockResolvedValue({ count: 1 }),
+  };
+  const client = { assistantTaskStep: stepDelegate } as unknown as Parameters<PlanService['materializeSteps']>[0];
+  return { client, stepDelegate };
 }
