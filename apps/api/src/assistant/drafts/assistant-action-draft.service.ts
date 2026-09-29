@@ -208,7 +208,9 @@ export class AssistantActionDraftService {
             };
         } catch (error) {
             const message = error instanceof Error ? error.message : '操作执行失败';
-            const summary = '操作未完成，系统未产生业务写入，请重试或调整要求。';
+            // 不能断言「未产生业务写入」：工具可能已经把写入提交、随后在结算阶段失败，
+            // 旧措辞会让用户以为没生效而重试，从而产生重复数据。
+            const summary = '操作执行失败，请刷新对话确认结果；若未生效可重试。';
             this.logger.error(`action draft execution failed: draft=${draft.id} tool=${draft.toolName} error=${message}`);
             await this.settleExecuted(draft, DraftStatus.FAILED, summary, null, null, 'ACTION_EXECUTION_FAILED');
             return { draftId: draft.id, status: 'FAILED', summary, resource: null };
@@ -365,8 +367,15 @@ export class AssistantActionDraftService {
             });
 
             if (succeeded) {
-                await transaction.conversationMessage.create({
-                    data: {
+                // toolCallId 在 conversation_messages 上是唯一列，而草稿生成时 turn-state
+                // 已经写过一条 TOOL 消息（内容为草稿摘要）。确认成功后必须原地更新这条消息，
+                // 不能用 create 再插一条：唯一冲突会让整个结算事务回滚，而业务写入已经在
+                // execute 里提交过了，结果就是「数据已写入、草稿被标记失败」，用户重试后
+                // 产生重复数据（如重复建库）。
+                await transaction.conversationMessage.upsert({
+                    where: { toolCallId: draft.toolCallId },
+                    update: { content: modelSummary },
+                    create: {
                         tenantId: draft.tenantId,
                         conversationId: draft.conversationId,
                         turnId: draft.turnId,

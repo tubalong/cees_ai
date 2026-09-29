@@ -219,6 +219,18 @@ approve(工具存在 → 权限 → 参数校验)
 `tool_result` 事件。事件追加回原轮次是关键：客户端重放 `events?afterSeq=N` 时能看到
 `awaiting_confirmation → completed` 的完整演化，而不是永远停在待确认。
 
+结算事务有两条硬约束，违反会造成「数据已写入、界面说失败」并诱导用户重试出重复数据：
+
+1. **TOOL 消息必须原地更新，不能重复插入。** `conversation_messages.tool_call_id` 是唯一列，
+   而草稿生成时 `turn-state` 已经写过一条 TOOL 消息（内容为草稿摘要）。确认成功后必须用
+   `upsert` 更新该行内容为工具内部摘要（模型后续调用需要其中的内部 ID，如 `knowledge_base_id`）。
+   若改用 `create` 再插一条，会命中 `tool_call_id` 唯一冲突导致**整个结算事务回滚**——而业务写入
+   早已在 `definition.execute` 内部提交，于是草稿被标记 `FAILED`、用户被告知操作未完成，
+   重试即产生重复业务数据（例如重复创建同名知识库）。
+2. **失败文案不得断言「未产生业务写入」。** 工具可能已经提交写入、随后在结算阶段失败，
+   因此在无法确认的情况下只能提示用户刷新确认结果并视情况重试。真实失败原因仍按 3.5 的分工
+   落库与推送，不进模型上下文。
+
 ### 3.5 审计与脱敏
 
 - 审计只记 `toolName` / `toolVersion` / `toolCallId` / `executedResourceId` / `errorCode`；
