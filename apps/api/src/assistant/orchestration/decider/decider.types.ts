@@ -4,6 +4,7 @@
  */
 export type DecisionType =
   | 'SUFFICIENCY_CHECK'
+  | 'FAILURE_HANDLING'
   | 'ROUTING'
   | 'COMPLETION_CHECK'
   | 'RISK_SCORE'
@@ -41,6 +42,16 @@ export interface DecisionStepResult {
     /** 同任务内已存在未决的同类问题（去重防御）。 */
     duplicatePending: boolean;
   };
+  failure?: {
+    /** 失败错误码（内部约定值或上游错误码）。 */
+    code: string;
+    /** 已发生的尝试次数（含本次失败）。 */
+    attemptNo: number;
+    /** 允许的最大尝试次数（含首次）。 */
+    maxAttempts: number;
+    /** 该错误是否被判定为可重试（瞬时类）。 */
+    retryable: boolean;
+  };
 }
 
 export interface DecisionInput {
@@ -67,6 +78,10 @@ export interface Decision {
 /** SUFFICIENCY_CHECK 的 choice：ask_user=需要用户介入（挂起提问）；proceed=可自主继续。 */
 export const SUFFICIENCY_CHOICES = ['ask_user', 'proceed'] as const;
 export type SufficiencyChoice = (typeof SUFFICIENCY_CHOICES)[number];
+
+/** FAILURE_HANDLING 的 choice：retry=按退避自动重试；escalate=升级用户裁决。 */
+export const FAILURE_CHOICES = ['retry', 'escalate'] as const;
+export type FailureChoice = (typeof FAILURE_CHOICES)[number];
 
 export interface OrchestrationDecider {
   decide(input: DecisionInput): Promise<Decision>;

@@ -25,6 +25,17 @@ export function createOrchestrationDecider(deps: {
       const deterministic = deps.rule.tryDecide(input);
       if (deterministic) return deterministic;
 
+      // 失败处置规则总可判定（余额与可重试性均已知）；走到这里说明上下文缺失。
+      // 升级用户是安全方向（不静默重试、不静默跳过），交用户显式裁决。
+      if (input.decisionType === 'FAILURE_HANDLING') {
+        logger.warn('failure handling decision lacks context, escalating to user');
+        return {
+          choice: 'escalate',
+          confidence: 0,
+          rationale: '失败处置缺少可判定上下文，升级用户处理',
+        };
+      }
+
       if (deps.config.mode === 'rule') {
         return {
           choice: 'ask_user',

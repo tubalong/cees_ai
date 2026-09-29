@@ -76,6 +76,49 @@ describe('RuleDeciderService', () => {
       ),
     ).toBeNull();
   });
+
+  it('rules to retry while a retryable failure still has attempts left', () => {
+    const input = decisionInput({ decisionType: 'FAILURE_HANDLING' });
+    input.stepResult!.failure = {
+      code: 'STEP_EXECUTION_ERROR',
+      attemptNo: 1,
+      maxAttempts: 3,
+      retryable: true,
+    };
+
+    const decision = service.tryDecide(input);
+
+    expect(decision).toEqual(expect.objectContaining({ choice: 'retry', confidence: 1 }));
+    expect(decision?.rationale).toContain('第 1/3 次');
+  });
+
+  it('rules to escalate when retries are exhausted or the error is not retryable', () => {
+    const exhausted = decisionInput({ decisionType: 'FAILURE_HANDLING' });
+    exhausted.stepResult!.failure = {
+      code: 'STEP_EXECUTION_ERROR',
+      attemptNo: 3,
+      maxAttempts: 3,
+      retryable: true,
+    };
+    const first = service.tryDecide(exhausted);
+    expect(first).toEqual(expect.objectContaining({ choice: 'escalate', confidence: 1 }));
+    expect(first?.rationale).toContain('尝试次数已达上限');
+
+    const permanent = decisionInput({ decisionType: 'FAILURE_HANDLING' });
+    permanent.stepResult!.failure = {
+      code: 'STEP_TOOL_FORBIDDEN',
+      attemptNo: 1,
+      maxAttempts: 3,
+      retryable: false,
+    };
+    const second = service.tryDecide(permanent);
+    expect(second).toEqual(expect.objectContaining({ choice: 'escalate', confidence: 1 }));
+    expect(second?.rationale).toContain('错误不可自动重试');
+  });
+
+  it('defers a failure handling decision when the failure context is absent', () => {
+    expect(service.tryDecide(decisionInput({ decisionType: 'FAILURE_HANDLING' }))).toBeNull();
+  });
 });
 
 describe('loadOrchestrationDeciderConfig', () => {
@@ -213,6 +256,23 @@ describe('createOrchestrationDecider', () => {
 
     expect(decision).toEqual(expect.objectContaining({ choice: 'ask_user', confidence: 0 }));
     expect(decision.rationale).toContain('决策器不可用');
+  });
+
+  it('escalates a failure handling decision without context instead of calling the llm', async () => {
+    const { ruleTryDecide, llmDecide } = harness();
+    ruleTryDecide.mockReturnValue(null);
+    const decider = createOrchestrationDecider({
+      rule: { tryDecide: ruleTryDecide } as unknown as RuleDeciderService,
+      llm: { decide: llmDecide } as unknown as LlmDeciderService,
+      config,
+    });
+
+    const decision = await decider.decide(decisionInput({ decisionType: 'FAILURE_HANDLING' }));
+
+    // 失败处置无上下文时升级用户是安全方向：不静默重试、不静默跳过、不调模型。
+    expect(decision).toEqual(expect.objectContaining({ choice: 'escalate', confidence: 0 }));
+    expect(decision.rationale).toContain('缺少可判定上下文');
+    expect(llmDecide).not.toHaveBeenCalled();
   });
 });
 

@@ -2653,6 +2653,8 @@ model AssistantTaskStep {
   status          AssistantTaskStepStatus @default(PENDING)
   /// 重试计数；超上限走「重排 / 跳过 / 升级」阶梯。
   attemptNo       Int                     @default(0) @map("attempt_no")
+  /// 自动重试的「不早于」时间（失败退避）；为空表示立即可派发。
+  retryAfterAt    DateTime?               @map("retry_after_at")
   /// 结果摘要（回流总管与展示）。
   summary         String?                 @db.Text
   /// 产出资产引用列表（不含签名 URL）。

@@ -580,6 +580,162 @@ describe('StepStateService', () => {
       data: expect.objectContaining({ toolCallRef: TOOL_CALL_ID, role: 'TOOL' }),
     }));
   });
+
+  it('yields the task execution by releasing the lease to the current moment', async () => {
+    const harness = createHarness();
+
+    await expect(harness.service.yieldTaskExecution({
+      taskId: TASK_ID,
+      executionOwner: EXECUTION_OWNER,
+    })).resolves.toBe(true);
+
+    // 让行即交还执行权：租约置为当前时刻，恢复扫描可立即重拾（退避窗口不空转）。
+    expect(harness.prisma.assistantTask.updateMany).toHaveBeenCalledWith({
+      where: { id: TASK_ID, status: 'RUNNING', executionOwner: EXECUTION_OWNER },
+      data: {
+        executionOwner: null,
+        leaseExpiresAt: expect.any(Date),
+        heartbeatAt: expect.any(Date),
+      },
+    });
+  });
+
+  it('escalates a failed step onto the user inside the caller transaction', async () => {
+    const harness = createHarness();
+
+    await expect(harness.service.escalateStepInTransaction(
+      harness.tx as unknown as Prisma.TransactionClient,
+      { taskId: TASK_ID, stepId: STEP_ID, tenantId: TENANT_ID },
+    )).resolves.toBe(true);
+
+    // 失败 → 挂起：清空完成时间；等待期间步骤不属于任何执行者。
+    expect(harness.tx.assistantTaskStep.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: STEP_ID,
+        taskId: TASK_ID,
+        tenantId: TENANT_ID,
+        status: AssistantTaskStepStatus.FAILED,
+      },
+      data: {
+        status: AssistantTaskStepStatus.WAITING_USER,
+        completedAt: null,
+        heartbeatAt: expect.any(Date),
+      },
+    });
+  });
+
+  it('schedules a failed step for retry with the backoff not-before time', async () => {
+    const harness = createHarness();
+    const retryAfterAt = new Date('2026-09-28T10:00:30.000Z');
+
+    await expect(harness.service.scheduleStepRetry({
+      taskId: TASK_ID,
+      stepId: STEP_ID,
+      tenantId: TENANT_ID,
+      retryAfterAt,
+    })).resolves.toBe(true);
+
+    // 退避调度不写事件：本次失败已由 step_failed 留痕，重试开始由下一次 step_started 表达。
+    expect(harness.prisma.assistantTaskStep.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: STEP_ID,
+        taskId: TASK_ID,
+        tenantId: TENANT_ID,
+        status: AssistantTaskStepStatus.FAILED,
+      },
+      data: {
+        status: AssistantTaskStepStatus.READY,
+        retryAfterAt,
+        heartbeatAt: expect.any(Date),
+      },
+    });
+    expect(harness.events.appendInTransaction).not.toHaveBeenCalled();
+  });
+
+  it('applies a user retry decision by clearing the backoff and returning to READY', async () => {
+    const harness = createHarness();
+
+    await expect(harness.service.applyFailureDecision({
+      taskId: TASK_ID,
+      stepId: STEP_ID,
+      stepKey: 's1',
+      tenantId: TENANT_ID,
+      action: 'retry',
+      reason: '用户裁决重试本步骤',
+    })).resolves.toBe(true);
+
+    expect(harness.tx.assistantTaskStep.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: STEP_ID,
+        taskId: TASK_ID,
+        tenantId: TENANT_ID,
+        status: AssistantTaskStepStatus.WAITING_USER,
+      },
+      data: {
+        status: AssistantTaskStepStatus.READY,
+        retryAfterAt: null,
+        heartbeatAt: expect.any(Date),
+      },
+    });
+    expect(harness.events.appendInTransaction).not.toHaveBeenCalled();
+  });
+
+  it('settles the user skip and abort decisions with their terminal markers and events', async () => {
+    const skipHarness = createHarness();
+
+    await expect(skipHarness.service.applyFailureDecision({
+      taskId: TASK_ID,
+      stepId: STEP_ID,
+      stepKey: 's1',
+      tenantId: TENANT_ID,
+      action: 'skip',
+      reason: '用户裁决跳过本步骤，产出缺失',
+    })).resolves.toBe(true);
+
+    expect(skipHarness.tx.assistantTaskStep.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ status: AssistantTaskStepStatus.WAITING_USER }),
+      data: expect.objectContaining({
+        status: AssistantTaskStepStatus.SKIPPED,
+        error: { code: 'STEP_SKIPPED_BY_USER', message: '用户裁决跳过本步骤，产出缺失' },
+      }),
+    }));
+    expect(skipHarness.events.appendInTransaction).toHaveBeenCalledWith(skipHarness.tx, TASK_ID, TENANT_ID, {
+      type: 'step_skipped',
+      stepId: STEP_ID,
+      stepKey: 's1',
+      reason: '用户裁决跳过本步骤，产出缺失',
+    });
+
+    const abortHarness = createHarness();
+
+    await expect(abortHarness.service.applyFailureDecision({
+      taskId: TASK_ID,
+      stepId: STEP_ID,
+      stepKey: 's1',
+      tenantId: TENANT_ID,
+      action: 'abort',
+      reason: '用户裁决终止任务',
+    })).resolves.toBe(true);
+
+    // 终止：FAILED + resolution=abort（调度收尾据此跳过再次升级并判定任务失败）。
+    expect(abortHarness.tx.assistantTaskStep.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ status: AssistantTaskStepStatus.WAITING_USER }),
+      data: expect.objectContaining({
+        status: AssistantTaskStepStatus.FAILED,
+        error: {
+          code: 'STEP_ABORTED_BY_USER',
+          message: '用户裁决终止任务',
+          resolution: 'abort',
+        },
+      }),
+    }));
+    expect(abortHarness.events.appendInTransaction).toHaveBeenCalledWith(abortHarness.tx, TASK_ID, TENANT_ID, {
+      type: 'step_failed',
+      stepId: STEP_ID,
+      stepKey: 's1',
+      reason: '用户裁决终止任务',
+    });
+  });
 });
 
 function createHarness(options: {
@@ -631,8 +787,12 @@ function createHarness(options: {
   };
   const prisma: Record<string, any> = {
     $transaction: jest.fn(),
+    assistantTask: {
+      updateMany: jest.fn().mockResolvedValue({ count: options.taskUpdateCount ?? 1 }),
+    },
     assistantTaskStep: {
       findMany: jest.fn().mockResolvedValue(options.staleSteps ?? []),
+      updateMany: jest.fn().mockResolvedValue({ count: options.stepUpdateCount ?? 1 }),
     },
     toolCall: {
       findFirst: jest.fn().mockResolvedValue(options.existingToolCall ?? null),

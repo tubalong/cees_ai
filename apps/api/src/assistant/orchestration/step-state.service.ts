@@ -11,6 +11,7 @@ import { PrismaService } from '../../database/prisma.service';
 import type { KnowledgeToolCitation, ToolSource } from '../tools/tool.types';
 import { TaskEventService } from './task-event.service';
 import type { PublicTaskResourceRef } from './orchestration.types';
+import type { FailureDecisionAction } from './step-failure';
 
 interface StepToolResult {
   summary: string;
@@ -95,6 +96,30 @@ export class StepStateService {
       });
       return true;
     });
+  }
+
+  /**
+   * 调度让行：任务交还执行权（退避等待 / 无进展兜底）。租约置为当前时刻，
+   * 恢复扫描可立即重拾——避免退避窗口内长时间空转。
+   */
+  async yieldTaskExecution(input: {
+    taskId: string;
+    executionOwner: string;
+  }): Promise<boolean> {
+    const now = new Date();
+    const updated = await this.prisma.assistantTask.updateMany({
+      where: {
+        id: input.taskId,
+        status: AssistantTaskStatus.RUNNING,
+        executionOwner: input.executionOwner,
+      },
+      data: {
+        executionOwner: null,
+        leaseExpiresAt: now,
+        heartbeatAt: now,
+      },
+    });
+    return updated.count === 1;
   }
 
   /**
@@ -205,11 +230,64 @@ export class StepStateService {
     return updated.count === 1;
   }
 
+  /**
+   * 失败升级（失败阶梯：升级用户裁决，须在调用方事务内执行）：FAILED →
+   * WAITING_USER 条件更新并清空完成时间——裁决交互创建、状态迁移与错误详情
+   * 保留同事务提交；等待期间步骤不属于任何执行者，不阻塞其它步骤推进。
+   */
+  async escalateStepInTransaction(
+    transaction: Prisma.TransactionClient,
+    input: { taskId: string; stepId: string; tenantId: string },
+  ): Promise<boolean> {
+    const updated = await transaction.assistantTaskStep.updateMany({
+      where: {
+        id: input.stepId,
+        taskId: input.taskId,
+        tenantId: input.tenantId,
+        status: AssistantTaskStepStatus.FAILED,
+      },
+      data: {
+        status: AssistantTaskStepStatus.WAITING_USER,
+        completedAt: null,
+        heartbeatAt: new Date(),
+      },
+    });
+    return updated.count === 1;
+  }
+
   /** 依赖满足：PENDING → READY（无事件；就绪不是对外可见的状态迁移）。 */
   async markStepReady(taskId: string, stepId: string): Promise<boolean> {
     const updated = await this.prisma.assistantTaskStep.updateMany({
       where: { id: stepId, taskId, status: AssistantTaskStepStatus.PENDING },
       data: { status: AssistantTaskStepStatus.READY },
+    });
+    return updated.count === 1;
+  }
+
+  /**
+   * 失败重试调度（失败阶梯：自动重试）：FAILED → READY 条件更新并写入退避
+   * 「不早于」时间；本次失败详情保留在 error 作为失败痕迹，重试派发时
+   * attemptNo 再 +1。不写事件：本次失败已由 step_failed 留痕，重试开始由
+   * 下一次 step_started 表达。
+   */
+  async scheduleStepRetry(input: {
+    taskId: string;
+    stepId: string;
+    tenantId: string;
+    retryAfterAt: Date | null;
+  }): Promise<boolean> {
+    const updated = await this.prisma.assistantTaskStep.updateMany({
+      where: {
+        id: input.stepId,
+        taskId: input.taskId,
+        tenantId: input.tenantId,
+        status: AssistantTaskStepStatus.FAILED,
+      },
+      data: {
+        status: AssistantTaskStepStatus.READY,
+        retryAfterAt: input.retryAfterAt,
+        heartbeatAt: new Date(),
+      },
     });
     return updated.count === 1;
   }
@@ -240,6 +318,70 @@ export class StepStateService {
       if (updated.count !== 1) return false;
       await this.events.appendInTransaction(transaction, input.taskId, input.tenantId, {
         type: 'step_skipped',
+        stepId: input.stepId,
+        stepKey: input.stepKey,
+        reason: input.reason,
+      });
+      return true;
+    });
+  }
+
+  /**
+   * 应用失败裁决（用户对升级交互的解决，幂等条件更新）：
+   * - retry：WAITING_USER → READY，清退避立即重试（派发时 attemptNo 再 +1，
+   *   用户显式重试可突破自动重试上限）；
+   * - skip：WAITING_USER → SKIPPED，写 step_skipped 事件，产出缺失由任务汇总呈现；
+   * - abort：WAITING_USER → FAILED，error 标记 resolution=abort，调度收尾据此
+   *   跳过再次升级、任务随之判定失败。
+   */
+  async applyFailureDecision(input: {
+    taskId: string;
+    stepId: string;
+    stepKey: string;
+    tenantId: string;
+    action: FailureDecisionAction;
+    reason: string;
+  }): Promise<boolean> {
+    return this.prisma.$transaction(async (transaction) => {
+      const now = new Date();
+      if (input.action === 'retry') {
+        const updated = await transaction.assistantTaskStep.updateMany({
+          where: {
+            id: input.stepId,
+            taskId: input.taskId,
+            tenantId: input.tenantId,
+            status: AssistantTaskStepStatus.WAITING_USER,
+          },
+          data: {
+            status: AssistantTaskStepStatus.READY,
+            retryAfterAt: null,
+            heartbeatAt: now,
+          },
+        });
+        return updated.count === 1;
+      }
+      const aborted = input.action === 'abort';
+      const updated = await transaction.assistantTaskStep.updateMany({
+        where: {
+          id: input.stepId,
+          taskId: input.taskId,
+          tenantId: input.tenantId,
+          status: AssistantTaskStepStatus.WAITING_USER,
+        },
+        data: {
+          status: aborted ? AssistantTaskStepStatus.FAILED : AssistantTaskStepStatus.SKIPPED,
+          completedAt: now,
+          heartbeatAt: now,
+          error: {
+            code: aborted ? 'STEP_ABORTED_BY_USER' : 'STEP_SKIPPED_BY_USER',
+            message: input.reason,
+            ...(aborted ? { resolution: 'abort' } : {}),
+          } as Prisma.InputJsonObject,
+        },
+      });
+      if (updated.count !== 1) return false;
+      await this.events.appendInTransaction(transaction, input.taskId, input.tenantId, {
+        type: aborted ? 'step_failed' : 'step_skipped',
         stepId: input.stepId,
         stepKey: input.stepKey,
         reason: input.reason,

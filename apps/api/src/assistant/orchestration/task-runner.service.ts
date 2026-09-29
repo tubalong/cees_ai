@@ -7,6 +7,7 @@ import {
 } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../../database/prisma.service';
+import { FailureHandlingService } from './failure-handling.service';
 import { InteractionService, type ExpiredInteractionRow } from './interaction.service';
 import { StepRunnerService } from './step-runner.service';
 import { StepStateService } from './step-state.service';
@@ -41,6 +42,7 @@ interface StepSnapshotRow {
   status: AssistantTaskStepStatus;
   dependsOn: Prisma.JsonValue;
   leaseExpiresAt: Date | null;
+  retryAfterAt: Date | null;
 }
 
 interface TaskExecution {
@@ -71,6 +73,7 @@ export class TaskRunnerService implements OnModuleInit, OnModuleDestroy {
     private readonly state: StepStateService,
     private readonly taskEvents: TaskEventService,
     private readonly interactions: InteractionService,
+    private readonly failureHandling: FailureHandlingService,
   ) { }
 
   onModuleInit(): void {
@@ -180,6 +183,12 @@ export class TaskRunnerService implements OnModuleInit, OnModuleDestroy {
         }
         const steps = await this.loadSteps(taskId, task.planVersion);
 
+        // 0) 失败处置兜底：未处置的 FAILED 步骤先走失败阶梯（自动重试 / 升级裁决），
+        //    覆盖「失败已写、处置未落」的崩溃窗口；处置后状态已流转，重载快照。
+        if (steps.some((step) => step.status === AssistantTaskStepStatus.FAILED)) {
+          if (await this.failureHandling.reconcileUnhandledFailures(taskId) > 0) continue;
+        }
+
         // 1) 依赖推进：依赖全部成功的 PENDING → READY；依赖失败/跳过的级联 SKIPPED。
         if (await this.advanceSteps(task, steps)) continue;
 
@@ -193,19 +202,25 @@ export class TaskRunnerService implements OnModuleInit, OnModuleDestroy {
           continue;
         }
 
-        // 3) 派发最早的就绪步骤：一次一步（窗口串行独占，进度可按 stepNo 追踪）。
-        const ready = steps.find((step) => step.status === AssistantTaskStepStatus.READY);
+        // 3) 派发最早的就绪步骤：一次一步（窗口串行独占，进度可按 stepNo 追踪）；
+        //    退避中的步骤（retryAfterAt 未到）本轮不派发，交第 5 步统一让行。
+        const ready = steps.find(
+          (step) => step.status === AssistantTaskStepStatus.READY
+            && (!step.retryAfterAt || step.retryAfterAt.getTime() <= Date.now()),
+        );
         if (ready) {
           if (!(await this.dispatchStep(task, execution, ready.id))) return;
           continue;
         }
 
-        // 4) 挂起步骤：有未决事项 → 任务转 WAITING_USER 并释放租约等待用户介入；
+        // 4) 挂起步骤：先应用「已解决的失败裁决」（重试/跳过/终止落状态）；
+        //    仍有未决事项 → 任务转 WAITING_USER 并释放租约等待用户介入；
         //    全部已解决 → 重新派发（断点续跑）——挂起不阻塞其它步骤（第 3 步已覆盖）。
         const waitingSteps = steps.filter(
           (step) => step.status === AssistantTaskStepStatus.WAITING_USER,
         );
         if (waitingSteps.length > 0) {
+          if (await this.failureHandling.applyResolvedFailureDecisions(taskId) > 0) continue;
           if (await this.interactions.hasPendingForTask(taskId)) {
             await this.markTaskWaitingUser(taskId);
             return;
@@ -214,8 +229,20 @@ export class TaskRunnerService implements OnModuleInit, OnModuleDestroy {
           continue;
         }
 
-        // 5) 防御：仍有 PENDING 步骤（依赖图异常）→ 交还执行权，等待恢复扫描。
-        if (steps.some((step) => step.status === AssistantTaskStepStatus.PENDING)) return;
+        // 5) 无进展让行：退避等待中的就绪步骤或残留 PENDING（依赖图异常）时，
+        //    交还任务执行权（租约置过期），由恢复扫描重拾续跑。
+        const now = new Date();
+        const cooling = steps.some(
+          (step) => step.status === AssistantTaskStepStatus.READY
+            && step.retryAfterAt !== null && step.retryAfterAt > now,
+        );
+        if (cooling || steps.some((step) => step.status === AssistantTaskStepStatus.PENDING)) {
+          await this.state.yieldTaskExecution({
+            taskId,
+            executionOwner: this.executionOwner,
+          });
+          return;
+        }
 
         // 6) 全部步骤终态：任务终态判定与终态事件原子提交。
         await this.finalizeTask(task);
@@ -464,7 +491,14 @@ export class TaskRunnerService implements OnModuleInit, OnModuleDestroy {
     return this.prisma.assistantTaskStep.findMany({
       where: { taskId, planVersion },
       orderBy: { stepNo: 'asc' },
-      select: { id: true, stepKey: true, status: true, dependsOn: true, leaseExpiresAt: true },
+      select: {
+        id: true,
+        stepKey: true,
+        status: true,
+        dependsOn: true,
+        leaseExpiresAt: true,
+        retryAfterAt: true,
+      },
     });
   }
 

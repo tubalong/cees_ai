@@ -1,5 +1,6 @@
 import type { PrismaService } from '../../database/prisma.service';
 import type { TenantContext } from '../../tenant/tenant-context';
+import type { FailureHandlingService } from './failure-handling.service';
 import type { InteractionService } from './interaction.service';
 import type { PlanService } from './plan.service';
 import { TaskService } from './task.service';
@@ -21,6 +22,8 @@ describe('TaskService', () => {
     expect(harness.prisma.assistantTask.findFirst).toHaveBeenCalledWith({
       where: { id: TASK_ID, tenantId: TENANT_ID, membershipId: MEMBERSHIP_ID },
     });
+    // 失败裁决先行落状态（重试/跳过/终止），再做挂起恢复判定。
+    expect(harness.failureHandling.applyResolvedFailureDecisions).toHaveBeenCalledWith(TASK_ID);
     expect(harness.interactions.hasPendingForTask).toHaveBeenCalledWith(TASK_ID);
     // WAITING_USER → RUNNING：释放执行权与租约，交回调度器重新认领（断点续跑）。
     expect(harness.prisma.assistantTask.updateMany).toHaveBeenCalledWith({
@@ -40,6 +43,8 @@ describe('TaskService', () => {
 
     await harness.service.resumeAfterInteractionResolved(TASK_ID);
 
+    // 失败裁决先行落状态（幂等），但仍有未决事项：任务保持挂起。
+    expect(harness.failureHandling.applyResolvedFailureDecisions).toHaveBeenCalledWith(TASK_ID);
     expect(harness.prisma.assistantTask.updateMany).not.toHaveBeenCalled();
     expect(harness.runner.startTask).not.toHaveBeenCalled();
   });
@@ -49,6 +54,7 @@ describe('TaskService', () => {
 
     await harness.service.resumeAfterInteractionResolved(TASK_ID);
 
+    expect(harness.failureHandling.applyResolvedFailureDecisions).not.toHaveBeenCalled();
     expect(harness.interactions.hasPendingForTask).not.toHaveBeenCalled();
     expect(harness.prisma.assistantTask.updateMany).not.toHaveBeenCalled();
     expect(harness.runner.startTask).not.toHaveBeenCalled();
@@ -107,6 +113,7 @@ function createHarness(options: {
     hasPendingForTask: jest.fn().mockResolvedValue(options.pending ?? false),
   };
   const runner = { startTask: jest.fn().mockResolvedValue(undefined) };
+  const failureHandling = { applyResolvedFailureDecisions: jest.fn().mockResolvedValue(0) };
   const service = new TaskService(
     prisma as unknown as PrismaService,
     tenantContext as unknown as TenantContext,
@@ -115,6 +122,7 @@ function createHarness(options: {
     runner as unknown as TaskRunnerService,
     {} as unknown as StepStateService,
     interactions as unknown as InteractionService,
+    failureHandling as unknown as FailureHandlingService,
   );
-  return { service, prisma, runner, interactions };
+  return { service, prisma, runner, interactions, failureHandling };
 }

@@ -25,6 +25,7 @@ import { AssistantActionDraftService } from './drafts/assistant-action-draft.ser
 import { LlmDeciderService } from './orchestration/decider/llm-decider';
 import { orchestrationDeciderProvider } from './orchestration/decider/orchestration-decider.factory';
 import { RuleDeciderService } from './orchestration/decider/rule-decider';
+import { FailureHandlingService } from './orchestration/failure-handling.service';
 import { InteractionService } from './orchestration/interaction.service';
 import { OrchestrationToolsService } from './orchestration/orchestration-tools.service';
 import { PlanService } from './orchestration/plan.service';
@@ -95,6 +96,7 @@ import { AssignTaskTool } from './tools/executors/assign-task.tool';
     RuleDeciderService,
     LlmDeciderService,
     orchestrationDeciderProvider,
+    FailureHandlingService,
     TaskService,
     StepStateService,
     StepRunnerService,

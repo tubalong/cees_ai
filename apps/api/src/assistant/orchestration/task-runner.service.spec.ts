@@ -1,4 +1,5 @@
 import type { PrismaService } from '../../database/prisma.service';
+import type { FailureHandlingService } from './failure-handling.service';
 import { InteractionService } from './interaction.service';
 import { StepRunnerService } from './step-runner.service';
 import { StepStateService } from './step-state.service';
@@ -16,6 +17,7 @@ interface StepRow {
   status: string;
   dependsOn: string[];
   leaseExpiresAt: Date | null;
+  retryAfterAt?: Date | null;
   error?: { code: string; message: string } | null;
 }
 
@@ -227,6 +229,89 @@ describe('TaskRunnerService', () => {
     );
   });
 
+  it('reconciles unhandled failed steps before advancing the plan', async () => {
+    const harness = createHarness({
+      steps: [{ id: STEP_ONE, stepKey: 's1', status: 'FAILED', dependsOn: [], leaseExpiresAt: null }],
+      reconcileHandledCounts: [1],
+    });
+
+    await harness.service.startTask(TASK_ID);
+    await waitForFinalize(harness);
+
+    // 第一轮处置 1 条（处置后重读快照继续）；随后无未处置失败，收敛任务终态。
+    expect(harness.failureHandling.reconcileUnhandledFailures).toHaveBeenCalledWith(TASK_ID);
+    expect(harness.taskEvents.appendInTransaction).toHaveBeenCalledWith(
+      harness.tx,
+      TASK_ID,
+      TENANT_ID,
+      expect.objectContaining({ type: 'task_failed' }),
+    );
+  });
+
+  it('defers a cooling ready step and yields the task execution', async () => {
+    const harness = createHarness({
+      steps: [{
+        id: STEP_ONE,
+        stepKey: 's1',
+        status: 'READY',
+        dependsOn: [],
+        leaseExpiresAt: null,
+        retryAfterAt: new Date(Date.now() + 60_000),
+      }],
+    });
+
+    await harness.service.startTask(TASK_ID);
+    await waitForYield(harness);
+
+    // 退避未到：不派发，交还执行权（租约置过期），由恢复扫描在退避结束后重拾。
+    expect(harness.stepRunner.executeStep).not.toHaveBeenCalled();
+    expect(harness.stepState.yieldTaskExecution).toHaveBeenCalledWith({
+      taskId: TASK_ID,
+      executionOwner: harness.owner(),
+    });
+  });
+
+  it('dispatches a ready step once its retry backoff has elapsed', async () => {
+    const harness = createHarness({
+      steps: [{
+        id: STEP_ONE,
+        stepKey: 's1',
+        status: 'READY',
+        dependsOn: [],
+        leaseExpiresAt: null,
+        retryAfterAt: new Date(Date.now() - 1_000),
+      }],
+    });
+
+    await harness.service.startTask(TASK_ID);
+    await waitForFinalize(harness);
+
+    expect(harness.stepRunner.executeStep).toHaveBeenCalledTimes(1);
+    expect(harness.stepRunner.executeStep.mock.calls[0]![0].stepId).toBe(STEP_ONE);
+    expect(harness.stepState.yieldTaskExecution).not.toHaveBeenCalled();
+  });
+
+  it('applies resolved failure decisions before re-dispatching a waiting step', async () => {
+    const harness = createHarness({
+      steps: [{ id: STEP_ONE, stepKey: 's1', status: 'WAITING_USER', dependsOn: [], leaseExpiresAt: null }],
+      applyDecisionCounts: [1],
+    });
+
+    await harness.service.startTask(TASK_ID);
+    await waitForFinalize(harness);
+
+    // 已解决的失败裁决先行落状态（重载快照后取消挂起判定），随后重新派发步骤。
+    expect(harness.failureHandling.applyResolvedFailureDecisions).toHaveBeenCalledWith(TASK_ID);
+    expect(harness.stepRunner.executeStep).toHaveBeenCalledTimes(1);
+    expect(harness.stepRunner.executeStep.mock.calls[0]![0].stepId).toBe(STEP_ONE);
+    expect(harness.taskEvents.appendInTransaction).toHaveBeenCalledWith(
+      harness.tx,
+      TASK_ID,
+      TENANT_ID,
+      { type: 'task_completed' },
+    );
+  });
+
   it('resumes waiting tasks without pending interactions during the recovery scan', async () => {
     const harness = createHarness({
       waitingTasks: [{ id: 'task-1' }, { id: 'task-2' }],
@@ -334,6 +419,8 @@ function createHarness(options: {
   claimedOwnerOverride?: string;
   executeStepBehavior?: 'succeed' | 'fail' | 'throw';
   executeStepError?: { code: string; message: string };
+  reconcileHandledCounts?: number[];
+  applyDecisionCounts?: number[];
 } = {}) {
   const steps = options.steps ?? [];
   let capturedOwner: string | null = null;
@@ -364,7 +451,9 @@ function createHarness(options: {
     },
     assistantTaskStep: {
       findMany: jest.fn().mockImplementation((args: { where: { taskId: string } }) => Promise.resolve(
-        args.where.taskId === TASK_ID ? steps.map((step) => ({ ...step })) : [],
+        args.where.taskId === TASK_ID
+          ? steps.map((step) => ({ ...step, retryAfterAt: step.retryAfterAt ?? null }))
+          : [],
       )),
       findFirst: jest.fn().mockImplementation((args: { where: Record<string, unknown> }) => {
         // 恢复扫描的活跃步骤探测：status + leaseExpiresAt 同时出现。
@@ -418,6 +507,7 @@ function createHarness(options: {
     }),
     writeSuspendTimeoutNotice: jest.fn().mockResolvedValue(undefined),
     expireWaitingStep: jest.fn().mockResolvedValue(true),
+    yieldTaskExecution: jest.fn().mockResolvedValue(true),
   };
 
   const stepRunner = {
@@ -446,12 +536,23 @@ function createHarness(options: {
       async (taskId: string) => (options.pendingTaskIds ?? []).includes(taskId),
     ),
   };
+  const reconcileCounts = [...(options.reconcileHandledCounts ?? [])];
+  const applyDecisionCounts = [...(options.applyDecisionCounts ?? [])];
+  const failureHandling = {
+    reconcileUnhandledFailures: jest.fn().mockImplementation(
+      async () => (reconcileCounts.length > 0 ? reconcileCounts.shift()! : 0),
+    ),
+    applyResolvedFailureDecisions: jest.fn().mockImplementation(
+      async () => (applyDecisionCounts.length > 0 ? applyDecisionCounts.shift()! : 0),
+    ),
+  };
   const service = new TaskRunnerService(
     prisma as unknown as PrismaService,
     stepRunner as unknown as StepRunnerService,
     stepState as unknown as StepStateService,
     taskEvents as unknown as TaskEventService,
     interactions as unknown as InteractionService,
+    failureHandling as unknown as FailureHandlingService,
   );
   return {
     service,
@@ -462,6 +563,7 @@ function createHarness(options: {
     stepRunner,
     taskEvents,
     interactions,
+    failureHandling,
     owner: () => capturedOwner,
   };
 }
@@ -485,6 +587,15 @@ async function waitForTaskWaiting(harness: { prisma: Record<string, any> }): Pro
     await new Promise((resolve) => setImmediate(resolve));
   }
   throw new Error('task was not marked WAITING_USER in time');
+}
+
+/** 等待调度循环让出执行权（退避 / 无进展时的 yield 信号）。 */
+async function waitForYield(harness: { stepState: { yieldTaskExecution: jest.Mock } }): Promise<void> {
+  for (let attempt = 0; attempt < 500; attempt++) {
+    if (harness.stepState.yieldTaskExecution.mock.calls.length > 0) return;
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  throw new Error('task did not yield its execution in time');
 }
 
 async function flush(): Promise<void> {

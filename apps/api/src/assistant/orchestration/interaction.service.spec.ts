@@ -27,6 +27,12 @@ const QUESTION_PAYLOAD = {
   ],
 };
 
+const FAILURE_OPTIONS = [
+  { id: 'retry', label: '重试该步骤', description: '再执行一次本步骤' },
+  { id: 'skip', label: '跳过该步骤', description: '本步产出缺失，继续后续步骤' },
+  { id: 'abort', label: '终止任务', description: '结束任务并保留已产出的内容' },
+];
+
 interface RowOverrides {
   status?: string;
   type?: string;
@@ -251,6 +257,88 @@ describe('InteractionService', () => {
         stepId: '30000000-0000-0000-0000-000000000002',
         role: 'USER',
         content: '用户答复了你的提问「报告里是否需要包含去年同期对比？」：只看本季度',
+      }),
+    });
+  });
+
+  it('stores the failure marker when a failure decision interaction is created', async () => {
+    const harness = createHarness();
+
+    await harness.service.createInTransaction(harness.tx as any, {
+      tenantId: TENANT_ID,
+      taskId: TASK_ID,
+      stepId: '30000000-0000-0000-0000-000000000001',
+      stepKey: 's1',
+      type: 'DECISION',
+      summary: '步骤「收集数据」执行未成功，请选择处理方式',
+      reason: '第 1/3 次尝试失败（STEP_EXECUTION_ERROR）：连接超时',
+      options: FAILURE_OPTIONS,
+      failure: { code: 'STEP_EXECUTION_ERROR', message: '连接超时', attemptNo: 1 },
+      requestId: REQUEST_ID,
+      membershipId: MEMBERSHIP_ID,
+    });
+
+    // 失败标记随 payload 持久化：调度侧据此区分失败裁决与普通 ask_user 裁决。
+    const createArgs = harness.tx.assistantTaskInteraction.create.mock.calls[0][0] as {
+      data: { payload: Record<string, unknown> };
+    };
+    expect(createArgs.data.payload).toEqual(expect.objectContaining({
+      stepKey: 's1',
+      failure: { code: 'STEP_EXECUTION_ERROR', message: '连接超时', attemptNo: 1 },
+    }));
+  });
+
+  it('does not inject a window message when a failure decision is resolved', async () => {
+    const harness = createHarness({
+      interaction: interactionRow({
+        type: 'DECISION',
+        stepId: '30000000-0000-0000-0000-000000000002',
+        payload: {
+          summary: '步骤「收集数据」执行未成功，请选择处理方式',
+          reason: '第 3/3 次尝试失败（STEP_EXECUTION_ERROR）：连接超时',
+          stepKey: 's1',
+          options: FAILURE_OPTIONS,
+          failure: { code: 'STEP_EXECUTION_ERROR', message: '连接超时', attemptNo: 3 },
+        },
+      }),
+    });
+
+    await harness.service.resolve(INTERACTION_ID, { decision: 'choose', value: 'retry' });
+
+    // 失败裁决的解决是步骤状态流转（重试/跳过/终止），不向步骤窗口注入续跑消息。
+    expect(harness.tx.assistantTaskStepMessage.create).not.toHaveBeenCalled();
+    expect(harness.taskEvents.appendInTransaction).toHaveBeenCalledWith(
+      harness.tx,
+      TASK_ID,
+      TENANT_ID,
+      expect.objectContaining({ type: 'interaction_resolved', value: 'retry' }),
+    );
+  });
+
+  it('still injects the chosen option for a regular decision without a failure marker', async () => {
+    const harness = createHarness({
+      interaction: interactionRow({
+        type: 'DECISION',
+        stepId: '30000000-0000-0000-0000-000000000002',
+        payload: {
+          summary: '采用哪种汇总口径？',
+          reason: null,
+          stepKey: 's1',
+          options: [
+            { id: 'tax-included', label: '含税口径', description: null },
+            { id: 'tax-excluded', label: '不含税口径', description: null },
+          ],
+        },
+      }),
+    });
+
+    await harness.service.resolve(INTERACTION_ID, { decision: 'choose', value: 'tax-excluded' });
+
+    expect(harness.tx.assistantTaskStepMessage.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        stepId: '30000000-0000-0000-0000-000000000002',
+        role: 'USER',
+        content: '用户做出了裁决「采用哪种汇总口径？」：不含税口径',
       }),
     });
   });

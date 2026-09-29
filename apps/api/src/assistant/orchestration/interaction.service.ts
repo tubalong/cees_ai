@@ -25,6 +25,7 @@ const EXPIRY_BATCH_LIMIT = 50;
 const MAX_SUMMARY_CHARS = 1000;
 const MAX_REASON_CHARS = 1000;
 const MAX_OPTIONS = 10;
+const MAX_FAILURE_MESSAGE_CHARS = 300;
 const MAX_RESOLUTION_CHARS = 2000;
 
 /** 单个任务内授权交互的扫描上限（拒绝循环防御与最近结局判定用）。 */
@@ -45,6 +46,8 @@ export interface CreateInteractionInput {
   reason?: string | null;
   /** 提问与裁决的候选项；授权不传（为空数组）。 */
   options?: PublicTaskInteractionOption[];
+  /** 失败裁决标记（失败阶梯升级专用）：存在即按动作裁决处理（解决时不注入续跑消息）。 */
+  failure?: { code: string; message: string; attemptNo: number } | null;
   /** 授权申请的权限项（type=AUTHORIZATION 必填，批准后按此匹配使用）。 */
   permissionCode?: string;
   /** 授权申请的工具展示名（type=AUTHORIZATION 必填）。 */
@@ -74,6 +77,8 @@ export interface ParsedInteractionPayload {
   options: PublicTaskInteractionOption[];
   permissionCode: string | null;
   toolName: string | null;
+  /** 失败裁决标记；普通事项为 null。 */
+  failure: { code: string; message: string; attemptNo: number } | null;
 }
 
 interface InteractionCloseRow {
@@ -213,8 +218,11 @@ export class InteractionService {
       if (claimed.count !== 1) return null;
       // 答复/裁决注入步骤窗口（USER 角色）：步骤恢复后模型在此断点看到用户输入
       // 继续执行（提问=答复文本、裁决=所选方案）；授权无正文、不注入。
+      // 失败裁决不注入：其解决是步骤状态流转（重试/跳过/终止），不续跑窗口。
+      const parsedPayload = parseInteractionPayload(interaction.payload);
       if (
         interaction.stepId
+        && !parsedPayload.failure
         && (interaction.type === AssistantTaskInteractionType.QUESTION
           || interaction.type === AssistantTaskInteractionType.DECISION)
       ) {
@@ -224,7 +232,7 @@ export class InteractionService {
           role: ConversationMessageRole.USER,
           content: buildResolutionNotice(
             interaction.type,
-            parseInteractionPayload(interaction.payload),
+            parsedPayload,
             outcome.value,
           ),
         });
@@ -234,7 +242,7 @@ export class InteractionService {
         interactionId: interaction.id,
         interactionType: interaction.type,
         stepId: interaction.stepId,
-        stepKey: parseInteractionPayload(interaction.payload).stepKey,
+        stepKey: parsedPayload.stepKey,
         status: outcome.eventStatus,
         value: outcome.value,
         scope: outcome.scope,
@@ -568,6 +576,7 @@ export class InteractionService {
         options: [],
         permissionCode: input.permissionCode,
         toolName: input.toolName,
+        failure: null,
       };
     }
 
@@ -581,7 +590,15 @@ export class InteractionService {
     if (options.length === 0) {
       throw interactionInputInvalid('提问与裁决必须携带候选项');
     }
-    return { summary, reason, stepKey, options, permissionCode: null, toolName: null };
+    return {
+      summary,
+      reason,
+      stepKey,
+      options,
+      permissionCode: null,
+      toolName: null,
+      failure: parseIncomingFailure(input.failure),
+    };
   }
 
   /** 关闭单条 PENDING 事项并写 interaction_resolved 事件；竞争失败（已被处理）返回 false。 */
@@ -670,7 +687,34 @@ export function parseInteractionPayload(payload: Prisma.JsonValue): ParsedIntera
     options: parseOptions(record.options),
     permissionCode: asString(record.permissionCode),
     toolName: asString(record.toolName),
+    failure: parseStoredFailure(record.failure),
   };
+}
+
+/** 失败裁决标记归一化（仓储侧，形状可信；防御性容错）。 */
+function parseStoredFailure(value: unknown): ParsedInteractionPayload['failure'] {
+  if (!isRecord(value)) return null;
+  const code = asString(value.code);
+  const message = asString(value.message);
+  if (!code || !message) return null;
+  const attemptNo = typeof value.attemptNo === 'number' && Number.isSafeInteger(value.attemptNo)
+    ? value.attemptNo
+    : 0;
+  return { code, message, attemptNo };
+}
+
+/** 写入侧失败标记：必填字段缺失或为空时不做半截透传。 */
+function parseIncomingFailure(
+  value: CreateInteractionInput['failure'],
+): ParsedInteractionPayload['failure'] {
+  if (!value) return null;
+  const code = value.code.trim();
+  const message = value.message.trim();
+  if (!code || !message) return null;
+  const attemptNo = Number.isSafeInteger(value.attemptNo) && value.attemptNo >= 0
+    ? value.attemptNo
+    : 0;
+  return { code, message: truncate(message, MAX_FAILURE_MESSAGE_CHARS), attemptNo };
 }
 
 function parseOptions(value: unknown): PublicTaskInteractionOption[] {

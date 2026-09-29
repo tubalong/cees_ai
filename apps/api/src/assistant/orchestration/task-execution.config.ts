@@ -49,6 +49,41 @@ export interface SuspendTimeoutConfig {
 
 const guardLogger = new Logger('OrchestrationGuardsConfig');
 
+/**
+ * 失败阶梯（需求 §8.1）：自动重试的最大尝试次数与退避基数；
+ * 超限或不可重试错误走升级用户裁决。
+ */
+export interface StepRetryConfig {
+  /** 单个步骤的最大尝试次数（含首次）；attemptNo 达到该值后失败即升级。 */
+  maxAttempts: number;
+  /** 首次退避秒数，其后按已尝试次数指数翻倍；<= 0 表示立即重试。 */
+  backoffSeconds: number;
+}
+
+const DEFAULT_STEP_RETRY_MAX_ATTEMPTS = 3;
+const DEFAULT_STEP_RETRY_BACKOFF_SECONDS = 30;
+
+export function loadStepRetryConfig(env: NodeJS.ProcessEnv = process.env): StepRetryConfig {
+  return {
+    maxAttempts: readCount(env.ORCHESTRATION_STEP_RETRY_MAX, DEFAULT_STEP_RETRY_MAX_ATTEMPTS),
+    backoffSeconds: readCount(
+      env.ORCHESTRATION_STEP_RETRY_BACKOFF_SECONDS,
+      DEFAULT_STEP_RETRY_BACKOFF_SECONDS,
+    ),
+  };
+}
+
+/** 失败退避时刻：base * 2^(attemptNo-1)；退避配置为 0 时返回 null（立即可重试）。 */
+export function nextRetryAt(
+  attemptNo: number,
+  backoffSeconds: number,
+  now = new Date(),
+): Date | null {
+  if (backoffSeconds <= 0) return null;
+  const factor = 2 ** Math.max(0, attemptNo - 1);
+  return new Date(now.getTime() + backoffSeconds * 1_000 * factor);
+}
+
 export function loadOrchestrationGuards(
   env: NodeJS.ProcessEnv = process.env,
 ): OrchestrationGuards {

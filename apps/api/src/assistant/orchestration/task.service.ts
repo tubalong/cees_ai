@@ -16,6 +16,7 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { TenantContext } from '../../tenant/tenant-context';
+import { FailureHandlingService } from './failure-handling.service';
 import { InteractionService, toPublicInteraction } from './interaction.service';
 import {
   AnswerInput,
@@ -93,6 +94,7 @@ export class TaskService {
     private readonly runner: TaskRunnerService,
     private readonly stepState: StepStateService,
     private readonly interactions: InteractionService,
+    private readonly failureHandling: FailureHandlingService,
   ) { }
 
   /**
@@ -350,6 +352,8 @@ export class TaskService {
   async resumeAfterInteractionResolved(taskId: string): Promise<void> {
     const task = await this.requireOwnTask(taskId);
     if (task.status !== AssistantTaskStatus.WAITING_USER) return;
+    // 失败裁决先行落状态（重试 / 跳过 / 终止），再做挂起恢复判定。
+    await this.failureHandling.applyResolvedFailureDecisions(task.id);
     if (await this.interactions.hasPendingForTask(task.id)) return;
     const resumed = await this.prisma.assistantTask.updateMany({
       where: { id: task.id, tenantId: task.tenantId, status: AssistantTaskStatus.WAITING_USER },
