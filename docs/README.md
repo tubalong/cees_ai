@@ -17,6 +17,7 @@
 | [AI 助手业务写操作](product/assistant-business-tools.md) | 聊天式部门/知识库写入：发现+动作两层工具、待确认草稿、确认前无副作用、幂等与重鉴权 |
 | [AI 同事：定位与关系说明](product/ai-colleague.md) | 四个主体（企业/用户/总管/同事）的定义与关系、两种运行模式（前台对话与编排执行）、能力构成（职能/数据源/学习记录/工作记录/权限边界）、权限与临时授权、术语边界 |
 | [AI 任务编排（需求设计）](product/ai-orchestration.md) | 对话与编排双通道、任务全流程（计划/派发前确认/逐步执行/草稿验收/沉淀）、三层上下文与三不变量、JEV 三方职责、建议/临时授权/主动问人交互与分块实施 |
+| [AI 管家：主动跟进与推动](product/proactive-assistant.md) | 设计草案（未实施）：“事找人”定位与红线、规则发现 + LLM 翻译（引用校验）、跟进记录独立数据面与证据链、提醒设置与防打扰、反馈闭环 |
 | [桌面端安全加固](engineering/desktop-security-hardening.md) | CSP（dev 响应头 + 打包 meta）、IPC 来源校验、导航锁定、webview 策略、令牌移出 Web Storage |
 | [用户个人资料管理](product/user-profile-management.md) | 当前租户成员查询和修改自己的展示资料 |
 | [密码修改与凭证安全](security/password-management.md) | 租户成员和平台管理员修改自己的密码及会话安全规则 |
@@ -41,6 +42,7 @@
 | [redis-foundation](architecture/redis-foundation.md) | NestJS Redis 基础 CRUD、命名空间和使用边界 |
 | [本机工具与 Excel 读写实现](architecture/local-tools-and-excel-io-plan.md) | 聊天上传并生成 Excel、本机只读扫描、隔离/恢复/永久清理的实现边界与风险登记 |
 | [AI 任务编排技术设计](architecture/ai-orchestration-technical.md) | 数据模型（同事三件套/任务五表/统一交互表）、状态机与幂等、对外契约与任务事件流、派发书与执行窗口算法、编排决策抽象（v1 规则 + LLM / v2 JEV）、调度运行器与实现落点 |
+| [AI 管家技术设计（草案）](architecture/proactive-assistant-technical.md) | 设计草案（未实施）：跟进记录数据模型（主表/规则表/设置表）、状态机与幂等、证据链结构、接口草案、翻译调用链与规则框架要点 |
 | [api](api/README.md) | 公开与内部契约及生成客户端约定 |
 | [项目管理 API](api/project-management-api.md) | 项目、成员、负责人和状态命令接口 |
 | [知识库管理 API](api/knowledge-base-api.md) | 知识库 CRUD、成员权限、文档上传和公开查询接口 |
