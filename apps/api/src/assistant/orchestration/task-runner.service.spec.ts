@@ -254,6 +254,75 @@ describe('TaskRunnerService', () => {
       data: expect.objectContaining({ executionOwner: expect.any(String) }),
     }));
   });
+
+  it('applies the continue-default suspend timeout policy to expired interactions', async () => {
+    const harness = createHarness();
+    process.env.ORCHESTRATION_SUSPEND_TIMEOUT_MINUTES = '30';
+    process.env.ORCHESTRATION_SUSPEND_TIMEOUT_ACTION = 'continue_default';
+    try {
+      const applied = await (harness.service as any).applySuspendTimeoutActions([
+        {
+          id: 'i-1', taskId: 'task-1', tenantId: TENANT_ID, type: 'QUESTION',
+          stepId: STEP_ONE, stepKey: 's1', summary: '口径按含税还是不含税？',
+        },
+        {
+          id: 'i-2', taskId: 'task-1', tenantId: TENANT_ID, type: 'AUTHORIZATION',
+          stepId: STEP_ONE, stepKey: 's1', summary: '允许执行「导入台账」',
+        },
+      ]);
+
+      // 按默认值继续：向步骤窗口注入系统提示，不改变步骤状态（交由恢复扫描续跑）。
+      expect(applied).toBe(2);
+      expect(harness.stepState.writeSuspendTimeoutNotice).toHaveBeenCalledWith({
+        tenantId: TENANT_ID,
+        stepId: STEP_ONE,
+        content: expect.stringContaining('未在时限内收到答复'),
+      });
+      expect(harness.stepState.writeSuspendTimeoutNotice).toHaveBeenCalledWith({
+        tenantId: TENANT_ID,
+        stepId: STEP_ONE,
+        content: expect.stringContaining('视为未获批准'),
+      });
+      expect(harness.stepState.expireWaitingStep).not.toHaveBeenCalled();
+      expect(harness.prisma.auditLog.create).toHaveBeenCalledTimes(2);
+    } finally {
+      delete process.env.ORCHESTRATION_SUSPEND_TIMEOUT_MINUTES;
+      delete process.env.ORCHESTRATION_SUSPEND_TIMEOUT_ACTION;
+    }
+  });
+
+  it('converges the waiting step when the suspend timeout action skips it', async () => {
+    const harness = createHarness();
+    process.env.ORCHESTRATION_SUSPEND_TIMEOUT_MINUTES = '30';
+    process.env.ORCHESTRATION_SUSPEND_TIMEOUT_ACTION = 'skip_step';
+    try {
+      const applied = await (harness.service as any).applySuspendTimeoutActions([
+        {
+          id: 'i-3', taskId: 'task-1', tenantId: TENANT_ID, type: 'DECISION',
+          stepId: STEP_ONE, stepKey: 's1', summary: '采用哪种汇总口径？',
+        },
+      ]);
+
+      expect(applied).toBe(1);
+      expect(harness.stepState.expireWaitingStep).toHaveBeenCalledWith(expect.objectContaining({
+        taskId: 'task-1',
+        stepId: STEP_ONE,
+        stepKey: 's1',
+        outcome: 'skip',
+      }));
+      expect(harness.stepState.writeSuspendTimeoutNotice).not.toHaveBeenCalled();
+      // 每条应用均写超时审计留痕（事项类型与所采取的动作）。
+      expect(harness.prisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({
+          action: 'TASK_SUSPEND_TIMEOUT_APPLIED',
+          metadata: expect.objectContaining({ interactionType: 'DECISION', action: 'skip_step' }),
+        }),
+      }));
+    } finally {
+      delete process.env.ORCHESTRATION_SUSPEND_TIMEOUT_MINUTES;
+      delete process.env.ORCHESTRATION_SUSPEND_TIMEOUT_ACTION;
+    }
+  });
 });
 
 function createHarness(options: {
@@ -311,6 +380,7 @@ function createHarness(options: {
         return Promise.resolve(step ? { stepKey: step.stepKey, status: step.status } : null);
       }),
     },
+    auditLog: { create: jest.fn().mockResolvedValue({}) },
   };
 
   const stepState = {
@@ -346,6 +416,8 @@ function createHarness(options: {
       }
       return false;
     }),
+    writeSuspendTimeoutNotice: jest.fn().mockResolvedValue(undefined),
+    expireWaitingStep: jest.fn().mockResolvedValue(true),
   };
 
   const stepRunner = {
@@ -369,7 +441,7 @@ function createHarness(options: {
   const taskEvents = { appendInTransaction: jest.fn().mockResolvedValue(1) };
   const interactions = {
     closePendingForTaskInTransaction: jest.fn().mockResolvedValue(0),
-    expireOverdueInteractions: jest.fn().mockResolvedValue(0),
+    expireOverdueInteractions: jest.fn().mockResolvedValue([]),
     hasPendingForTask: jest.fn().mockImplementation(
       async (taskId: string) => (options.pendingTaskIds ?? []).includes(taskId),
     ),

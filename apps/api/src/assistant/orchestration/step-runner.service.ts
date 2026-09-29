@@ -1,9 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import {
   AssistantTaskInteraction,
   AssistantTaskInteractionStatus,
   AssistantTaskStatus,
   AssistantTaskStepStatus,
+  AuditOutcome,
   ConversationMessageRole,
   Prisma,
   ToolCallStatus,
@@ -29,6 +30,18 @@ import { canonicalJson, toToolFailure } from '../tools/tool-failure';
 import { ToolPolicyService } from '../tools/tool-policy.service';
 import { ToolRegistryService } from '../tools/tool-registry';
 import { toChatToolDefinition, type ToolDefinition } from '../tools/tool.types';
+import {
+  ASK_USER_TOOL_NAME,
+  buildAskUserToolDefinition,
+  parseAskUserArguments,
+  type AskUserArguments,
+} from './ask-user.contract';
+import {
+  ORCHESTRATION_DECIDER,
+  type Decision,
+  type DecisionTaskSnapshot,
+  type OrchestrationDecider,
+} from './decider/decider.types';
 import { InteractionService } from './interaction.service';
 import type { PublicTaskPlanStep, PublicTaskResourceRef } from './orchestration.types';
 import { StepStateService } from './step-state.service';
@@ -37,6 +50,8 @@ import {
   MAX_STEP_SUMMARY_CHARS,
   MAX_STEP_TOOL_CALLS,
   STEP_PROGRESS_NOTE_MAX_CHARS,
+  loadOrchestrationGuards,
+  loadSuspendTimeoutConfig,
   nextTaskLease,
 } from './task-execution.config';
 import { TaskEventService } from './task-event.service';
@@ -81,10 +96,12 @@ interface StepExecutionContext {
     stepKey: string;
     stepNo: number;
     planVersion: number;
+    /** 计划中的步骤名（展示与决策快照用）；计划未给出时为 null。 */
+    stepTitle: string | null;
   };
   /** 派发书文本（instructions）。 */
   instructions: string;
-  /** 裁剪后的模型工具面；为空时走纯文本分支。 */
+  /** 模型工具面：协议工具 ask_user + 权限裁剪后的企业工具；意外为空时走纯文本防御分支。 */
   toolFace: ChatToolDefinition[];
   requestId: string;
   /** ToolCall.conversationId / ToolExecutionContext.conversationId（uuid 列）。 */
@@ -118,6 +135,7 @@ export class StepRunnerService {
     private readonly state: StepStateService,
     private readonly taskEvents: TaskEventService,
     private readonly interactions: InteractionService,
+    @Inject(ORCHESTRATION_DECIDER) private readonly decider: OrchestrationDecider,
   ) { }
 
   /** 执行一个 READY 步骤；返回时步骤通常已终态（失去租约或中止时由恢复扫描收束）。 */
@@ -238,6 +256,7 @@ export class StepRunnerService {
         stepKey: step.stepKey,
         stepNo: step.stepNo,
         planVersion: step.planVersion,
+        stepTitle: planStep?.title ?? null,
       },
       instructions: buildStepInstructions({ agent, goal: task.goal, planStep, dependencies }),
       toolFace,
@@ -248,7 +267,8 @@ export class StepRunnerService {
       roles: authorization.roles,
     };
 
-    // 工具面为空时 tool_turn 会因 tools 为空被 ai-service 拒绝，必须走纯文本分支。
+    // 防御分支：ask_user 恒在工具面内，正常路径不会为空；保留纯文本分支兜底
+    // 工具面构造变化（tool_turn 会因 tools 为空被 ai-service 拒绝）。
     if (toolFace.length === 0) {
       await this.runPlainStep(context, input);
     } else {
@@ -392,7 +412,7 @@ export class StepRunnerService {
     );
   }
 
-  /** 纯文本步骤：工具面为空（权限极窄）时直接一次模型调用产出摘要。 */
+  /** 纯文本步骤（防御分支）：工具面意外为空时直接一次模型调用产出摘要。 */
   private async runPlainStep(context: StepExecutionContext, input: StepExecutionInput): Promise<void> {
     const request: ChatRequest = {
       request_id: context.requestId,
@@ -514,6 +534,22 @@ export class StepRunnerService {
         continue;
       }
 
+      // 协议工具 ask_user：不经过 ToolRegistry / ToolPolicy（不依赖企业权限），
+      // 由本服务直接处理——参数校验 → 决策器判定必要性 → 挂起或抑制继续。
+      if (record.name === ASK_USER_TOOL_NAME) {
+        const outcome = await this.handleAskUser(context, input, {
+          toolCallId: effectiveToolCallId,
+          arguments: record.arguments,
+        });
+        if (outcome === 'suspended') {
+          return { limitExceeded: false, ownershipLost: false, suspended: true };
+        }
+        if (outcome === 'ownershipLost') {
+          return { limitExceeded: false, ownershipLost: true };
+        }
+        continue;
+      }
+
       let approval: ReturnType<ToolPolicyService['approve']>;
       let executionPermissions = context.permissions;
       let executionRoles = context.roles;
@@ -591,6 +627,36 @@ export class StepRunnerService {
             });
             if (!settled) return { limitExceeded: false, ownershipLost: true };
             continue;
+          }
+          // 防滥用（需求 §6.2）：授权申请创建次数上限——超限不再创建新请求，
+          // 驳回本次调用并引导模型转向替代方案（与「拒绝后不重复挂起」同一方向）。
+          if (latest?.status !== AssistantTaskInteractionStatus.PENDING) {
+            const guards = loadOrchestrationGuards();
+            if (guards.maxAuthorizationsPerTask > 0) {
+              const createdCount = await this.interactions.countForTask({
+                tenantId: context.task.tenantId,
+                taskId: context.task.id,
+                type: 'AUTHORIZATION',
+              });
+              if (createdCount >= guards.maxAuthorizationsPerTask) {
+                await this.auditOrchestrationLimit(context, 'AUTHORIZATIONS', {
+                  current: createdCount,
+                  max: guards.maxAuthorizationsPerTask,
+                  toolCallId: effectiveToolCallId,
+                });
+                const settled = await this.state.rejectStepToolCall({
+                  toolCallId: effectiveToolCallId,
+                  taskId: context.task.id,
+                  stepId: context.step.id,
+                  tenantId: context.task.tenantId,
+                  executionOwner: input.executionOwner,
+                  code: 'AUTHORIZATION_LIMIT_EXCEEDED',
+                  summary: '本任务的授权申请次数已达上限，不再发起新的授权；请改用其他可行方式完成本步骤，或说明无法完成',
+                });
+                if (!settled) return { limitExceeded: false, ownershipLost: true };
+                continue;
+              }
+            }
           }
           const suspended = await this.suspendForAuthorization(context, input, {
             toolCallId: effectiveToolCallId,
@@ -773,6 +839,257 @@ export class StepRunnerService {
   }
 
   /**
+   * 协议工具 ask_user 的处理链：参数校验 → 防滥用事实收集 → 决策器判定必要性
+   * （规则先判上限 / 重复，模糊场景交 LLM）→ 挂起提问（ask_user）或抑制继续
+   * （proceed）。返回后由调用方决定工具循环走向。
+   */
+  private async handleAskUser(
+    context: StepExecutionContext,
+    input: StepExecutionInput,
+    request: { toolCallId: string; arguments: Prisma.JsonValue },
+  ): Promise<'continue' | 'suspended' | 'ownershipLost'> {
+    // 1) 参数校验：非法即拒绝本次调用（模型可按摘要修正后重新发起）。
+    let parsed: AskUserArguments;
+    try {
+      parsed = parseAskUserArguments(request.arguments);
+    } catch (error) {
+      const rejection = toToolFailure(error);
+      const settled = await this.state.rejectStepToolCall({
+        toolCallId: request.toolCallId,
+        taskId: context.task.id,
+        stepId: context.step.id,
+        tenantId: context.task.tenantId,
+        executionOwner: input.executionOwner,
+        code: 'ASK_USER_INVALID',
+        summary: '提问参数不合法，本次提问未送达；请修正后重新发起',
+        errorMessage: rejection.errorMessage,
+      });
+      return settled ? 'continue' : 'ownershipLost';
+    }
+
+    // 2) 防滥用事实 + 任务快照（决策时刻从数据库现读，不以内存态为准）。
+    const guards = loadOrchestrationGuards();
+    const [questionCount, decisionCount, duplicatePending, taskSnapshot] = await Promise.all([
+      this.interactions.countForTask({
+        tenantId: context.task.tenantId,
+        taskId: context.task.id,
+        type: 'QUESTION',
+      }),
+      this.interactions.countForTask({
+        tenantId: context.task.tenantId,
+        taskId: context.task.id,
+        type: 'DECISION',
+      }),
+      this.interactions.hasPendingBySummary({
+        tenantId: context.task.tenantId,
+        taskId: context.task.id,
+        summary: parsed.question,
+      }),
+      this.buildDecisionTaskSnapshot(context),
+    ]);
+    const askedCount = questionCount + decisionCount;
+
+    // 3) 决策器判定「是否必须打扰用户」。
+    const decision = await this.decider.decide({
+      decisionType: 'SUFFICIENCY_CHECK',
+      context: {
+        tenantId: context.task.tenantId,
+        userId: context.task.userId,
+        requestId: context.requestId,
+      },
+      taskSnapshot,
+      stepResult: {
+        stepKey: context.step.stepKey,
+        stepTitle: context.step.stepTitle,
+        summary: null,
+        question: {
+          kind: parsed.kind,
+          summary: parsed.question,
+          optionCount: parsed.options.length,
+        },
+        sufficiency: {
+          askedCount,
+          maxQuestions: guards.maxQuestionsPerTask,
+          duplicatePending,
+        },
+      },
+    });
+    await this.auditDecisionEvaluated(context, parsed, decision, {
+      askedCount,
+      maxQuestions: guards.maxQuestionsPerTask,
+      duplicatePending,
+    });
+
+    if (decision.choice !== 'ask_user') {
+      // 抑制本次提问：结算为 COMPLETED 并回喂说明，模型基于现有信息继续。
+      if (guards.maxQuestionsPerTask > 0 && askedCount >= guards.maxQuestionsPerTask) {
+        await this.auditOrchestrationLimit(context, 'QUESTIONS', {
+          current: askedCount,
+          max: guards.maxQuestionsPerTask,
+          toolCallId: request.toolCallId,
+        });
+      }
+      const settled = await this.state.completeStepToolCallFromProposed({
+        toolCallId: request.toolCallId,
+        taskId: context.task.id,
+        stepId: context.step.id,
+        tenantId: context.task.tenantId,
+        executionOwner: input.executionOwner,
+        summary: `提问未发送：${decision.rationale ?? '系统判断可基于现有信息继续'}。`
+          + '请基于现有信息继续完成本步，不要重复提问。',
+      });
+      return settled ? 'continue' : 'ownershipLost';
+    }
+
+    // 4) 挂起等待用户答复：ask_user 无论置信度都放行（提问是安全方向）。
+    const suspended = await this.suspendForAskUser(context, input, {
+      toolCallId: request.toolCallId,
+      parsed,
+    });
+    return suspended ? 'suspended' : 'ownershipLost';
+  }
+
+  /**
+   * 提问 / 裁决挂起（原子事务）：工具结算（PROPOSED → COMPLETED，写 TOOL 窗口
+   * 消息「已向用户提问」）→ 创建 QUESTION / DECISION 交互（写 interaction_requested
+   * 事件）→ 步骤 RUNNING → WAITING_USER 并释放租约。答复经交互解决注入窗口。
+   */
+  private async suspendForAskUser(
+    context: StepExecutionContext,
+    input: StepExecutionInput,
+    request: { toolCallId: string; parsed: AskUserArguments },
+  ): Promise<boolean> {
+    // 挂起超时（需求 §6.3）：0 表示无限等待；否则设置过期时间，超时后由
+    // 恢复扫描按动作策略处理（按默认值继续 / 跳过该步 / 终止任务）。
+    const timeout = loadSuspendTimeoutConfig();
+    const expiresAt = timeout.timeoutMinutes > 0
+      ? new Date(Date.now() + timeout.timeoutMinutes * 60_000)
+      : null;
+    try {
+      return await this.prisma.$transaction(async (transaction) => {
+        const settled = await this.state.completeStepToolCallInTransaction(transaction, {
+          toolCallId: request.toolCallId,
+          taskId: context.task.id,
+          stepId: context.step.id,
+          tenantId: context.task.tenantId,
+          executionOwner: input.executionOwner,
+          summary: '已向用户提问，等待用户答复后继续本步骤',
+        });
+        if (!settled) return false;
+        await this.interactions.createInTransaction(transaction, {
+          tenantId: context.task.tenantId,
+          taskId: context.task.id,
+          stepId: context.step.id,
+          stepKey: context.step.stepKey,
+          type: request.parsed.kind === 'question' ? 'QUESTION' : 'DECISION',
+          summary: request.parsed.question,
+          reason: request.parsed.reason,
+          options: request.parsed.options,
+          expiresAt,
+          requestId: context.requestId,
+          membershipId: context.task.membershipId,
+        });
+        const suspended = await this.state.suspendStepInTransaction(transaction, {
+          taskId: context.task.id,
+          stepId: context.step.id,
+          tenantId: context.task.tenantId,
+          executionOwner: input.executionOwner,
+        });
+        // 前两步已有写入，挂起冲突必须抛错回滚而非半截提交。
+        if (!suspended) throw new Error(`step ${context.step.id} suspend conflict`);
+        return true;
+      });
+    } catch (error) {
+      this.logger.warn(`step ${context.step.id} ask_user suspend failed: ${String(error)}`);
+      return false;
+    }
+  }
+
+  /** 决策输入的任务状态快照：任务目标 + 当前计划版本的步骤状态与摘要。 */
+  private async buildDecisionTaskSnapshot(context: StepExecutionContext): Promise<DecisionTaskSnapshot> {
+    const [steps, planSteps] = await Promise.all([
+      this.prisma.assistantTaskStep.findMany({
+        where: { taskId: context.task.id, planVersion: context.step.planVersion },
+        orderBy: { stepNo: 'asc' },
+        select: { stepKey: true, status: true, summary: true },
+      }),
+      this.loadPlanSteps(context.task.id, context.step.planVersion),
+    ]);
+    const titleByKey = new Map(planSteps.map((planned) => [planned.stepKey, planned.title ?? null]));
+    return {
+      taskId: context.task.id,
+      goal: context.task.goal,
+      planVersion: context.step.planVersion,
+      steps: steps.map((row) => ({
+        stepKey: row.stepKey,
+        title: titleByKey.get(row.stepKey) ?? null,
+        status: row.status,
+        summary: row.summary,
+      })),
+    };
+  }
+
+  /** 决策评估审计：每次 ask_user 判定留痕（选项 / 置信度 / 理由与防滥用事实）。 */
+  private async auditDecisionEvaluated(
+    context: StepExecutionContext,
+    parsed: AskUserArguments,
+    decision: Decision,
+    facts: { askedCount: number; maxQuestions: number; duplicatePending: boolean },
+  ): Promise<void> {
+    await this.prisma.auditLog.create({
+      data: {
+        tenantId: context.task.tenantId,
+        actorUserId: null,
+        actorMembershipId: context.task.membershipId,
+        action: 'TASK_DECISION_EVALUATED',
+        outcome: AuditOutcome.SUCCESS,
+        resourceType: 'ASSISTANT_TASK',
+        resourceId: context.task.id,
+        requestId: context.requestId,
+        metadata: {
+          decisionType: 'SUFFICIENCY_CHECK',
+          stepId: context.step.id,
+          stepKey: context.step.stepKey,
+          questionKind: parsed.kind,
+          choice: decision.choice,
+          confidence: decision.confidence,
+          rationale: decision.rationale ?? null,
+          askedCount: facts.askedCount,
+          maxQuestions: facts.maxQuestions,
+          duplicatePending: facts.duplicatePending,
+        },
+      },
+    });
+  }
+
+  /** 防滥用上限审计：超限拦截留痕（哪类上限、当前计数、涉及工具调用）。 */
+  private async auditOrchestrationLimit(
+    context: StepExecutionContext,
+    limit: 'AUTHORIZATIONS' | 'QUESTIONS',
+    facts: { current: number; max: number; toolCallId: string },
+  ): Promise<void> {
+    await this.prisma.auditLog.create({
+      data: {
+        tenantId: context.task.tenantId,
+        actorUserId: null,
+        actorMembershipId: context.task.membershipId,
+        action: 'TASK_ORCHESTRATION_LIMIT_EXCEEDED',
+        outcome: AuditOutcome.FAILURE,
+        resourceType: 'ASSISTANT_TASK',
+        resourceId: context.task.id,
+        requestId: context.requestId,
+        metadata: {
+          limit,
+          current: facts.current,
+          max: facts.max,
+          stepId: context.step.id,
+          toolCallId: facts.toolCallId,
+        },
+      },
+    });
+  }
+
+  /**
    * 重建步骤窗口消息：TOOL 消息按 ToolCall.upstreamCallId 映射回模型可见的
    * 调用 ID，并按 modelStep 分组补回 assistant(tool_calls) 前缀——与轮次
    * 工具轮次同一协议，保证模型每轮看到的工具历史自洽。
@@ -853,15 +1170,18 @@ export class StepRunnerService {
   }
 
   /**
-   * 步骤工具面：发起人实时权限 ∩ 步骤策略。WRITE 工具同样进入工具面——
-   * 调用时经授权链二次把关（临时授权放行 / 无授权挂起等用户批准），
-   * 仅剔除显式排除项。
+   * 步骤工具面：协议工具 ask_user（不依赖企业权限，恒可用）+ 发起人实时权限 ∩
+   * 步骤策略。WRITE 工具同样进入工具面——调用时经授权链二次把关（临时授权放行 /
+   * 无授权挂起等用户批准），仅剔除显式排除项。
    */
   private resolveToolFace(permissions: string[]): ChatToolDefinition[] {
-    return this.toolRegistry
-      .listAllowedDefinitions(permissions)
-      .filter((tool) => !STEP_EXCLUDED_TOOLS.has(tool.name))
-      .map(toChatToolDefinition);
+    return [
+      buildAskUserToolDefinition(),
+      ...this.toolRegistry
+        .listAllowedDefinitions(permissions)
+        .filter((tool) => !STEP_EXCLUDED_TOOLS.has(tool.name))
+        .map(toChatToolDefinition),
+    ];
   }
 
   /** 本步骤产出的稳定资源引用（去重、按调用顺序）。 */
@@ -962,8 +1282,9 @@ function buildStepInstructions(input: {
     '1. 你正在企业任务中独立执行一个步骤：聚焦本步要求，不要扩大范围；',
     '2. 需要内部资料或外部信息时使用可用工具检索，不要凭记忆编造；',
     '3. 涉及写操作（新增或修改企业数据）时直接调用相应工具：系统会在必要时自动向用户申请授权；',
-    '4. 完成后直接给出本步结果摘要：做了什么、结论与关键数据，保持简洁；',
-    '5. 不要向用户提问或等待确认；确实无法完成时说明原因，不要假装完成。',
+    '4. 缺少关键信息、存在歧义、或必须由用户在多个方案间拍板时，调用 ask_user 向用户提问或请求裁决（同一问题只问一次；能从上下文推断或有安全默认值的不要打扰用户），答复后会回到本步骤继续执行；',
+    '5. 完成后直接给出本步结果摘要：做了什么、结论与关键数据，保持简洁；',
+    '6. 确实无法完成时说明原因，不要假装完成。',
   );
   const text = lines.join('\n');
   return text.length > MAX_STEP_INSTRUCTIONS_CHARS

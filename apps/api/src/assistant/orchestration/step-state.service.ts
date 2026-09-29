@@ -249,6 +249,65 @@ export class StepStateService {
   }
 
   /**
+   * 挂起超时终局（skip_step / fail_task 策略）：WAITING_USER（无执行者）→
+   * SKIPPED / FAILED，终态与任务事件原子提交；continue_default 策略不走此路径。
+   */
+  async expireWaitingStep(input: {
+    taskId: string;
+    stepId: string;
+    stepKey: string;
+    tenantId: string;
+    outcome: 'skip' | 'fail';
+    reason: string;
+  }): Promise<boolean> {
+    return this.prisma.$transaction(async (transaction) => {
+      const now = new Date();
+      const updated = await transaction.assistantTaskStep.updateMany({
+        where: {
+          id: input.stepId,
+          taskId: input.taskId,
+          tenantId: input.tenantId,
+          status: AssistantTaskStepStatus.WAITING_USER,
+        },
+        data: {
+          status: input.outcome === 'skip'
+            ? AssistantTaskStepStatus.SKIPPED
+            : AssistantTaskStepStatus.FAILED,
+          completedAt: now,
+          heartbeatAt: now,
+          error: { code: 'STEP_SUSPEND_TIMEOUT', message: input.reason } as Prisma.InputJsonObject,
+        },
+      });
+      if (updated.count !== 1) return false;
+      await this.events.appendInTransaction(transaction, input.taskId, input.tenantId, {
+        type: input.outcome === 'skip' ? 'step_skipped' : 'step_failed',
+        stepId: input.stepId,
+        stepKey: input.stepKey,
+        reason: input.reason,
+      });
+      return true;
+    });
+  }
+
+  /**
+   * 挂起超时“按默认值继续”策略：向步骤窗口注入系统提示（USER 角色），
+   * 恢复后模型可见并据此继续；步骤维持 WAITING_USER，由恢复扫描续跑。
+   */
+  async writeSuspendTimeoutNotice(input: {
+    tenantId: string;
+    stepId: string;
+    content: string;
+  }): Promise<void> {
+    await this.prisma.$transaction((transaction) =>
+      writeStepMessage(transaction, {
+        tenantId: input.tenantId,
+        stepId: input.stepId,
+        role: ConversationMessageRole.USER,
+        content: input.content,
+      }));
+  }
+
+  /**
    * 步内工具调用记录：由步骤行原子分配 nextToolCallSeq 后创建；唯一约束
    * 冲突（同一 modelStep + upstreamCallId 重放）回读已存在记录，绝不重复执行。
    * 任务事件不写：任务事件流只承载步骤级展示事件，工具级明细留在窗口消息内。
@@ -468,6 +527,43 @@ export class StepStateService {
       errorMessage: input.errorMessage ?? input.summary,
       result: { summary: input.summary, resourceType: null, resourceId: null, sources: [] },
     });
+  }
+
+  /**
+   * 同 completeStepToolCall，但复用调用方事务：提问挂起路径把「协议工具已受理」
+   * 的 TOOL 消息与交互创建、步骤挂起原子提交。
+   */
+  async completeStepToolCallInTransaction(
+    transaction: Prisma.TransactionClient,
+    input: {
+      toolCallId: string;
+      taskId: string;
+      stepId: string;
+      tenantId: string;
+      executionOwner: string;
+      summary: string;
+    },
+  ): Promise<boolean> {
+    return this.settleStepToolCallInTransaction(transaction, {
+      ...input,
+      expectedStatus: ToolCallStatus.PROPOSED,
+      status: ToolCallStatus.COMPLETED,
+      executionToken: null,
+      result: { summary: input.summary, resourceType: null, resourceId: null, sources: [] },
+    });
+  }
+
+  /** 同 completeStepToolCallInTransaction 的非事务入口：提问抑制等「受理即完成」场景。 */
+  async completeStepToolCallFromProposed(input: {
+    toolCallId: string;
+    taskId: string;
+    stepId: string;
+    tenantId: string;
+    executionOwner: string;
+    summary: string;
+  }): Promise<boolean> {
+    return this.prisma.$transaction((transaction) =>
+      this.completeStepToolCallInTransaction(transaction, input));
   }
 
   /** 步骤成功回流：SUCCEEDED、终稿窗口消息与 step_completed 事件原子提交。 */
@@ -850,9 +946,10 @@ export class StepStateService {
 
 /**
  * 事务内写步骤窗口消息：seq 分配（最大 + 1）与插入同事务——
- * 步骤租约串行独占，不存在并发插入竞态。
+ * 步骤租约串行独占，不存在并发插入竞态。交互解决（答复注入）与超时提示
+ * 共用本函数，导出给 interaction.service 复用。
  */
-async function writeStepMessage(
+export async function writeStepMessage(
   transaction: Prisma.TransactionClient,
   input: {
     tenantId: string;

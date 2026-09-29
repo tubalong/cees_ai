@@ -23,6 +23,9 @@ import { GitHubOAuthBrokerService } from './connectors/github-oauth-broker.servi
 import { ConversationService } from './conversation/conversation.service';
 import { EventService } from './conversation/event.service';
 import { AssistantActionDraftService } from './drafts/assistant-action-draft.service';
+import { LlmDeciderService } from './orchestration/decider/llm-decider';
+import { orchestrationDeciderProvider } from './orchestration/decider/orchestration-decider.factory';
+import { RuleDeciderService } from './orchestration/decider/rule-decider';
 import { InteractionService } from './orchestration/interaction.service';
 import { OrchestrationToolsService } from './orchestration/orchestration-tools.service';
 import { PlanService } from './orchestration/plan.service';
@@ -88,6 +91,9 @@ import { ImportFinanceLedgerTool } from './tools/executors/import-finance-ledger
     TaskEventService,
     PlanService,
     InteractionService,
+    RuleDeciderService,
+    LlmDeciderService,
+    orchestrationDeciderProvider,
     TaskService,
     StepStateService,
     StepRunnerService,

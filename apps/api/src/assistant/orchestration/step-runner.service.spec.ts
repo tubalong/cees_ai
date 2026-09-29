@@ -1,4 +1,4 @@
-import type { ToolTurnStreamEvent, ChatStreamEvent } from '@cees/ai-service-client';
+import type { ToolTurnStreamEvent } from '@cees/ai-service-client';
 import type { AiServiceGateway } from '../../ai-orchestration/ai-service-gateway.service';
 import type { PrismaService } from '../../database/prisma.service';
 import {
@@ -8,6 +8,7 @@ import {
 import type { ToolDefinition } from '../tools/tool.types';
 import { ToolPolicyService } from '../tools/tool-policy.service';
 import { ToolRegistryService } from '../tools/tool-registry';
+import type { OrchestrationDecider } from './decider/decider.types';
 import type { InteractionService } from './interaction.service';
 import { StepRunnerService } from './step-runner.service';
 import { StepStateService } from './step-state.service';
@@ -177,7 +178,7 @@ describe('StepRunnerService', () => {
     expect(harness.state.succeedStep).toHaveBeenCalledWith(expect.objectContaining({ summary: '完成' }));
   });
 
-  it('keeps WRITE tools on the tool face and prunes only step-excluded tools', async () => {
+  it('keeps ask_user and WRITE tools on the tool face and prunes only step-excluded tools', async () => {
     const harness = createHarness({
       tools: [
         READ_TOOL,
@@ -194,6 +195,7 @@ describe('StepRunnerService', () => {
 
     const request = harness.gateway.streamToolTurn.mock.calls[0]![0] as Record<string, any>;
     expect(request.tools).toEqual([
+      expect.objectContaining({ name: 'ask_user' }),
       {
         name: 'knowledge_search',
         description: READ_TOOL.description,
@@ -409,19 +411,19 @@ describe('StepRunnerService', () => {
     }));
   });
 
-  it('runs a plain chat step when the permission-filtered tool face is empty', async () => {
+  it('keeps the ask_user protocol tool available when no enterprise tool is allowed', async () => {
     const harness = createHarness({ tools: [] });
-    harness.gateway.streamChat.mockResolvedValueOnce(chatStream([
+    harness.gateway.streamToolTurn.mockResolvedValueOnce(stream([
       { type: 'content_delta', text: '数据分析结论：环比增长 12%。' },
       { type: 'completed', latency_ms: 3, finish_reason: 'stop' },
     ]));
 
     await harness.service.executeStep(executionInput());
 
-    expect(harness.gateway.streamToolTurn).not.toHaveBeenCalled();
-    expect(harness.gateway.streamChat).toHaveBeenCalledTimes(1);
-    const request = harness.gateway.streamChat.mock.calls[0]![0] as Record<string, any>;
+    expect(harness.gateway.streamChat).not.toHaveBeenCalled();
+    const request = harness.gateway.streamToolTurn.mock.calls[0]![0] as Record<string, any>;
     expect(request.instructions).toContain('数据助理');
+    expect((request.tools as Array<{ name: string }>).map((tool) => tool.name)).toEqual(['ask_user']);
     expect(request.messages).toEqual([
       { role: 'user', content: [{ type: 'text', text: '请开始执行本步骤。' }] },
     ]);
@@ -442,6 +444,215 @@ describe('StepRunnerService', () => {
     }));
     expect(harness.gateway.streamToolTurn).not.toHaveBeenCalled();
     expect(harness.gateway.streamChat).not.toHaveBeenCalled();
+  });
+
+  it('suspends the step and raises a QUESTION interaction when the model calls ask_user', async () => {
+    const harness = createHarness({ tools: [READ_TOOL] });
+    harness.gateway.streamToolTurn.mockResolvedValueOnce(stream([
+      {
+        type: 'tool_calls',
+        tool_calls: [{
+          id: 'call-q1',
+          name: 'ask_user',
+          arguments: { kind: 'question', question: '统计口径按含税还是不含税？', reason: '口径决定后续汇总' },
+        }],
+      },
+      { type: 'completed', latency_ms: 4, finish_reason: 'tool_calls' },
+    ]));
+    harness.state.createStepToolCall.mockImplementation(echoRecord);
+    harness.decider.decide.mockResolvedValue({ choice: 'ask_user', confidence: 0.95, rationale: '缺关键口径' });
+
+    await harness.service.executeStep(executionInput());
+
+    // 决策器拿到防滥用事实与提问内容（判定时刻从数据库现读）。
+    expect(harness.decider.decide).toHaveBeenCalledWith(expect.objectContaining({
+      decisionType: 'SUFFICIENCY_CHECK',
+      stepResult: expect.objectContaining({
+        question: expect.objectContaining({ kind: 'question', summary: '统计口径按含税还是不含税？' }),
+        sufficiency: expect.objectContaining({ askedCount: 0, maxQuestions: 10, duplicatePending: false }),
+      }),
+    }));
+    // 原子挂起：工具结算 COMPLETED（提问已受理）→ 创建 QUESTION（含自由填写兜底）→ 步骤 WAITING_USER。
+    expect(harness.state.completeStepToolCallInTransaction).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ toolCallId: 'tc-call-q1', summary: '已向用户提问，等待用户答复后继续本步骤' }),
+    );
+    expect(harness.interactions.createInTransaction).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        type: 'QUESTION',
+        stepId: STEP_ID,
+        stepKey: 's1',
+        summary: '统计口径按含税还是不含税？',
+        options: [expect.objectContaining({ id: 'custom' })],
+        requestId: `task:${TASK_ID}:step:${STEP_ID}`,
+      }),
+    );
+    expect(harness.state.suspendStepInTransaction).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ taskId: TASK_ID, stepId: STEP_ID, executionOwner: EXECUTION_OWNER }),
+    );
+    // 决策评估审计留痕；挂起即中止本步（不再继续模型轮次、不回流终态）。
+    expect(harness.prisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        action: 'TASK_DECISION_EVALUATED',
+        metadata: expect.objectContaining({ choice: 'ask_user', questionKind: 'question' }),
+      }),
+    }));
+    expect(harness.gateway.streamToolTurn).toHaveBeenCalledTimes(1);
+    expect(harness.state.succeedStep).not.toHaveBeenCalled();
+    expect(harness.state.failStep).not.toHaveBeenCalled();
+  });
+
+  it('rejects an ask_user call with invalid arguments instead of suspending', async () => {
+    const harness = createHarness({ tools: [READ_TOOL] });
+    harness.gateway.streamToolTurn
+      .mockResolvedValueOnce(stream([
+        {
+          type: 'tool_calls',
+          tool_calls: [{
+            id: 'call-bad',
+            name: 'ask_user',
+            arguments: { kind: 'decision', question: '选一个方案' },
+          }],
+        },
+        { type: 'completed', latency_ms: 4, finish_reason: 'tool_calls' },
+      ]))
+      .mockResolvedValueOnce(stream([
+        { type: 'content_delta', text: '已按默认方案完成。' },
+        { type: 'completed', latency_ms: 4, finish_reason: 'stop' },
+      ]));
+    harness.state.createStepToolCall.mockImplementation(echoRecord);
+
+    await harness.service.executeStep(executionInput());
+
+    // decision 缺候选项 → 拒绝本次调用（模型可修正后重发），不进入决策器与挂起。
+    expect(harness.state.rejectStepToolCall).toHaveBeenCalledWith(expect.objectContaining({
+      toolCallId: 'tc-call-bad',
+      code: 'ASK_USER_INVALID',
+    }));
+    expect(harness.decider.decide).not.toHaveBeenCalled();
+    expect(harness.interactions.createInTransaction).not.toHaveBeenCalled();
+    expect(harness.state.succeedStep).toHaveBeenCalledWith(expect.objectContaining({
+      summary: '已按默认方案完成。',
+    }));
+  });
+
+  it('suppresses the question and feeds back a note when the decider judges information sufficient', async () => {
+    const harness = createHarness({ tools: [READ_TOOL] });
+    harness.gateway.streamToolTurn
+      .mockResolvedValueOnce(stream([
+        {
+          type: 'tool_calls',
+          tool_calls: [{
+            id: 'call-q2',
+            name: 'ask_user',
+            arguments: {
+              kind: 'decision',
+              question: '报表按周还是按月？',
+              options: [{ id: 'weekly', label: '按周' }, { id: 'monthly', label: '按月' }],
+            },
+          }],
+        },
+        { type: 'completed', latency_ms: 4, finish_reason: 'tool_calls' },
+      ]))
+      .mockResolvedValueOnce(stream([
+        { type: 'content_delta', text: '已按周粒度完成统计。' },
+        { type: 'completed', latency_ms: 4, finish_reason: 'stop' },
+      ]));
+    harness.state.createStepToolCall.mockImplementation(echoRecord);
+    harness.decider.decide.mockResolvedValue({ choice: 'proceed', confidence: 1, rationale: '粒度可从上下文推断' });
+
+    await harness.service.executeStep(executionInput());
+
+    // 抑制提问：结算为已受理并回喂说明，模型基于现有信息继续。
+    expect(harness.interactions.createInTransaction).not.toHaveBeenCalled();
+    expect(harness.state.completeStepToolCallFromProposed).toHaveBeenCalledWith(expect.objectContaining({
+      toolCallId: 'tc-call-q2',
+      summary: expect.stringContaining('提问未发送：粒度可从上下文推断'),
+    }));
+    expect(harness.gateway.streamToolTurn).toHaveBeenCalledTimes(2);
+    expect(harness.state.succeedStep).toHaveBeenCalledWith(expect.objectContaining({
+      summary: '已按周粒度完成统计。',
+    }));
+  });
+
+  it('stops asking and audits when the per-task question budget is exhausted', async () => {
+    const harness = createHarness({ tools: [READ_TOOL] });
+    harness.gateway.streamToolTurn
+      .mockResolvedValueOnce(stream([
+        {
+          type: 'tool_calls',
+          tool_calls: [{
+            id: 'call-q10',
+            name: 'ask_user',
+            arguments: { kind: 'question', question: '还要补充什么信息吗？' },
+          }],
+        },
+        { type: 'completed', latency_ms: 4, finish_reason: 'tool_calls' },
+      ]))
+      .mockResolvedValueOnce(stream([
+        { type: 'content_delta', text: '基于现有信息完成本步。' },
+        { type: 'completed', latency_ms: 4, finish_reason: 'stop' },
+      ]));
+    harness.state.createStepToolCall.mockImplementation(echoRecord);
+    harness.interactions.countForTask.mockImplementation((args: { type: string }) =>
+      Promise.resolve(args.type === 'QUESTION' ? 10 : 0));
+    harness.decider.decide.mockResolvedValue({ choice: 'proceed', confidence: 1, rationale: '提问次数已达上限' });
+
+    await harness.service.executeStep(executionInput());
+
+    expect(harness.decider.decide).toHaveBeenCalledWith(expect.objectContaining({
+      stepResult: expect.objectContaining({
+        sufficiency: expect.objectContaining({ askedCount: 10, maxQuestions: 10 }),
+      }),
+    }));
+    expect(harness.prisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        action: 'TASK_ORCHESTRATION_LIMIT_EXCEEDED',
+        metadata: expect.objectContaining({ limit: 'QUESTIONS', current: 10, max: 10 }),
+      }),
+    }));
+    expect(harness.state.completeStepToolCallFromProposed).toHaveBeenCalled();
+    expect(harness.interactions.createInTransaction).not.toHaveBeenCalled();
+  });
+
+  it('rejects a WRITE call without a new authorization when the per-task limit is reached', async () => {
+    const harness = createHarness({ tools: [READ_TOOL, WRITE_TOOL] });
+    harness.gateway.streamToolTurn
+      .mockResolvedValueOnce(stream([
+        { type: 'tool_calls', tool_calls: [{ id: 'call-w9', name: 'import_finance_ledger', arguments: {} }] },
+        { type: 'completed', latency_ms: 4, finish_reason: 'tool_calls' },
+      ]))
+      .mockResolvedValueOnce(stream([
+        { type: 'content_delta', text: '授权次数已达上限，未能导入。' },
+        { type: 'completed', latency_ms: 4, finish_reason: 'stop' },
+      ]));
+    harness.toolPolicy.approve.mockReturnValue({
+      definition: { ...WRITE_TOOL, execute: jest.fn() },
+      parsedArguments: {},
+    });
+    harness.state.createStepToolCall.mockImplementation(echoRecord);
+    harness.interactions.countForTask.mockResolvedValue(10);
+
+    await harness.service.executeStep(executionInput());
+
+    // 超限不再创建新授权：驳回本次调用并引导模型转向替代方案。
+    expect(harness.state.rejectStepToolCall).toHaveBeenCalledWith(expect.objectContaining({
+      toolCallId: 'tc-call-w9',
+      code: 'AUTHORIZATION_LIMIT_EXCEEDED',
+    }));
+    expect(harness.interactions.createInTransaction).not.toHaveBeenCalled();
+    expect(harness.state.suspendStepInTransaction).not.toHaveBeenCalled();
+    expect(harness.prisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        action: 'TASK_ORCHESTRATION_LIMIT_EXCEEDED',
+        metadata: expect.objectContaining({ limit: 'AUTHORIZATIONS', current: 10, max: 10 }),
+      }),
+    }));
+    expect(harness.state.succeedStep).toHaveBeenCalledWith(expect.objectContaining({
+      summary: '授权次数已达上限，未能导入。',
+    }));
   });
 });
 
@@ -531,6 +742,7 @@ function createHarness(options: {
         args?.select?.executedResourceType ? (options.outputRefRows ?? []) : (options.windowToolCalls ?? []),
       )),
     },
+    auditLog: { create: jest.fn().mockResolvedValue({}) },
     $transaction: jest.fn().mockImplementation(async (work: (tx: unknown) => unknown) => work({})),
   };
   const gateway = { streamToolTurn: jest.fn(), streamChat: jest.fn() };
@@ -547,6 +759,8 @@ function createHarness(options: {
     createStepToolCall: jest.fn(),
     claimStepToolExecution: jest.fn().mockResolvedValue(true),
     completeStepToolCall: jest.fn().mockResolvedValue(true),
+    completeStepToolCallInTransaction: jest.fn().mockResolvedValue(true),
+    completeStepToolCallFromProposed: jest.fn().mockResolvedValue(true),
     failStepToolCall: jest.fn().mockResolvedValue(true),
     rejectStepToolCall: jest.fn().mockResolvedValue(true),
     rejectStepToolCallInTransaction: jest.fn().mockResolvedValue(true),
@@ -557,8 +771,11 @@ function createHarness(options: {
     findLatestAuthorization: jest.fn().mockResolvedValue(null),
     markAuthorizationUsed: jest.fn().mockResolvedValue(true),
     createInTransaction: jest.fn().mockResolvedValue({ id: 'interaction-1' }),
+    countForTask: jest.fn().mockResolvedValue(0),
+    hasPendingBySummary: jest.fn().mockResolvedValue(false),
   };
   const taskEvents = { append: jest.fn().mockResolvedValue(1) };
+  const decider = { decide: jest.fn().mockResolvedValue({ choice: 'ask_user', confidence: 1 }) };
   const service = new StepRunnerService(
     prisma as unknown as PrismaService,
     gateway as unknown as AiServiceGateway,
@@ -567,14 +784,11 @@ function createHarness(options: {
     state as unknown as StepStateService,
     taskEvents as unknown as TaskEventService,
     interactions as unknown as InteractionService,
+    decider as unknown as OrchestrationDecider,
   );
-  return { service, prisma, gateway, toolPolicy, state, taskEvents, interactions };
+  return { service, prisma, gateway, toolPolicy, state, taskEvents, interactions, decider };
 }
 
 async function* stream(events: ToolTurnStreamEvent[]): AsyncGenerator<ToolTurnStreamEvent> {
-  for (const event of events) yield event;
-}
-
-async function* chatStream(events: ChatStreamEvent[]): AsyncGenerator<ChatStreamEvent> {
   for (const event of events) yield event;
 }

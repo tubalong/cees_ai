@@ -233,6 +233,28 @@ describe('InteractionService', () => {
     );
   });
 
+  it('injects the answer into the step window when a question is resolved', async () => {
+    const harness = createHarness({
+      interaction: interactionRow({
+        type: 'QUESTION',
+        payload: QUESTION_PAYLOAD,
+        stepId: '30000000-0000-0000-0000-000000000002',
+      }),
+    });
+
+    await harness.service.resolve(INTERACTION_ID, { decision: 'answer', value: 'no' });
+
+    // 候选 id 回填 label 后作为 USER 消息注入步骤窗口：恢复后模型在断点看到用户输入续跑。
+    expect(harness.tx.assistantTaskStepMessage.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        tenantId: TENANT_ID,
+        stepId: '30000000-0000-0000-0000-000000000002',
+        role: 'USER',
+        content: '用户答复了你的提问「报告里是否需要包含去年同期对比？」：只看本季度',
+      }),
+    });
+  });
+
   it('returns the current state without new writes when the interaction is already resolved', async () => {
     const harness = createHarness({
       interaction: interactionRow({ status: 'RESOLVED', scope: 'ONCE', resolution: { decision: 'approve', scope: 'ONCE' } }),
@@ -312,7 +334,19 @@ describe('InteractionService', () => {
     });
     const now = new Date('2026-09-28T10:00:00.000Z');
 
-    await expect(harness.service.expireOverdueInteractions(now)).resolves.toBe(1);
+    const expired = await harness.service.expireOverdueInteractions(now);
+    // 返回关闭明细：任务运行器据此按事项类型应用超时后动作。
+    expect(expired).toEqual([
+      {
+        id: INTERACTION_ID,
+        taskId: TASK_ID,
+        tenantId: TENANT_ID,
+        type: 'AUTHORIZATION',
+        stepId: null,
+        stepKey: 's1',
+        summary: AUTHORIZATION_PAYLOAD.summary,
+      },
+    ]);
 
     expect(harness.prisma.assistantTaskInteraction.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
@@ -487,6 +521,10 @@ function createHarness(options: {
       findUniqueOrThrow: jest.fn().mockResolvedValue(interactionRow({ status: 'RESOLVED' })),
     },
     auditLog: { create: jest.fn().mockResolvedValue({}) },
+    assistantTaskStepMessage: {
+      findFirst: jest.fn().mockResolvedValue({ seq: 3 }),
+      create: jest.fn().mockResolvedValue({}),
+    },
   };
   const prisma = {
     $transaction: jest.fn().mockImplementation((callback: (transaction: unknown) => unknown) => callback(tx)),

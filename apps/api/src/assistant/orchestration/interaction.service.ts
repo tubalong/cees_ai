@@ -6,6 +6,7 @@ import {
   AssistantTaskInteractionType,
   AssistantTaskStatus,
   AuditOutcome,
+  ConversationMessageRole,
   Prisma,
 } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
@@ -16,6 +17,7 @@ import {
   PublicTaskInteractionScope,
   PublicTaskInteractionType,
 } from './orchestration.types';
+import { writeStepMessage } from './step-state.service';
 import { TaskEventService } from './task-event.service';
 
 /** 单次过期扫描处理的挂起事项上限（避免长扫描与事件风暴）。 */
@@ -81,6 +83,17 @@ interface InteractionCloseRow {
   type: AssistantTaskInteractionType;
   stepId: string | null;
   payload: Prisma.JsonValue;
+}
+
+/** 过期关闭的行明细：任务运行器据事项类型与触发步骤应用超时后动作。 */
+export interface ExpiredInteractionRow {
+  id: string;
+  taskId: string;
+  tenantId: string;
+  type: AssistantTaskInteractionType;
+  stepId: string | null;
+  stepKey: string | null;
+  summary: string;
 }
 
 /**
@@ -198,6 +211,24 @@ export class InteractionService {
       });
       // 并发下已被其他请求解决：按幂等语义返回最新状态。
       if (claimed.count !== 1) return null;
+      // 答复/裁决注入步骤窗口（USER 角色）：步骤恢复后模型在此断点看到用户输入
+      // 继续执行（提问=答复文本、裁决=所选方案）；授权无正文、不注入。
+      if (
+        interaction.stepId
+        && (interaction.type === AssistantTaskInteractionType.QUESTION
+          || interaction.type === AssistantTaskInteractionType.DECISION)
+      ) {
+        await writeStepMessage(transaction, {
+          tenantId: interaction.tenantId,
+          stepId: interaction.stepId,
+          role: ConversationMessageRole.USER,
+          content: buildResolutionNotice(
+            interaction.type,
+            parseInteractionPayload(interaction.payload),
+            outcome.value,
+          ),
+        });
+      }
       await this.taskEvents.appendInTransaction(transaction, interaction.taskId, interaction.tenantId, {
         type: 'interaction_resolved',
         interactionId: interaction.id,
@@ -255,8 +286,11 @@ export class InteractionService {
     return closed;
   }
 
-  /** 超时策略：将已过 expiresAt 的 PENDING 事项关闭为 EXPIRED（由任务运行器的恢复扫描周期调用）。 */
-  async expireOverdueInteractions(now = new Date()): Promise<number> {
+  /**
+   * 超时策略：将已过 expiresAt 的 PENDING 事项关闭为 EXPIRED（由任务运行器的
+   * 恢复扫描周期调用）。返回成功关闭的行明细——调用方按事项类型应用超时后动作。
+   */
+  async expireOverdueInteractions(now = new Date()): Promise<ExpiredInteractionRow[]> {
     const overdue = await this.prisma.assistantTaskInteraction.findMany({
       where: {
         status: AssistantTaskInteractionStatus.PENDING,
@@ -266,12 +300,22 @@ export class InteractionService {
       take: EXPIRY_BATCH_LIMIT,
       select: { id: true, taskId: true, tenantId: true, type: true, stepId: true, payload: true },
     });
-    let expired = 0;
+    const expired: ExpiredInteractionRow[] = [];
     for (const row of overdue) {
       try {
         const closed = await this.prisma.$transaction((transaction) =>
           this.closeInteractionInTransaction(transaction, row, 'EXPIRED', now));
-        if (closed) expired++;
+        if (!closed) continue;
+        const payload = parseInteractionPayload(row.payload);
+        expired.push({
+          id: row.id,
+          taskId: row.taskId,
+          tenantId: row.tenantId,
+          type: row.type,
+          stepId: row.stepId,
+          stepKey: payload.stepKey,
+          summary: payload.summary,
+        });
       } catch (error) {
         this.logger.error(`failed to expire interaction ${row.id}: ${String(error)}`);
       }
@@ -347,6 +391,46 @@ export class InteractionService {
       where: { taskId, status: AssistantTaskInteractionStatus.PENDING },
     });
     return count > 0;
+  }
+
+  /**
+   * 任务内指定类型事项的创建总数（防滥用上限判定）：包含全部历史终态；
+   * 只统计「创建」次数——PENDING 重附着走创建前分支，不重复计数。
+   */
+  async countForTask(input: {
+    tenantId: string;
+    taskId: string;
+    type: PublicTaskInteractionType;
+  }): Promise<number> {
+    return this.prisma.assistantTaskInteraction.count({
+      where: { tenantId: input.tenantId, taskId: input.taskId, type: input.type },
+    });
+  }
+
+  /**
+   * 同类问题合并：任务内是否已有待决的同类提问/裁决（摘要精确匹配）。
+   * 命中时不再重复打扰用户，由调用方按「基于现有信息继续」处理。
+   */
+  async hasPendingBySummary(input: {
+    tenantId: string;
+    taskId: string;
+    summary: string;
+  }): Promise<boolean> {
+    const normalized = truncate(input.summary.trim(), MAX_SUMMARY_CHARS);
+    if (!normalized) return false;
+    const pending = await this.prisma.assistantTaskInteraction.findMany({
+      where: {
+        tenantId: input.tenantId,
+        taskId: input.taskId,
+        status: AssistantTaskInteractionStatus.PENDING,
+        type: {
+          in: [AssistantTaskInteractionType.QUESTION, AssistantTaskInteractionType.DECISION],
+        },
+      },
+      select: { payload: true },
+      take: AUTHORIZATION_SCAN_LIMIT,
+    });
+    return pending.some((row) => parseInteractionPayload(row.payload).summary === normalized);
   }
 
   /**
@@ -554,6 +638,26 @@ function toDisplayResolution(resolution: Prisma.JsonValue | null): string | null
   const value = asString(resolution.value);
   if (value) return value;
   return asString(resolution.decision);
+}
+
+/** 答复/裁决注入步骤窗口的展示文本：所选候选回填 label，自由文本原样。 */
+function buildResolutionNotice(
+  type: AssistantTaskInteractionType,
+  payload: ParsedInteractionPayload,
+  value: string | null,
+): string {
+  const answer = resolveOptionLabel(payload.options, value);
+  const prefix = type === AssistantTaskInteractionType.QUESTION
+    ? `用户答复了你的提问「${payload.summary}」：`
+    : `用户做出了裁决「${payload.summary}」：`;
+  return truncate(`${prefix}${answer}`, MAX_RESOLUTION_CHARS);
+}
+
+/** 所选候选（id）回填可读 label；自由文本或未知候选原样使用。 */
+function resolveOptionLabel(options: PublicTaskInteractionOption[], value: string | null): string {
+  const text = value?.trim() ?? '';
+  const matched = options.find((option) => option.id === text);
+  return matched ? matched.label : text;
 }
 
 /** 防御式解析内部 payload：非预期结构按空值兜底（数据由本服务写入，形状可信）。 */

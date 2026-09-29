@@ -2,18 +2,21 @@ import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/commo
 import {
   AssistantTaskStatus,
   AssistantTaskStepStatus,
+  AuditOutcome,
   Prisma,
 } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../../database/prisma.service';
-import { InteractionService } from './interaction.service';
+import { InteractionService, type ExpiredInteractionRow } from './interaction.service';
 import { StepRunnerService } from './step-runner.service';
 import { StepStateService } from './step-state.service';
 import { TaskEventService } from './task-event.service';
 import {
   TASK_HEARTBEAT_INTERVAL_MS,
   TASK_RECOVERY_INTERVAL_MS,
+  loadSuspendTimeoutConfig,
   nextTaskLease,
+  type SuspendTimeoutAction,
 } from './task-execution.config';
 
 /** 单轮恢复扫描处理的失联任务上限（避免长事务与扫描抖动）。 */
@@ -467,10 +470,12 @@ export class TaskRunnerService implements OnModuleInit, OnModuleDestroy {
 
   private async runRecoveryScan(): Promise<void> {
     try {
-      // 超时策略：先关闭已过 expiresAt 的挂起事项（写 interaction_resolved），再恢复失联任务。
+      // 超时策略：先关闭已过 expiresAt 的挂起事项（写 interaction_resolved），
+      // 再按配置动作应用（按默认值继续 / 跳过步骤 / 终止任务）。
       const expired = await this.interactions.expireOverdueInteractions();
-      if (expired > 0) {
-        this.logger.warn(`expired ${expired} overdue interaction(s)`);
+      if (expired.length > 0) {
+        this.logger.warn(`expired ${expired.length} overdue interaction(s)`);
+        await this.applySuspendTimeoutActions(expired);
       }
       const rescheduled = await this.recoverStaleTasks();
       if (rescheduled > 0) {
@@ -485,6 +490,78 @@ export class TaskRunnerService implements OnModuleInit, OnModuleDestroy {
       this.logger.error(`task recovery scan failed: ${String(error)}`);
     }
   }
+
+  /**
+   * 挂起超时后动作（恢复扫描调用，逐条独立容错）：
+   * - continue_default：向步骤窗口注入系统提示（视为未获批准 / 按默认继续），
+   *   步骤维持 WAITING_USER，由本轮恢复扫描续跑；
+   * - skip_step / fail_task：无执行者的 WAITING_USER 步骤条件收束为 SKIPPED /
+   *   FAILED，任务随后由既有推进逻辑判定终态。
+   * 每条应用均写 TASK_SUSPEND_TIMEOUT_APPLIED 审计留痕。
+   */
+  private async applySuspendTimeoutActions(expired: ExpiredInteractionRow[]): Promise<number> {
+    const timeout = loadSuspendTimeoutConfig();
+    // 无限等待（默认）：理论上不会出现过期事项，防御性短路。
+    if (timeout.timeoutMinutes <= 0) return 0;
+    let applied = 0;
+    for (const row of expired) {
+      try {
+        if (timeout.action === 'continue_default') {
+          if (row.stepId) {
+            await this.state.writeSuspendTimeoutNotice({
+              tenantId: row.tenantId,
+              stepId: row.stepId,
+              content: buildSuspendTimeoutNotice(row),
+            });
+          }
+        } else if (row.stepId) {
+          await this.state.expireWaitingStep({
+            taskId: row.taskId,
+            stepId: row.stepId,
+            stepKey: row.stepKey ?? '',
+            tenantId: row.tenantId,
+            outcome: timeout.action === 'skip_step' ? 'skip' : 'fail',
+            reason: timeout.action === 'skip_step'
+              ? '等待用户处理超时，本步骤已跳过'
+              : '等待用户处理超时，本步骤按失败收束',
+          });
+        }
+        await this.auditSuspendTimeoutApplied(row, timeout.action);
+        applied++;
+      } catch (error) {
+        this.logger.error(
+          `failed to apply suspend timeout for interaction ${row.id}: ${String(error)}`,
+        );
+      }
+    }
+    return applied;
+  }
+
+  /** 超时策略应用审计：事项、触发步骤与所采取的动作。 */
+  private async auditSuspendTimeoutApplied(
+    row: ExpiredInteractionRow,
+    action: SuspendTimeoutAction,
+  ): Promise<void> {
+    await this.prisma.auditLog.create({
+      data: {
+        tenantId: row.tenantId,
+        actorUserId: null,
+        actorMembershipId: null,
+        action: 'TASK_SUSPEND_TIMEOUT_APPLIED',
+        outcome: AuditOutcome.SUCCESS,
+        resourceType: 'ASSISTANT_TASK_INTERACTION',
+        resourceId: row.id,
+        requestId: `task:${row.taskId}:suspend-timeout`,
+        metadata: {
+          taskId: row.taskId,
+          interactionType: row.type,
+          stepId: row.stepId,
+          stepKey: row.stepKey,
+          action,
+        },
+      },
+    });
+  }
 }
 
 /** dependsOn JSON 由物化写入，读取时形状可信；防御性回退为空数组。 */
@@ -492,6 +569,24 @@ function asStringArray(value: Prisma.JsonValue): string[] {
   return Array.isArray(value)
     ? value.filter((entry): entry is string => typeof entry === 'string')
     : [];
+}
+
+/**
+ * 超时「按默认值继续」的步骤窗口提示（USER 角色，服务端固定文案）：授权视为
+ * 未获批准、提问无答复、裁决按最稳妥默认——模型恢复后据此继续本步骤。
+ */
+function buildSuspendTimeoutNotice(row: ExpiredInteractionRow): string {
+  const label = `「${row.summary}」`;
+  if (row.type === 'AUTHORIZATION') {
+    return `授权申请${label}未在时限内处理，视为未获批准：本次操作不再执行，`
+      + '请改用其他可行方式完成本步骤，或说明无法完成。';
+  }
+  if (row.type === 'DECISION') {
+    return `裁决${label}未在时限内作出：请采用最稳妥的默认方案继续完成本步骤，`
+      + '并在结果摘要中说明所采用的默认选择。';
+  }
+  return `提问${label}未在时限内收到答复：请基于现有信息继续完成本步骤；`
+    + '确实无法完成的，说明原因。';
 }
 
 /** 失败步骤的 error JSON → 任务级失败原因（展示级）。 */
