@@ -34,6 +34,12 @@ ai-service 不持久化正式会话、消息或摘要。`conversation_id` 只用
 
 如果全部近期消息无法放入模式预算，服务从最新消息向前保留连续后缀，并避免让截断后的上下文以孤立 Assistant 消息开头。最后一条用户消息不能放入预算时返回 `CHAT_CONTEXT_TOO_LARGE`，不会静默删除本轮问题。
 
+**消息条数上限必须与 ai-service 契约对齐。** `ChatRequest.messages` 与 `ToolTurnRequest.messages` 的 `max_length` 都是 **128**，超出时 ai-service 直接以 `INVALID_INVOCATION_REQUEST`(422) 拒绝，且响应体刻意不含字段级原因。NestJS 组装后统一裁剪到 **`MODEL_MESSAGE_LIMIT = 120`**（留出余量），保留最新一段。
+
+只靠压缩阈值挡不住这类越界：压缩按**文本消息**条数（`COMPACTION_THRESHOLD`）与 Token 预算触发，而工具轮次实际发送的是「文本 + `TOOL` 消息 + 为每个工具步骤合成的 `assistant(tool_calls)`」。工具调用密集的会话会先在**总条数**上越界，而且**该会话之后每一轮都会被拒**——用户看到的是会话彻底不可用，不是单次失败。
+
+裁剪必须落在安全边界上：`tool` 消息只有在紧随其配对的 `assistant(tool_calls)` 时才是合法结构，因此裁剪后要继续丢弃开头连续悬空的 `tool` 消息；末条（本轮用户提问）始终保留。
+
 `context_usage.strategy`：
 
 - `full`：请求中的全部消息都被采用，且未使用历史摘要；
@@ -136,6 +142,7 @@ capabilities = ["chat", "vision", "tool_calling"]
 - 原始 Chat 文本超过 1 MiB：`INVALID_CHAT_REQUEST`，HTTP 422；
 - 上下文超过模式或压缩预算：`CHAT_CONTEXT_TOO_LARGE`，HTTP 422；
 - 请求输出预算超过模式上限：`INVALID_CHAT_REQUEST`，HTTP 422；
+- 调用请求超出契约约束（如 `messages` 超过 128 条、`description` 超过 2048 字符）：`INVALID_INVOCATION_REQUEST`，HTTP 422；NestJS 映射为可执行提示（新建会话继续），而不是把 `Request validation failed` 原样给用户；
 - Chat 配置或模式不可用：`AI_SERVICE_NOT_READY` / `CHAT_MODE_UNAVAILABLE`，HTTP 503；
 - 非流式 Provider 未返回非空文本：`CHAT_OUTPUT_INVALID`，HTTP 502；
 - 压缩摘要为空或无效：`CHAT_SUMMARY_INVALID`，HTTP 502；

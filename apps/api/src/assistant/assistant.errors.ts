@@ -51,6 +51,19 @@ export function describeAssistantError(error: unknown): PublicAssistantError {
     };
   }
 
+  if (error.code === 'INVALID_INVOCATION_REQUEST') {
+    // ai-service 拒绝调用请求（上下文条数/体积超出契约上限）时返回的 422，
+    // 响应体刻意不含字段级原因。这里给出可执行出路：原会话历史仍在，
+    // 换一个会话即可继续，而不是让用户反复重试一个注定失败的请求。
+    return {
+      code: error.code,
+      message: '本轮的上下文超出模型可接受的范围（对话历史过长），请新建会话继续；'
+        + '原会话内容仍保留在历史记录中。',
+      retryable: false,
+      status: HttpStatus.BAD_GATEWAY,
+    };
+  }
+
   return {
     code: error.code,
     message: error.message,

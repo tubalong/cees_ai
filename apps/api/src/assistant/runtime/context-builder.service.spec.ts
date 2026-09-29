@@ -1,8 +1,9 @@
 import { ConversationMessageRole } from '@prisma/client';
-import { ContextBuilderService } from './context-builder.service';
+import { ContextBuilderService, MODEL_MESSAGE_LIMIT, trimToModelMessageLimit } from './context-builder.service';
 import type { PrismaService } from '../../database/prisma.service';
 import type { AiServiceGateway } from '../../ai-orchestration/ai-service-gateway.service';
 import type { UserMemoryService } from '../../user-memory/user-memory.service';
+import type { ToolTurnMessage } from '@cees/ai-service-client';
 
 const TENANT_ID = '10000000-0000-0000-0000-000000000001';
 const USER_ID = '10000000-0000-0000-0000-000000000002';
@@ -372,5 +373,87 @@ describe('ContextBuilderService compaction triggers', () => {
         await service.buildChatRequest(buildInput());
 
         expect(userMemory.applyCandidates).not.toHaveBeenCalled();
+    });
+
+    it('bounds the assembled tool-turn messages to the model message limit', async () => {
+        // 工具调用密集的会话会先在「总条数」上越界：压缩阈值只看文本消息，
+        // 而这里统计的是文本 + TOOL 消息 + 为每个工具步骤合成的 assistant(tool_calls)。
+        // 越界后 ai-service 以 INVALID_INVOCATION_REQUEST 拒绝该会话的每一轮。
+        const history: HistoryMessageRow[] = [
+            { id: 'u0', role: ConversationMessageRole.USER, content: '统计所有项目', turnId: null, toolCallId: null },
+            ...Array.from({ length: 70 }, (_, index) => ({
+                id: `t${index}`,
+                role: ConversationMessageRole.TOOL,
+                content: `结果 ${index}`,
+                turnId: `turn-${index}`,
+                toolCallId: `tc-${index}`,
+            })),
+        ];
+        const toolCalls = Array.from({ length: 70 }, (_, index) => ({
+            id: `tc-${index}`,
+            turnId: `turn-${index}`,
+            upstreamCallId: `call_${index}`,
+            name: 'list_projects',
+            arguments: {},
+        }));
+        const { service } = createService(history, toolCalls);
+
+        const result = await service.buildToolTurnMessages(buildInput());
+
+        expect(result.items.length).toBeLessThanOrEqual(MODEL_MESSAGE_LIMIT);
+        // 首条不能是悬空的 tool 结果（缺少配对的 assistant(tool_calls) 会被 provider 拒绝）。
+        expect(result.items[0].role).not.toBe('tool');
+        // 保留最新一段：最后一条工具结果必须还在。
+        expect(result.items[result.items.length - 1]).toEqual(expect.objectContaining({ role: 'tool' }));
+    });
+});
+
+describe('trimToModelMessageLimit', () => {
+    /** 构造「assistant(tool_calls) + tool 结果」交替的工具步骤消息。 */
+    function toolStepItems(steps: number): ToolTurnMessage[] {
+        const items: ToolTurnMessage[] = [];
+        for (let index = 0; index < steps; index += 1) {
+            items.push({
+                role: 'assistant',
+                content: null,
+                tool_calls: [{ id: `call_${index}`, name: 'list_projects', arguments: {} }],
+            });
+            items.push({
+                role: 'tool',
+                content: [{ type: 'text', text: `结果 ${index}` }],
+                tool_call_id: `call_${index}`,
+                name: 'list_projects',
+            });
+        }
+        return items;
+    }
+
+    it('keeps the newest slice within the limit', () => {
+        const items = toolStepItems(80);
+        const trimmed = trimToModelMessageLimit(items);
+
+        expect(items.length).toBeGreaterThan(MODEL_MESSAGE_LIMIT);
+        expect(trimmed.length).toBeLessThanOrEqual(MODEL_MESSAGE_LIMIT);
+        expect(trimmed[trimmed.length - 1]).toEqual(items[items.length - 1]);
+    });
+
+    it('never leaves a leading tool result without its assistant(tool_calls)', () => {
+        // 裁剪点落在轮次中间时，开头悬空的 tool 结果必须一并丢弃；
+        // provider 只接受「tool 消息紧随其配对的 assistant(tool_calls)」的结构。
+        const items: ToolTurnMessage[] = [
+            { role: 'user', content: [{ type: 'text', text: '开始' }] },
+            { role: 'assistant', content: [{ type: 'text', text: '好的' }] },
+            ...toolStepItems(80),
+        ];
+        const trimmed = trimToModelMessageLimit(items);
+
+        expect(trimmed.length).toBeLessThanOrEqual(MODEL_MESSAGE_LIMIT);
+        expect(trimmed[0].role).not.toBe('tool');
+    });
+
+    it('returns the same array when already within the limit', () => {
+        const items = toolStepItems(2);
+
+        expect(trimToModelMessageLimit(items)).toBe(items);
     });
 });

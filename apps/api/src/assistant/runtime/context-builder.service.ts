@@ -12,6 +12,20 @@ const COMPACTION_THRESHOLD = 80;
 const RETAIN_RECENT_COUNT = 20;
 
 /**
+ * 交给模型的消息条数上限。
+ *
+ * 必须与 ai-service 契约（`ToolTurnRequest.messages` 与 `ChatRequest.messages` 的
+ * `max_length=128`）对齐并留出余量：超出时 ai-service 直接以
+ * `INVALID_INVOCATION_REQUEST`(422) 拒绝，而且响应体刻意不含字段级原因。
+ *
+ * 为什么单靠压缩阈值挡不住：压缩按**文本消息**条数（COMPACTION_THRESHOLD）与 Token
+ * 预算触发，而这里统计的是文本 + TOOL 消息 + 为每个工具步骤合成的
+ * `assistant(tool_calls)` 消息。工具调用密集的会话会先在总条数上越界——一旦越界，
+ * 该会话的**每一轮**都会 422，且用户看到的是会话彻底不可用。
+ */
+export const MODEL_MESSAGE_LIMIT = 120;
+
+/**
  * 各模式输入 Token 预算的兜底默认值（Standard 64K / Ultra 128K）。
  * 权威值来自 ai-service `/ready` 的 `chat_context_budgets`（运行时拉取）；
  * 仅在 ai-service 未就绪、字段缺失或调用失败时回退到该值。
@@ -96,7 +110,9 @@ export class ContextBuilderService {
       mode: (input.mode === 'ultra' ? 'ultra' : 'standard') satisfies ChatMode,
       conversation_summary: summary,
       user_memories: userMemories.length > 0 ? userMemories : null,
-      messages: await Promise.all(history.map((message) => this.toChatMessage(message, input))),
+      // 纯文本轮次已过滤 TOOL 消息，直接保留最新一段即可。
+      messages: (await Promise.all(history.map((message) => this.toChatMessage(message, input))))
+        .slice(-MODEL_MESSAGE_LIMIT),
     };
   }
 
@@ -193,7 +209,7 @@ export class ContextBuilderService {
       items.push({ role: 'assistant', content: await this.toParts(message, input) });
     }
 
-    return { summary, items, userMemories };
+    return { summary, items: trimToModelMessageLimit(items), userMemories };
   }
 
   /**
@@ -418,6 +434,20 @@ export class ContextBuilderService {
 function normalizePersistedConnectorContexts(value: Prisma.JsonValue): Array<Record<string, unknown>> {
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is Prisma.JsonObject => Boolean(item && typeof item === 'object' && !Array.isArray(item)));
+}
+
+/**
+ * 从最老处裁剪到条数上限（保留最新的一段）。
+ *
+ * 裁剪必须落在安全边界上：`tool` 消息只有在紧随其配对的 `assistant(tool_calls)`
+ * 时才是合法会话结构，开头悬空的 tool 结果会让 provider 直接拒绝请求。
+ * 因此裁完后继续丢弃开头连续的 tool 消息。
+ */
+export function trimToModelMessageLimit(items: ToolTurnMessage[]): ToolTurnMessage[] {
+  if (items.length <= MODEL_MESSAGE_LIMIT) return items;
+  const trimmed = items.slice(items.length - MODEL_MESSAGE_LIMIT);
+  while (trimmed.length > 1 && trimmed[0].role === 'tool') trimmed.shift();
+  return trimmed;
 }
 
 /** 复用 ai-service `app/chat/context.py` 的估算口径：UTF-8 字节数 / 4 上取整。 */
