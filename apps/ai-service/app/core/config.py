@@ -20,6 +20,7 @@ class ModelRole(StrEnum):
     reasoning = "reasoning"
     rag = "rag"
     orchestrator = "orchestrator"
+    orchestration_decision = "orchestration_decision"
 
 
 class OutputMode(StrEnum):
@@ -216,7 +217,9 @@ def validate_readiness(settings: Settings, catalog: ModelCatalog) -> list[str]:
                 errors.append(f"role {role.value} references disabled profile {profile_name}")
                 continue
             required_mode = (
-                OutputMode.json_schema if role == ModelRole.structured else OutputMode.text
+                OutputMode.json_schema
+                if role in (ModelRole.structured, ModelRole.orchestration_decision)
+                else OutputMode.text
             )
             if required_mode not in profile.modes:
                 errors.append(
