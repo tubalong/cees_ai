@@ -56,7 +56,7 @@ Desktop: dws schema --all --compact --format json
   -> 仅保留 effect=read + confirmation=not_required + availability=available
   -> 转成不含 CLI 路径和凭据的完整工具目录
 API: POST /assistant/connectors/dingtalk/plan
-  -> 目录超过 ai-service 单轮 32 工具限制时，先从完整目录动态选出最多 32 个候选
+-> 目录超过 ai-service 单轮 32 工具限制时，先从完整目录动态选出最多 31 个候选（其中 1 个工具名额留给「是否需要下一轮」控制工具）
   -> 再由 AI 选择候选工具别名和结构化参数，不执行 dws
 Desktop: 重新读取具体 leaf Schema
   -> 再次校验只读安全属性、工具身份和参数白名单

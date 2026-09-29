@@ -79,6 +79,7 @@ flowchart LR
 - [公开 AI 对话链路与 Token 计量](public-chat-api-and-token-metering.md)
 - [AI 助手工具循环](assistant-tool-loop.md)
 - [Desktop 连接器运行时](connector-runtime.md)
+- [连接器语义路由、多步接力与调用审计（草案）](connector-routing-and-iteration.md)
 - [AI Tool Calling](ai-tool-calling.md)
 - [联网搜索（Tavily）](web-search.md)
 - [通用任务 tasks.scope 方案](task-scope-proposal.md)

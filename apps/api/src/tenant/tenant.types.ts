@@ -5,6 +5,7 @@ export interface TenantResult {
     code: string;
     name: string;
     timezone: string;
+    connectorReadAuditEnabled: boolean;
     status: TenantStatus;
     version: number;
     createdAt: Date;

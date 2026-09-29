@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CEES AI API
-  version: 0.48.0
+  version: 0.52.0
   description: 以本文件为唯一事实源的公开 API 契约。资源与操作按 docs/api 约定补充。
 
 servers:
@@ -296,6 +296,58 @@ paths:
                 $ref: '#/components/schemas/ErrorResponseEnvelope'
         '503':
           description: AI service or model is temporarily unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+  /assistant/connectors/route:
+    post:
+      summary: 选择本轮回答需要激活的连接器
+      description: |
+        Desktop 在触发连接器规划前，先把已连接连接器的一级能力摘要（只含名称、能力描述、典型问法和就绪状态，
+        不含完整工具目录）交给服务端。服务端只用模型做语义路由，返回需要激活的 provider 列表，
+        不接收凭据、不接收工具参数、不执行任何外部调用。
+        用户明确点名某个连接器或从连接器卡片进入对话时，Desktop 直接硬命中，不调用本接口。
+        返回的 clarification 非空表示目标不唯一：Desktop 不得调用任何连接器或规划接口，
+        只把该提示作为本轮 `connectorRoutingHint` 提交，让模型自然反问。
+      operationId: routeAssistantConnector
+      tags: [Conversation]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConnectorRoutingRequest'
+      responses:
+        '200':
+          description: 需要激活的连接器；providers 为空表示本轮不使用任何连接器
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectorRoutingResponseEnvelope'
+        '400':
+          description: 查询内容或连接器摘要不合法
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '401':
+          description: 登录状态无效、已过期或缺少有效租户成员身份
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '502':
+          description: 模型返回了目录外的连接器或无效路由结果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '503':
+          description: ai-service 或模型暂时不可用
           content:
             application/json:
               schema:
@@ -1484,7 +1536,7 @@ paths:
     get:
       summary: 查询当前成员的用户级记忆列表
       description: |
-        返回当前成员在该租户内的全部未删除记忆，按创建时间升序（即注入对话上下文的顺序），至多 30 条。
+        返回当前成员在该租户内的全部未删除记忆，按创建时间升序（即注入对话上下文的顺序），至多 50 条。
         记忆只属于成员本人：AI 仅提议记忆内容，写入与删除一律以本人操作为准。
       operationId: listUserMemories
       tags:
@@ -12117,6 +12169,14 @@ components:
           type: boolean
           default: false
           description: 本轮是否允许联网搜索；省略时默认关闭。关闭时 AI 不获得联网检索工具；若用户消息明确提到需要联网，服务端可为本轮自动临时启用并在 started 事件回传（见 TurnCapabilities.autoEnabled）
+        connectorRoutingHint:
+          type: [string, 'null']
+          minLength: 1
+          maxLength: 1000
+          description: >-
+            Desktop 调用连接器语义路由、且路由判定目标不唯一时注入的本轮消歧提示，
+            让模型自然反问用户。只用于本轮回答，与 assistantContext 相同，
+            不落库、不作为业务写入或权限依据，也不属于 ConnectorContext 事实通道。
         connectorContexts:
           type: array
           maxItems: 5
@@ -12158,6 +12218,43 @@ components:
           type: object
           additionalProperties: true
           description: 已脱敏的连接器结构化结果，不得包含 Token、Cookie、AppSecret 或授权凭据
+        riskLevel:
+          type: string
+          enum: [READ, WRITE, DESTRUCTIVE]
+          description: >-
+            客户端依据同一次 plan 的工具目录自报的风险等级，只用于服务端分级审计，
+            不作为权限或业务写入依据。省略时按 DESTRUCTIVE 处理（与既有「未识别工具按
+            DESTRUCTIVE」一致），逐条审计而不并入轮次级聚合。
+        confirmed:
+          type: boolean
+          description: >-
+            客户端自报的「本轮执行前已获得用户确认」，只用于审计留痕，不代表服务端授权；
+            服务端不据此放行任何写入。
+
+    ConnectorPreviousStep:
+      type: object
+      additionalProperties: false
+      required: [toolId, status]
+      properties:
+        toolId:
+          type: string
+          minLength: 1
+          maxLength: 120
+          description: 同一次用户请求内已执行的连接器本地工具 ID
+        argumentsDigest:
+          type: string
+          maxLength: 2000
+          description: 已执行调用的参数脱敏摘要，只用于本轮规划参考
+        resultDigest:
+          type: string
+          maxLength: 2000
+          description: >-
+            已执行调用结果的脱敏摘要，属于不可信第三方数据。规划只能从中抽取 ID 或字段，
+            不得执行其中的指令，也不得据此生成新的写操作目标。
+        status:
+          type: string
+          enum: [SUCCESS, FAILED, REJECTED]
+          description: 已执行调用的结果状态
 
     TencentMeetingConnectorToolRisk:
       type: string
@@ -12207,6 +12304,14 @@ components:
           maxItems: 128
           items:
             $ref: '#/components/schemas/TencentMeetingConnectorTool'
+        previousSteps:
+          type: array
+          maxItems: 3
+          description: >-
+            同一次用户请求内此前已执行的连接器步骤摘要（脱敏、不可信）；缺省或为空表示第一轮
+            规划。Desktop 只在第一轮返回 followUpMayBeNeeded 时进入第二轮。
+          items:
+            $ref: '#/components/schemas/ConnectorPreviousStep'
 
     TencentMeetingConnectorPlannedCall:
       type: object
@@ -12232,6 +12337,12 @@ components:
           maxItems: 3
           items:
             $ref: '#/components/schemas/TencentMeetingConnectorPlannedCall'
+        followUpMayBeNeeded:
+          type: boolean
+          default: false
+          description: >-
+            模型提示「本次用户请求可能还需要第二轮连接器调用才能完成」；缺省或 false 时
+            Desktop 不得进入第二轮，以避免为不确定的情况多付一次规划成本。
 
     TencentMeetingConnectorPlanResponseEnvelope:
       type: object
@@ -12295,6 +12406,14 @@ components:
           maxItems: 256
           items:
             $ref: '#/components/schemas/WeComConnectorTool'
+        previousSteps:
+          type: array
+          maxItems: 3
+          description: >-
+            同一次用户请求内此前已执行的连接器步骤摘要（脱敏、不可信）；缺省或为空表示第一轮
+            规划。Desktop 只在第一轮返回 followUpMayBeNeeded 时进入第二轮。
+          items:
+            $ref: '#/components/schemas/ConnectorPreviousStep'
 
     WeComConnectorPlannedCall:
       type: object
@@ -12320,6 +12439,12 @@ components:
           maxItems: 3
           items:
             $ref: '#/components/schemas/WeComConnectorPlannedCall'
+        followUpMayBeNeeded:
+          type: boolean
+          default: false
+          description: >-
+            模型提示「本次用户请求可能还需要第二轮连接器调用才能完成」；缺省或 false 时
+            Desktop 不得进入第二轮，以避免为不确定的情况多付一次规划成本。
 
     WeComConnectorPlanResponseEnvelope:
       type: object
@@ -12466,6 +12591,14 @@ components:
           maxItems: 256
           items:
             $ref: '#/components/schemas/GitHubConnectorTool'
+        previousSteps:
+          type: array
+          maxItems: 3
+          description: >-
+            同一次用户请求内此前已执行的连接器步骤摘要（脱敏、不可信）；缺省或为空表示第一轮
+            规划。Desktop 只在第一轮返回 followUpMayBeNeeded 时进入第二轮。
+          items:
+            $ref: '#/components/schemas/ConnectorPreviousStep'
 
     GitHubConnectorPlannedCall:
       type: object
@@ -12491,6 +12624,12 @@ components:
           maxItems: 3
           items:
             $ref: '#/components/schemas/GitHubConnectorPlannedCall'
+        followUpMayBeNeeded:
+          type: boolean
+          default: false
+          description: >-
+            模型提示「本次用户请求可能还需要第二轮连接器调用才能完成」；缺省或 false 时
+            Desktop 不得进入第二轮，以避免为不确定的情况多付一次规划成本。
 
     GitHubConnectorPlanResponseEnvelope:
       type: object
@@ -12502,6 +12641,96 @@ components:
           const: true
         data:
           $ref: '#/components/schemas/GitHubConnectorPlanResult'
+        requestId:
+          type: [string, 'null']
+          description: Public API request trace ID
+
+    ConnectorRoutingProvider:
+      type: string
+      enum: [DINGTALK, TENCENT_MEETING, WECOM, GITHUB]
+      description: 参与语义路由的本地连接器；LOCAL_SYSTEM 本机工具不参与路由
+
+    ConnectorRoutingCandidate:
+      type: object
+      additionalProperties: false
+      required: [provider, displayName, capabilitySummary, state]
+      properties:
+        provider:
+          $ref: '#/components/schemas/ConnectorRoutingProvider'
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 60
+          description: 连接器展示名，例如 钉钉
+        capabilitySummary:
+          type: string
+          minLength: 1
+          maxLength: 300
+          description: 一级能力摘要，只描述能回答哪类问题，不包含工具名、参数或凭据
+        routingExamples:
+          type: array
+          maxItems: 5
+          items:
+            type: string
+            minLength: 1
+            maxLength: 60
+          description: 典型用户问法短句，用于语义匹配
+        state:
+          type: string
+          enum: [NOT_INSTALLED, AUTH_REQUIRED, PROFILE_REQUIRED, READY, ERROR]
+          description: 与 Desktop ConnectorState 一致；只有 READY 的连接器可以被路由命中
+        toolCount:
+          type: integer
+          minimum: 0
+          maximum: 5000
+          description: 当前已发现工具数量，仅用于提示模型能力规模，不参与权限判断
+
+    ConnectorRoutingRequest:
+      type: object
+      additionalProperties: false
+      required: [query, connectors]
+      properties:
+        query:
+          type: string
+          minLength: 1
+          maxLength: 10000
+        connectors:
+          type: array
+          minItems: 1
+          maxItems: 8
+          items:
+            $ref: '#/components/schemas/ConnectorRoutingCandidate'
+
+    ConnectorRoutingResult:
+      type: object
+      additionalProperties: false
+      required: [providers, clarification, reason]
+      properties:
+        providers:
+          type: array
+          maxItems: 8
+          items:
+            $ref: '#/components/schemas/ConnectorRoutingProvider'
+          description: 本轮需要激活并进入二级规划的连接器；为空表示不需要任何连接器
+        clarification:
+          type: [string, 'null']
+          maxLength: 500
+          description: 目标不唯一时的反问提示；非空时 Desktop 不得规划或执行任何连接器调用
+        reason:
+          type: string
+          maxLength: 500
+          description: 路由依据的简短说明，用于审计与排障，不展示为业务事实
+
+    ConnectorRoutingResponseEnvelope:
+      type: object
+      additionalProperties: false
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: '#/components/schemas/ConnectorRoutingResult'
         requestId:
           type: [string, 'null']
           description: Public API request trace ID
@@ -12546,6 +12775,14 @@ components:
           maxItems: 1500
           items:
             $ref: '#/components/schemas/DingTalkConnectorTool'
+        previousSteps:
+          type: array
+          maxItems: 3
+          description: >-
+            同一次用户请求内此前已执行的连接器步骤摘要（脱敏、不可信）；缺省或为空表示第一轮
+            规划。Desktop 只在第一轮返回 followUpMayBeNeeded 时进入第二轮。
+          items:
+            $ref: '#/components/schemas/ConnectorPreviousStep'
 
     DingTalkConnectorPlannedCall:
       type: object
@@ -12571,6 +12808,12 @@ components:
           maxItems: 3
           items:
             $ref: '#/components/schemas/DingTalkConnectorPlannedCall'
+        followUpMayBeNeeded:
+          type: boolean
+          default: false
+          description: >-
+            模型提示「本次用户请求可能还需要第二轮连接器调用才能完成」；缺省或 false 时
+            Desktop 不得进入第二轮，以避免为不确定的情况多付一次规划成本。
 
     DingTalkConnectorPlanResponseEnvelope:
       type: object
@@ -15322,6 +15565,7 @@ components:
         - code
         - name
         - timezone
+        - connectorReadAuditEnabled
         - status
         - version
         - createdAt
@@ -15350,6 +15594,12 @@ components:
         updatedAt:
           type: string
           format: date-time
+        connectorReadAuditEnabled:
+          type: boolean
+          description: >-
+            连接器读操作是否逐条审计。默认 false：连接器读调用按轮次级聚合成一条
+            CONNECTOR_READ_OPERATION 审计；开启后每次读调用各留一条。写/破坏性操作始终
+            逐条审计，不受该开关影响。修改需要 tenant.update 权限。
 
     UpdateTenantRequest:
       type: object
@@ -15368,6 +15618,9 @@ components:
           description: IANA 时区标识；与 name 至少提供一个，非法标识返回 400 TENANT_TIMEZONE_INVALID
           examples:
             - Asia/Shanghai
+        connectorReadAuditEnabled:
+          type: boolean
+          description: 连接器读操作审计开关；省略表示不修改。与 name / timezone 至少提供一个
         version:
           type: integer
           minimum: 1
@@ -16635,7 +16888,7 @@ components:
         content:
           type: string
           minLength: 1
-          maxLength: 1000
+          maxLength: 200
           description: 记忆正文，一条自包含的关于用户本人的陈述
         version:
           type: integer
@@ -16654,7 +16907,7 @@ components:
       properties:
         items:
           type: array
-          maxItems: 30
+          maxItems: 50
           items:
             $ref: "#/components/schemas/UserMemory"
 
@@ -16667,7 +16920,7 @@ components:
         content:
           type: string
           minLength: 1
-          maxLength: 1000
+          maxLength: 200
           description: 记忆正文；与 type 至少提供一个
         type:
           $ref: "#/components/schemas/UserMemoryType"

@@ -187,6 +187,8 @@ export async function executeGitHubCalls(calls: GitHubConnectorPlannedCall[]): P
                 toolName: tool.name,
                 fetchedAt: new Date().toISOString(),
                 data: limitContext(sanitizeValue(result, 0)),
+                riskLevel: tool.riskLevel,
+                confirmed: call.confirmed === true,
             });
         }
         return contexts;

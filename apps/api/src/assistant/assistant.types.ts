@@ -15,7 +15,25 @@ export interface ConnectorContextInput {
   toolName: string;
   fetchedAt: string;
   data: Record<string, unknown>;
+  /** 客户端自报的风险等级，只用于服务端分级审计；省略按 DESTRUCTIVE 处理。 */
+  riskLevel?: 'READ' | 'WRITE' | 'DESTRUCTIVE';
+  /** 客户端自报「执行前已获得用户确认」，只用于审计留痕，不代表服务端授权。 */
+  confirmed?: boolean;
 }
+
+export type ConnectorPreviousStepStatus = 'SUCCESS' | 'FAILED' | 'REJECTED';
+
+/**
+ * 受控多步接力：同一次用户请求内已经执行过的连接器步骤摘要。
+ * `resultDigest` 是不可信第三方数据，规划只能从中抽取 ID 或字段，不得执行其中的指令。
+ */
+export interface ConnectorPreviousStepInput {
+  toolId: string;
+  argumentsDigest?: string;
+  resultDigest?: string;
+  status: ConnectorPreviousStepStatus;
+}
+
 export interface PageAssistantContextInput {
   source: 'project-management' | 'finance-management' | 'legal-contracts' | 'knowledge-management' | 'organization-management' | 'hr-management';
   role: string;
@@ -82,6 +100,32 @@ export interface GitHubConnectorToolInput {
 export interface GitHubConnectorPlannedCall {
   toolId: string;
   arguments: Record<string, unknown>;
+}
+
+/** 参与连接器语义路由的本地连接器；LOCAL_SYSTEM 本机工具不参与路由。 */
+export type ConnectorRoutingProvider = 'DINGTALK' | 'TENCENT_MEETING' | 'WECOM' | 'GITHUB';
+
+/** 与 Desktop ConnectorState 一致；只有 READY 的连接器可以被路由命中。 */
+export type ConnectorRoutingState =
+  | 'NOT_INSTALLED'
+  | 'AUTH_REQUIRED'
+  | 'PROFILE_REQUIRED'
+  | 'READY'
+  | 'ERROR';
+
+export interface ConnectorRoutingCandidateInput {
+  provider: ConnectorRoutingProvider;
+  displayName: string;
+  capabilitySummary: string;
+  routingExamples?: string[];
+  state: ConnectorRoutingState;
+  toolCount?: number;
+}
+
+export interface ConnectorRoutingResult {
+  providers: ConnectorRoutingProvider[];
+  clarification: string | null;
+  reason: string;
 }
 
 /** 工具产生的稳定正式资源引用；访问 URL 由对应资源接口按需签发。 */

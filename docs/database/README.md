@@ -17,6 +17,12 @@ AI 调用与 Token 指标见 [AI 调用与 Token 计量](../architecture/public-
 - AI 服务对业务库只读；正式写入统一经 NestJS。
 - 业务模型落地前，先在此文档维护实体与关系草图。
 
+## 租户级连接器审计开关
+
+- `tenants.connector_read_audit_enabled`（默认 `false`）由 `20260929120000_connector_read_audit_toggle` 添加，控制连接器**只读**调用是否逐条审计；写与破坏性调用始终逐条审计，不受该开关影响；
+- 开关只通过 `PATCH /tenants/current` 修改（`tenant.update` 权限），单字段修改写 `TENANT_CONNECTOR_READ_AUDIT_CHANGED` 审计；
+- 连接器审计写入既有 `audit_logs`（`resource_type = CONNECTOR`，action 为 `CONNECTOR_READ_OPERATION` / `CONNECTOR_WRITE_OPERATION`），不新增审计表；保留期与归档策略仍待确认。
+
 ## HR 模型
 
 ```text

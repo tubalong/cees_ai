@@ -16,6 +16,7 @@ import { AssistantConnectorController } from './api/assistant-connector.controll
 import { AssistantTaskInteractionsController } from './api/assistant-task-interactions.controller';
 import { AssistantTasksController } from './api/assistant-tasks.controller';
 import { DingTalkConnectorPlannerService } from './connectors/dingtalk-connector-planner.service';
+import { ConnectorRoutingService } from './connectors/connector-routing.service';
 import { TencentMeetingConnectorPlannerService } from './connectors/tencent-meeting-connector-planner.service';
 import { WeComConnectorPlannerService } from './connectors/wecom-connector-planner.service';
 import { GitHubConnectorPlannerService } from './connectors/github-connector-planner.service';
@@ -79,6 +80,7 @@ import { AssignTaskTool } from './tools/executors/assign-task.tool';
   controllers: [AssistantActionDraftController, AssistantController, AssistantConnectorController, AssistantTaskInteractionsController, AssistantTasksController],
   providers: [
     ConversationService,
+    ConnectorRoutingService,
     DingTalkConnectorPlannerService,
     TencentMeetingConnectorPlannerService,
     WeComConnectorPlannerService,

@@ -51,7 +51,7 @@ The block contains long-term memories about the user themselves extracted from t
 Rules: only personal preferences, facts, decisions, or habits of the user (type one of
 PREFERENCE / FACT / DECISION / HABIT); quote the user, never infer; never include team-level
 information, sensitive data (passwords, ID numbers, salaries) or one-off questions; at most
-3 entries, each content at most 1000 characters; omit the entire block when nothing qualifies.
+3 entries, each content at most 200 characters; omit the entire block when nothing qualifies.
 Return only the summary followed by the block; the block is parsed by the system."""
 
 

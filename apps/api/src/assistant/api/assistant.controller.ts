@@ -147,6 +147,7 @@ export class AssistantController {
         mode: input.mode,
         knowledgeBaseEnabled: input.knowledgeBaseEnabled,
         webSearchEnabled: input.webSearchEnabled,
+        connectorRoutingHint: input.connectorRoutingHint,
       });
       const events = await this.turnRunner.subscribeTurn(
         {

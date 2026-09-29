@@ -27,6 +27,7 @@
 | [用户级记忆](architecture/user-memory.md) | 跨会话用户级长期记忆设计：仅用户级不做租户级、提炼与合并流程、注入与分块计划 |
 | [AI 调用与 Token 计量](architecture/public-chat-api-and-token-metering.md) | AiInvocationRecorderService 与 AIInvocationLog：模型调用、Token 记录与写入规则 |
 | [ai-tool-calling](architecture/ai-tool-calling.md) | 通用 Tool Calling、Tool Turn SSE、NestJS 工具执行边界 |
+| [连接器语义路由与调用审计](architecture/connector-routing-and-iteration.md) | 连接器语义路由、受控多步接力与调用审计设计草案（三项均未实现） |
 | [web-search](architecture/web-search.md) | Tavily 联网搜索工具、来源回填与安全边界 |
 | [task-scope-proposal](architecture/task-scope-proposal.md) | 通用任务 tasks.scope 的 C/D 协调基线、来源追溯与跨职能任务边界 |
 | [hr-finance-legal-data-contract](architecture/hr-finance-legal-data-contract.md) | HR、Finance 已实现基线及 Legal、老板经营概况聚合契约 |
@@ -50,6 +51,7 @@
 | [腾讯会议连接器 API](api/tencent-meeting-connector-api.md) | `0.40.0` 官方 CLI 规划语义、本地 OAuth 边界与迁移说明 |
 | [企业微信连接器 API](api/wecom-connector-api.md) | `0.39.0` 动态 CLI 工具规划与 `WECOM` 会话上下文 |
 | [GitHub 连接器 API](api/github-connector-api.md) | `0.43.0` OAuth Broker、官方远程 MCP 工具规划与 `GITHUB` 会话上下文 |
+| [连接器语义路由 API](api/assistant-connector-routing-api.md) | `0.44.0` 一级目录路由、`clarification` 语义与 `connectorRoutingHint` |
 | [分配策略与人财法 API](api/assignment-and-hr-finance-legal-api.md) | AssignmentPolicy、HR 与 Finance 已实现；Legal 契约已冻结待实现 |
 | [database](database/README.md) | 数据模型与迁移约定 |
 | [security](security/README.md) | 安全模型、租户隔离与审计 |
