@@ -74,4 +74,11 @@ export interface ConnectorContext<Provider extends string = string> {
     toolName: string;
     fetchedAt: string;
     data: Record<string, unknown>;
+    /**
+     * 自报风险等级，随轮次上报给服务端做分级审计（读写按条、只读默认按轮次级聚合）。
+     * 只影响审计粒度，不代表任何服务端授权；省略时服务端按 DESTRUCTIVE 处理。
+     */
+    riskLevel?: 'READ' | 'WRITE' | 'DESTRUCTIVE';
+    /** 执行前是否已获得用户确认；只作为审计留痕，不代表服务端授权。 */
+    confirmed?: boolean;
 }

@@ -155,7 +155,7 @@ test('ConnectorHost 统一委托生命周期、工具和调用，并发布带 ID
         connect: async () => { calls.push('connect'); return readyStatus; },
         disconnect: async () => { calls.push('disconnect'); return readyStatus; },
         discoverTools: async () => { calls.push('tools'); return tools; },
-        execute: async (input) => { calls.push(['execute', input]); return [{ provider: 'FAKE', toolId: 'tool-1', toolName: '查询', fetchedAt: '2026-09-21T00:00:00.000Z', data: {} }]; },
+        execute: async (input) => { calls.push(['execute', input]); return [{ provider: 'FAKE', toolId: 'tool-1', toolName: '查询', fetchedAt: '2026-09-21T00:00:00.000Z', data: {}, riskLevel: 'WRITE', confirmed: true }]; },
     };
     const registry = new ConnectorRegistry();
     registry.register(adapter);
@@ -167,7 +167,7 @@ test('ConnectorHost 统一委托生命周期、工具和调用，并发布带 ID
     assert.deepEqual(await host.disconnect('fake'), readyStatus);
     assert.deepEqual(await host.tools('fake'), tools);
     assert.deepEqual(await host.execute('fake', [{ toolId: 'tool-1', arguments: {}, confirmed: true }]), [{
-        provider: 'FAKE', toolId: 'tool-1', toolName: '查询', fetchedAt: '2026-09-21T00:00:00.000Z', data: {},
+        provider: 'FAKE', toolId: 'tool-1', toolName: '查询', fetchedAt: '2026-09-21T00:00:00.000Z', data: {}, riskLevel: 'WRITE', confirmed: true,
     }]);
     assert.deepEqual(calls, ['status', 'connect', 'disconnect', 'tools', ['execute', [{ toolId: 'tool-1', arguments: {}, confirmed: true }]]]);
     assert.equal(events.length, 3);

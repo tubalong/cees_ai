@@ -601,6 +601,8 @@ function connectorContext(tool: DiscoveredDwsTool, data: Record<string, unknown>
         toolName: tool.name,
         fetchedAt: new Date().toISOString(),
         data,
+        // DWS 只暴露 effect=read 且 confirmation=not_required 的工具，因此固定为只读。
+        riskLevel: 'READ',
     };
 }
 

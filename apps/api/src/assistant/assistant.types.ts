@@ -15,6 +15,10 @@ export interface ConnectorContextInput {
   toolName: string;
   fetchedAt: string;
   data: Record<string, unknown>;
+  /** 客户端自报的风险等级，只用于服务端分级审计；省略按 DESTRUCTIVE 处理。 */
+  riskLevel?: 'READ' | 'WRITE' | 'DESTRUCTIVE';
+  /** 客户端自报「执行前已获得用户确认」，只用于审计留痕，不代表服务端授权。 */
+  confirmed?: boolean;
 }
 export interface PageAssistantContextInput {
   source: 'project-management' | 'finance-management' | 'legal-contracts' | 'knowledge-management' | 'organization-management' | 'hr-management';
