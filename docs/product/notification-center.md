@@ -68,6 +68,7 @@
 | 日报提交提醒 | 有效成员前一天没有已提交或已通过日报 | 为未提交成员创建一条站内提醒 |
 | 合同到期提醒 | `ACTIVE` 合同进入 `renewalReminderDays` 提醒窗口或超过 `endDate` 自动流转 | 向合同负责人创建一条站内提醒 |
 | 人事异动生效 | 人事异动为 `APPROVED` 且已到租户本地 `effectiveDate` | 应用档案与组织变更，离职时停用成员并撤销会话 |
+| 审计保留与归档 | 租户审计超过对应保留期（连接器只读逐条 90 天，其余 3 年） | 只读逐条审计物理删除，其余租户审计迁入 `audit_logs_archive` |
 
 日报提醒只面向有效租户成员和有效用户，不提醒已提交或已通过日报的成员。日报日期按 UTC 日界线计算，通知关联类型为 `WORK_REPORT`。
 
@@ -75,16 +76,23 @@
 
 人事异动后台任务按租户时区判断生效日，成功后转为 `EFFECTIVE` 并写系统审计；单条执行失败时保留 `APPROVED`，后续轮询继续重试。
 
+审计保留任务按分级策略清理 `audit_logs`：连接器只读逐条审计（`metadata.aggregated = false`）到期物理删除，其余租户审计到期迁入 `audit_logs_archive`，`platform_audit_logs` 不参与清理。每轮按批推进，积压逐步排空；设计与失败语义见 [审计日志保留策略](../architecture/audit-log-retention.md)。
+
 ## 6. 配置
 
 | 环境变量 | 默认值 | 说明 |
 | --- | --- | --- |
 | `BACKGROUND_JOBS_ENABLED` | 启用 | 设置为 `false` 可关闭应用进程内后台任务 |
 | `BACKGROUND_JOBS_INTERVAL_SECONDS` | `60` | 定时轮询间隔，必须为正整数秒 |
+| `AUDIT_RETENTION_ENABLED` | 启用 | 设置为 `false` 只关闭审计保留清理，不影响审计写入与查询 |
+| `AUDIT_CONNECTOR_READ_RETENTION_DAYS` | `90` | 连接器只读逐条审计保留天数 |
+| `AUDIT_ARCHIVE_AFTER_DAYS` | `1095` | 其余租户审计的归档阈值（3 年） |
+| `AUDIT_RETENTION_BATCH_SIZE` | `1000` | 单批处理行数 |
+| `AUDIT_RETENTION_MAX_BATCHES` | `5` | 单类单轮最多批数 |
 | `REDIS_URL` | 无默认值 | Redis 连接地址，后台锁依赖 Redis |
 | `REDIS_KEY_PREFIX` | 环境配置 | Redis 逻辑键的环境前缀 |
 
-生产环境必须配置独立 Redis，并确保不同环境使用不同的 key 前缀。关闭后台任务不会影响通知查询接口，但会停止过期清理和日报提醒。
+生产环境必须配置独立 Redis，并确保不同环境使用不同的 key 前缀。关闭后台任务不会影响通知查询接口，但会停止过期清理、日报提醒与审计保留清理；后者停摆时 `audit_logs` 只增不减。
 
 ## 7. 权限与审计
 

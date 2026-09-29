@@ -24,7 +24,8 @@
 | [用户级记忆](architecture/user-memory.md) | 跨会话用户级长期记忆设计：仅用户级不做租户级、提炼与合并流程、注入与分块计划 |
 | [AI 调用与 Token 计量](architecture/public-chat-api-and-token-metering.md) | AiInvocationRecorderService 与 AIInvocationLog：模型调用、Token 记录与写入规则 |
 | [ai-tool-calling](architecture/ai-tool-calling.md) | 通用 Tool Calling、Tool Turn SSE、NestJS 工具执行边界 |
-| [连接器语义路由与调用审计](architecture/connector-routing-and-iteration.md) | 连接器语义路由、受控多步接力与调用审计设计草案（三项均未实现） |
+| [连接器语义路由与调用审计](architecture/connector-routing-and-iteration.md) | 连接器语义路由、受控多步接力与调用审计（已落地，契约 `0.44.0` / `0.45.0` / `0.47.0`） |
+| [审计日志保留策略](architecture/audit-log-retention.md) | 审计分级保留：连接器只读逐条审计到期删除、其余租户审计归档、平台审计永久 |
 | [web-search](architecture/web-search.md) | Tavily 联网搜索工具、来源回填与安全边界 |
 | [task-scope-proposal](architecture/task-scope-proposal.md) | 通用任务 tasks.scope 的 C/D 协调基线、来源追溯与跨职能任务边界 |
 | [hr-finance-legal-data-contract](architecture/hr-finance-legal-data-contract.md) | HR、Finance 已实现基线及 Legal、老板经营概况聚合契约 |
