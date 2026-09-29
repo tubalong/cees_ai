@@ -123,7 +123,10 @@ async def answer_question(
             messages=answer_messages + [
                 ChatMessage(
                     role="system",
-                    content="请直接输出简洁的中文答案，并在每个事实后使用证据编号 [S1]、[S2] 引用；不要输出 JSON。",
+                    content=(
+                        "请直接输出简洁的中文答案，并在每个事实后使用证据编号 "
+                        "[S1]、[S2] 引用；不要输出 JSON。"
+                    ),
                 )
             ],
             output_mode=OutputMode.text,
