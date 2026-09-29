@@ -10641,7 +10641,7 @@ components:
     ConversationMessage:
       type: object
       additionalProperties: false
-      required: [id, role, content, imageFileIds, connectorContexts, resources, createdAt]
+      required: [id, role, content, imageFileIds, documentFileIds, connectorContexts, resources, createdAt]
       properties:
         id:
           type: string
@@ -10658,6 +10658,15 @@ components:
           maxItems: 8
           uniqueItems: true
           description: 用户消息引用的稳定图片文件 ID（用户输入的附件），仅用户消息可能非空；展示/下载地址由前端通过文件接口按需获取
+          items:
+            type: string
+            format: uuid
+        documentFileIds:
+          type: array
+          maxItems: 8
+          uniqueItems: true
+          default: []
+          description: 用户消息引用的稳定文档附件文件 ID（pdf/docx/xlsx/pptx/csv/md/txt/json），仅用户消息可能非空；用于在会话历史中恢复附件并提供「存入知识库」入口（sourceType=FILE_OBJECT 的 sourceId），不携带签名 URL
           items:
             type: string
             format: uuid

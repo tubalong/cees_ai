@@ -88,6 +88,7 @@ Authorization: Bearer <access-token>
 
 - `content` 是持久化文本，不携带任何签名 URL；
 - 用户消息的图片引用（用户输入的附件）在 `imageFileIds` 中，展示/下载地址由前端通过文件接口按需获取；
+- 用户消息的文档附件引用在 `documentFileIds` 中（pdf/docx/xlsx/pptx/csv/md/txt/json），同样只给稳定 ID、不带签名 URL；它是「存入知识库」以 `sourceType: FILE_OBJECT` 保存时的 `sourceId` 来源，历史消息因此可以恢复一键存入入口；
 - 工具消息（`role: TOOL`）携带 `toolCallId` 和 `resources`：`resources` 是工具产生的稳定正式资源引用（`IMAGE` 为 AI 生成图片、`DOCUMENT` 为 AI 生成文档），非 TOOL 消息为空数组；
 - 工具消息还按轮次回传该轮的 `sources`（联网来源）与 `citations`（知识库引用）；前端按消息的 `turnId` 把它们挂回同一轮的助手回答，**不跨轮累积、不做会话级缓存**，避免上一轮的来源/引用串到当前回答下方；
 - 图片访问 URL 通过 `GET /api/v1/images/{imageId}` 按需生成（短期有效，过期后重新请求即可），文档资源同理走对应资源接口。前端拿到 `resources` 后按需换取 URL，不要缓存或持久化签名 URL，历史消息中的图片/文档由此永久可恢复。图片只以服务端 `resources` 的稳定引用为准，**不从消息正文文本中猜测图片地址**。
