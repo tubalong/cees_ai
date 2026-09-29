@@ -21,6 +21,7 @@ class ModelRole(StrEnum):
     rag = "rag"
     orchestrator = "orchestrator"
     orchestration_decision = "orchestration_decision"
+    archive_suggestion = "archive_suggestion"
 
 
 class OutputMode(StrEnum):
