@@ -11,7 +11,10 @@ import { UpdateUserMemoryDto } from './dto';
 import type { UserMemoryResult } from './user-memory.types';
 
 /** 记忆条目数量封顶；达到上限后按更新时间最旧淘汰（与设计文档 4.5 一致）。 */
-const MAX_USER_MEMORIES = 30;
+const MAX_USER_MEMORIES = 50;
+
+/** 单条记忆内容长度封顶（与契约 maxLength 一致）。 */
+const MAX_USER_MEMORY_CONTENT_CHARS = 200;
 
 /** 代码层敏感内容兜底：命中即丢弃候选（prompt 已先约束，见设计文档 4.2 第 5 点）。 */
 const SENSITIVE_PATTERNS: RegExp[] = [
@@ -181,7 +184,7 @@ export class UserMemoryService {
 
     /**
      * 应用 AI 提炼的记忆候选（ai-service 只提议，NestJS 校验并执行写入）：
-     * 完全相同的条目去重；update 命中 replaces 时覆盖旧条目；达到 30 条上限
+     * 完全相同的条目去重；update 命中 replaces 时覆盖旧条目；达到 50 条上限
      * 时先淘汰最久未更新的条目；敏感内容兜底拒绝。全部记录审计。
      */
     async applyCandidates(
@@ -324,7 +327,7 @@ function toUserMemoryResult(memory: MemoryRecord): UserMemoryResult {
 /** 清洗候选：trim、长度、敏感内容兜底；不合法返回 null（调用方丢弃）。 */
 function normalizeCandidate(candidate: UserMemoryCandidateInput): UserMemoryCandidateInput | null {
     const content = candidate.content.trim();
-    if (!content || content.length > 1000) return null;
+    if (!content || content.length > MAX_USER_MEMORY_CONTENT_CHARS) return null;
     if (SENSITIVE_PATTERNS.some((pattern) => pattern.test(content))) {
         return null;
     }
@@ -382,7 +385,7 @@ async function upsertReplacement(
     });
 }
 
-/** 达到 30 条上限时软删除更新时间最旧的条目并审计。 */
+/** 达到 50 条上限时软删除更新时间最旧的条目并审计。 */
 async function evictOldestIfNeeded(
     transaction: Prisma.TransactionClient,
     context: RequestTenantContext,

@@ -7,12 +7,12 @@ export class UpdateUserMemoryDto {
     @ApiPropertyOptional({
         description: '记忆正文；与 type 至少提供一个',
         minLength: 1,
-        maxLength: 1000,
+        maxLength: 200,
     })
     @IsOptional()
     @IsString()
     @MinLength(1)
-    @MaxLength(1000)
+    @MaxLength(200)
     content?: string;
 
     @ApiPropertyOptional({ description: '记忆类型；与 content 至少提供一个', enum: MemoryType })
