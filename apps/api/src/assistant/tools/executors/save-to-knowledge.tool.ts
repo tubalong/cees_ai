@@ -45,6 +45,7 @@ export class SaveToKnowledgeTool implements OnModuleInit {
             + '仅在用户明确表达保存/存入/收录意图时调用；引用已存在资源时用 sourceType 与 sourceId，必须引用真实存在的资源；'
             + '要保存的是一份较长文档（用户上传的附件、AI 生成文档、对话中的长内容）时，必须用 sourceType/sourceId 引用它，'
             + '绝不要把文档正文改写成 content——工具参数的输出预算装不下长文档，会因中途截断而整轮失败；'
+            + '本轮消息附带的附件 ID 与文件名已在上文「本轮用户消息附带的文件」清单中给出，从那里取 file_id；'
             + '只有当用户口述了一段较短内容（几百字以内）要保存时，才把它整理为纯文本通过 content 传入；'
             + '目标知识库须经用户确认（可先用 list_knowledge_bases 列出候选库），绝不替用户挑选。',
         parameters: {

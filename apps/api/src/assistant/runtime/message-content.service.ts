@@ -117,6 +117,8 @@ export class AssistantMessageContentService {
     if (documentFileIds && documentFileIds.length > 0) {
       const documentParts = await this.resolveDocumentParts(documentFileIds, identity);
       parts.push(...documentParts);
+      const references = await this.describeDocumentReferences(documentFileIds, identity);
+      if (references) parts.push(references);
     }
     if (parts.length === 0) {
       throw new BadRequestException({
@@ -305,6 +307,49 @@ export class AssistantMessageContentService {
       parts.push(...extracted.parts);
     }
     return parts;
+  }
+
+  /**
+   * 把本轮附件的稳定引用清单注入模型上下文。
+   *
+   * 附件正文是以**提取文本**形式进上下文的，模型看不到 FileObject ID。缺 ID 时它无法
+   * 构造 `save_to_knowledge` 的 `sourceType: FILE_OBJECT` + `sourceId` 路径，只能退而
+   * 把长文档内联进 `content`，最终因输出上限截断导致整轮失败。这里把 ID 与文件名一起
+   * 交给模型，并按既有约定要求它不向用户展示内部 ID。
+   */
+  async describeDocumentReferences(
+    fileIds: readonly string[] | undefined,
+    identity: MessageContentIdentity,
+  ): Promise<MessageContentPart | undefined> {
+    const normalized = normalizeFileIds(fileIds);
+    if (normalized.length === 0) return undefined;
+    const files = await this.prisma.fileObject.findMany({
+      where: {
+        tenantId: identity.tenantId,
+        id: { in: normalized },
+        deletedAt: null,
+        purpose: FilePurpose.ATTACHMENT,
+        createdBy: identity.userId,
+      },
+      select: { id: true, originalName: true },
+    });
+    if (files.length === 0) return undefined;
+    const byId = new Map(files.map((file) => [file.id, file]));
+    const lines = normalized
+      .map((fileId) => byId.get(fileId))
+      .filter((file): file is { id: string; originalName: string } => Boolean(file))
+      .map((file) => `- file_id=${file.id} 文件名=${file.originalName}`);
+    if (lines.length === 0) return undefined;
+    return {
+      type: 'text',
+      text: [
+        '本轮用户消息附带的文件（可被工具引用）：',
+        ...lines,
+        '把这些文件存入知识库时，调用 save_to_knowledge，sourceType=FILE_OBJECT，'
+        + 'sourceId 传上面列出的 file_id；name 省略时服务端沿用原文件名。'
+        + '不要把这些 file_id 展示给用户，也不要把文件正文改写成 content 参数。',
+      ].join('\n'),
+    };
   }
 
   private async resolveImages(
