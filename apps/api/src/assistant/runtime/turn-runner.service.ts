@@ -9,6 +9,9 @@ import {
 } from '@nestjs/common';
 import {
   AssistantEventType,
+  AssistantTaskEventType,
+  AssistantTaskStatus,
+  AssistantTaskStepStatus,
   AssistantTurnStage,
   AssistantTurnStatus,
   Prisma,
@@ -21,7 +24,7 @@ import type {
   ToolTurnStreamEvent,
   UserMemoryCandidate,
 } from '@cees/ai-service-client';
-import { AiServiceGateway, AiServiceInvocationError } from '../../ai-orchestration/ai-service-gateway.service';
+import { AiServiceGateway } from '../../ai-orchestration/ai-service-gateway.service';
 import { PrismaService } from '../../database/prisma.service';
 import { TenantContext } from '../../tenant/tenant-context';
 import { describeAssistantError } from '../assistant.errors';
@@ -38,9 +41,13 @@ import {
 import { ConversationService } from '../conversation/conversation.service';
 import { EventService } from '../conversation/event.service';
 import { AssistantActionDraftService } from '../drafts/assistant-action-draft.service';
-import { ToolPolicyError, ToolPolicyService } from '../tools/tool-policy.service';
+import { FailureHandlingService } from '../orchestration/failure-handling.service';
+import { OrchestrationToolsService } from '../orchestration/orchestration-tools.service';
+import { PublicTaskResourceRef } from '../orchestration/orchestration.types';
+import { canonicalJson, toToolFailure } from '../tools/tool-failure';
+import { ToolPolicyService } from '../tools/tool-policy.service';
 import { ToolRegistryService } from '../tools/tool-registry';
-import { KNOWLEDGE_SEARCH_TOOL_NAME, ToolExecutionError, WEB_SEARCH_TOOL_NAME } from '../tools/tool.types';
+import { KNOWLEDGE_SEARCH_TOOL_NAME, WEB_SEARCH_TOOL_NAME } from '../tools/tool.types';
 import { UserMemoryService } from '../../user-memory/user-memory.service';
 import { ContextBuilderService } from './context-builder.service';
 import { IntentCapabilityService, type AutoEnabledCapability } from './intent-capability.service';
@@ -58,6 +65,16 @@ import {
 /** 单轮硬上限：最多模型调用次数与工具调用提案数。 */
 const MAX_TOOL_TURNS = 5;
 const MAX_TOOL_STEPS = 10;
+/** 计划调整引导只在工具面开放 revise 工具时注入；单轮最多提示的任务数。 */
+const REVISE_ORCHESTRATION_TASK_TOOL = 'revise_orchestration_task';
+const MAX_TASK_GUIDANCE_TASKS = 3;
+/** 终态任务感知：单轮最多提示的最近终态任务数、每任务产出数与失败原因截断长度。 */
+const MAX_TERMINAL_TASK_GUIDANCE_TASKS = 3;
+const MAX_TERMINAL_TASK_GUIDANCE_OUTPUTS = 3;
+const MAX_TASK_REASON_GUIDANCE_CHARS = 60;
+
+/** 连接器语义路由消歧提示上限，与公开契约 CreateTurnRequest.connectorRoutingHint 一致。 */
+const CONNECTOR_ROUTING_HINT_MAX_LENGTH = 1000;
 
 export interface StartTurnResult {
   turnId: string;
@@ -89,6 +106,8 @@ export class TurnRunnerService implements OnModuleDestroy {
     private readonly intentCapability: IntentCapabilityService,
     private readonly userMemory: UserMemoryService,
     private readonly actionDrafts: AssistantActionDraftService,
+    private readonly orchestrationTools: OrchestrationToolsService,
+    private readonly failureHandling: FailureHandlingService,
   ) { }
 
   onModuleDestroy(): void {
@@ -115,6 +134,12 @@ export class TurnRunnerService implements OnModuleDestroy {
     knowledgeBaseEnabled?: boolean;
     /** 本轮是否允许联网搜索；省略时默认关闭。 */
     webSearchEnabled?: boolean;
+    /**
+     * Desktop 连接器语义路由判定目标不唯一时给出的本轮消歧提示。
+     * 与 assistantContext 相同：只在内存中参与本轮 instructions，不落库，
+     * 不进入 ConnectorContext 事实通道，也不作为业务写入或权限依据。
+     */
+    connectorRoutingHint?: string | null;
   }): Promise<StartTurnResult> {
     const conversation = await this.conversationService.requireMemberConversation(input.conversationId);
     const context = this.tenantContext.require();
@@ -148,6 +173,7 @@ export class TurnRunnerService implements OnModuleDestroy {
       connectorContexts,
       input.knowledgeBaseEnabled ?? false,
       input.webSearchEnabled ?? false,
+      input.connectorRoutingHint,
       input.assistantContext,
       input.generationOptions,
     );
@@ -215,6 +241,7 @@ export class TurnRunnerService implements OnModuleDestroy {
       signal: abortController.signal,
       assistantContext: input.assistantContext,
       generationOptions: input.generationOptions,
+      connectorRoutingHint: input.connectorRoutingHint,
     });
 
     return { turnId: turn.id };
@@ -275,6 +302,7 @@ export class TurnRunnerService implements OnModuleDestroy {
     capabilities: PublicTurnCapabilities;
     assistantContext?: PageAssistantContextInput;
     generationOptions?: GenerationOptionsInput;
+    connectorRoutingHint?: string | null;
     signal: AbortSignal;
   }): Promise<void> {
     try {
@@ -308,14 +336,21 @@ export class TurnRunnerService implements OnModuleDestroy {
         if (tool.name === WEB_SEARCH_TOOL_NAME && !input.capabilities.webSearch) return false;
         return true;
       });
-      if (gatedTools.length === 0) {
+      // 编排门控：企业没有在职 AI 同事时仅移除编排工具——对话本身与其余
+      // 工具不受任何影响；有同事时把名册注入工具描述。门控服务自身
+      // fail-closed 且不抛出，任何异常都不会波及本轮对话。
+      const orchestratedTools = await this.orchestrationTools.gate(
+        input.conversation.tenantId,
+        gatedTools,
+      );
+      if (orchestratedTools.length === 0) {
         await this.runPlainTurn(input);
         return;
       }
       await this.runToolTurn({
         ...input,
         permissions: currentAuthorization.permissions,
-        allowedTools: gatedTools,
+        allowedTools: orchestratedTools,
       });
     } catch (error) {
       await this.state.failTurn(
@@ -340,6 +375,7 @@ export class TurnRunnerService implements OnModuleDestroy {
     capabilities: PublicTurnCapabilities;
     assistantContext?: PageAssistantContextInput;
     generationOptions?: GenerationOptionsInput;
+    connectorRoutingHint?: string | null;
     signal: AbortSignal;
   }): Promise<void> {
     const { turnId, conversation } = input;
@@ -352,9 +388,13 @@ export class TurnRunnerService implements OnModuleDestroy {
       mode: input.mode,
     });
     // 未启用的能力通过可信 instructions 告知模型，避免它凭记忆编造外部/内部信息，
-    // 并引导它在用户确有需求时提示开启开关或改写为明确请求。
-    const guidance = buildCapabilityGuidance(input.capabilities);
-    const instructions = combineAssistantInstructions(guidance, input.assistantContext, input.generationOptions);
+    // 并引导它在用户确有需求时提示开启开关或改写为明确请求；已结束任务同理注入，
+    // 让纯聊天路径也能准确回答任务进展与产出去向。
+    const guidance = joinGuidance(
+      buildCapabilityGuidance(input.capabilities),
+      await this.buildTerminalTaskGuidance(input.conversation, input.membershipId),
+    );
+    const instructions = combineAssistantInstructions(guidance, input.assistantContext, input.generationOptions, input.connectorRoutingHint);
     if (instructions) chatRequest.instructions = instructions;
     if (input.signal.aborted) return;
 
@@ -412,6 +452,7 @@ export class TurnRunnerService implements OnModuleDestroy {
     capabilities: PublicTurnCapabilities;
     assistantContext?: PageAssistantContextInput;
     generationOptions?: GenerationOptionsInput;
+    connectorRoutingHint?: string | null;
     signal: AbortSignal;
   }): Promise<void> {
     const { turnId, conversation } = input;
@@ -434,13 +475,35 @@ export class TurnRunnerService implements OnModuleDestroy {
       });
       if (input.signal.aborted) return;
 
+      // 计划调整引导：任务卡片「调整要求」与失败裁决「调整计划」都由用户在对话
+      // 中补充调整内容，这里把待调整任务、失败步骤与可沿用步骤注入 instructions，
+      // 模型才能正确调用 revise 工具。每个模型调用前重算，避免引导过期。
+      const taskGuidance = input.allowedTools.some((tool) => tool.name === REVISE_ORCHESTRATION_TASK_TOOL)
+        ? await this.buildTaskAdjustmentGuidance(conversation, input.membershipId)
+        : null;
+      if (input.signal.aborted) return;
+
+      // 终态任务感知：把会话里已结束任务（含产出）注入 instructions，让模型在
+      // 后续对话中准确回答任务进展与产出去向。每个模型调用前重算，长会话被
+      // 压缩后汇报消息可能不在上下文里，这里作为兜底。
+      const terminalTaskGuidance = await this.buildTerminalTaskGuidance(
+        conversation,
+        input.membershipId,
+      );
+      if (input.signal.aborted) return;
+
       const request: ToolTurnRequest = {
         request_id: input.requestId,
         tenant_id: conversation.tenantId,
         user_id: input.userId,
         conversation_id: conversation.id,
         mode: input.mode === 'ultra' ? 'ultra' : 'standard',
-        instructions: combineAssistantInstructions(buildCapabilityGuidance(input.capabilities), input.assistantContext, input.generationOptions),
+        instructions: combineAssistantInstructions(
+          joinGuidance(buildCapabilityGuidance(input.capabilities), taskGuidance, terminalTaskGuidance),
+          input.assistantContext,
+          input.generationOptions,
+          input.connectorRoutingHint,
+        ),
         conversation_summary: messages.summary ?? null,
         user_memories: messages.userMemories.length > 0 ? messages.userMemories : null,
         messages: messages.items,
@@ -578,6 +641,215 @@ export class TurnRunnerService implements OnModuleDestroy {
       message: '模型调用次数超过单轮上限',
       retryable: false,
     }, this.executionOwner);
+  }
+
+  /**
+   * 计划调整引导：列出当前会话中「等待重排」与「调整要求后待确认」的任务并注入
+   * 本轮 instructions。前者给出失败步骤与可沿用的已完成步骤（模型据此生成调整
+   * 后的完整计划），后者提示模型按用户消息决定是否生成新版本草案。无匹配任务时
+   * 返回 null，轮次行为与未启用本引导时完全一致。
+   */
+  private async buildTaskAdjustmentGuidance(
+    conversation: { id: string; tenantId: string },
+    membershipId: string,
+  ): Promise<string | null> {
+    const tasks = await this.prisma.assistantTask.findMany({
+      where: {
+        conversationId: conversation.id,
+        tenantId: conversation.tenantId,
+        membershipId,
+        status: { in: [AssistantTaskStatus.WAITING_USER, AssistantTaskStatus.PENDING_CONFIRM] },
+      },
+      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+      select: { id: true, title: true, status: true, planVersion: true },
+      take: MAX_TASK_GUIDANCE_TASKS,
+    });
+    const notes: string[] = [];
+    for (const task of tasks) {
+      if (task.status === AssistantTaskStatus.WAITING_USER) {
+        if (await this.failureHandling.hasAwaitingReplan(task.id)) {
+          notes.push(await this.describeAwaitingReplanTask(task));
+        }
+        continue;
+      }
+      if (await this.hasRequestedRevision(task.id)) {
+        notes.push(await this.describeRequestedRevisionTask(task));
+      }
+    }
+    if (notes.length === 0) return null;
+    return [
+      '当前会话有以下任务正在调整计划（与本轮用户消息无关时不要调用调整工具）：',
+      ...notes,
+      `调整计划时调用 ${REVISE_ORCHESTRATION_TASK_TOOL}：给出调整后的完整步骤（全量替换），`
+        + '沿用已完成的步骤须填写其 carried_from_step_key（仅限清单中给出的可沿用步骤）；'
+        + '新草案由用户在任务卡片再次确认后才会执行，不要声称任务已继续执行。',
+    ].join('\n');
+  }
+
+  /** 任务是否存在「调整要求」事件；存在即说明用户点过卡片调整或任务经过重排。 */
+  private async hasRequestedRevision(taskId: string): Promise<boolean> {
+    const event = await this.prisma.assistantTaskEvent.findFirst({
+      where: { taskId, type: AssistantTaskEventType.PLAN_REVISION_REQUESTED },
+      select: { id: true },
+    });
+    return Boolean(event);
+  }
+
+  /** 执行中失败选择「调整计划」的挂起任务：给出失败步骤与可沿用的已完成步骤。 */
+  private async describeAwaitingReplanTask(task: {
+    id: string;
+    title: string;
+    planVersion: number;
+  }): Promise<string> {
+    const [plan, runtimeSteps] = await Promise.all([
+      this.prisma.assistantTaskPlan.findFirst({
+        where: { taskId: task.id, version: task.planVersion },
+        select: { steps: true },
+      }),
+      this.prisma.assistantTaskStep.findMany({
+        where: {
+          taskId: task.id,
+          planVersion: task.planVersion,
+          status: {
+            in: [AssistantTaskStepStatus.WAITING_USER, AssistantTaskStepStatus.SUCCEEDED],
+          },
+        },
+        orderBy: { stepNo: 'asc' },
+        select: { stepKey: true, status: true },
+      }),
+    ]);
+    const titles = stepTitleIndex(plan?.steps ?? null);
+    const failed = runtimeSteps
+      .filter((step) => step.status === AssistantTaskStepStatus.WAITING_USER)
+      .map((step) => formatStepRef(step.stepKey, titles.get(step.stepKey)));
+    const carried = runtimeSteps
+      .filter((step) => step.status === AssistantTaskStepStatus.SUCCEEDED)
+      .map((step) => formatStepRef(step.stepKey, titles.get(step.stepKey)));
+    return `- 任务「${task.title}」（task_id：${task.id}）执行中步骤 ${failed.join('、') || '（未知）'} `
+      + '失败后用户选择了「调整计划」，任务正等待调整后的新计划（生成后回到待确认，不自动执行）。'
+      + (carried.length > 0 ? `可沿用的已完成步骤：${carried.join('、')}。` : '没有可沿用的已完成步骤。');
+  }
+
+  /** 「调整要求」后的待确认任务：给出草案步骤，提示按用户消息生成新版本。 */
+  private async describeRequestedRevisionTask(task: {
+    id: string;
+    title: string;
+    planVersion: number;
+  }): Promise<string> {
+    const plan = await this.prisma.assistantTaskPlan.findFirst({
+      where: { taskId: task.id },
+      orderBy: { version: 'desc' },
+      select: { version: true, steps: true },
+    });
+    const titles = stepTitleIndex(plan?.steps ?? null);
+    const refs = [...titles.entries()]
+      .map(([stepKey, title]) => formatStepRef(stepKey, title))
+      .join('、');
+    return `- 任务「${task.title}」（task_id：${task.id}）已被用户要求调整计划，`
+      + `当前草案 v${plan?.version ?? task.planVersion} 待确认：${refs || '（步骤不可读）'}。`
+      + '若用户本轮提出了具体调整内容，请生成调整后的完整计划；仅表达“确认/继续”意图时不要调用调整工具。';
+  }
+
+  /**
+   * 终态任务感知：把会话里最近的终态任务（状态、失败原因与产出文档）注入本轮
+   * instructions，让模型在后续对话中准确回答任务进展与产出去向。任何查询异常
+   * 都降级为不注入（对话本身不受影响）；无终态任务时返回 null。
+   */
+  private async buildTerminalTaskGuidance(
+    conversation: { id: string; tenantId: string },
+    membershipId: string,
+  ): Promise<string | null> {
+    try {
+      const tasks = await this.prisma.assistantTask.findMany({
+        where: {
+          conversationId: conversation.id,
+          tenantId: conversation.tenantId,
+          membershipId,
+          status: {
+            in: [
+              AssistantTaskStatus.COMPLETED,
+              AssistantTaskStatus.FAILED,
+              AssistantTaskStatus.CANCELLED,
+            ],
+          },
+        },
+        orderBy: [{ completedAt: 'desc' }, { id: 'desc' }],
+        select: { id: true, title: true, status: true, failedReason: true },
+        take: MAX_TERMINAL_TASK_GUIDANCE_TASKS,
+      });
+      if (tasks.length === 0) return null;
+      const outputTitles = await this.loadTerminalTaskOutputTitles(conversation.tenantId, tasks);
+      const notes = tasks.map((task) => {
+        const outputs = outputTitles.get(task.id) ?? [];
+        const outputNote = outputs.length > 0
+          ? `产出文档：${formatGuidanceOutputList(outputs)}`
+          : '没有文档产出';
+        if (task.status === AssistantTaskStatus.COMPLETED) {
+          return `- 任务「${task.title}」已完成；${outputNote}。`;
+        }
+        if (task.status === AssistantTaskStatus.FAILED) {
+          const reason = truncateText(
+            task.failedReason ?? '存在未成功完成的步骤',
+            MAX_TASK_REASON_GUIDANCE_CHARS,
+          );
+          return `- 任务「${task.title}」未全部成功（${reason}）；${outputNote}。`;
+        }
+        return `- 任务「${task.title}」已被取消；${outputNote}。`;
+      });
+      return [
+        '当前会话最近有任务已结束（仅当用户提及相关话题时参考，不要主动重复汇报）：',
+        ...notes,
+        '任务执行细节以任务卡片与系统汇报消息为准，不要编造进度或产出；'
+          + '用户询问产出去向时，说明可在任务卡片中验收并按提示归档到知识库。',
+      ].join('\n');
+    } catch (error) {
+      this.logger.warn(`failed to build terminal task guidance: ${String(error)}`);
+      return null;
+    }
+  }
+
+  /**
+   * 终态任务的产出文档标题：一次查询覆盖全部提示任务，SUCCEEDED 步骤的
+   * DOCUMENT 产出按顺序去重，已删除文档跳过。
+   */
+  private async loadTerminalTaskOutputTitles(
+    tenantId: string,
+    tasks: Array<{ id: string }>,
+  ): Promise<Map<string, string[]>> {
+    const steps = await this.prisma.assistantTaskStep.findMany({
+      where: {
+        taskId: { in: tasks.map((task) => task.id) },
+        status: AssistantTaskStepStatus.SUCCEEDED,
+      },
+      orderBy: [{ completedAt: 'asc' }, { stepNo: 'asc' }],
+      select: { taskId: true, outputRefs: true },
+    });
+    const idsByTask = new Map<string, string[]>();
+    for (const step of steps) {
+      if (!Array.isArray(step.outputRefs)) continue;
+      const ids = idsByTask.get(step.taskId) ?? [];
+      for (const ref of step.outputRefs as unknown as PublicTaskResourceRef[]) {
+        if (ref?.type === 'DOCUMENT' && typeof ref.id === 'string' && !ids.includes(ref.id)) {
+          ids.push(ref.id);
+        }
+      }
+      idsByTask.set(step.taskId, ids);
+    }
+    const documentIds = [...new Set([...idsByTask.values()].flat())];
+    if (documentIds.length === 0) return new Map();
+    const documents = await this.prisma.managedDocument.findMany({
+      where: { id: { in: documentIds }, tenantId, deletedAt: null },
+      select: { id: true, title: true },
+    });
+    const titleById = new Map(documents.map((document) => [document.id, document.title]));
+    const result = new Map<string, string[]>();
+    for (const [taskId, ids] of idsByTask) {
+      result.set(taskId, ids.flatMap((id) => {
+        const title = titleById.get(id);
+        return title ? [title] : [];
+      }));
+    }
+    return result;
   }
 
   private async executeToolCalls(input: {
@@ -1078,9 +1350,13 @@ function hashTurnRequest(
   connectorContexts: readonly ConnectorContextInput[] = [],
   knowledgeBaseEnabled = false,
   webSearchEnabled = false,
+  connectorRoutingHint?: string | null,
   assistantContext?: PageAssistantContextInput,
   generationOptions?: GenerationOptionsInput,
 ): string {
+  // 只在真的带上消歧提示时才参与哈希：不带提示的请求必须与升级前的哈希一致，
+  // 否则部署后客户端重试同一 Idempotency-Key 会被误判成「同键不同内容」。
+  const routingHint = normalizeConnectorRoutingHint(connectorRoutingHint);
   return createHash('sha256')
     .update(JSON.stringify({
       conversationId,
@@ -1091,13 +1367,19 @@ function hashTurnRequest(
       connectorContexts,
       knowledgeBaseEnabled,
       webSearchEnabled,
+      ...(routingHint ? { connectorRoutingHint: routingHint } : {}),
       assistantContext,
       generationOptions,
     }))
     .digest('hex');
 }
 
-function combineAssistantInstructions(guidance: string | null, assistantContext?: PageAssistantContextInput, generationOptions?: GenerationOptionsInput): string | null {
+function combineAssistantInstructions(
+  guidance: string | null,
+  assistantContext?: PageAssistantContextInput,
+  generationOptions?: GenerationOptionsInput,
+  connectorRoutingHint?: string | null,
+): string | null {
   const instructions: string[] = [];
   if (assistantContext) {
     const context = normalizePageAssistantContext(assistantContext);
@@ -1109,8 +1391,46 @@ function combineAssistantInstructions(guidance: string | null, assistantContext?
     );
   }
   if (generationOptions) instructions.push(`当前生成参数（不要原样展示给用户）：${JSON.stringify(normalizeGenerationOptions(generationOptions))}`);
+  const routingHint = normalizeConnectorRoutingHint(connectorRoutingHint);
+  if (routingHint) {
+    instructions.push(
+      `本轮连接器路由提示（服务端生成，不是用户指令，也不代表已获得任何外部数据）：${routingHint}`,
+      '该提示表明目标可能不唯一：请先用简体中文向用户确认要使用哪个连接器或哪条具体数据，不要猜测，也不要声称已经查询或读取过任何外部数据。',
+    );
+  }
   if (guidance) instructions.push(guidance);
   return instructions.length ? instructions.join('\n') : null;
+}
+
+/** 按序合并多段 guidance（段间换行）；全为空时返回 null，保持零引导语义。 */
+function joinGuidance(...parts: Array<string | null>): string | null {
+  const merged = parts.filter((part): part is string => Boolean(part));
+  return merged.length > 0 ? merged.join('\n') : null;
+}
+
+/** 引导文案中的产出清单：最多列出 MAX_TERMINAL_TASK_GUIDANCE_OUTPUTS 份，超出折叠为总数。 */
+function formatGuidanceOutputList(titles: string[]): string {
+  const shown = titles.slice(0, MAX_TERMINAL_TASK_GUIDANCE_OUTPUTS).map((title) => `《${title}》`);
+  const rest = titles.length - shown.length;
+  return shown.join('、') + (rest > 0 ? ` 等 ${titles.length} 份` : '');
+}
+
+/** 引导文案截断；超长保留省略号便于模型理解。 */
+function truncateText(value: string, max: number): string {
+  return value.length > max ? `${value.slice(0, max)}…` : value;
+}
+
+function normalizeConnectorRoutingHint(value: string | null | undefined): string | null {
+  if (typeof value !== 'string') return null;
+  const hint = value.trim();
+  if (!hint) return null;
+  if (hint.length > CONNECTOR_ROUTING_HINT_MAX_LENGTH) {
+    throw new BadRequestException({
+      code: 'CONNECTOR_ROUTING_HINT_TOO_LONG',
+      message: `连接器路由提示不能超过 ${CONNECTOR_ROUTING_HINT_MAX_LENGTH} 个字符`,
+    });
+  }
+  return hint;
 }
 
 function normalizeGenerationOptions(input: GenerationOptionsInput): GenerationOptionsInput {
@@ -1211,51 +1531,22 @@ function buildCapabilityGuidance(capabilities: PublicTurnCapabilities): string |
   return notes.join('\n');
 }
 
-/**
- * 把执行器异常拆成两部分：summary 回喂模型（只允许服务端固定友好文案，
- * 不携带权限码、错误码或任何动态错误详情——内部信息一旦进入模型上下文，
- * 用户即可通过诱导让模型复述），errorMessage 落库与进公开事件供排障。
- */
-function toToolFailure(error: unknown): { summary: string; errorMessage: string; code: string } {
-  if (error instanceof ToolPolicyError) {
-    return { summary: error.userFacingSummary, errorMessage: error.message, code: error.code };
+/** 计划快照 steps JSON 的 stepKey → 标题索引；标题缺失时值为 null。 */
+function stepTitleIndex(steps: Prisma.JsonValue | null): Map<string, string | null> {
+  const index = new Map<string, string | null>();
+  if (!Array.isArray(steps)) return index;
+  for (const item of steps) {
+    if (!item || typeof item !== 'object') continue;
+    const row = item as { stepKey?: unknown; title?: unknown };
+    if (typeof row.stepKey !== 'string') continue;
+    index.set(row.stepKey, typeof row.title === 'string' ? row.title : null);
   }
-  if (error instanceof ToolExecutionError) {
-    return { summary: error.userFacingSummary, errorMessage: error.message, code: error.code };
-  }
-  if (error instanceof AiServiceInvocationError) {
-    return {
-      summary: 'AI 服务暂时不可用，本次操作未能完成；请告知用户稍后重试',
-      errorMessage: `${error.code}: ${error.message}`,
-      code: 'TOOL_EXECUTION_FAILED',
-    };
-  }
-  const code = isCodedToolError(error) ? error.code : 'TOOL_EXECUTION_FAILED';
-  const detail = error instanceof Error ? error.message : '工具执行失败';
-  return {
-    summary: '该操作未能完成，请告知用户稍后重试或换一种方式表达',
-    errorMessage: isCodedToolError(error) ? `${code}: ${detail}` : detail,
-    code,
-  };
+  return index;
 }
 
-function isCodedToolError(error: unknown): error is { code: string; message: string } {
-  return Boolean(
-    error
-    && typeof error === 'object'
-    && 'code' in error
-    && typeof error.code === 'string'
-    && 'message' in error
-    && typeof error.message === 'string',
-  );
-}
-
-/** Compare provider JSON arguments independent of object-key insertion order. */
-function canonicalJson(value: unknown): string {
-  if (value === null || typeof value !== 'object') return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
-  const object = value as Record<string, unknown>;
-  return `{${Object.keys(object).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(object[key])}`).join(',')}}`;
+/** 步骤引用文案：s1「收集数据」；标题缺失时只写标识（模型仍可引用标识）。 */
+function formatStepRef(stepKey: string, title: string | null | undefined): string {
+  return title ? `${stepKey}「${title}」` : stepKey;
 }
 
 /** Omit 对联合类型会退化为公共属性；分配式 Omit 保留每个成员的结构。 */

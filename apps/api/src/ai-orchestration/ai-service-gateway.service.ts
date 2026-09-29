@@ -58,6 +58,7 @@ import {
 import {
   AiInvocationExecution,
   AiInvocationRecorderService,
+  type AiInvocationAttributes,
 } from './ai-invocation-recorder.service';
 
 export class AiServiceInvocationError extends HttpException {
@@ -83,9 +84,14 @@ export class AiServiceInvocationError extends HttpException {
 
 export interface ChatInvocationTracking {
   membershipId: string;
-  turnId: string;
+  /** 轮次执行载体的轮次 ID；任务步骤内发起的模型调用为 null（见 taskId / stepId）。 */
+  turnId: string | null;
   /** Service-side conversation identity for observability. */
   conversationId?: string;
+  /** 任务步骤执行载体的任务 ID；步骤窗口调用记入 metadata（不新增列）。 */
+  taskId?: string;
+  /** 任务步骤执行载体的步骤 ID；同上。 */
+  stepId?: string;
 }
 
 /** ai-service /ready 暴露的各聊天模式输入 Token 预算（context_budget_tokens）。 */
@@ -215,6 +221,7 @@ export class AiServiceGateway {
       operation: 'chat.invoke',
       execution: toRecordedExecution(response.execution),
       metadata: {
+        ...carrierInvocationAttributes(tracking),
         mode: response.mode,
         outcome: 'completed',
         contextStrategy: response.context_usage.strategy,
@@ -254,7 +261,7 @@ export class AiServiceGateway {
       requestId: input.request_id,
       operation: 'chat.compact',
       execution: toRecordedExecution(response.execution),
-      metadata: { outcome: 'completed' },
+      metadata: { ...carrierInvocationAttributes(tracking), outcome: 'completed' },
     });
     return response;
   }
@@ -336,7 +343,7 @@ export class AiServiceGateway {
           toolCallId: tracking.toolCallId,
           operation: 'image.generate',
           execution: error.execution,
-          metadata: { outcome: 'error', errorCode: error.code },
+          metadata: { ...carrierInvocationAttributes(tracking), outcome: 'error', errorCode: error.code },
         });
       }
       throw error;
@@ -354,7 +361,7 @@ export class AiServiceGateway {
       toolCallId: tracking.toolCallId,
       operation: 'image.generate',
       execution: toRecordedImageExecution(response.execution),
-      metadata: { outcome: 'completed', promptLength: input.prompt.length },
+      metadata: { ...carrierInvocationAttributes(tracking), outcome: 'completed', promptLength: input.prompt.length },
     });
     return response;
   }
@@ -382,7 +389,7 @@ export class AiServiceGateway {
           toolCallId: tracking.toolCallId,
           operation: 'document.compose',
           execution: error.execution,
-          metadata: { outcome: 'error', errorCode: error.code },
+          metadata: { ...carrierInvocationAttributes(tracking), outcome: 'error', errorCode: error.code },
         });
       }
       throw error;
@@ -400,7 +407,7 @@ export class AiServiceGateway {
       toolCallId: tracking.toolCallId,
       operation: 'document.compose',
       execution: toRecordedExecution(response.execution),
-      metadata: { outcome: 'completed', instructionLength: input.instruction.length },
+      metadata: { ...carrierInvocationAttributes(tracking), outcome: 'completed', instructionLength: input.instruction.length },
     });
     return response;
   }
@@ -423,7 +430,7 @@ export class AiServiceGateway {
       toolCallId: tracking.toolCallId,
       operation: 'spreadsheet.compose',
       execution: toRecordedExecution(response.execution),
-      metadata: { outcome: 'completed', instructionLength: input.instruction.length },
+      metadata: { ...carrierInvocationAttributes(tracking), outcome: 'completed', instructionLength: input.instruction.length },
     });
     return response;
   }
@@ -653,6 +660,7 @@ export class AiServiceGateway {
           tokenUsage: toRecordedTokenUsage(tokenUsage),
         },
         metadata: {
+          ...carrierInvocationAttributes(args.tracking),
           mode: args.input.mode ?? 'standard',
           outcome,
           ...(errorCode ? { errorCode } : {}),
@@ -785,6 +793,7 @@ export class AiServiceGateway {
       operation: args.operation,
       execution: args.error.execution,
       metadata: {
+        ...carrierInvocationAttributes(args.tracking),
         outcome: 'error',
         errorCode: args.error.code,
         ...(args.mode ? { mode: args.mode } : {}),
@@ -840,6 +849,17 @@ export class AiServiceGateway {
     });
     return this.client;
   }
+}
+
+/**
+ * 步骤执行载体的任务/步骤 ID 记入调用日志 metadata（不新增列，见技术文档 §2.3）；
+ * 轮次载体返回空对象，行为与 M1 完全一致。
+ */
+function carrierInvocationAttributes(tracking: ChatInvocationTracking): AiInvocationAttributes {
+  return {
+    ...(tracking.taskId ? { taskId: tracking.taskId } : {}),
+    ...(tracking.stepId ? { stepId: tracking.stepId } : {}),
+  };
 }
 
 function toRecordedExecution(execution: ExecutionMetadata): AiInvocationExecution {

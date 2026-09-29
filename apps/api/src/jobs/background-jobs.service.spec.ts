@@ -18,7 +18,8 @@ describe('BackgroundJobsService', () => {
         const prisma = createPrismaMock();
         const redis = createRedisMock({ setIfAbsent: jest.fn().mockResolvedValue(false) });
         const notifications = createNotificationMock();
-        const service = createService(prisma, redis, notifications);
+        const auditRetention = createAuditRetentionMock();
+        const service = createService(prisma, redis, notifications, auditRetention);
 
         await expect(service.runOnce(NOW)).resolves.toEqual({
             skipped: true,
@@ -27,8 +28,11 @@ describe('BackgroundJobsService', () => {
             workReportReminderNotifications: 0,
             legalContractTransitions: 0,
             hrEmployeeChangesApplied: 0,
+            purgedConnectorReadEvents: 0,
+            archivedAuditEvents: 0,
         });
         expect(prisma.uploadSession.updateMany).not.toHaveBeenCalled();
+        expect(auditRetention.runOnce).not.toHaveBeenCalled();
     });
 
     it('expires upload sessions and AI action drafts under the lock', async () => {
@@ -37,14 +41,18 @@ describe('BackgroundJobsService', () => {
         prisma.aIActionDraft.updateMany.mockResolvedValue({ count: 1 });
         prisma.tenantMembership.findMany.mockResolvedValue([]);
         const redis = createRedisMock();
-        const service = createService(prisma, redis);
+        const auditRetention = createAuditRetentionMock();
+        const service = createService(prisma, redis, createNotificationMock(), auditRetention);
 
         await expect(service.runOnce(NOW)).resolves.toEqual(expect.objectContaining({
             skipped: false,
             expiredUploadSessions: 2,
             expiredAiActionDrafts: 1,
             workReportReminderNotifications: 0,
+            purgedConnectorReadEvents: 0,
+            archivedAuditEvents: 0,
         }));
+        expect(auditRetention.runOnce).toHaveBeenCalledWith(NOW);
         expect(prisma.uploadSession.updateMany).toHaveBeenCalledWith({
             where: { status: 'PENDING', expiresAt: { lte: NOW } },
             data: { status: 'EXPIRED', failureCode: 'UPLOAD_SESSION_EXPIRED' },
@@ -162,10 +170,15 @@ function createNotificationMock(): Record<string, any> {
     return { createForUsers: jest.fn().mockResolvedValue('notification-id') };
 }
 
+function createAuditRetentionMock(): Record<string, any> {
+    return { runOnce: jest.fn().mockResolvedValue({ purgedConnectorReadEvents: 0, archivedAuditEvents: 0 }) };
+}
+
 function createService(
     prisma: Record<string, any>,
     redis: Record<string, any>,
     notifications = createNotificationMock(),
+    auditRetention = createAuditRetentionMock(),
 ): BackgroundJobsService {
     const legalService = { processLifecycle: jest.fn().mockResolvedValue(0) };
     const hrService = { processApprovedEmployeeChanges: jest.fn().mockResolvedValue(0) };
@@ -175,5 +188,6 @@ function createService(
         notifications as unknown as NotificationService,
         legalService as any,
         hrService as any,
+        auditRetention as any,
     );
 }

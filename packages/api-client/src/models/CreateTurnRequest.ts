@@ -30,6 +30,10 @@ export type CreateTurnRequest = {
      */
     webSearchEnabled?: boolean;
     /**
+     * Desktop 调用连接器语义路由、且路由判定目标不唯一时注入的本轮消歧提示， 让模型自然反问用户。只用于本轮回答，与 assistantContext 相同， 不落库、不作为业务写入或权限依据，也不属于 ConnectorContext 事实通道。
+     */
+    connectorRoutingHint?: string | null;
+    /**
      * Desktop 从用户已授权的本地连接器或本机工具读取的本轮只读上下文； 不会作为业务事实或写操作权限依据。 上限 5 = 连接器计划调用（最多 3）+ 本机操作结果（1）+ 本机能力声明（1）。
      */
     connectorContexts?: Array<ConnectorContext>;

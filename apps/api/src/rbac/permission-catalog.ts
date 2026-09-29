@@ -73,6 +73,8 @@ export const TENANT_PERMISSION_DEFINITIONS = [
     ['ai.ppt.generate', '调用 AI 生成 PPT'],
     ['ai.workflow.use', '使用 AI 工作流'],
     ['ai.web.search', '使用 AI 联网搜索公开资料'],
+    ['ai.task.create', '发起 AI 编排任务'],
+    ['ai.task.read', '查看 AI 编排任务'],
     ['dingtalk.integration.read', '查看钉钉企业绑定'],
     ['dingtalk.integration.manage', '管理钉钉企业绑定'],
     ['dingtalk.organization.read', '查看钉钉组织镜像'],
@@ -125,8 +127,9 @@ export const TENANT_PERMISSION_DEFINITIONS = [
 export const TENANT_ADMIN_ROLE_CODE = 'tenant_admin';
 
 /**
- * 新建租户角色时默认授予的 AI 能力权限：图片/文档的生成与查看，
- * 以及文档库与知识库的基础读取（AI 对话工具集对每个账号默认可用）。
+ * 新建租户角色时默认授予的 AI 能力权限：图片/文档的生成与查看、
+ * 文档库与知识库的基础读取，以及 AI 编排任务的发起与查看
+ * （AI 对话工具集对每个账号默认可用）。
  *
  * 变更约束：本集合只在“新建角色”时生效，存量角色不会自动获得新增或移除的权限码。
  * 调整集合时必须同步编写存量补齐（或回收）迁移——参照
@@ -139,4 +142,6 @@ export const DEFAULT_ROLE_PERMISSION_CODES = [
     'knowledge_base.read',
     'ai.image.generate',
     'ai.document.generate',
+    'ai.task.create',
+    'ai.task.read',
 ] as const;

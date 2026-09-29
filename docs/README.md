@@ -15,6 +15,9 @@
 | [GitHub 官方远程 MCP 连接器](product/github-remote-mcp-connector.md) | GitHub OAuth、官方远程 MCP、动态工具发现与 Desktop 本地执行 |
 | [分配策略与人财法](product/assignment-and-hr-finance-legal.md) | AssignmentPolicy、完整 HR 与 Finance 已实现；Legal 契约已冻结待实现 |
 | [AI 助手业务写操作](product/assistant-business-tools.md) | 聊天式部门/知识库写入：发现+动作两层工具、待确认草稿、确认前无副作用、幂等与重鉴权 |
+| [AI 同事：定位与关系说明](product/ai-colleague.md) | 四个主体（企业/用户/总管/同事）的定义与关系、两种运行模式（前台对话与编排执行）、能力构成（职能/数据源/学习记录/工作记录/权限边界）、权限与临时授权、术语边界 |
+| [AI 任务编排（需求设计）](product/ai-orchestration.md) | 对话与编排双通道、任务全流程（计划/派发前确认/逐步执行/草稿验收/沉淀）、三层上下文与三不变量、JEV 三方职责、建议/临时授权/主动问人交互与分块实施 |
+| [AI 管家：主动跟进与推动](product/proactive-assistant.md) | 设计草案（未实施）：“事找人”定位与红线、规则发现 + LLM 翻译（引用校验）、跟进记录独立数据面与证据链、提醒设置与防打扰、反馈闭环 |
 | [桌面端安全加固](engineering/desktop-security-hardening.md) | CSP（dev 响应头 + 打包 meta）、IPC 来源校验、导航锁定、webview 策略、令牌移出 Web Storage |
 | [用户个人资料管理](product/user-profile-management.md) | 当前租户成员查询和修改自己的展示资料 |
 | [密码修改与凭证安全](security/password-management.md) | 租户成员和平台管理员修改自己的密码及会话安全规则 |
@@ -24,6 +27,8 @@
 | [用户级记忆](architecture/user-memory.md) | 跨会话用户级长期记忆设计：仅用户级不做租户级、提炼与合并流程、注入与分块计划 |
 | [AI 调用与 Token 计量](architecture/public-chat-api-and-token-metering.md) | AiInvocationRecorderService 与 AIInvocationLog：模型调用、Token 记录与写入规则 |
 | [ai-tool-calling](architecture/ai-tool-calling.md) | 通用 Tool Calling、Tool Turn SSE、NestJS 工具执行边界 |
+| [连接器语义路由与调用审计](architecture/connector-routing-and-iteration.md) | 连接器语义路由、受控多步接力与调用审计（已落地，契约 `0.44.0` / `0.45.0` / `0.47.0`） |
+| [审计日志保留策略](architecture/audit-log-retention.md) | 审计分级保留：连接器只读逐条审计到期删除、其余租户审计归档、平台审计永久 |
 | [web-search](architecture/web-search.md) | Tavily 联网搜索工具、来源回填与安全边界 |
 | [task-scope-proposal](architecture/task-scope-proposal.md) | 通用任务 tasks.scope 的 C/D 协调基线、来源追溯与跨职能任务边界 |
 | [hr-finance-legal-data-contract](architecture/hr-finance-legal-data-contract.md) | HR、Finance 已实现基线及 Legal、老板经营概况聚合契约 |
@@ -38,6 +43,8 @@
 | [file-upload](architecture/file-upload.md) | 已落地的 COS 基础直传接口与后续权限、额度、扫描设计 |
 | [redis-foundation](architecture/redis-foundation.md) | NestJS Redis 基础 CRUD、命名空间和使用边界 |
 | [本机工具与 Excel 读写实现](architecture/local-tools-and-excel-io-plan.md) | 聊天上传并生成 Excel、本机只读扫描、隔离/恢复/永久清理的实现边界与风险登记 |
+| [AI 任务编排技术设计](architecture/ai-orchestration-technical.md) | 数据模型（同事表 / 任务五表 / 统一交互表）、状态机与幂等、对外契约与任务事件流、派发书与执行窗口算法、编排决策抽象（v1 规则 + LLM / v2 JEV）、调度运行器与实现落点 |
+| [AI 管家技术设计（草案）](architecture/proactive-assistant-technical.md) | 设计草案（未实施）：跟进记录数据模型（主表/规则表/设置表）、状态机与幂等、证据链结构、接口草案、翻译调用链与规则框架要点 |
 | [api](api/README.md) | 公开与内部契约及生成客户端约定 |
 | [项目管理 API](api/project-management-api.md) | 项目、成员、负责人和状态命令接口 |
 | [知识库管理 API](api/knowledge-base-api.md) | 知识库 CRUD、成员权限、文档上传和公开查询接口 |
@@ -45,6 +52,7 @@
 | [腾讯会议连接器 API](api/tencent-meeting-connector-api.md) | `0.40.0` 官方 CLI 规划语义、本地 OAuth 边界与迁移说明 |
 | [企业微信连接器 API](api/wecom-connector-api.md) | `0.39.0` 动态 CLI 工具规划与 `WECOM` 会话上下文 |
 | [GitHub 连接器 API](api/github-connector-api.md) | `0.43.0` OAuth Broker、官方远程 MCP 工具规划与 `GITHUB` 会话上下文 |
+| [连接器语义路由 API](api/assistant-connector-routing-api.md) | `0.44.0` 一级目录路由、`clarification` 语义与 `connectorRoutingHint` |
 | [分配策略与人财法 API](api/assignment-and-hr-finance-legal-api.md) | AssignmentPolicy、HR 与 Finance 已实现；Legal 契约已冻结待实现 |
 | [database](database/README.md) | 数据模型与迁移约定 |
 | [security](security/README.md) | 安全模型、租户隔离与审计 |

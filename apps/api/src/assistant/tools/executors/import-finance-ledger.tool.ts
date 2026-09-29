@@ -5,6 +5,7 @@ import { AssistantMessageContentService } from '../../runtime/message-content.se
 import { ToolRegistryService } from '../tool-registry';
 import {
     runAsTenant,
+    ToolExecutionError,
     type ToolConfirmationContext,
     type ToolConfirmationRequest,
     type ToolDefinition,
@@ -85,6 +86,15 @@ export class ImportFinanceLedgerTool implements OnModuleInit {
     }
 
     private async resolveAttachment(context: ToolConfirmationContext): Promise<ParsedFinanceLedgerAttachment> {
+        // 本工具依赖「本轮上传的附件」；任务步骤执行窗口没有轮次输入，
+        // 工具面已排除 WRITE 工具，这里兜底防御绕过（模型编造调用时拒绝）。
+        if (context.turnId === null) {
+            throw new ToolExecutionError(
+                'TURN_INPUT_REQUIRED',
+                'import_finance_ledger requires an active turn with a spreadsheet attachment',
+                '导入台账需要基于当前消息中的 XLSX 或 CSV 附件。请告知用户：在对话中上传文件后重试。',
+            );
+        }
         const materials = await this.messageContent.resolveTurnDocumentSourceMaterials(context.turnId, {
             tenantId: context.tenantId,
             userId: context.userId,

@@ -2925,7 +2925,17 @@
     background: var(--surface);
 }
 
+.chat-resource-footer .chat-resource-actions {
+    width: auto;
+    margin-left: auto;
+    padding-top: 0;
+    border-top: 0;
+    flex-wrap: nowrap;
+}
+
 .chat-resource-meta {
+    flex: 0 0 auto;
     color: var(--muted);
     font-size: 10px;
+    white-space: nowrap;
 }

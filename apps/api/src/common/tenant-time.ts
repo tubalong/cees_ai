@@ -56,6 +56,21 @@ export function shiftLocalDateKey(timeZone: string, instant: Date, days: number)
     });
 }
 
+/** 该时刻在租户时区中的墙钟时间，格式为 `YYYY-MM-DDTHH:mm:ss`（不含偏移）。 */
+export function localDateTimeText(timeZone: string, instant: Date): string {
+    const { year, month, day, hour, minute, second } = localParts(timeZone, instant);
+    return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+        + `T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:${String(second).padStart(2, '0')}`;
+}
+
+/** 该时刻在租户时区的 UTC 偏移，格式为 `+08:00`。 */
+export function timeZoneOffsetText(timeZone: string, instant: Date): string {
+    const totalMinutes = Math.round(offsetMilliseconds(timeZone, instant) / 60000);
+    const sign = totalMinutes < 0 ? '-' : '+';
+    const absolute = Math.abs(totalMinutes);
+    return `${sign}${String(Math.floor(absolute / 60)).padStart(2, '0')}:${String(absolute % 60).padStart(2, '0')}`;
+}
+
 /**
  * 把 `YYYY-MM-DD` 业务日期标识还原成该标识对应的存储时刻。
  * 日报和周报的 `periodStart` 约定为日期标识的 UTC 零点（见 `parseDate`），

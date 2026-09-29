@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CEES AI Service Internal API",
-    "version": "0.7.0",
+    "version": "0.8.2",
     "description": "Internal infrastructure API used only by trusted CEES services.\nDesktop, mobile, and third-party clients must call the NestJS public API instead.\n"
   },
   "servers": [
@@ -1813,7 +1813,9 @@
           "structured",
           "reasoning",
           "rag",
-          "orchestrator"
+          "orchestrator",
+          "orchestration_decision",
+          "archive_suggestion"
         ]
       },
       "MessageRole": {
@@ -2389,13 +2391,13 @@
               "array",
               "null"
             ],
-            "maxItems": 30,
+            "maxItems": 50,
             "items": {
               "type": "string",
               "minLength": 1,
-              "maxLength": 1000
+              "maxLength": 200
             },
-            "description": "Long-term user memories, each a self-contained statement about the user. Injected as a dedicated system block before the conversation summary; absent or null means no memories are injected. At most 30 entries."
+            "description": "Long-term user memories, each a self-contained statement about the user. Injected as a dedicated system block before the conversation summary; absent or null means no memories are injected. At most 50 entries."
           },
           "messages": {
             "type": "array",
@@ -2538,7 +2540,7 @@
           "content": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 1000,
+            "maxLength": 200,
             "description": "A self-contained statement about the user, quoted from the conversation; no inference, no team-level information, no sensitive data."
           },
           "action": {
@@ -2895,13 +2897,13 @@
               "array",
               "null"
             ],
-            "maxItems": 30,
+            "maxItems": 50,
             "items": {
               "type": "string",
               "minLength": 1,
-              "maxLength": 1000
+              "maxLength": 200
             },
-            "description": "Long-term user memories, each a self-contained statement about the user. Injected as a dedicated system block before the conversation summary; absent or null means no memories are injected. At most 30 entries."
+            "description": "Long-term user memories, each a self-contained statement about the user. Injected as a dedicated system block before the conversation summary; absent or null means no memories are injected. At most 50 entries."
           },
           "messages": {
             "type": "array",

@@ -56,15 +56,19 @@ Desktop: dws schema --all --compact --format json
   -> 仅保留 effect=read + confirmation=not_required + availability=available
   -> 转成不含 CLI 路径和凭据的完整工具目录
 API: POST /assistant/connectors/dingtalk/plan
-  -> 目录超过 ai-service 单轮 32 工具限制时，先从完整目录动态选出最多 32 个候选
-  -> 再由 AI 选择具体工具 ID 和结构化参数，不执行 dws
+-> 目录超过 ai-service 单轮 32 工具限制时，先从完整目录动态选出最多 31 个候选（其中 1 个工具名额留给「是否需要下一轮」控制工具）
+  -> 再由 AI 选择候选工具别名和结构化参数，不执行 dws
 Desktop: 重新读取具体 leaf Schema
   -> 再次校验只读安全属性、工具身份和参数白名单
   -> execFile 执行固定 CLI 路径
   -> JSON 结果脱敏并作为 connectorContexts 发起正式对话轮次
 ```
 
+候选下发给模型时统一改名为 `dingtalk_tool_<序号>`，复合工具名（如 `cees.my_attendance_records`）和内部 `dws_read_*` ID 写在工具描述里，规划结果再映射回真实工具。这不是可选优化：ai-service 的模型工具名不允许点号且最长 128 字符，描述最长 2048 字符，直接下发复合工具名或超长描述会被请求校验拦成 422，整轮规划失败。
+
 因此，能力范围以用户电脑上当前受管 DWS 版本的 Schema 为准，而不是由 CEES 写死产品清单。模型永远不能返回 shell、原始 argv 或任意命令路径。
+
+只读调用的 JSON 输出由 Desktop 固定补齐，不允许模型决定：命令声明了 `format` 参数时追加 `--format json`；只声明布尔 `json` 开关时（例如 `dev connect list`）追加 `--json`。该开关由连接器接管，既不进入模型可见的工具 Schema，也不接受模型传值（否则会拼出 `--json true` 这类错误参数）。若某个只读命令仍返回纯文本，Desktop 保留原文（`unparsedText` 加说明）而不是整轮报「无法解析的 JSON 数据」；本人考勤记录是例外，它必须先拿到真正的 JSON 才能做确定性时间换算，因此不做文本兜底。
 
 对话查询中的组织和考勤复合只读能力：
 
@@ -246,6 +250,8 @@ scope = VISIBLE_SCOPE
 | DWS Schema 没有安全只读工具 | 本轮不执行连接器查询，正式对话继续使用其他上下文 |
 | AI 返回目录外工具或未声明参数 | Desktop/API 拒绝计划，不执行本地命令 |
 | 执行前 leaf Schema 安全属性变化 | 拒绝执行并提示重试，不沿用旧目录 |
+| 只读命令只声明布尔 `json` 开关 | Desktop 追加 `--json`（如 `dev connect list`），不改用 `--format json`；开关不进入模型可见 Schema |
+| 只读命令返回纯文本而非 JSON | 保留原文并标记 `unparsedText`，不整轮报「无法解析的 JSON 数据」；本人考勤记录仍要求真实 JSON |
 | DWS Schema 使用 `+` 快捷命令 | 仅允许符合安全命名规则的快捷命令词，例如 `+my-attendance`；不放宽到任意 Shell 字符 |
 | 本人考勤记录查询 | 优先使用 `cees.my_attendance_records`，按当前 Profile 注入用户 ID，并把时间和字段语义标准化后再进入对话 |
 | 考勤时间戳不是合法的 10 位秒或 13 位毫秒值 | 拒绝生成考勤上下文并明确报错，不让模型猜测时间 |

@@ -40,7 +40,7 @@ export type KnowledgeIndexStatus = {
     epoch: string;
 };
 
-export type ModelRole = 'default' | 'structured' | 'reasoning' | 'rag' | 'orchestrator';
+export type ModelRole = 'default' | 'structured' | 'reasoning' | 'rag' | 'orchestrator' | 'orchestration_decision' | 'archive_suggestion';
 
 export type MessageRole = 'system' | 'user' | 'assistant';
 
@@ -195,7 +195,7 @@ export type ChatRequest = {
      */
     conversation_summary?: string | null;
     /**
-     * Long-term user memories, each a self-contained statement about the user. Injected as a dedicated system block before the conversation summary; absent or null means no memories are injected. At most 30 entries.
+     * Long-term user memories, each a self-contained statement about the user. Injected as a dedicated system block before the conversation summary; absent or null means no memories are injected. At most 50 entries.
      */
     user_memories?: Array<string> | null;
     messages: Array<ChatMessage>;
@@ -347,7 +347,7 @@ export type ToolTurnRequest = {
     instructions?: string | null;
     conversation_summary?: string | null;
     /**
-     * Long-term user memories, each a self-contained statement about the user. Injected as a dedicated system block before the conversation summary; absent or null means no memories are injected. At most 30 entries.
+     * Long-term user memories, each a self-contained statement about the user. Injected as a dedicated system block before the conversation summary; absent or null means no memories are injected. At most 50 entries.
      */
     user_memories?: Array<string> | null;
     messages: Array<ToolTurnMessage>;

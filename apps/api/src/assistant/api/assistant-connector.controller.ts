@@ -4,12 +4,13 @@ import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
 import { TenantContextInterceptor } from '../../tenant/tenant-context.interceptor';
 import { TenantGuard } from '../../tenant/tenant.guard';
 import { DingTalkConnectorPlannerService } from '../connectors/dingtalk-connector-planner.service';
+import { ConnectorRoutingService } from '../connectors/connector-routing.service';
 import { TencentMeetingConnectorPlannerService } from '../connectors/tencent-meeting-connector-planner.service';
 import { WeComConnectorPlannerService } from '../connectors/wecom-connector-planner.service';
 import { GitHubConnectorPlannerService } from '../connectors/github-connector-planner.service';
 import { GitHubOAuthBrokerService } from '../connectors/github-oauth-broker.service';
 import { toAssistantHttpException } from '../assistant.errors';
-import { GitHubOAuthExchangeRequestDto, PlanDingTalkConnectorRequestDto, PlanGitHubConnectorRequestDto, PlanTencentMeetingConnectorRequestDto, PlanWeComConnectorRequestDto } from '../dto';
+import { GitHubOAuthExchangeRequestDto, PlanDingTalkConnectorRequestDto, PlanGitHubConnectorRequestDto, PlanTencentMeetingConnectorRequestDto, PlanWeComConnectorRequestDto, RouteConnectorRequestDto } from '../dto';
 
 @ApiTags('Conversation')
 @ApiBearerAuth()
@@ -18,6 +19,7 @@ import { GitHubOAuthExchangeRequestDto, PlanDingTalkConnectorRequestDto, PlanGit
 @UseInterceptors(TenantContextInterceptor)
 export class AssistantConnectorController {
   constructor(
+    private readonly connectorRouting: ConnectorRoutingService,
     private readonly planner: DingTalkConnectorPlannerService,
     private readonly tencentMeetingPlanner: TencentMeetingConnectorPlannerService,
     private readonly weComPlanner: WeComConnectorPlannerService,
@@ -25,13 +27,28 @@ export class AssistantConnectorController {
     private readonly githubOAuthBroker: GitHubOAuthBrokerService,
   ) {}
 
+  @Post('route')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: '选择本轮回答需要激活的连接器' })
+  @ApiOkResponse({ description: '返回需要激活的 provider 列表；clarification 非空时 Desktop 不得规划或执行任何连接器调用' })
+  async routeConnectors(@Body() input: RouteConnectorRequestDto) {
+    try {
+      return await this.connectorRouting.route(input.query, input.connectors, {
+        previousProviders: input.previousProviders,
+        recentMessages: input.recentMessages,
+      });
+    } catch (error) {
+      throw toAssistantHttpException(error);
+    }
+  }
+
   @Post('dingtalk/plan')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: '规划本机钉钉 DWS 只读查询' })
-  @ApiOkResponse({ description: '返回最多三个本地工具调用计划；服务端不执行 DWS' })
+  @ApiOkResponse({ description: '返回最多三个本地工具调用计划与是否需要下一轮的提示；服务端不执行 DWS' })
   async planDingTalk(@Body() input: PlanDingTalkConnectorRequestDto) {
     try {
-      return await this.planner.plan(input.query, input.tools);
+      return await this.planner.plan(input.query, input.tools, input.previousSteps);
     } catch (error) {
       throw toAssistantHttpException(error);
     }
@@ -40,10 +57,10 @@ export class AssistantConnectorController {
   @Post('tencent-meeting/plan')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: '规划本机腾讯会议官方 CLI 调用' })
-  @ApiOkResponse({ description: '返回最多三个本地 CLI 调用计划；服务端不接触 OAuth 凭据，也不执行工具' })
+  @ApiOkResponse({ description: '返回最多三个本地 CLI 调用计划与是否需要下一轮的提示；服务端不接触 OAuth 凭据，也不执行工具' })
   async planTencentMeeting(@Body() input: PlanTencentMeetingConnectorRequestDto) {
     try {
-      return await this.tencentMeetingPlanner.plan(input.query, input.tools);
+      return await this.tencentMeetingPlanner.plan(input.query, input.tools, input.previousSteps);
     } catch (error) {
       throw toAssistantHttpException(error);
     }
@@ -52,10 +69,10 @@ export class AssistantConnectorController {
   @Post('wecom/plan')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: '规划本机企业微信官方 CLI 调用' })
-  @ApiOkResponse({ description: '返回最多三个本地 CLI 调用计划；服务端不接触机器人授权，也不执行工具' })
+  @ApiOkResponse({ description: '返回最多三个本地 CLI 调用计划与是否需要下一轮的提示；服务端不接触机器人授权，也不执行工具' })
   async planWeCom(@Body() input: PlanWeComConnectorRequestDto) {
     try {
-      return await this.weComPlanner.plan(input.query, input.tools);
+      return await this.weComPlanner.plan(input.query, input.tools, input.previousSteps);
     } catch (error) {
       throw toAssistantHttpException(error);
     }
@@ -78,10 +95,10 @@ export class AssistantConnectorController {
   @Post('github/plan')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: '规划本机 GitHub 官方远程 MCP 调用' })
-  @ApiOkResponse({ description: '返回最多三个本地执行的 MCP 调用计划；服务端不接触 GitHub OAuth 凭据，也不执行工具' })
+  @ApiOkResponse({ description: '返回最多三个本地执行的 MCP 调用计划与是否需要下一轮的提示；服务端不接触 GitHub OAuth 凭据，也不执行工具' })
   async planGitHub(@Body() input: PlanGitHubConnectorRequestDto) {
     try {
-      return await this.githubPlanner.plan(input.query, input.tools);
+      return await this.githubPlanner.plan(input.query, input.tools, input.previousSteps);
     } catch (error) {
       throw toAssistantHttpException(error);
     }

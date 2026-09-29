@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  AssistantTaskStepStatus,
   AuditOutcome,
   DraftStatus,
   FilePurpose,
@@ -36,7 +37,12 @@ export interface GenerateImageCommand {
   membershipId: string;
   requestId: string;
   conversationId: string;
-  turnId: string;
+  /** 轮次执行载体的轮次 ID；任务步骤内发起的调用为 null（见 taskStepId）。 */
+  turnId: string | null;
+  /** 任务步骤执行载体的步骤 ID；轮次内发起的调用为 null（见 turnId）。 */
+  taskStepId?: string | null;
+  /** 任务步骤执行载体所属的任务 ID；仅步骤载体填充（调用日志 metadata 记录用）。 */
+  taskId?: string | null;
   toolCallId: string;
   executionOwner: string;
   executionToken: string;
@@ -81,13 +87,13 @@ export class ImageService {
   ) {}
 
   async generateImage(command: GenerateImageCommand): Promise<GeneratedImage> {
-    const completed = await this.findReadyImage(command.tenantId, command.turnId, command.toolCallId);
+    const completed = await this.findReadyImage(command);
     if (completed) return completed;
     await this.requireExecutionClaim(command);
 
     const reservation = await this.reserveImage(command);
     if (!reservation.claimed) {
-      const replay = await this.findReadyImage(command.tenantId, command.turnId, command.toolCallId);
+      const replay = await this.findReadyImage(command);
       if (replay) return replay;
       throw new Error(`图片工具调用 ${command.toolCallId} 已存在未完成执行，禁止并发重复生成`);
     }
@@ -120,6 +126,8 @@ export class ImageService {
         membershipId: command.membershipId,
         conversationId: command.conversationId,
         turnId: command.turnId,
+        ...(command.taskId ? { taskId: command.taskId } : {}),
+        ...(command.taskStepId ? { stepId: command.taskStepId } : {}),
         toolCallId: command.toolCallId,
       });
       // Cancellation or lease loss may happen while the provider is running.
@@ -161,7 +169,7 @@ export class ImageService {
       return finalized;
     } catch (error) {
       // 事务响应丢失时先确认 READY，避免误删已经提交成功的正式对象。
-      const persisted = await this.findReadyImage(command.tenantId, command.turnId, command.toolCallId).catch(() => null);
+      const persisted = await this.findReadyImage(command).catch(() => null);
       if (persisted) return persisted;
 
       let orphaned = false;
@@ -257,17 +265,7 @@ export class ImageService {
       where: {
         id: command.toolCallId,
         tenantId: command.tenantId,
-        turnId: command.turnId,
-        status: ToolCallStatus.EXECUTING,
-        executionToken: command.executionToken,
-        leaseExpiresAt: { gt: now },
-        turn: {
-          is: {
-            status: 'RUNNING',
-            executionOwner: command.executionOwner,
-            leaseExpiresAt: { gt: now },
-          },
-        },
+        ...liveCarrierClaimWhere(command, now),
       },
       select: { id: true },
     });
@@ -297,17 +295,7 @@ export class ImageService {
           is: {
             id: command.toolCallId,
             tenantId: command.tenantId,
-            status: ToolCallStatus.EXECUTING,
-            executionToken: command.executionToken,
-            leaseExpiresAt: { gt: now },
-            turn: {
-              is: {
-                id: command.turnId,
-                status: 'RUNNING',
-                executionOwner: command.executionOwner,
-                leaseExpiresAt: { gt: now },
-              },
-            },
+            ...liveCarrierClaimWhere(command, now),
           },
         },
       },
@@ -391,17 +379,7 @@ export class ImageService {
         where: {
           id: command.toolCallId,
           tenantId: command.tenantId,
-          turnId: command.turnId,
-          status: ToolCallStatus.EXECUTING,
-          executionToken: command.executionToken,
-          leaseExpiresAt: { gt: now },
-          turn: {
-            is: {
-              status: 'RUNNING',
-              executionOwner: command.executionOwner,
-              leaseExpiresAt: { gt: now },
-            },
-          },
+          ...liveCarrierClaimWhere(command, now),
         },
         select: { id: true },
       });
@@ -587,16 +565,18 @@ export class ImageService {
     });
   }
 
-  private async findReadyImage(
-    tenantId: string,
-    turnId: string,
-    toolCallId: string,
-  ): Promise<GeneratedImage | null> {
+  private async findReadyImage(command: GenerateImageCommand): Promise<GeneratedImage | null> {
     const image = await this.prisma.managedImage.findFirst({
       where: {
-        tenantId,
-        toolCallId,
-        toolCall: { is: { tenantId, turnId } },
+        tenantId: command.tenantId,
+        toolCallId: command.toolCallId,
+        toolCall: {
+          is: {
+            tenantId: command.tenantId,
+            turnId: command.turnId,
+            taskStepId: command.taskStepId ?? null,
+          },
+        },
       },
       select: {
         id: true,
@@ -611,7 +591,7 @@ export class ImageService {
     });
     if (
       !image
-      || image.tenantId !== tenantId
+      || image.tenantId !== command.tenantId
       || image.status !== ManagedImageStatus.READY
       || !image.contentType
       || !image.provider
@@ -658,6 +638,48 @@ function extensionOf(contentType: string): string {
     case 'image/webp': return 'webp';
     default: return 'bin';
   }
+}
+
+/**
+ * 工具调用执行载体的租约校验条件：轮次（turnId）或任务步骤（taskStepId）二选一。
+ * 轮次载体沿用轮次租约；步骤载体校验步骤行的执行者、状态与租约有效期
+ * （与步骤运行器的执行租约同构，见技术文档 §7.1）。
+ */
+function liveCarrierClaimWhere(
+  carrier: {
+    turnId: string | null;
+    taskStepId?: string | null;
+    executionOwner: string;
+    executionToken: string;
+  },
+  now: Date,
+): Prisma.ToolCallWhereInput {
+  return {
+    turnId: carrier.turnId,
+    taskStepId: carrier.taskStepId ?? null,
+    status: ToolCallStatus.EXECUTING,
+    executionToken: carrier.executionToken,
+    leaseExpiresAt: { gt: now },
+    ...(carrier.turnId !== null
+      ? {
+        turn: {
+          is: {
+            status: 'RUNNING',
+            executionOwner: carrier.executionOwner,
+            leaseExpiresAt: { gt: now },
+          },
+        },
+      }
+      : {
+        taskStep: {
+          is: {
+            status: AssistantTaskStepStatus.RUNNING,
+            executionOwner: carrier.executionOwner,
+            leaseExpiresAt: { gt: now },
+          },
+        },
+      }),
+  };
 }
 
 function isUniqueConstraintError(error: unknown): boolean {

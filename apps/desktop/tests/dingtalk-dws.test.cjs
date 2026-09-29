@@ -10,6 +10,7 @@ const {
     parseDwsFailureDetails,
     parseDingTalkUserRecords,
     parseJsonOutput,
+    parseJsonOutputOrText,
     selectCurrentProfile,
 } = require('../dist-electron/dingtalk-dws.js');
 
@@ -121,4 +122,18 @@ test('兼容 DWS orgEmployeeModel 的 orgUserId 和 orgUserName', () => {
         admin: true,
         boss: false,
     }]);
+});
+
+test('只读查询在 DWS 返回纯文本时保留原文而不是整轮解析失败', () => {
+    // `dws dev connect list` 在没有 --json 时返回纯文本 `no connectors found`。
+    assert.deepEqual(parseJsonOutputOrText('no connectors found'), {
+        unparsedText: 'no connectors found',
+        note: 'DWS 未返回 JSON，以上为原始文本输出；请如实转述，不要臆造字段',
+    });
+    // JSON 正常时仍按 JSON 解析，兜底不影响正常路径。
+    assert.deepEqual(parseJsonOutputOrText('[{"id":"c1"}]'), [{ id: 'c1' }]);
+    // 空白输出是明确的空结果，不抛错。
+    assert.equal(parseJsonOutputOrText('   ').unparsedText, '');
+    // 超长文本按上限收敛，避免撑爆连接器上下文。
+    assert.equal(parseJsonOutputOrText('x'.repeat(9000)).unparsedText.length, 4000);
 });

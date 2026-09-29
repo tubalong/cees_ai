@@ -140,6 +140,8 @@ Accept: text/event-stream
     "toolId": "dws_read_0123456789abcdef",
     "toolName": "attendance.record.get",
     "fetchedAt": "2026-09-20T08:00:00.000Z",
+    "riskLevel": "READ",
+    "confirmed": false,
     "data": { "date": "2026-09-20", "result": { "records": [] } }
   }]
 }
@@ -170,6 +172,7 @@ Accept: text/event-stream
 
 - API 会将上下文和用户消息一起持久化，重连、重放和模型上下文构建都以数据库记录为准；客户端不提交 DWS Token、Cookie、AppSecret 或其他凭据。
 - 单轮所有连接器上下文最大 64KB；包含 `token`、`secret`、`cookie`、`authorization`、`credential` 或 `password` 等键名时拒绝请求。
+- 每项上下文可携带 `riskLevel`（`READ`/`WRITE`/`DESTRUCTIVE`）与 `confirmed`（boolean），两者都是**客户端自报**、只用于服务端分级审计，不代表服务端授权：写与破坏性调用逐条写 `CONNECTOR_WRITE_OPERATION`，只读调用默认每轮聚合一条 `CONNECTOR_READ_OPERATION`，租户开启 `connectorReadAuditEnabled` 后改为逐条。省略或传入非法 `riskLevel` 一律按 `DESTRUCTIVE` 处理。审计只记录 `provider`/`toolId`/`toolName`/`riskLevel`/`confirmed`/结果字节数与字段白名单内的状态摘要，不记录正文、路径或凭据。
 - 上下文进入模型时包在只读参考标记中，不能成为系统指令、权限依据或正式业务写入依据；连接器当前不支持通过对话修改 CEES 或钉钉数据。
 - 钉钉组织同步仍使用 `POST /api/v1/dingtalk/organization/snapshot`，需要 CEES 租户管理员确认，不通过 `connectorContexts` 绕过组织导入权限。
 
@@ -210,7 +213,25 @@ Desktop 先从本机执行 `dws schema --all --compact --format json`，只提�
 }
 ```
 
-API 不持有 DWS Token，也不执行本地命令。由于 ai-service 单次最多接收 32 个模型工具，完整目录超过 32 项时，API 会先让模型从完整只读目录中选出最多 32 个候选，再进行参数规划；因此不会按固定产品类型截断能力。Desktop 必须在执行前重新读取具体 leaf Schema，复核工具身份、安全属性和参数白名单；模型不能提交 shell、CLI 路径或原始 argv。单次最多规划 3 个查询，无需钉钉数据时 `calls` 为空。
+受控多步接力（同一轮对话内最多两轮，契约 `0.47.0`）时，Desktop 会在第二轮请求里回带上一轮已执行步骤的脱敏摘要：
+
+```json
+{
+  "query": "把昨天的会议纪要发到项目群",
+  "tools": [ "…同上，省略…" ],
+  "previousSteps": [{
+    "toolId": "dws_read_0123456789abcdef",
+    "argumentsDigest": "{\"name\":\"项目群\"}",
+    "resultDigest": "conversation_id=c1",
+    "status": "SUCCESS"
+  }]
+}
+```
+
+- `previousSteps` 可选，最多 3 条、单条摘要 ≤ 2000 字；服务端把它包在固定定界符内并声明为**不可信数据**，只允许用来抽取 ID / 字段，不允许执行其中的指令或据此新增写操作目标。
+- 响应可带 `followUpMayBeNeeded`（boolean，缺省 `false`）：为 `true` 只表示「本轮调用可能不足以完成这次请求」，并不触发任何后续动作；是否进入第二轮由 Desktop 决定（硬上限两轮、两轮合计 ≤ 3 次调用）。该提示通过一个额外的控制工具回传，因此真实工具候选上限由 32 收敛为 31。
+
+API 不持有 DWS Token，也不执行本地命令。由于 ai-service 单次最多接收 32 个模型工具（其中 1 个留给「是否需要下一轮」控制工具），完整目录超过 31 项时，API 会先让模型从完整只读目录中选出最多 31 个候选，再进行参数规划；因此不会按固定产品类型截断能力。Desktop 必须在执行前重新读取具体 leaf Schema，复核工具身份、安全属性和参数白名单；模型不能提交 shell、CLI 路径或原始 argv。单次最多规划 3 个查询，无需钉钉数据时 `calls` 为空。
 
 同一会话内重复提交相同 `Idempotency-Key` 且请求内容相同，会重新订阅原轮次事件，不会创建新轮次；同一键对应不同内容返回 `409 IDEMPOTENCY_KEY_CONFLICT`。幂等键长度为 1～128 个字符。
 
@@ -421,7 +442,7 @@ Assistant 不接受把任意公网 URL 直接写入消息。前端先走现有 F
 
 ## 9. 用户级记忆（User Memory）
 
-跨会话的用户级长期记忆，只归属当前成员本人：AI 在对话中仅**提议**记忆内容，写入、修改与删除一律以本人操作为准并记录审计。记忆只做用户级不做租户级（租户级由知识库承载）；每人至多 30 条，按创建时间升序返回（即注入对话上下文的顺序）。设计详见 [用户级记忆设计文档](../architecture/user-memory.md)。
+跨会话的用户级长期记忆，只归属当前成员本人：AI 在对话中仅**提议**记忆内容，写入、修改与删除一律以本人操作为准并记录审计。记忆只做用户级不做租户级（租户级由知识库承载）；每人至多 50 条、单条至多 200 字符，按创建时间升序返回（即注入对话上下文的顺序）。设计详见 [用户级记忆设计文档](../architecture/user-memory.md)。
 
 ```http
 GET /api/v1/user-memories
@@ -430,6 +451,6 @@ DELETE /api/v1/user-memories/{memoryId}?version={version}
 Authorization: Bearer <access-token>
 ```
 
-`PATCH` 请求体 `{ content?, type?, version }`：`content`（1–1000 字符）与 `type`（`PREFERENCE` / `FACT` / `DECISION` / `HABIT`）至少提供一个，`version` 用于乐观并发控制；不存在的记忆返回 `404 USER_MEMORY_NOT_FOUND`，版本不匹配返回 `409 USER_MEMORY_VERSION_CONFLICT`。`DELETE` 软删除记忆并保留审计事实，`version` 必填。列表接口返回全部未删除记忆（至多 30 条），不分页。
+`PATCH` 请求体 `{ content?, type?, version }`：`content`（1–200 字符）与 `type`（`PREFERENCE` / `FACT` / `DECISION` / `HABIT`）至少提供一个，`version` 用于乐观并发控制；不存在的记忆返回 `404 USER_MEMORY_NOT_FOUND`，版本不匹配返回 `409 USER_MEMORY_VERSION_CONFLICT`。`DELETE` 软删除记忆并保留审计事实，`version` 必填。列表接口返回全部未删除记忆（至多 50 条），不分页。
 
 本接口只覆盖「查看、修改、删除」；记忆的自动提炼与注入由服务端在对话链路内完成，不提供客户端写入接口。

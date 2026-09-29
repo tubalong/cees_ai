@@ -7,7 +7,21 @@
 
 ### 契约版本与迁移
 
-- **0.43.0**：当前开发基线。新增平台 AI Credit 配置管理 API：`/platform/ai-credit/*` 共 21 个操作（能力目录、档位、费率、订阅参数、加油包、全局计费配置），列表响应统一为 `{ items }` 信封，权限码 `platform.aiCredit.read/write`。客户端需要重新生成。详见 [AI 计费系统设计](../product/ai-credit-system-design.md)。
+- **0.53.0**：当前开发基线。AI 任务编排 M2 存量项「产出验收与归档」：新增 `GET /assistant/tasks/{taskId}/outputs`（产出验收视图：产出清单、归档结果与建议、可归档库候选）与 `POST /assistant/tasks/{taskId}/outputs/confirm`（逐产出指定知识库的验收归档，幂等、仅任务终态可提交），任务事件流新增 `output_confirmed` 事件（payload：`documentId` / `knowledgeBaseId` / `knowledgeDocumentId` / `visibilityScope`）。均为兼容新增，客户端需要重新生成。详见 [AI 任务编排技术设计](../architecture/ai-orchestration-technical.md)。
+- **0.52.0**：AI 任务编排 M3（重编排）：任务事件流新增 `plan_revision_requested` 事件（用户请求调整计划，草案期与执行中重排共用同一事件），`AssistantTaskPlanStep` 新增可选步骤沿用锚点 `carriedFromStepKey`（重排后该步骤的产出直接沿用、不再执行）。均为兼容新增，客户端需要重新生成。详见 [AI 任务编排技术设计](../architecture/ai-orchestration-technical.md)。
+- **0.51.0**：AI 任务编排 M3（重编排与交互）：新增挂起事项解决操作 `POST /assistant/task-interactions/{interactionId}/resolve`（授权批准/拒绝、提问答复、裁决选项，解决动作幂等），`AssistantTaskDetail` 新增挂起事项列表 `interactions`（含已解决历史），任务事件流新增 `interaction_requested` / `interaction_resolved` 两个事件（类型 AUTHORIZATION / QUESTION / DECISION；状态 RESOLVED / REJECTED / EXPIRED / CANCELLED）。均为兼容新增，客户端需要重新生成。详见 [AI 任务编排技术设计](../architecture/ai-orchestration-technical.md)。
+- **0.50.0**：AI 任务编排 M2（子执行与窗口隔离）：任务事件流新增 5 个步骤级事件（`step_started` / `step_progress` / `step_completed` / `step_failed` / `step_skipped`），`AssistantTaskStep` 新增产出引用 `outputRefs`（复用 `ToolResultResourceReference`，尚未回流时为空数组）。均为兼容新增，客户端需要重新生成。详见 [AI 任务编排技术设计](../architecture/ai-orchestration-technical.md)。
+- **0.49.0**：新增 AI 任务编排任务面 API：`/assistant/tasks` 共 5 个操作（任务列表、任务详情、任务事件 SSE、计划确认、任务取消），新增权限码 `ai.task.create/read`；客户端需要重新生成。详见 [AI 任务编排（需求设计）](../product/ai-orchestration.md) 与 [AI 任务编排技术设计](../architecture/ai-orchestration-technical.md)。
+- **0.48.0**：审计保留策略落地，只在接口描述中说明数据可用范围的变化：`GET /audit-events` 与详情只返回 `audit_logs` 热表数据，超过保留期（默认 3 年）的租户审计已迁入 `audit_logs_archive`、连接器只读逐条审计（默认 90 天）到期后物理删除，因此不再出现在列表或详情中。响应结构、参数与错误码均未变化，旧客户端行为不变，客户端需要重新生成。详见 [审计日志保留策略](../architecture/audit-log-retention.md)。
+- **0.47.0**：连接器受控多步接力。四个 `Plan<Provider>ConnectorRequest` 新增可选 `previousSteps`（最多 3 条、
+  单条 ≤ 2000 字的脱敏摘要，服务端按不可信数据注入），`Plan<Provider>ConnectorResult` 新增可选
+  `followUpMayBeNeeded`（缺省 `false`，只是「本轮调用可能不足以完成请求」的提示，是否进入第二轮由 Desktop
+  决定：硬上限两轮、两轮合计 ≤ 3 次调用）。均为兼容新增，旧客户端行为与请求哈希不变，客户端需要重新生成。
+  详见 [连接器语义路由、受控多步接力与调用审计](../architecture/connector-routing-and-iteration.md) §4。
+- **0.46.0**：用户级记忆容量调整：每人上限由 30 条提升为 50 条（`UserMemoryList.items.maxItems`），单条正文由最多 1000 字符收紧为最多 200 字符（`UserMemory.content`、`UpdateUserMemoryRequest.content`）；GET /user-memories 描述同步为「至多 50 条」。旧客户端读取不受影响，写入超过 200 字符的正文将被拒绝；客户端需要重新生成。详见 [用户级记忆设计](../architecture/user-memory.md)。
+- **0.45.0**：连接器调用审计落地。`ConnectorContext` 新增可选 `riskLevel`（`READ|WRITE|DESTRUCTIVE`）与 `confirmed`，服务端据此分级审计：写/破坏性调用逐条留痕，只读调用默认按轮次级聚合成一条；省略 `riskLevel` 按 `DESTRUCTIVE` 处理，旧客户端行为不变。新增租户级开关 `TenantDetail.connectorReadAuditEnabled`（默认 `false`），`UpdateTenantRequest` 可修改（需要 `tenant.update`）。客户端需要重新生成。详见 [连接器语义路由、多步接力与调用审计](../architecture/connector-routing-and-iteration.md) §5。
+- **0.44.0**：新增连接器语义路由 POST /assistant/connectors/route（只接收一级能力摘要，返回需要激活的 provider 与可选 clarification），并给 CreateTurnRequest 增加可选 connectorRoutingHint（≤1000 字，用于消歧反问，不落库、不作为事实或权限依据）。未携带提示的轮次请求哈希与升级前一致，旧客户端的 Idempotency-Key 重试不受影响；客户端需要重新生成。详见 [连接器语义路由 API](assistant-connector-routing-api.md)。
+- **0.43.0**：新增平台 AI Credit 配置管理 API：`/platform/ai-credit/*` 共 21 个操作（能力目录、档位、费率、订阅参数、加油包、全局计费配置），列表响应统一为 `{ items }` 信封，权限码 `platform.aiCredit.read/write`。客户端需要重新生成。详见 [AI 计费系统设计](../product/ai-credit-system-design.md)。
 - **0.43.0**：新增 GitHub OAuth Broker 配置与授权码换码接口，并保留官方远程 MCP 规划接口；客户端需重新生成。详见 [GitHub 连接器 API](github-connector-api.md)。
 - **0.41.0**：`ConversationMessage` 新增必填但默认空数组的 `connectorContexts`，用于恢复企业微信业务权限授权提示；旧客户端可忽略，新客户端需重新生成。连接器上下文仍不构成 CEES 权限或业务事实。详见 [企业微信连接器 API](wecom-connector-api.md)。
 - **0.40.0**：腾讯会议从 Desktop 个人 Token + 远程 MCP 修正为托管官方 `@tencentcloud/tmeet` CLI + 浏览器 OAuth；保留无副作用的 `POST /assistant/connectors/tencent-meeting/plan` Schema，更新工具目录语义并删除 Desktop Token IPC。旧个人 Token 不迁移，升级后用户需重新完成 OAuth；详见 [腾讯会议连接器 API 与迁移说明](tencent-meeting-connector-api.md)。
@@ -42,6 +56,7 @@
 - [Assistant / Conversation API](assistant-api.md)
 - [腾讯会议连接器 API](tencent-meeting-connector-api.md)
 - [企业微信连接器 API](wecom-connector-api.md)
+- [连接器语义路由 API](assistant-connector-routing-api.md)
 - [公开 AI 对话链路与 Token 计量](../architecture/public-chat-api-and-token-metering.md)
 - [用户个人资料管理](../product/user-profile-management.md)
 - [钉钉组织架构与人员同步 API](dingtalk-organization-sync-api.md)
@@ -461,6 +476,26 @@ GET    /api/v1/projects/{projectId}/tasks/{taskId}/activities
 - 删除异步二次生成链路：ai-service 内部契约移除 `POST /internal/v1/chat/related-questions` 端点与 `related_questions_role` 配置（内部契约 `0.6.0` → `0.7.0`，开发阶段破坏性变更）；NestJS 不再 fire-and-forget 调用该端点，相应 AiInvocation 审计（`chat.related_questions`）随之移除；
 - Prisma 新增 `20260920031236_assistant_turn_related_questions` 迁移：`assistant_turns` 增加 `related_questions` JSONB 列；
 - 详细业务边界见 [Assistant / Conversation API](assistant-api.md)，架构说明见 [公开 AI 对话链路与上下文压缩](../architecture/contextual-chat.md)。
+
+## 用户级记忆上限调整说明（2026-09-29，内部契约 0.8.0）
+
+- 公开契约版本提升为 `0.46.0`：用户级记忆列表至多 50 条（`UserMemoryList.items.maxItems` 由 30 提升为 50）；单条记忆正文 `UserMemory.content` 与 `UpdateUserMemoryRequest.content` 由最多 1000 字符收紧为最多 200 字符；GET /user-memories 描述同步为「至多 50 条」；
+- 内部契约版本由 `0.7.0` 提升为 `0.8.0`：`ChatRequest` / `ToolTurnRequest.user_memories` 同步为至多 50 条、单条至多 200 字符，`UserMemoryCandidate.content` 至多 200 字符；
+- 调整动机：记忆以独立 system 块全量注入对话上下文，收紧单条长度后最坏注入体积由 30 × 1000 字符降为 50 × 200 字符（约 1 万字符量级），避免记忆固定块挤占消息与工具结果的上下文预算；
+- NestJS 侧容量常量调整为 50 并新增单条 200 字符校验（超长候选直接丢弃，不落库）；ai-service 侧压缩与随答提示词同步为「每条不超过 200 字」；
+- 旧客户端读取不受影响；写入超过 200 字符的正文返回参数校验错误。详细业务边界见 [用户级记忆设计](../architecture/user-memory.md) 与 [Assistant / Conversation API](assistant-api.md)。
+
+## 编排决策模型角色说明（2026-09-29，内部契约 0.8.1）
+
+- ai-service 内部契约版本由 `0.8.0` 提升为 `0.8.1`；`ModelRole` 兼容新增 `orchestration_decision`，用于 AI 任务编排的原子决策调用（结构化输出 `{choice, confidence, rationale}`，服务端按 JSON Schema 校验并失败重试一次）；
+- 不新增端点：调用走既有 `POST /internal/v1/llm/invoke` 链路，该角色输出模式为 json_schema；`config/models.*.toml` 的 `[roles]` 需登记 `orchestration_decision`（未登记时该角色不可用，编排侧按"放行提问"兜底并记审计）；
+- 调用方为 NestJS 编排层决策器（`apps/api/src/assistant/orchestration/decider/`），决策语义与演进见 [AI 任务编排技术设计](../architecture/ai-orchestration-technical.md) 第 6 节。
+
+## 产出归档建议模型角色说明（2026-09-29，内部契约 0.8.2）
+
+- ai-service 内部契约版本由 `0.8.1` 提升为 `0.8.2`；`ModelRole` 兼容新增 `archive_suggestion`，用于 AI 任务产出验收的归档建议（结构化输出 `{suggestions: [{documentId, knowledgeBaseId, reason}]}`，服务端按 JSON Schema 校验、对候选与产出做合法性硬过滤并失败重试一次）；
+- 不新增端点：调用走既有 `POST /internal/v1/llm/invoke` 链路，该角色输出模式为 json_schema；`config/models.*.toml` 的 `[roles]` 需登记 `archive_suggestion`（未登记时该角色不可用，服务端降级为空建议，由用户从候选自选）；
+- 调用方为 NestJS 产出验收服务（`apps/api/src/assistant/orchestration/task-outputs.service.ts`），仅“无明确组织归属”时触发；有部门归属走确定性规则（部门库），不调模型。归档语义见 [AI 任务编排技术设计](../architecture/ai-orchestration-technical.md) 第 2.4 节。
 
 ## 契约事实源
 

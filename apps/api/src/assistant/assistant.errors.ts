@@ -63,7 +63,6 @@ export function describeAssistantError(error: unknown): PublicAssistantError {
       status: HttpStatus.BAD_GATEWAY,
     };
   }
-
   return {
     code: error.code,
     message: error.message,

@@ -20,6 +20,8 @@ test('钉钉以本地 CLI 连接器 Manifest 声明运行能力', () => {
         id: 'dingtalk',
         name: '钉钉',
         description: '通过命令行管理钉钉全产品能力：AI 表格、考勤、日历、群聊与机器人、通讯录、开放平台文档、DING 消息、钉钉文档、钉钉云盘、AI 听记、邮箱、OA 审批、日志、待办。',
+        capabilitySummary: '查询本人账号可见的钉钉数据：考勤打卡、OA 审批与待办、日历日程与会议室、AI 听记与纪要、群聊消息、文档与钉盘、日志与邮件。',
+        routingExamples: ['我这个月打了几天卡', '我有哪些待审批的申请', '帮我看看项目群里说了什么', '我今天的日程安排'],
         icon: 'dingtalk',
         transportType: 'LOCAL_CLI',
         executionLocation: 'DESKTOP',
@@ -257,6 +259,24 @@ test('执行参数仅来自 Schema，固定使用 JSON 输出且不拼接 shell'
     ]);
     assert.throws(() => buildDwsArguments(tool, { query: 'Alice', shell: 'calc.exe' }), /未在 Schema 中声明/);
     assert.throws(() => buildDwsArguments(tool, { query: 'Alice', format: 'yaml' }), /未在 Schema 中声明/);
+});
+
+test('布尔 json 参数固定翻译为 --json 开关且不进入模型可见 Schema', () => {
+    const [tool] = parseDingTalkReadTools({
+        canonical_path: 'dev.connect_list',
+        primary_cli_path: 'dev connect list',
+        effect: 'read',
+        confirmation: 'not_required',
+        availability: 'available',
+        parameters: { json: { type: 'boolean' } },
+    });
+    // DWS 用布尔开关 --json 输出 JSON，而不是 --format json；连接器必须自己补上。
+    assert.deepEqual(buildDwsArguments(tool, {}), ['dev', 'connect', 'list', '--json']);
+    // json 由连接器接管：模型传值会被拒绝，避免拼出 `--json true` 这类错误参数。
+    assert.throws(() => buildDwsArguments(tool, { json: true }), /未在 Schema 中声明/);
+    // 也不出现在模型可见的一级 Schema 里。
+    assert.deepEqual(Object.keys(tool.parameters.properties), []);
+    assert.equal(tool.parameters.required, undefined);
 });
 
 test('连接器上下文会移除凭据字段并截断过长文本', () => {

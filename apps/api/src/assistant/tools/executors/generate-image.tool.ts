@@ -63,6 +63,8 @@ export class GenerateImageTool implements OnModuleInit {
       requestId: context.requestId,
       conversationId: context.conversationId,
       turnId: context.turnId,
+      taskStepId: context.taskStepId ?? null,
+      taskId: context.taskId ?? null,
       toolCallId: context.toolCallId,
       executionOwner: context.executionOwner,
       executionToken: context.executionToken,

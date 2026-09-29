@@ -1,7 +1,7 @@
 import { toUserErrorMessage } from './user-error';
 
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000/api/';
-// export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://192.168.5.29:3000/api/';
+// export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000/api/';
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://192.168.5.29:3000/api/';
 // export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://132.232.159.186:3000/api/';
 // http://192.168.5.29:3000/api/
 // http://132.232.159.186:3000/api/
@@ -1632,6 +1632,8 @@ export interface ConnectorContext {
     toolName: string;
     fetchedAt: string;
     data: Record<string, unknown>;
+    riskLevel?: 'READ' | 'WRITE' | 'DESTRUCTIVE';
+    confirmed?: boolean;
 }
 
 export interface DingTalkConnectorTool {
@@ -1641,12 +1643,31 @@ export interface DingTalkConnectorTool {
     parameters: Record<string, unknown>;
 }
 
-export interface DingTalkConnectorPlan {
-    calls: Array<{ toolId: string; arguments: Record<string, unknown> }>;
+/**
+ * 受控多步接力：同一次用户请求内已执行的连接器步骤摘要。
+ * `resultDigest` 由连接器返回内容生成，属于不可信数据，服务端只允许用它抽取 ID 或字段。
+ */
+export interface ConnectorPreviousStep {
+    toolId: string;
+    argumentsDigest?: string;
+    resultDigest?: string;
+    status: 'SUCCESS' | 'FAILED' | 'REJECTED';
 }
 
-export async function planDingTalkConnectorQueries(query: string, tools: DingTalkConnectorTool[]): Promise<DingTalkConnectorPlan> {
-    return authorizedRequest<DingTalkConnectorPlan>('v1/assistant/connectors/dingtalk/plan', { method: 'POST', body: JSON.stringify({ query, tools }) });
+export interface DingTalkConnectorPlan {
+    calls: Array<{ toolId: string; arguments: Record<string, unknown> }>;
+    followUpMayBeNeeded?: boolean;
+}
+
+export async function planDingTalkConnectorQueries(
+    query: string,
+    tools: DingTalkConnectorTool[],
+    previousSteps: ConnectorPreviousStep[] = [],
+): Promise<DingTalkConnectorPlan> {
+    return authorizedRequest<DingTalkConnectorPlan>('v1/assistant/connectors/dingtalk/plan', {
+        method: 'POST',
+        body: JSON.stringify({ query, tools, ...(previousSteps.length ? { previousSteps } : {}) }),
+    });
 }
 
 export interface TencentMeetingConnectorTool {
@@ -1660,15 +1681,17 @@ export interface TencentMeetingConnectorTool {
 
 export interface TencentMeetingConnectorPlan {
     calls: Array<{ toolId: string; arguments: Record<string, unknown> }>;
+    followUpMayBeNeeded?: boolean;
 }
 
 export async function planTencentMeetingConnectorQueries(
     query: string,
     tools: TencentMeetingConnectorTool[],
+    previousSteps: ConnectorPreviousStep[] = [],
 ): Promise<TencentMeetingConnectorPlan> {
     return authorizedRequest<TencentMeetingConnectorPlan>('v1/assistant/connectors/tencent-meeting/plan', {
         method: 'POST',
-        body: JSON.stringify({ query, tools }),
+        body: JSON.stringify({ query, tools, ...(previousSteps.length ? { previousSteps } : {}) }),
     });
 }
 
@@ -1683,15 +1706,17 @@ export interface WeComConnectorTool {
 
 export interface WeComConnectorPlan {
     calls: Array<{ toolId: string; arguments: Record<string, unknown> }>;
+    followUpMayBeNeeded?: boolean;
 }
 
 export async function planWeComConnectorQueries(
     query: string,
     tools: WeComConnectorTool[],
+    previousSteps: ConnectorPreviousStep[] = [],
 ): Promise<WeComConnectorPlan> {
     return authorizedRequest<WeComConnectorPlan>('v1/assistant/connectors/wecom/plan', {
         method: 'POST',
-        body: JSON.stringify({ query, tools }),
+        body: JSON.stringify({ query, tools, ...(previousSteps.length ? { previousSteps } : {}) }),
     });
 }
 
@@ -1706,15 +1731,63 @@ export interface GitHubConnectorTool {
 
 export interface GitHubConnectorPlan {
     calls: Array<{ toolId: string; arguments: Record<string, unknown> }>;
+    followUpMayBeNeeded?: boolean;
 }
 
 export async function planGitHubConnectorQueries(
     query: string,
     tools: GitHubConnectorTool[],
+    previousSteps: ConnectorPreviousStep[] = [],
 ): Promise<GitHubConnectorPlan> {
     return authorizedRequest<GitHubConnectorPlan>('v1/assistant/connectors/github/plan', {
         method: 'POST',
-        body: JSON.stringify({ query, tools }),
+        body: JSON.stringify({ query, tools, ...(previousSteps.length ? { previousSteps } : {}) }),
+    });
+}
+
+export type ConnectorRoutingProvider = 'DINGTALK' | 'TENCENT_MEETING' | 'WECOM' | 'GITHUB';
+
+/** 参与连接器语义路由的一级目录项；只描述能回答哪类问题，不含工具名、参数或凭据。 */
+export interface ConnectorRoutingCandidate {
+    provider: ConnectorRoutingProvider;
+    displayName: string;
+    capabilitySummary: string;
+    routingExamples?: string[];
+    state: 'NOT_INSTALLED' | 'AUTH_REQUIRED' | 'PROFILE_REQUIRED' | 'READY' | 'ERROR';
+    toolCount?: number;
+}
+
+export interface ConnectorRoutingResult {
+    providers: ConnectorRoutingProvider[];
+    clarification: string | null;
+    reason: string;
+}
+
+/** 路由用的最近一轮对话摘要；只用于消解代词与省略表达，不作为业务事实。 */
+export interface ConnectorRoutingRecentMessage {
+    role: 'user' | 'assistant';
+    content: string;
+}
+
+/**
+ * 连接器语义路由：只决定本轮该试哪些连接器，不执行任何外部调用、不接收凭据。
+ * clarification 非空时不得再调用任何连接器规划或执行接口，只把提示交给本轮对话让模型反问。
+ * recentMessages 与 previousProviders 只用于消解「那这个月的呢」这类省略式追问；
+ * previousProviders 是客户端自报的提示（服务端会先与就绪候选集求交），不构成任何授权。
+ */
+export async function routeAssistantConnector(
+    query: string,
+    connectors: ConnectorRoutingCandidate[],
+    context: { previousProviders?: ConnectorRoutingProvider[]; recentMessages?: ConnectorRoutingRecentMessage[] } = {},
+): Promise<ConnectorRoutingResult> {
+    return authorizedRequest<ConnectorRoutingResult>('v1/assistant/connectors/route', {
+        method: 'POST',
+        body: JSON.stringify({
+            query,
+            connectors,
+            ...(context.previousProviders?.length ? { previousProviders: context.previousProviders } : {}),
+            ...(context.recentMessages?.length ? { recentMessages: context.recentMessages } : {}),
+        }),
     });
 }
 
@@ -1768,7 +1841,7 @@ async function streamSse(path: string, init: RequestInit, onEvent: (event: TurnS
     try { while (true) { const { value, done } = await reader.read(); if (done) { consume(decoder.decode()); if (buffer.trim()) throw new Error('事件流意外中断'); break; } consume(decoder.decode(value, { stream: true })); } } finally { reader.releaseLock(); }
 }
 
-export function createTurn(conversationId: string, input: { content: string; mode: ChatMode; imageFileIds?: string[]; fileIds?: string[]; connectorContexts?: ConnectorContext[]; assistantContext?: PageAssistantContext; generationOptions?: GenerationOptions; knowledgeBaseEnabled?: boolean; webSearchEnabled?: boolean }, idempotencyKey: string, onEvent: (event: TurnStreamEvent) => void, signal?: AbortSignal): Promise<void> { return streamSse(`v1/conversations/${encodeURIComponent(conversationId)}/turns`, { method: 'POST', body: JSON.stringify({ content: input.content, mode: input.mode, ...(input.imageFileIds?.length ? { imageFileIds: input.imageFileIds } : {}), ...(input.fileIds?.length ? { fileIds: input.fileIds } : {}), ...(input.connectorContexts?.length ? { connectorContexts: input.connectorContexts } : {}), ...(input.assistantContext ? { assistantContext: input.assistantContext } : {}), ...(input.generationOptions ? { generationOptions: input.generationOptions } : {}), ...(input.knowledgeBaseEnabled ? { knowledgeBaseEnabled: true } : {}), ...(input.webSearchEnabled ? { webSearchEnabled: true } : {}) }), signal, headers: { 'Idempotency-Key': idempotencyKey } }, onEvent); }
+export function createTurn(conversationId: string, input: { content: string; mode: ChatMode; imageFileIds?: string[]; fileIds?: string[]; connectorContexts?: ConnectorContext[]; assistantContext?: PageAssistantContext; generationOptions?: GenerationOptions; knowledgeBaseEnabled?: boolean; webSearchEnabled?: boolean; connectorRoutingHint?: string | null }, idempotencyKey: string, onEvent: (event: TurnStreamEvent) => void, signal?: AbortSignal): Promise<void> { return streamSse(`v1/conversations/${encodeURIComponent(conversationId)}/turns`, { method: 'POST', body: JSON.stringify({ content: input.content, mode: input.mode, ...(input.imageFileIds?.length ? { imageFileIds: input.imageFileIds } : {}), ...(input.fileIds?.length ? { fileIds: input.fileIds } : {}), ...(input.connectorContexts?.length ? { connectorContexts: input.connectorContexts } : {}), ...(input.assistantContext ? { assistantContext: input.assistantContext } : {}), ...(input.generationOptions ? { generationOptions: input.generationOptions } : {}), ...(input.knowledgeBaseEnabled ? { knowledgeBaseEnabled: true } : {}), ...(input.webSearchEnabled ? { webSearchEnabled: true } : {}), ...(input.connectorRoutingHint ? { connectorRoutingHint: input.connectorRoutingHint } : {}) }), signal, headers: { 'Idempotency-Key': idempotencyKey } }, onEvent); }
 export function replayTurnEvents(conversationId: string, turnId: string, afterSeq: number, onEvent: (event: TurnStreamEvent) => void, signal?: AbortSignal): Promise<void> { return streamSse(`v1/conversations/${encodeURIComponent(conversationId)}/turns/${encodeURIComponent(turnId)}/events?afterSeq=${afterSeq}`, { method: 'GET', signal }, onEvent); }
 export async function cancelTurn(conversationId: string, turnId: string): Promise<Turn> { return authorizedRequest<Turn>(`v1/conversations/${encodeURIComponent(conversationId)}/turns/${encodeURIComponent(turnId)}/cancel`, { method: 'POST' }); }
 

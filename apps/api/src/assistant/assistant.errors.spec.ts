@@ -41,7 +41,6 @@ describe('describeAssistantError', () => {
         expect(described.message).toContain('新建会话');
         expect(described.message).not.toContain('Request validation failed');
     });
-
     it('keeps the generic unavailable message for ai-service availability errors', () => {
         const described = describeAssistantError(
             new AiServiceInvocationError('AI_SERVICE_UNAVAILABLE', 'upstream down', true, 503),

@@ -3,16 +3,29 @@ import type { ChatToolDefinition, ToolCall } from '@cees/ai-service-client';
 import { randomUUID } from 'node:crypto';
 import { AiServiceGateway } from '../../ai-orchestration/ai-service-gateway.service';
 import { TenantContext } from '../../tenant/tenant-context';
+import { TenantTimeZoneService } from '../../tenant/tenant-time-zone.service';
 import type {
+  ConnectorPreviousStepInput,
   DingTalkConnectorPlannedCall,
   DingTalkConnectorToolInput,
 } from '../assistant.types';
+import {
+  buildConnectorFollowUpToolDefinition,
+  buildConnectorModelToolDefinitions,
+  connectorPreviousStepsInstructions,
+  MODEL_TOOL_LIMIT,
+  renderConnectorPreviousSteps,
+  renderCurrentTimeInstructions,
+  splitConnectorFollowUpCalls,
+} from './model-tool-definition';
 
 const MAX_TOOL_CATALOG_BYTES = 2 * 1024 * 1024;
 const MAX_PLANNED_CALLS = 3;
-const MAX_SELECTED_TOOLS = 32;
+/** 比 ai-service 的工具上限少 1，为「是否需要下一轮」控制工具留出名额。 */
+const MAX_SELECTED_TOOLS = MODEL_TOOL_LIMIT - 1;
 const TOOL_ID_PATTERN = /^dws_read_[a-f0-9]{16}$/;
 const SELECTOR_TOOL_NAME = 'select_dws_read_tools';
+const MODEL_TOOL_NAMESPACE = 'dingtalk';
 const PERSONAL_ATTENDANCE_QUERY_PATTERN = /(?:我的|我|本人|自己|个人).{0,40}(?:考勤|打卡|上下班)|(?:考勤|打卡|上下班).{0,40}(?:我的|我|本人|自己|个人)/i;
 const ATTENDANCE_APPROVAL_QUERY_PATTERN = /请假|加班|出差|外出|补卡|审批/;
 const PRIORITY_TOOL_NAMES = new Set([
@@ -28,10 +41,16 @@ export class DingTalkConnectorPlannerService {
   constructor(
     private readonly gateway: AiServiceGateway,
     private readonly tenantContext: TenantContext,
+    private readonly tenantTimeZone: TenantTimeZoneService,
   ) {}
 
-  async plan(query: string, tools: DingTalkConnectorToolInput[]): Promise<{ calls: DingTalkConnectorPlannedCall[] }> {
+  async plan(
+    query: string,
+    tools: DingTalkConnectorToolInput[],
+    previousSteps: ConnectorPreviousStepInput[] = [],
+  ): Promise<{ calls: DingTalkConnectorPlannedCall[]; followUpMayBeNeeded: boolean }> {
     const context = this.tenantContext.require();
+    const timeZone = await this.tenantTimeZone.resolve(context.tenantId);
     if (Buffer.byteLength(JSON.stringify(tools), 'utf8') > MAX_TOOL_CATALOG_BYTES) {
       throw new BadRequestException('钉钉 DWS 工具目录过大');
     }
@@ -43,33 +62,41 @@ export class DingTalkConnectorPlannerService {
     });
 
     const deterministicAttendanceCall = personalAttendanceCall(query, tools);
-    if (deterministicAttendanceCall) return { calls: [deterministicAttendanceCall] };
+    if (deterministicAttendanceCall) return { calls: [deterministicAttendanceCall], followUpMayBeNeeded: false };
 
     const selectedIds = await this.selectTools(query, tools, context);
-    if (selectedIds.length === 0) return { calls: [] };
-    const definitions: ChatToolDefinition[] = selectedIds.map((toolId) => {
+    if (selectedIds.length === 0) return { calls: [], followUpMayBeNeeded: false };
+    const { definitions, modelToolMap } = buildConnectorModelToolDefinitions(MODEL_TOOL_NAMESPACE, selectedIds.map((toolId) => {
       const tool = toolMap.get(toolId)!;
       return {
-        name: tool.toolId,
-        description: `[DingTalk DWS: ${tool.name}] ${tool.description}`.slice(0, 2200),
-        parameters: tool.parameters,
+        tool,
+        description: `[DingTalk DWS read-only tool=${tool.toolId}] ${tool.name}: ${tool.description}`,
       };
-    });
+    }));
+    const followUpTool = buildConnectorFollowUpToolDefinition(MODEL_TOOL_NAMESPACE);
+    const renderedPreviousSteps = renderConnectorPreviousSteps(previousSteps);
     const calls = await this.requestCalls({
       query,
-      definitions,
+      definitions: [...definitions, followUpTool],
       context,
       instructions: [
         'You plan read-only DingTalk DWS queries for a desktop connector.',
         'Call tools only when the user needs current DingTalk data available through the supplied tools.',
+        ...renderCurrentTimeInstructions(new Date(), timeZone),
         'Prefer CEES composite tools and DWS shortcut tools that resolve the current user or recursively collect complete data.',
-        'For personal attendance or punch-record questions, prefer cees.my_attendance_records. Its time fields are already normalized; never recalculate timestamps or treat workDate as a clock time.',
+        'For personal attendance or punch-record questions, prefer the CEES personal attendance tool named cees.my_attendance_records when it is present. Its time fields are already normalized; never recalculate timestamps or treat workDate as a clock time.',
         'When the user asks whether personal attendance data can be queried, use a matching no-argument personal attendance tool to verify instead of answering from assumptions.',
         'Do not answer the user, do not invent unavailable tools or arguments, and never request write operations.',
         `Return at most ${MAX_PLANNED_CALLS} tool calls. Return no tool calls when required arguments are missing.`,
+        `Call ${followUpTool.name} exactly once: set needed=true only when this same request still needs another connector round after the calls you return.`,
+        ...(renderedPreviousSteps ? connectorPreviousStepsInstructions(renderedPreviousSteps) : []),
       ].join(' '),
     });
-    return { calls: deduplicateCalls(calls.slice(0, MAX_PLANNED_CALLS).map((call) => validatePlannedCall(call, toolMap))) };
+    const { calls: plannedCalls, followUpMayBeNeeded } = splitConnectorFollowUpCalls(calls, MODEL_TOOL_NAMESPACE);
+    return {
+      calls: deduplicateCalls(plannedCalls.slice(0, MAX_PLANNED_CALLS).map((call) => validatePlannedCall(call, modelToolMap))),
+      followUpMayBeNeeded,
+    };
   }
 
   private async selectTools(
@@ -207,11 +234,12 @@ function validateTool(tool: DingTalkConnectorToolInput, existing: Map<string, Di
 
 function validatePlannedCall(
   call: ToolCall,
-  tools: Map<string, DingTalkConnectorToolInput>,
+  modelTools: Map<string, DingTalkConnectorToolInput>,
 ): DingTalkConnectorPlannedCall {
-  if (!tools.has(call.name)) throw new BadGatewayException('模型返回了目录外的钉钉 DWS 工具');
+  const tool = modelTools.get(call.name);
+  if (!tool) throw new BadGatewayException('模型返回了目录外的钉钉 DWS 工具');
   if (!isRecord(call.arguments)) throw new BadGatewayException('模型返回了无效的钉钉 DWS 工具参数');
-  return { toolId: call.name, arguments: call.arguments };
+  return { toolId: tool.toolId, arguments: call.arguments };
 }
 
 function deduplicateCalls(calls: DingTalkConnectorPlannedCall[]): DingTalkConnectorPlannedCall[] {

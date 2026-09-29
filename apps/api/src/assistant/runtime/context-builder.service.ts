@@ -153,7 +153,9 @@ export class ContextBuilderService {
     const retainedToolCallIds = history
       .map((message) => message.toolCallId)
       .filter((id): id is string => id !== null);
-    const toolCalls: ToolCallHistoryRow[] =
+    // 表结构上 turnId 可空是为了任务步骤载体共享本表；会话 TOOL 消息引用的调用
+    // 必然来自轮次载体，这里防御性过滤并用类型谓词收窄，供后续按轮次+模型步分组。
+    const toolCalls = (
       retainedToolCallIds.length > 0
         ? await this.prisma.toolCall.findMany({
           where: { tenantId: conversation.tenantId, id: { in: retainedToolCallIds } },
@@ -168,7 +170,8 @@ export class ContextBuilderService {
             arguments: true,
           },
         })
-        : [];
+        : []
+    ).filter((call): call is ToolCallHistoryRow => call.turnId !== null);
     const callById = new Map(toolCalls.map((call) => [call.id, call]));
     const callsByStep = new Map<string, NonNullable<ToolTurnMessage['tool_calls']>>();
     const assistantContentByStep = new Map<string, string | null>();

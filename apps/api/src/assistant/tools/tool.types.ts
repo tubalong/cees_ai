@@ -17,7 +17,15 @@ export interface ToolExecutionContext {
   membershipId: string;
   requestId: string;
   conversationId: string;
-  turnId: string;
+  /**
+   * 轮次执行载体的轮次 ID；任务步骤内发起的调用为 null（见 taskStepId）。
+   * 依赖轮次内容（如本轮上传的文件、图片）的工具必须自行判空并拒绝步骤载体调用。
+   */
+  turnId: string | null;
+  /** 任务步骤执行载体的步骤 ID；轮次内发起的调用为 null（见 turnId）。 */
+  taskStepId?: string | null;
+  /** 任务步骤执行载体所属的任务 ID；仅步骤载体填充（调用日志 metadata 记录用）。 */
+  taskId?: string | null;
   toolCallId: string;
   /** 持有本轮租约的 API 实例标识；业务副作用前必须再次核对。 */
   executionOwner: string;
