@@ -271,8 +271,18 @@ class OpenAICompatibleProvider:
                     finish_reason = current_finish_reason
 
             if tool_call_chunks:
+                try:
+                    coalesced = _coalesce_tool_call_chunks(tool_call_chunks)
+                except ProviderOutputError as exc:
+                    # 工具参数被输出上限截断时 JSON 必然不完整。把原因写清楚，
+                    # 上层才能给出「缩小请求范围」这类可执行提示，而不是笼统的内部错误。
+                    if finish_reason == "length":
+                        raise ProviderOutputError(
+                            "streamed tool call arguments were truncated by the output token limit"
+                        ) from exc
+                    raise
                 yield ProviderStreamChunk(
-                    tool_calls=_coalesce_tool_call_chunks(tool_call_chunks),
+                    tool_calls=coalesced,
                     token_usage=token_usage,
                     finish_reason=finish_reason,
                 )
