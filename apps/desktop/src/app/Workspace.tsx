@@ -1314,7 +1314,6 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
                 }
             }
             const githubConnector = window.cees?.connectors;
-            const mentionsGitHub = /github|git hub|issue|pull request|\bpr\b|actions/i.test(content) || preferredConnector === 'github' || forcedConnector === 'github';
             const mentionsGitHub = /github|git hub|issue|pull request|\bpr\b|actions|commit|commits|提交记录|提交总结|私有仓库|private repository/i.test(content) || preferredConnector === 'github' || forcedConnector === 'github';
             if (githubConnector && mentionsGitHub) {
                 const status = await githubConnector.status('github') as GitHubConnectorStatus;
