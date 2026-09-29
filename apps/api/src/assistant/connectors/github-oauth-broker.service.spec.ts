@@ -18,7 +18,7 @@ describe('GitHubOAuthBrokerService', () => {
     process.env.CEES_GITHUB_OAUTH_CLIENT_ID = 'client-id';
     process.env.CEES_GITHUB_OAUTH_CLIENT_SECRET = 'client-secret';
     const config = new GitHubOAuthBrokerService().getConfig();
-    expect(config).toEqual(expect.objectContaining({ clientId: 'client-id' }));
+    expect(config).toEqual(expect.objectContaining({ clientId: 'client-id', scope: expect.stringContaining('repo') }));
     expect(config).not.toHaveProperty('clientSecret');
   });
 
