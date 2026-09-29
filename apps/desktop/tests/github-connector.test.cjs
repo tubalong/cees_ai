@@ -9,6 +9,7 @@ const {
     classifyGitHubToolRisk,
     normalizeGitHubTool,
     sanitizeGitHubResult,
+    hasRequiredGitHubOAuthScope,
 } = require('../dist-electron/connectors/github/github.connector.js');
 const { GITHUB_CONNECTOR_MANIFEST } = require('../dist-electron/connectors/github/github.manifest.js');
 
@@ -20,6 +21,12 @@ test('GitHub 使用官方远程 MCP 和 OAuth，由 Desktop 执行', () => {
     assert.equal(GITHUB_CONNECTOR_MANIFEST.supportsDynamicTools, true);
     assert.equal(GITHUB_MCP_ENDPOINT, 'https://api.githubcopilot.com/mcp/');
     assert.ok(GITHUB_MCP_TOOLSETS.includes('repos'));
+});
+
+test('GitHub OAuth 必须包含私有仓库所需的 repo scope', () => {
+    assert.equal(hasRequiredGitHubOAuthScope('repo,read:org,read:user'), true);
+    assert.equal(hasRequiredGitHubOAuthScope('public_repo read:user'), false);
+    assert.equal(hasRequiredGitHubOAuthScope(null), false);
 });
 
 test('GitHub 动态工具按 annotations 和名称分类风险', () => {

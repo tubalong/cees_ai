@@ -2,13 +2,13 @@
 
 ## 1. 契约版本
 
-公开契约 `0.43.0` 新增 GitHub OAuth Broker 配置/换码接口，并保留 GitHub 官方远程 MCP 规划接口与 `ConnectorContext.provider=GITHUB`。这是兼容新增；客户端需要重新生成。
+公开契约 `0.43.0` 新增 GitHub OAuth Broker 配置/换码接口，并保留 GitHub 官方远程 MCP 规划接口与 `ConnectorContext.provider=GITHUB`。这是兼容新增；客户端需要重新生成。已使用旧授权的用户需要解绑后重新连接，才能获得新增的私有仓库权限。
 
 ## 2. OAuth Broker 接口
 
 ### `GET /assistant/connectors/github/oauth/config`
 
-返回当前部署的公开 Client ID、GitHub 授权地址、scope 和换码路径。响应不包含 Client Secret。
+返回当前部署的公开 Client ID、GitHub 授权地址、scope 和换码路径。scope 必须包含 `repo`，用于访问当前用户有权访问的私有仓库；响应不包含 Client Secret。
 
 ### `POST /assistant/connectors/github/oauth/exchange`
 

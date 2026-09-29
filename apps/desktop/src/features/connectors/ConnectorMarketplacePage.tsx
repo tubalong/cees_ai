@@ -410,9 +410,9 @@ export default function ConnectorMarketplacePage(): JSX.Element {
                         : selectedManifest.id === 'tencent-meeting'
                             ? selectedTencentMeetingStatus.authorizedUserName || t('{count} 个腾讯会议 CLI 命令可用', { count: selectedTencentMeetingStatus.toolCount })
                             : selectedManifest.id === 'wecom'
-                                ? t('{count} 个企业微信 CLI 工具可用', { count: selectedWeComStatus.toolCount })
+                                ? t('已连接')
                                 : selectedManifest.id === 'github'
-                                    ? t('{count} 个 GitHub MCP 工具可用', { count: selectedGitHubStatus.toolCount })
+                                    ? t('已连接')
                         : selectedStatus.version || t('已完成授权')}</span>
                 </div>
                 {selectedManifest.id === 'github' ? <div className="connector-version-panel">
