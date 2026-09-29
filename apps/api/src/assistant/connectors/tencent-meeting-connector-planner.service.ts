@@ -3,12 +3,14 @@ import type { ChatToolDefinition, ToolCall } from '@cees/ai-service-client';
 import { randomUUID } from 'node:crypto';
 import { AiServiceGateway } from '../../ai-orchestration/ai-service-gateway.service';
 import { TenantContext } from '../../tenant/tenant-context';
+import { TenantTimeZoneService } from '../../tenant/tenant-time-zone.service';
 import {
   buildConnectorFollowUpToolDefinition,
   buildConnectorModelToolDefinitions,
   connectorPreviousStepsInstructions,
   MODEL_TOOL_LIMIT,
   renderConnectorPreviousSteps,
+  renderCurrentTimeInstructions,
   splitConnectorFollowUpCalls,
 } from './model-tool-definition';
 import type {
@@ -30,6 +32,7 @@ export class TencentMeetingConnectorPlannerService {
   constructor(
     private readonly gateway: AiServiceGateway,
     private readonly tenantContext: TenantContext,
+    private readonly tenantTimeZone: TenantTimeZoneService,
   ) {}
 
   async plan(
@@ -38,6 +41,7 @@ export class TencentMeetingConnectorPlannerService {
     previousSteps: ConnectorPreviousStepInput[] = [],
   ): Promise<{ calls: TencentMeetingConnectorPlannedCall[]; followUpMayBeNeeded: boolean }> {
     const context = this.tenantContext.require();
+    const timeZone = await this.tenantTimeZone.resolve(context.tenantId);
     if (Buffer.byteLength(JSON.stringify(tools), 'utf8') > MAX_TOOL_CATALOG_BYTES) {
       throw new BadRequestException('腾讯会议 CLI 工具目录过大');
     }
@@ -64,7 +68,7 @@ export class TencentMeetingConnectorPlannerService {
       instructions: [
         'You plan Tencent Meeting official CLI calls for a desktop connector.',
         'Call tools only when the user needs current Tencent Meeting data or explicitly requests a Tencent Meeting action.',
-        'Use convert_timestamp when relative dates require current time and the tool is available.',
+        ...renderCurrentTimeInstructions(new Date(), timeZone),
         'Never invent tools, IDs, meeting details, or arguments.',
         'For meeting.update, meeting.cancel, record.permission-apply-commit, or any tool marked WRITE/DESTRUCTIVE, plan the exact requested call; Desktop will obtain explicit confirmation before execution.',
         'Do not call record.permission-apply-commit unless the current user message explicitly confirms a previously previewed permission request.',

@@ -157,6 +157,55 @@ describe('ConnectorRoutingService', () => {
     await expect(incomplete.route('我今天的会议', connectors)).rejects.toThrow('未正常完成');
   });
 
+  it('把最近几轮对话随本轮问题一起交给模型，用于消解省略式追问', async () => {
+    const streamToolTurn: jest.Mock = jest.fn(async () => stream([
+      { type: 'tool_calls', tool_calls: [{ id: 'call-1', name: 'select_connectors', arguments: { providers: ['DINGTALK'], reason: '延续上一轮考勤话题' } }] },
+      { type: 'completed', latency_ms: 1, finish_reason: 'tool_calls' },
+    ]));
+    const service = createService(streamToolTurn);
+
+    await expect(service.route('那这个月的呢', connectors, {
+      previousProviders: ['DINGTALK'],
+      recentMessages: [
+        { role: 'user', content: '帮我查一下考勤' },
+        { role: 'assistant', content: '可以问我本月的打卡情况' },
+      ],
+    })).resolves.toEqual({ providers: ['DINGTALK'], clarification: null, reason: '延续上一轮考勤话题' });
+
+    const request = streamToolTurn.mock.calls[0]![0] as {
+      messages: Array<{ role: string; content: Array<{ type: string; text: string }> }>;
+      instructions: string;
+    };
+    // 历史轮次在前、本轮问题在最后，模型才能把「那这个月的呢」接回上一轮话题。
+    expect(request.messages.map((message) => message.role)).toEqual(['user', 'assistant', 'user']);
+    expect(request.messages[0]!.content[0]!.text).toBe('帮我查一下考勤');
+    expect(request.messages[2]!.content[0]!.text).toBe('那这个月的呢');
+    expect(request.instructions).toContain('elliptical');
+    expect(request.instructions).toContain('Connectors used in the previous turn');
+    expect(request.instructions).toContain('DINGTALK');
+  });
+
+  it('上一轮连接器先与就绪候选集求交：未就绪或目录外的提示一律丢弃', async () => {
+    const streamToolTurn: jest.Mock = jest.fn(async () => stream([
+      { type: 'tool_calls', tool_calls: [{ id: 'call-1', name: 'select_connectors', arguments: { providers: [], reason: '不需要' } }] },
+      { type: 'completed', latency_ms: 1, finish_reason: 'tool_calls' },
+    ]));
+    const service = createService(streamToolTurn);
+
+    await service.route('你好', [
+      // 两个就绪连接器才会走模型，否则会命中「仅一个就绪」的确定性捷径。
+      { ...connectors[0]!, state: 'AUTH_REQUIRED' },
+      connectors[1]!,
+      { provider: 'WECOM', displayName: '企业微信', capabilitySummary: '查询企业微信消息与日程。', state: 'READY', toolCount: 90 },
+    ], { previousProviders: ['DINGTALK', 'GITHUB'] });
+
+    const request = streamToolTurn.mock.calls[0]![0] as { instructions: string };
+    // 钉钉未就绪、GitHub 不在一级目录中：两者都不得作为「上一轮连接器」提示出现。
+    expect(request.instructions).not.toContain('Connectors used in the previous turn');
+    expect(request.instructions).not.toContain('DINGTALK');
+    expect(request.instructions).not.toContain('GITHUB');
+  });
+
   function createService(streamToolTurn: jest.Mock): ConnectorRoutingService {
     return new ConnectorRoutingService(
       { streamToolTurn } as unknown as AiServiceGateway,

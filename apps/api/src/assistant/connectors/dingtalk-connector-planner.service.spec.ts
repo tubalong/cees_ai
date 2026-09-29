@@ -2,6 +2,7 @@ import { BadGatewayException } from '@nestjs/common';
 import type { ToolTurnStreamEvent } from '@cees/ai-service-client';
 import type { AiServiceGateway } from '../../ai-orchestration/ai-service-gateway.service';
 import type { TenantContext } from '../../tenant/tenant-context';
+import type { TenantTimeZoneService } from '../../tenant/tenant-time-zone.service';
 import {
   CONNECTOR_PREVIOUS_STEP_DIGEST_MAX_LENGTH,
   MODEL_TOOL_DESCRIPTION_MAX_LENGTH,
@@ -49,6 +50,7 @@ describe('DingTalkConnectorPlannerService', () => {
     const service = new DingTalkConnectorPlannerService(
       { streamToolTurn } as unknown as AiServiceGateway,
       { require: () => context } as unknown as TenantContext,
+      { resolve: async () => 'Asia/Shanghai' } as unknown as TenantTimeZoneService,
     );
 
     await expect(service.plan('把我的考勤记录列出来', [attendanceTool, ...tools])).resolves.toEqual({
@@ -63,6 +65,7 @@ describe('DingTalkConnectorPlannerService', () => {
     const service = new DingTalkConnectorPlannerService(
       { streamToolTurn } as unknown as AiServiceGateway,
       { require: () => context } as unknown as TenantContext,
+      { resolve: async () => 'Asia/Shanghai' } as unknown as TenantTimeZoneService,
     );
 
     await expect(service.plan('查询我 2026-09-01 的打卡记录', [attendanceTool])).resolves.toEqual({
@@ -79,6 +82,7 @@ describe('DingTalkConnectorPlannerService', () => {
     const service = new DingTalkConnectorPlannerService(
       { streamToolTurn } as unknown as AiServiceGateway,
       { require: () => context } as unknown as TenantContext,
+      { resolve: async () => 'Asia/Shanghai' } as unknown as TenantTimeZoneService,
     );
 
     await expect(service.plan('查询我的加班考勤审批', [attendanceTool])).resolves.toEqual({
@@ -96,6 +100,7 @@ describe('DingTalkConnectorPlannerService', () => {
     const service = new DingTalkConnectorPlannerService(
       { streamToolTurn } as unknown as AiServiceGateway,
       { require: () => context } as unknown as TenantContext,
+      { resolve: async () => 'Asia/Shanghai' } as unknown as TenantTimeZoneService,
     );
 
     await expect(service.plan('查我今天的日程', tools)).resolves.toEqual({
@@ -120,6 +125,7 @@ describe('DingTalkConnectorPlannerService', () => {
     const service = new DingTalkConnectorPlannerService(
       { streamToolTurn } as unknown as AiServiceGateway,
       { require: () => context } as unknown as TenantContext,
+      { resolve: async () => 'Asia/Shanghai' } as unknown as TenantTimeZoneService,
     );
 
     await expect(service.plan('查询钉钉数据', [longTool])).resolves.toEqual({ calls: [], followUpMayBeNeeded: false });
@@ -140,6 +146,7 @@ describe('DingTalkConnectorPlannerService', () => {
         { type: 'completed', latency_ms: 1, finish_reason: 'tool_calls' },
       ])) } as unknown as AiServiceGateway,
       { require: () => context } as unknown as TenantContext,
+      { resolve: async () => 'Asia/Shanghai' } as unknown as TenantTimeZoneService,
     );
 
     await expect(service.plan('查询数据', tools)).rejects.toBeInstanceOf(BadGatewayException);
@@ -164,6 +171,7 @@ describe('DingTalkConnectorPlannerService', () => {
     const service = new DingTalkConnectorPlannerService(
       { streamToolTurn } as unknown as AiServiceGateway,
       { require: () => context } as unknown as TenantContext,
+      { resolve: async () => 'Asia/Shanghai' } as unknown as TenantTimeZoneService,
     );
 
     await expect(service.plan('查我今天的日程', manyTools)).resolves.toEqual({
@@ -200,6 +208,7 @@ describe('DingTalkConnectorPlannerService', () => {
     const service = new DingTalkConnectorPlannerService(
       { streamToolTurn } as unknown as AiServiceGateway,
       { require: () => context } as unknown as TenantContext,
+      { resolve: async () => 'Asia/Shanghai' } as unknown as TenantTimeZoneService,
     );
 
     await expect(service.plan('查询钉钉数据', [...priorityTools, ...otherTools])).resolves.toEqual({
@@ -292,6 +301,7 @@ describe('DingTalkConnectorPlannerService', () => {
     return new DingTalkConnectorPlannerService(
       { streamToolTurn } as unknown as AiServiceGateway,
       { require: () => context } as unknown as TenantContext,
+      { resolve: async () => 'Asia/Shanghai' } as unknown as TenantTimeZoneService,
     );
   }
 });

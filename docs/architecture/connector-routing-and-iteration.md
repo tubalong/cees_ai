@@ -1,6 +1,6 @@
 # 连接器语义路由、受控多步接力与调用审计（设计与落地记录）
 
-> 状态：**差距一（语义路由）、差距三（连接器调用审计）与差距二（受控多步接力）均已落地**（契约 `0.44.0` / `0.45.0` / `0.47.0`）。本文同时承担设计与落地记录：每期实现前先落 `packages/contracts`，实现后按 §9 状态表逐项标注已落地 / 暂缓 / 待确认，与草案不一致的地方在对应小节明确记录（见 §4.6）。
+> 状态：**差距一（语义路由）、差距三（连接器调用审计）与差距二（受控多步接力）均已落地**（契约 `0.44.0` / `0.45.0` / `0.47.0`），后续缺陷修复见 §11（契约 `0.54.0`）。本文同时承担设计与落地记录：每期实现前先落 `packages/contracts`，实现后按 §9 状态表逐项标注已落地 / 暂缓 / 待确认，与草案不一致的地方在对应小节明确记录（见 §4.6）。
 > Owner：B（`apps/desktop/src/app/**` 与 `apps/api/src/assistant/**` 的唯一 owner）
 > 关联文档：
 > - [Desktop 连接器运行时](connector-runtime.md)：连接器生命周期、凭据位置、动态工具与规划边界
@@ -49,7 +49,8 @@
 ```text
 一级（路由，常驻摘要）
 Renderer -> POST /assistant/connectors/route
-    { query, connectors: [{ provider, displayName, capabilitySummary, routingExamples, readyState, toolCount }] }
+    { query, connectors: [{ provider, displayName, capabilitySummary, routingExamples, readyState, toolCount }],
+      previousProviders?, recentMessages? }
     -> { providers: [...], clarification: string | null, reason: string }
     -> 只决定「激活哪些 provider」，不做任何调用
 
@@ -63,6 +64,7 @@ Renderer -> 仅对被激活的 provider 调 POST /assistant/connectors/<provider
 - 路由复用现有「工具式结构化选择」模式（`select_connectors` 工具 + 白名单校验），**不解析自由文本**，避免模型输出格式漂移。
 - 用户明确点名 provider、或从连接器卡片进入（`preferredConnector` / `forcedConnector`）时**直接硬命中，不调路由**。此时正则只承担「识别点名」这一件事，使未就绪的连接器仍能给出「请先安装并授权」的确定性引导。
 - `clarification` 非空时，Desktop 不调用任何连接器，把该提示作为新的可选请求字段 `connectorRoutingHint`（≤ 1000 字）注入本轮，让模型自然反问。**不复用 `ConnectorContext`**，避免把路由提示混进事实通道与审计白名单。
+- 省略式追问（「那这个月的呢」）必须能接回上一轮话题，因此请求额外携带最近 6 轮对话与上一轮尝试过的 provider；`previousProviders` 是客户端自报，服务端先与就绪候选集求交后才作为提示（见 §11）。
 
 ### 3.3 改动点
 
@@ -85,6 +87,7 @@ Renderer -> 仅对被激活的 provider 调 POST /assistant/connectors/<provider
 - 新增 `POST /assistant/connectors/route`；
 - 新增 `ConnectorRoutingProvider`、`ConnectorRoutingCandidate`、`ConnectorRoutingRequest`、`ConnectorRoutingResult`、`ConnectorRoutingResponseEnvelope`；
 - 轮次创建请求新增可选 `connectorRoutingHint`（`maxLength: 1000`，省略即无提示）。
+- 契约 `0.54.0`（兼容新增）：`ConnectorRoutingRequest` 增加可选 `previousProviders`（`maxItems: 8`、`uniqueItems`）与 `recentMessages`（`maxItems: 6`），并新增 `ConnectorRoutingRecentMessage`（`role` + `content ≤ 2000`）；响应结构不变。
 
 随后执行 `pnpm --filter @cees/contracts` 校验并重新生成 `packages/api-client`（移动端若接入路由需同步 Dart 客户端）。
 
@@ -257,6 +260,10 @@ Renderer -> 仅对被激活的 provider 调 POST /assistant/connectors/<provider
 | 连接器写操作逐条审计 | 已落地（契约 `0.45.0`，`CONNECTOR_WRITE_OPERATION`） |
 | 连接器读操作轮次级聚合审计 | 已落地（默认，`CONNECTOR_READ_OPERATION` 每轮一条） |
 | 租户级读审计开关 | 已落地（`tenants.connector_read_audit_enabled`，经 `PATCH /tenants/current` 修改） |
+| 对话上下文路由（`recentMessages` / `previousProviders`） | 已落地（契约 `0.54.0`）：历史轮次随请求下发；`previousProviders` 先与就绪候选集求交，只作提示不构成授权 |
+| 连接器规划注入当前时间参考 | 已落地（契约 `0.54.0`）：四个 planner 共用 `renderCurrentTimeInstructions`，按 `Tenant.timezone` 换算，缺失回退 `Asia/Shanghai` |
+| 腾讯会议规划指令中的 `convert_timestamp` | 已删除：该工具在官方 CLI 中并不存在，属于幽灵指令 |
+| DWS 只读输出 JSON 收口与纯文本兜底 | 已落地：布尔 `json` 开关翻译为 `--json`，非 JSON 文本按原文保留 |
 
 ## 10. 待确认问题（均已决定）
 
@@ -265,3 +272,37 @@ Renderer -> 仅对被激活的 provider 调 POST /assistant/connectors/<provider
 3. ~~**路由成本**：每个未点名品牌的问题都会多一次路由模型调用。是否只在「已连接连接器 ≥ 2」时才启用路由，单连接器直接命中？~~ **已决定**：就绪连接器 ≤ 1 时不调用模型，直接返回确定性结果（无就绪连接器返回空，单就绪连接器直接命中）；≥ 2 时才做一次路由模型调用，且未点名的问题才需要它。
 4. ~~**读操作审计默认值**：默认关闭是否足够？~~ **已决定**：默认即写入一条轮次级聚合审计（`CONNECTOR_READ_OPERATION`），开关 `connectorReadAuditEnabled` 只决定是否进一步逐条。因此「默认关闭」不会让只读调用完全无痕；开启后按次留痕，代价是审计量级上升。
 5. ~~**审计保留策略**：连接器审计量级远高于现有业务审计，`audit_logs` 是否需要保留期与归档策略（当前未见相关约定）。~~ **已决定**：采用分级保留——连接器只读逐条审计保留 `90` 天后物理删除，其余租户审计保留 `3` 年后迁入 `audit_logs_archive`，`platform_audit_logs` 永久保留。执行入口是既有后台任务（Redis 锁内串行），配置项、索引取舍与失败语义见 [审计日志保留策略](audit-log-retention.md)（契约 `0.48.0`）。
+## 11. 缺陷修复：对话上下文路由、规划时钟与 DWS 输出收口（契约 `0.54.0`）
+
+> 状态：**已落地**。触发问题是同一会话内出现「牛头不对马嘴」的回答：省略式追问被路由到错误连接器、历史会议查询窗口算到错误月份，以及 `DWS 返回了无法解析的 JSON 数据`。
+
+### 11.1 根因
+
+| 现象 | 根因 |
+| --- | --- |
+| 不带品牌名的追问（「那帮我查询一下考勤记录」）被路由到空结果或错误连接器 | `ConnectorRoutingService.requestRoutingCall` 只把当前一句话交给模型（`messages: [{ role: 'user', content: query }]`），请求体也没有任何对话上下文，模型无从知道上一轮在聊什么 |
+| 每轮追问都在重新掷骰子 | Desktop 每轮重新路由，不保留「上一轮用了哪个连接器」，省略式追问因而可能落到完全不相干的连接器 |
+| 腾讯会议历史会议窗口算到错误月份，同一账号反复得到 0 条 / 1 条 | 规划指令要求模型在需要当前时间时调用 `convert_timestamp`，但腾讯会议官方 CLI 并不存在该工具；同时指令里没有给出当前时间，模型只能凭记忆猜年月 |
+| `DWS 返回了无法解析的 JSON 数据` | `buildDwsArguments` 只在命令声明 `format` 参数时追加 `--format json`；`dev connect list` 用的是自己的布尔开关 `--json`，默认输出纯文本 `no connectors found`，严格 JSON 解析直接抛错 |
+
+### 11.2 改动
+
+- 契约（`0.54.0`，兼容新增）：`ConnectorRoutingRequest` 增加可选 `previousProviders`（≤8、去重）与 `recentMessages`（≤6 条 × ≤2000 字），新增 `ConnectorRoutingRecentMessage`；响应 `ConnectorRoutingResult` 与 `connectorRoutingHint` 语义不变。
+- API：`ConnectorRoutingService.route` 接收上下文，把历史轮次按顺序放在本轮问题之前交给模型，并在指令里声明「用上下文消解代词与省略表达，只在真正无法消解时才反问」；`previousProviders` 先与就绪候选集求交后才作为提示，未就绪或目录外一律丢弃。它是提示，不是授权。
+- API：四个 planner 统一通过 `renderCurrentTimeInstructions(now, timeZone)` 注入 `Current local time is YYYY-MM-DDTHH:mm:ss±hh:mm (timezone <IANA>)`，并要求把「今天 / 本周 / 这个月」换算成具体日期；时区由新增的 `TenantTimeZoneService` 读取 `Tenant.timezone`（缺失或非法回退 `Asia/Shanghai`），不依赖服务器本地时区。腾讯会议规划指令中并不存在的 `convert_timestamp` 已删除。
+- Desktop：路由请求带上最近 6 轮对话与上一轮尝试过的 provider；该记录的 ref 在新建会话、切换会话、删除会话与返回首页时清空。
+- Desktop：`buildDwsArguments` 把只读命令声明的布尔 `json` 开关固定翻译为 `--json`，并把 `json` 归入 `CONTROL_PARAMETERS`（既不进模型可见 Schema，也不接受模型传值）；非 JSON 文本按 `runDwsJsonOrText` 保留原文，本人考勤记录仍要求真实 JSON 才能做确定性时间换算。
+
+### 11.3 不变量
+
+上下文与时钟都只是**提示**，不改变任何既有约束：路由仍只决定「试哪个连接器」，`clarification` 非空时仍不调用任何连接器；`previousProviders` 不放大权限；单轮仍 ≤3 次连接器调用、≤3 条连接器上下文；连接器仍不写入 CEES 业务数据，凭据不出本机。
+
+### 11.4 验证
+
+- API：`connector-routing.service.spec.ts`（上下文随请求下发、`previousProviders` 与就绪集求交）、`model-tool-definition.spec.ts` 与 `tenant-time.spec.ts`（时钟文本与跨月边界）、四个 planner spec（构造参数与新增指令）。
+- Desktop：`tests/dingtalk-connector.test.cjs`（`--json` 开关与模型 Schema 隐藏）、`tests/dingtalk-dws.test.cjs`（纯文本兜底）；`tsc -b` + 生产构建 + 连接器回归脚本。
+- 契约：`pnpm --filter @cees/contracts lint` 与 `generate:public`，随后 `apps/api`、`apps/desktop` 全量构建与测试通过。
+
+### 11.5 待跟进
+
+- 腾讯会议 `meeting.list-ended` 的分页行为尚未独立验证。时钟修复后若仍出现「已结束会议条数偏少」，需按分页字段单独排查，不在本次改动范围内。

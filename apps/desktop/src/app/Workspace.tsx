@@ -913,6 +913,19 @@ async function collectConnectorRoutingCandidates(
     return candidates;
 }
 
+/** 路由只用于消解代词与省略表达，只回传最近几轮并收敛单条长度，避免无效上下文。 */
+const MAX_ROUTING_RECENT_MESSAGES = 6;
+const MAX_ROUTING_RECENT_MESSAGE_LENGTH = 2000;
+
+function recentRoutingMessages(
+    messages: readonly LocalChatMessage[],
+): Array<{ role: 'user' | 'assistant'; content: string }> {
+    return messages
+        .slice(-MAX_ROUTING_RECENT_MESSAGES)
+        .map((item) => ({ role: item.role, content: item.content.trim().slice(0, MAX_ROUTING_RECENT_MESSAGE_LENGTH) }))
+        .filter((item) => item.content.length > 0);
+}
+
 function WeComAuthorizationCard({ request, retrying, onRetry }: {
     request: WeComAuthorizationRequest;
     retrying: boolean;
@@ -987,6 +1000,11 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
     const messageStream = useRef<HTMLDivElement>(null);
     const questionAnchors = useRef(new Map<string, HTMLDivElement>());
     const pendingQuestionFocus = useRef<string>();
+    /**
+     * 上一轮尝试过的连接器 provider。只作为下一轮语义路由的消解提示
+     * （让「那这个月的呢」这类省略式追问回到同一连接器），不代表已获得任何数据权限。
+     */
+    const lastRoutedProviders = useRef<ConnectorRoutingProvider[]>([]);
     const [activeQuestionId, setActiveQuestionId] = useState<string>();
     const [previewDocument, setPreviewDocument] = useState<{ id: string; title: string; content: string }>();
     const [saveTarget, setSaveTarget] = useState<SaveTarget>();
@@ -1090,6 +1108,7 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
         setConversations((items) => [conversation, ...items.filter((item) => item.id !== conversation.id)]);
         setActiveConversationId(conversation.id);
         setMessages([]);
+        lastRoutedProviders.current = [];
         setPreviewDocument(undefined);
     };
 
@@ -1198,6 +1217,7 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
             if (activeConversationId === conversation.id) {
                 setActiveConversationId(undefined);
                 setMessages([]);
+                lastRoutedProviders.current = [];
             }
         } catch (error) {
             message.error(toUserErrorMessage(error, t('删除对话失败，请稍后重试')));
@@ -1225,6 +1245,7 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
         setPreviewDocument(undefined);
         setImageGenerating(false);
         setActiveConversationId(conversation.id);
+        lastRoutedProviders.current = [];
         const detail = await getConversation(conversation.id);
         if (selectionVersion !== conversationSelectionVersion.current) return;
         const deletedCitationIds = readDeletedCitationIds(conversation.id);
@@ -1369,13 +1390,22 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
             let connectorRoutingHint: string | null = null;
             if (pinnedConnectors.size === 0 && window.cees?.connectors) {
                 try {
-                    const routing = await routeAssistantConnector(content, await collectConnectorRoutingCandidates(window.cees.connectors));
+                    const routing = await routeAssistantConnector(
+                        content,
+                        await collectConnectorRoutingCandidates(window.cees.connectors),
+                        {
+                            previousProviders: lastRoutedProviders.current,
+                            recentMessages: recentRoutingMessages(messages),
+                        },
+                    );
                     routing.providers.forEach((provider) => activeConnectors.add(ROUTING_CONNECTOR_ID_BY_PROVIDER[provider]));
                     connectorRoutingHint = routing.clarification;
                 } catch {
                     connectorRoutingHint = null;
                 }
             }
+            // 记录本轮尝试的连接器供下一轮省略式追问消解；只是提示，服务端仍会与就绪候选集求交。
+            lastRoutedProviders.current = [...activeConnectors].map((id) => ROUTING_PROVIDER_BY_CONNECTOR_ID[id]);
             const dingtalkConnector = window.cees?.connectors?.dingtalk;
             const relayTargets: RelayTarget[] = [];
             if (dingtalkConnector && activeConnectors.has('dingtalk')) {
@@ -1669,6 +1699,7 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
         setActiveTurn(undefined);
         setActiveConversationId(undefined);
         setMessages([]);
+        lastRoutedProviders.current = [];
         setPreviewDocument(undefined);
         navigate('/');
     };

@@ -1763,17 +1763,31 @@ export interface ConnectorRoutingResult {
     reason: string;
 }
 
+/** 路由用的最近一轮对话摘要；只用于消解代词与省略表达，不作为业务事实。 */
+export interface ConnectorRoutingRecentMessage {
+    role: 'user' | 'assistant';
+    content: string;
+}
+
 /**
  * 连接器语义路由：只决定本轮该试哪些连接器，不执行任何外部调用、不接收凭据。
  * clarification 非空时不得再调用任何连接器规划或执行接口，只把提示交给本轮对话让模型反问。
+ * recentMessages 与 previousProviders 只用于消解「那这个月的呢」这类省略式追问；
+ * previousProviders 是客户端自报的提示（服务端会先与就绪候选集求交），不构成任何授权。
  */
 export async function routeAssistantConnector(
     query: string,
     connectors: ConnectorRoutingCandidate[],
+    context: { previousProviders?: ConnectorRoutingProvider[]; recentMessages?: ConnectorRoutingRecentMessage[] } = {},
 ): Promise<ConnectorRoutingResult> {
     return authorizedRequest<ConnectorRoutingResult>('v1/assistant/connectors/route', {
         method: 'POST',
-        body: JSON.stringify({ query, connectors }),
+        body: JSON.stringify({
+            query,
+            connectors,
+            ...(context.previousProviders?.length ? { previousProviders: context.previousProviders } : {}),
+            ...(context.recentMessages?.length ? { recentMessages: context.recentMessages } : {}),
+        }),
     });
 }
 

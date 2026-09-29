@@ -142,6 +142,7 @@ export { ConnectorContext } from './models/ConnectorContext';
 export { ConnectorPreviousStep } from './models/ConnectorPreviousStep';
 export { ConnectorRoutingCandidate } from './models/ConnectorRoutingCandidate';
 export { ConnectorRoutingProvider } from './models/ConnectorRoutingProvider';
+export { ConnectorRoutingRecentMessage } from './models/ConnectorRoutingRecentMessage';
 export type { ConnectorRoutingRequest } from './models/ConnectorRoutingRequest';
 export type { ConnectorRoutingResponseEnvelope } from './models/ConnectorRoutingResponseEnvelope';
 export type { ConnectorRoutingResult } from './models/ConnectorRoutingResult';

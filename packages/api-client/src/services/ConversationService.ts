@@ -192,6 +192,10 @@ export class ConversationService {
      * 用户明确点名某个连接器或从连接器卡片进入对话时，Desktop 直接硬命中，不调用本接口。
      * 返回的 clarification 非空表示目标不唯一：Desktop 不得调用任何连接器或规划接口，
      * 只把该提示作为本轮 `connectorRoutingHint` 提交，让模型自然反问。
+     * 请求可携带 `recentMessages`（最近若干轮对话）与 `previousProviders`（上一轮激活的连接器），
+     * 两者都只用于消解代词与省略表达，避免省略式追问被路由到错误连接器；
+     * `previousProviders` 必须先与就绪候选集求交后才可作为提示，且与 `riskLevel`、`confirmed`
+     * 一样属于客户端自报，不能作为权限或业务事实依据。
      *
      * @returns ConnectorRoutingResponseEnvelope 需要激活的连接器；providers 为空表示本轮不使用任何连接器
      * @throws ApiError
