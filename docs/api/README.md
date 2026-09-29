@@ -7,7 +7,8 @@
 
 ### 契约版本与迁移
 
-- **0.47.0**：当前开发基线。AI 任务编排 M3（重编排）：任务事件流新增 `plan_revision_requested` 事件（用户请求调整计划，草案期与执行中重排共用同一事件），`AssistantTaskPlanStep` 新增可选步骤沿用锚点 `carriedFromStepKey`（重排后该步骤的产出直接沿用、不再执行）。均为兼容新增，客户端需要重新生成。详见 [AI 任务编排技术设计](../architecture/ai-orchestration-technical.md)。
+- **0.48.0**：当前开发基线。AI 任务编排 M2 存量项「产出验收与归档」：新增 `GET /assistant/tasks/{taskId}/outputs`（产出验收视图：产出清单、归档结果与建议、可归档库候选）与 `POST /assistant/tasks/{taskId}/outputs/confirm`（逐产出指定知识库的验收归档，幂等、仅任务终态可提交），任务事件流新增 `output_confirmed` 事件（payload：`documentId` / `knowledgeBaseId` / `knowledgeDocumentId` / `visibilityScope`）。均为兼容新增，客户端需要重新生成。详见 [AI 任务编排技术设计](../architecture/ai-orchestration-technical.md)。
+- **0.47.0**：AI 任务编排 M3（重编排）：任务事件流新增 `plan_revision_requested` 事件（用户请求调整计划，草案期与执行中重排共用同一事件），`AssistantTaskPlanStep` 新增可选步骤沿用锚点 `carriedFromStepKey`（重排后该步骤的产出直接沿用、不再执行）。均为兼容新增，客户端需要重新生成。详见 [AI 任务编排技术设计](../architecture/ai-orchestration-technical.md)。
 - **0.46.0**：AI 任务编排 M3（重编排与交互）：新增挂起事项解决操作 `POST /assistant/task-interactions/{interactionId}/resolve`（授权批准/拒绝、提问答复、裁决选项，解决动作幂等），`AssistantTaskDetail` 新增挂起事项列表 `interactions`（含已解决历史），任务事件流新增 `interaction_requested` / `interaction_resolved` 两个事件（类型 AUTHORIZATION / QUESTION / DECISION；状态 RESOLVED / REJECTED / EXPIRED / CANCELLED）。均为兼容新增，客户端需要重新生成。详见 [AI 任务编排技术设计](../architecture/ai-orchestration-technical.md)。
 - **0.45.0**：AI 任务编排 M2（子执行与窗口隔离）：任务事件流新增 5 个步骤级事件（`step_started` / `step_progress` / `step_completed` / `step_failed` / `step_skipped`），`AssistantTaskStep` 新增产出引用 `outputRefs`（复用 `ToolResultResourceReference`，尚未回流时为空数组）。均为兼容新增，客户端需要重新生成。详见 [AI 任务编排技术设计](../architecture/ai-orchestration-technical.md)。
 - **0.44.0**：新增 AI 任务编排任务面 API：`/assistant/tasks` 共 5 个操作（任务列表、任务详情、任务事件 SSE、计划确认、任务取消），新增权限码 `assistant.task.create/read`；客户端需要重新生成。详见 [AI 任务编排（需求设计）](../product/ai-orchestration.md) 与 [AI 任务编排技术设计](../architecture/ai-orchestration-technical.md)。
@@ -471,6 +472,12 @@ GET    /api/v1/projects/{projectId}/tasks/{taskId}/activities
 - ai-service 内部契约版本由 `0.7.0` 提升为 `0.8.0`；`ModelRole` 兼容新增 `orchestration_decision`，用于 AI 任务编排的原子决策调用（结构化输出 `{choice, confidence, rationale}`，服务端按 JSON Schema 校验并失败重试一次）；
 - 不新增端点：调用走既有 `POST /internal/v1/llm/invoke` 链路，该角色输出模式为 json_schema；`config/models.*.toml` 的 `[roles]` 需登记 `orchestration_decision`（未登记时该角色不可用，编排侧按"放行提问"兜底并记审计）；
 - 调用方为 NestJS 编排层决策器（`apps/api/src/assistant/orchestration/decider/`），决策语义与演进见 [AI 任务编排技术设计](../architecture/ai-orchestration-technical.md) 第 6 节。
+
+## 产出归档建议模型角色说明（2026-09-29，内部契约 0.8.1）
+
+- ai-service 内部契约版本由 `0.8.0` 提升为 `0.8.1`；`ModelRole` 兼容新增 `archive_suggestion`，用于 AI 任务产出验收的归档建议（结构化输出 `{suggestions: [{documentId, knowledgeBaseId, reason}]}`，服务端按 JSON Schema 校验、对候选与产出做合法性硬过滤并失败重试一次）；
+- 不新增端点：调用走既有 `POST /internal/v1/llm/invoke` 链路，该角色输出模式为 json_schema；`config/models.*.toml` 的 `[roles]` 需登记 `archive_suggestion`（未登记时该角色不可用，服务端降级为空建议，由用户从候选自选）；
+- 调用方为 NestJS 产出验收服务（`apps/api/src/assistant/orchestration/task-outputs.service.ts`），仅“无明确组织归属”时触发；有部门归属走确定性规则（部门库），不调模型。归档语义见 [AI 任务编排技术设计](../architecture/ai-orchestration-technical.md) 第 2.4 节。
 
 ## 契约事实源
 
