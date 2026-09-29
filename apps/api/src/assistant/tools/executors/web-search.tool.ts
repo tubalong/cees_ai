@@ -24,9 +24,12 @@ export class WebSearchTool implements OnModuleInit {
 
   private readonly definition: ToolDefinition = {
     name: 'web_search',
-    version: '1.1.0',
+    version: '1.2.0',
     displayName: '联网搜索',
-    description: '搜索公开互联网中的资料，返回可引用的网页来源。遇到需要实时或外部资料的问题时使用。',
+    description:
+      '搜索公开互联网中的资料，返回可引用的网页来源。遇到实时数据、行业统计、公开报告或外部事实时使用。'
+      + '查询词应包含「主体 + 指标 + 时间范围 + 权威来源」，例如「乘联会 新能源乘用车 月度零售销量 2026」。'
+      + '若返回结果只是目录页、导航页或没有具体数据，请换用更具体的关键词再次检索，不要据此作答。',
     parameters: {
       type: 'object',
       properties: {
@@ -34,24 +37,24 @@ export class WebSearchTool implements OnModuleInit {
           type: 'string',
           minLength: 2,
           maxLength: MAX_QUERY_LENGTH,
-          description: '要搜索的具体问题或关键词',
+          description: '要搜索的具体关键词；建议包含主体、指标、时间范围和权威来源名称',
         },
         recency: {
           type: 'string',
           enum: [...RECENCY_VALUES],
-          description: '资料时效范围；默认 any',
+          description: '资料时效范围；默认 any；查询最新数据时用 month 或 year',
         },
         domains: {
           type: 'array',
           maxItems: MAX_DOMAINS,
           items: { type: 'string', maxLength: MAX_DOMAIN_LENGTH },
-          description: '可选的限定网站域名列表',
+          description: '可选的限定网站域名列表；行业统计类问题优先限定权威数据源域名',
         },
         max_results: {
           type: 'integer',
           minimum: 1,
           maximum: MAX_RESULTS,
-          description: '最多返回的来源数量；默认由服务端配置决定',
+          description: '最多返回的来源数量；默认由服务端配置决定；需要分项数据或做对比时可提高到 8-10',
         },
       },
       required: ['query'],

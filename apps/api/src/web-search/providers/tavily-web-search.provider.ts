@@ -42,7 +42,7 @@ export class TavilyWebSearchProvider implements WebSearchProvider {
         body: JSON.stringify({
           api_key: this.config.apiKey,
           query: input.query,
-          search_depth: 'basic',
+          search_depth: this.config.searchDepth,
           topic: 'general',
           time_range: input.recency === 'any' ? undefined : input.recency,
           include_domains: input.domains.length > 0 ? input.domains : undefined,

@@ -43,14 +43,17 @@ apps/api/src/assistant/tools/executors/web-search.tool.ts
 ```env
 WEB_SEARCH_PROVIDER=tavily
 WEB_SEARCH_API_KEY=change_me
-WEB_SEARCH_TIMEOUT_MS=10000
+WEB_SEARCH_TIMEOUT_MS=15000
 WEB_SEARCH_MAX_RESULTS=5
 WEB_SEARCH_MAX_SNIPPET_CHARS=1500
+WEB_SEARCH_SEARCH_DEPTH=advanced
 ```
 
 Secret 只能通过环境变量或平台 Secrets 注入，不能写入代码或提交 `.env`。当前 `WEB_SEARCH_PROVIDER` 只接受 `tavily`；开发/测试环境缺少 `WEB_SEARCH_API_KEY` 时，工具返回 `WEB_SEARCH_NOT_CONFIGURED`，不会在模块加载时发起外部请求；生产环境会在配置加载时拒绝缺失或仍为 `change_me` 的密钥。
 
-Tavily 请求固定使用基础搜索、普通资料主题，并关闭 Provider 生成答案、原始正文和图片返回。最终自然语言答案由 CEES 当前 ai-service 模型生成。
+`WEB_SEARCH_SEARCH_DEPTH` 只接受 `basic` 或 `advanced`。`basic` 每条结果只带页面摘要片段（1 credit），`advanced` 会抓取正文片段（2 credits）；默认 `advanced` 是因为销量、产量、财务这类需要“具体数字”的查询在 `basic` 下经常只拿到目录页或导航文本，模型拿不到可引用事实。调高成本敏感度可回退到 `basic`。
+
+Tavily 请求使用普通资料主题，按 `recency` 映射时间范围，并关闭 Provider 生成答案、原始正文和图片返回。最终自然语言答案由 CEES 当前 ai-service 模型生成。
 
 ## 4. 工具与权限
 
