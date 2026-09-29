@@ -7,7 +7,8 @@ GitHub 连接器采用 GitHub 官方远程 MCP 服务、GitHub OAuth、官方 MC
 - 固定远程端点：`https://api.githubcopilot.com/mcp/`；用户不能在配置或对话中替换端点；
 - Desktop Main Process 使用 `@modelcontextprotocol/sdk@1.30.1` 完成 Streamable HTTP、初始化、会话、OAuth PKCE、刷新令牌和断线重连；
 - OAuth 回调使用 `127.0.0.1` 动态端口，State 由本地回调服务校验；
-- GitHub OAuth Client ID 由部署方通过 `CEES_GITHUB_OAUTH_CLIENT_ID` 提供，不能把 Client Secret 或真实值提交到仓库；
+- GitHub OAuth Client ID 和 Client Secret 由 API 部署方通过 `CEES_GITHUB_OAUTH_CLIENT_ID`、`CEES_GITHUB_OAUTH_CLIENT_SECRET` 提供，不能把真实值提交到仓库；
+- Desktop 通过已认证的 CEES API 获取公开 Client ID，并将授权码和 PKCE verifier交给 API Broker 换码；Client Secret 永远不进入 Desktop、Renderer、OpenAPI 请求体或对话上下文；
 - Token 只保存在当前电脑的 Electron `safeStorage` 加密文件 `userData/connectors/github/oauth.secure`，不会上传 `apps/api`；
 - Desktop 连接后调用 `tools/list` 动态发现工具，最多接收 256 个工具；API 只规划调用，Desktop 执行；
 - `READ` 工具直接执行，`WRITE` 和 `DESTRUCTIVE` 工具在外部调用前必须二次确认；未知风险按 `DESTRUCTIVE` 处理；
@@ -18,6 +19,7 @@ GitHub 连接器采用 GitHub 官方远程 MCP 服务、GitHub OAuth、官方 MC
 
 ```text
 Renderer
+  -> CEES API OAuth Broker (config / code exchange)
   -> ConnectorHost
     -> GitHubConnectorAdapter
       -> GitHub official remote MCP
@@ -33,10 +35,11 @@ Renderer -> POST /assistant/connectors/github/plan
 ## 3. 授权与权限
 
 1. 用户在连接器市场点击 GitHub 卡片的“+”或详情页“连接”；
-2. Main Process 创建本机 loopback 回调并让官方 MCP SDK 发起 OAuth；
-3. 浏览器跳转到 GitHub 官方授权页面，用户确认 OAuth 权限；
-4. 回调校验 `state` 后，SDK 换取并保存 Token；
-5. Desktop 重新建立 MCP 会话并发现工具，状态显示 GitHub login 和工具数量；
+2. Renderer 使用当前 CEES 登录态读取 API Broker 的公开 OAuth 配置；
+3. Main Process 创建本机 loopback 回调、生成 PKCE 参数并打开 GitHub 官方授权页面；
+4. 回调校验 `state` 后，Main Process 将授权码、verifier 和 loopback redirect URI 发给 API Broker；
+5. API 使用部署环境的 Client Secret 向 GitHub 换码，不持久化 GitHub Token，再把必要 Token 返回当前 Desktop；
+6. Desktop 将 Token 写入安全存储，重新建立 MCP 会话并发现工具，状态显示 GitHub login 和工具数量；
 6. 实际可访问内容由 GitHub 用户权限、组织策略、OAuth scope 以及 GitHub MCP 的 scope challenge 共同决定，连接成功不表示所有仓库或所有工具都可用。
 
 GitHub Resource Metadata 可能声明多个支持的 scope。官方 MCP SDK 按 MCP 资源元数据和服务端 `WWW-Authenticate` challenge 选择授权 scope，因此 CEES 不把“最小 scope”伪装成固定保证；产品页面只展示连接状态，不承诺全量仓库访问。
@@ -57,9 +60,10 @@ GitHub Resource Metadata 可能声明多个支持的 scope。官方 MCP SDK 按 
 
 ```env
 CEES_GITHUB_OAUTH_CLIENT_ID=change_me
+CEES_GITHUB_OAUTH_CLIENT_SECRET=change_me
 ```
 
-部署方需要在 GitHub OAuth App/GitHub App 中配置与官方允许的 loopback 回调规则一致的回调地址，并将 Client ID 注入 Desktop 运行环境。不得把 Client Secret、Access Token、Refresh Token 或个人 OAuth 值写入仓库、OpenAPI、Renderer 或 API 请求体。
+`apps/desktop/mcp.json` 只保存固定远程 MCP URL、超时和默认禁用标志：`disabled=true` 表示不自动连接，不阻止用户点击“连接”手动启用。API 部署环境通过 `CEES_GITHUB_OAUTH_CLIENT_ID` 和 `CEES_GITHUB_OAUTH_CLIENT_SECRET` 配置 OAuth App；部署编排必须将这两个变量显式注入 API 容器，Desktop 不读取这两个环境变量，而是通过 `GET /assistant/connectors/github/oauth/config` 获取公开配置，并通过 `POST /assistant/connectors/github/oauth/exchange` 完成授权码换码。API 不持久化 GitHub Token，Desktop 只将当前用户 Token 保存到本机安全存储。部署方需要在 GitHub OAuth App/GitHub App 中配置与官方允许的 loopback 回调规则一致的回调地址。不得把 Client Secret、Access Token、Refresh Token 或个人 OAuth 值写入仓库、OpenAPI、Renderer 或普通日志。
 
 ## 6. 暂不支持
 

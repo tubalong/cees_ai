@@ -15,7 +15,7 @@ export interface ConnectorAdapter<
     readonly manifest: ConnectorManifest;
     configure(userDataPath: string): void;
     status(): Promise<Status>;
-    connect(): Promise<Status>;
+    connect(options?: unknown): Promise<Status>;
     disconnect(): Promise<Status>;
     resetTools(): void;
     discoverTools(): Promise<Tool[]>;

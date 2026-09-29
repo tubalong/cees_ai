@@ -160,7 +160,7 @@ bash infra/deploy-cos-release.sh <environment> <release-reference>
 
 部署前必须清除环境文件和模型配置中的 `change_me`，并填写 `SEED_PLATFORM_ADMIN_ACCOUNT`、`SEED_PLATFORM_ADMIN_PASSWORD`、`SEED_PLATFORM_ADMIN_DISPLAY_NAME`。`deploy-cos-release.sh` 会从 COS 下载并校验镜像包、导入镜像和更新镜像标签；Compose 随后执行 Prisma migration、创建缺失的平台超级管理员，再启动 ai-service 和 API。平台初始化不会创建默认租户或租户管理员，同名平台账号已存在时也不会覆盖现有凭证或状态。
 
-Compose 只会把 `infra/docker-compose.deploy.yml` 中显式声明的变量注入容器；`--env-file .env.<environment>` 仅用于 Compose 插值，不会自动把文件中的全部变量传给 API。联网搜索的 `WEB_SEARCH_PROVIDER`、`WEB_SEARCH_API_KEY`、`WEB_SEARCH_TIMEOUT_MS`、`WEB_SEARCH_MAX_RESULTS` 和 `WEB_SEARCH_MAX_SNIPPET_CHARS` 已在 Compose 中显式透传，其中 Staging 和 Production 当前都以 `NODE_ENV=production` 运行，必须提供真实的 `WEB_SEARCH_API_KEY`，不能使用 `change_me`；缺失时 Compose 会在启动前直接报错。
+Compose 只会把 `infra/docker-compose.deploy.yml` 中显式声明的变量注入容器；`--env-file .env.<environment>` 仅用于 Compose 插值，不会自动把文件中的全部变量传给 API。联网搜索的 `WEB_SEARCH_PROVIDER`、`WEB_SEARCH_API_KEY`、`WEB_SEARCH_TIMEOUT_MS`、`WEB_SEARCH_MAX_RESULTS` 和 `WEB_SEARCH_MAX_SNIPPET_CHARS`，以及 GitHub OAuth 的 `CEES_GITHUB_OAUTH_CLIENT_ID`、`CEES_GITHUB_OAUTH_CLIENT_SECRET`，已在 Compose 中显式透传。其中 Staging 和 Production 当前都以 `NODE_ENV=production` 运行，必须提供真实的 `WEB_SEARCH_API_KEY` 和 GitHub OAuth 配置，不能使用 `change_me`；缺失时部署校验或 Compose 会在启动前直接报错。
 
 ai-service 只接收 `docker-compose.deploy.yml` 中显式声明的环境变量。模型配置里每个已启用 profile 的 `api_key_env` 都必须在 `.env.<environment>` 中提供非空值，并由 Compose 透传；当前透传 `PRIMARY_LLM_API_KEY`、`QWEN_API_KEY`、`VISION_LLM_API_KEY`、`IMAGE_GEN_API_KEY`、`IMAGE_GEN_BACKUP_API_KEY`、`EMBEDDING_API_KEY` 和 `EMBEDDING_BACKUP_API_KEY`。新增已启用 profile、启用带 `vision` capability 的 profile 或改用新的 `api_key_env` 名称时，必须同时修改模型配置、环境文件和 `docker-compose.deploy.yml`，否则 ai-service 的 `/ready` 返回 503，容器被判定为 unhealthy，`api` 因 `depends_on: service_healthy` 无法启动。
 

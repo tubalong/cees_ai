@@ -173,6 +173,85 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponseEnvelope'
 
+  /assistant/connectors/github/oauth/config:
+    get:
+      summary: Read public GitHub OAuth broker configuration
+      description: |
+        Returns the public Client ID and authorization metadata for the current Desktop session.
+        The server-side Client Secret is never returned. The endpoint requires the authenticated CEES tenant session.
+      operationId: getGitHubOAuthConfig
+      tags: [Conversation]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Public GitHub OAuth configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GitHubOAuthConfigResponseEnvelope'
+        '401':
+          description: Authentication or tenant membership is invalid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '503':
+          description: GitHub OAuth broker is not configured on the API deployment
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+  /assistant/connectors/github/oauth/exchange:
+    post:
+      summary: Exchange a GitHub OAuth authorization code through the API broker
+      description: |
+        The API uses the deployment-held GitHub Client Secret to exchange the authorization code and PKCE verifier.
+        GitHub access tokens are returned only to the authenticated Desktop request and are not persisted by CEES.
+        redirectUri must be a loopback callback owned by the current Desktop process.
+      operationId: exchangeGitHubOAuthCode
+      tags: [Conversation]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GitHubOAuthExchangeRequest'
+      responses:
+        '200':
+          description: GitHub OAuth tokens for the current Desktop connection
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GitHubOAuthTokensResponseEnvelope'
+        '400':
+          description: Invalid authorization code, PKCE verifier, or loopback redirect URI
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '401':
+          description: Authentication or tenant membership is invalid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '502':
+          description: GitHub OAuth exchange failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '503':
+          description: GitHub OAuth broker is not configured on the API deployment
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
   /assistant/connectors/github/plan:
     post:
       summary: Plan GitHub official remote MCP calls for the current question
@@ -10931,6 +11010,89 @@ components:
         requestId:
           type: [string, 'null']
           description: Public API request trace ID
+
+    GitHubOAuthConfig:
+      type: object
+      additionalProperties: false
+      required: [clientId, authorizationEndpoint, scope, exchangePath]
+      properties:
+        clientId:
+          type: string
+          minLength: 1
+          description: Public GitHub OAuth Client ID
+        authorizationEndpoint:
+          type: string
+          format: uri
+          const: https://github.com/login/oauth/authorize
+        scope:
+          type: string
+          minLength: 1
+        exchangePath:
+          type: string
+          const: /v1/assistant/connectors/github/oauth/exchange
+
+    GitHubOAuthConfigResponseEnvelope:
+      type: object
+      additionalProperties: false
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: '#/components/schemas/GitHubOAuthConfig'
+        requestId:
+          type: [string, 'null']
+
+    GitHubOAuthExchangeRequest:
+      type: object
+      additionalProperties: false
+      required: [code, codeVerifier, redirectUri]
+      properties:
+        code:
+          type: string
+          minLength: 1
+          maxLength: 512
+        codeVerifier:
+          type: string
+          minLength: 43
+          maxLength: 256
+          pattern: '^[A-Za-z0-9._~-]+$'
+        redirectUri:
+          type: string
+          pattern: '^http://127\.0\.0\.1:[1-9][0-9]{0,4}/oauth/github/callback$'
+
+    GitHubOAuthTokens:
+      type: object
+      additionalProperties: false
+      required: [accessToken, tokenType, expiresIn, refreshToken, scope]
+      properties:
+        accessToken:
+          type: string
+          minLength: 1
+        tokenType:
+          type: string
+          minLength: 1
+        expiresIn:
+          type: [integer, 'null']
+          minimum: 0
+        refreshToken:
+          type: [string, 'null']
+        scope:
+          type: [string, 'null']
+
+    GitHubOAuthTokensResponseEnvelope:
+      type: object
+      additionalProperties: false
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: '#/components/schemas/GitHubOAuthTokens'
+        requestId:
+          type: [string, 'null']
 
     GitHubConnectorToolRisk:
       type: string

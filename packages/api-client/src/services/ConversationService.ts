@@ -13,6 +13,9 @@ import type { DingTalkConnectorPlanRequest } from '../models/DingTalkConnectorPl
 import type { DingTalkConnectorPlanResponseEnvelope } from '../models/DingTalkConnectorPlanResponseEnvelope';
 import type { GitHubConnectorPlanRequest } from '../models/GitHubConnectorPlanRequest';
 import type { GitHubConnectorPlanResponseEnvelope } from '../models/GitHubConnectorPlanResponseEnvelope';
+import type { GitHubOAuthConfigResponseEnvelope } from '../models/GitHubOAuthConfigResponseEnvelope';
+import type { GitHubOAuthExchangeRequest } from '../models/GitHubOAuthExchangeRequest';
+import type { GitHubOAuthTokensResponseEnvelope } from '../models/GitHubOAuthTokensResponseEnvelope';
 import type { TencentMeetingConnectorPlanRequest } from '../models/TencentMeetingConnectorPlanRequest';
 import type { TencentMeetingConnectorPlanResponseEnvelope } from '../models/TencentMeetingConnectorPlanResponseEnvelope';
 import type { TurnResponseEnvelope } from '../models/TurnResponseEnvelope';
@@ -104,6 +107,51 @@ export class ConversationService {
                 401: `Authentication or tenant membership is invalid`,
                 502: `AI provider returned an invalid plan`,
                 503: `AI service or model is temporarily unavailable`,
+            },
+        });
+    }
+    /**
+     * Read public GitHub OAuth broker configuration
+     * Returns the public Client ID and authorization metadata for the current Desktop session.
+     * The server-side Client Secret is never returned. The endpoint requires the authenticated CEES tenant session.
+     *
+     * @returns GitHubOAuthConfigResponseEnvelope Public GitHub OAuth configuration
+     * @throws ApiError
+     */
+    public static getGitHubOAuthConfig(): CancelablePromise<GitHubOAuthConfigResponseEnvelope> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/assistant/connectors/github/oauth/config',
+            errors: {
+                401: `Authentication or tenant membership is invalid`,
+                503: `GitHub OAuth broker is not configured on the API deployment`,
+            },
+        });
+    }
+    /**
+     * Exchange a GitHub OAuth authorization code through the API broker
+     * The API uses the deployment-held GitHub Client Secret to exchange the authorization code and PKCE verifier.
+     * GitHub access tokens are returned only to the authenticated Desktop request and are not persisted by CEES.
+     * redirectUri must be a loopback callback owned by the current Desktop process.
+     *
+     * @returns GitHubOAuthTokensResponseEnvelope GitHub OAuth tokens for the current Desktop connection
+     * @throws ApiError
+     */
+    public static exchangeGitHubOAuthCode({
+        requestBody,
+    }: {
+        requestBody: GitHubOAuthExchangeRequest,
+    }): CancelablePromise<GitHubOAuthTokensResponseEnvelope> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/assistant/connectors/github/oauth/exchange',
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                400: `Invalid authorization code, PKCE verifier, or loopback redirect URI`,
+                401: `Authentication or tenant membership is invalid`,
+                502: `GitHub OAuth exchange failed`,
+                503: `GitHub OAuth broker is not configured on the API deployment`,
             },
         });
     }

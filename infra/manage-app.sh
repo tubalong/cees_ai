@@ -94,10 +94,14 @@ validate_deployment_inputs() {
   local redis_url
   local node_env
   local web_search_api_key
+  local github_oauth_client_id
+  local github_oauth_client_secret
   database_url="$(read_env_value DATABASE_URL)"
   redis_url="$(read_env_value REDIS_URL)"
   node_env="$(read_env_value NODE_ENV)"
   web_search_api_key="$(read_env_value WEB_SEARCH_API_KEY)"
+  github_oauth_client_id="$(read_env_value CEES_GITHUB_OAUTH_CLIENT_ID)"
+  github_oauth_client_secret="$(read_env_value CEES_GITHUB_OAUTH_CLIENT_SECRET)"
 
   if [[ -z "$database_url" || -z "$redis_url" ]]; then
     echo "Error: DATABASE_URL and REDIS_URL are required in $ENV_FILE." >&2
@@ -106,6 +110,16 @@ validate_deployment_inputs() {
 
   if [[ "$node_env" == "production" && -z "$web_search_api_key" ]]; then
     echo "Error: WEB_SEARCH_API_KEY is required in $ENV_FILE when NODE_ENV=production." >&2
+    exit 1
+  fi
+
+  if [[ -z "$github_oauth_client_id" || "$github_oauth_client_id" == "change_me" ]]; then
+    echo "Error: CEES_GITHUB_OAUTH_CLIENT_ID is required in $ENV_FILE." >&2
+    exit 1
+  fi
+
+  if [[ -z "$github_oauth_client_secret" || "$github_oauth_client_secret" == "change_me" ]]; then
+    echo "Error: CEES_GITHUB_OAUTH_CLIENT_SECRET is required in $ENV_FILE." >&2
     exit 1
   fi
 

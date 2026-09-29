@@ -2,8 +2,8 @@ import { DingdingOutlined, GithubOutlined, LinkOutlined, MessageOutlined, PlusOu
 import { App as AntdApp, Button, Modal, Select, Space, Spin, Tag } from 'antd';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { API_BASE_URL, getAccessTokenForConnector, getGitHubOAuthConfig } from '../../core/api';
 import { useI18n } from '../../core/i18n';
-import { toUserErrorMessage } from '../../core/user-error';
 
 const EMPTY_STATUS: DesktopConnectorStatus = {
     state: 'NOT_INSTALLED',
@@ -94,14 +94,14 @@ export default function ConnectorMarketplacePage(): JSX.Element {
                 } catch (error) {
                     setRelease({
                         ...EMPTY_RELEASE,
-                        error: toUserErrorMessage(error, t('读取 DWS 版本状态失败')),
+                        error: error instanceof Error ? error.message : t('读取 DWS 版本状态失败'),
                     });
                 }
             }
         } catch (error) {
             setManifests([]);
             setStatuses({});
-            setMarketplaceError(toUserErrorMessage(error, t('读取连接器列表失败')));
+            setMarketplaceError(error instanceof Error ? error.message : t('读取连接器列表失败'));
         } finally {
             setLoading(false);
         }
@@ -155,11 +155,21 @@ export default function ConnectorMarketplacePage(): JSX.Element {
         }
         setConnectingId(manifest.id);
         try {
-            const nextStatus = manifest.id === 'dingtalk'
-                && currentDingTalkStatus.state === 'PROFILE_REQUIRED'
-                && connectors.dingtalk
-                ? await connectors.dingtalk.selectProfile(selectedProfile ?? '')
-                : await connectors.connect(manifest.id);
+            let nextStatus: DesktopConnectorStatus;
+            if (manifest.id === 'dingtalk' && currentDingTalkStatus.state === 'PROFILE_REQUIRED' && connectors.dingtalk) {
+                nextStatus = await connectors.dingtalk.selectProfile(selectedProfile ?? '');
+            } else if (manifest.id === 'github') {
+                const oauthConfig = await getGitHubOAuthConfig();
+                nextStatus = await connectors.connect(manifest.id, {
+                    apiAccessToken: getAccessTokenForConnector(),
+                    exchangeUrl: new URL(oauthConfig.exchangePath.replace(/^\/+/, ''), API_BASE_URL.endsWith('/') ? API_BASE_URL : `${API_BASE_URL}/`).toString(),
+                    clientId: oauthConfig.clientId,
+                    authorizationEndpoint: oauthConfig.authorizationEndpoint,
+                    scope: oauthConfig.scope,
+                });
+            } else {
+                nextStatus = await connectors.connect(manifest.id);
+            }
             updateStatus(manifest.id, nextStatus);
             if (nextStatus.state === 'PROFILE_REQUIRED') {
                 setSelectedConnectorId(manifest.id);
@@ -177,7 +187,7 @@ export default function ConnectorMarketplacePage(): JSX.Element {
                 message.warning(nextStatus.error || t('连接器已安装，请继续完成授权'));
             }
         } catch (error) {
-            message.error(toUserErrorMessage(error, t('{name}连接器安装或授权失败', { name: manifest.name })));
+            message.error(error instanceof Error ? error.message : t('{name}连接器安装或授权失败', { name: manifest.name }));
         } finally {
             setConnectingId(undefined);
         }
@@ -194,7 +204,7 @@ export default function ConnectorMarketplacePage(): JSX.Element {
             else if (nextRelease.updateAvailable) message.success(t('发现 DWS 新版本 {version}', { version: nextRelease.latestVersion ?? '' }));
             else message.success(t('当前已是最新稳定版本'));
         } catch (error) {
-            message.error(toUserErrorMessage(error, t('检查 DWS 更新失败')));
+            message.error(error instanceof Error ? error.message : t('检查 DWS 更新失败'));
         } finally {
             setCheckingUpdate(false);
         }
@@ -216,7 +226,7 @@ export default function ConnectorMarketplacePage(): JSX.Element {
                     setRelease(nextRelease);
                     message.success(t('DWS 已升级到 {version}', { version: nextRelease.installedVersion ?? release.latestVersion ?? '' }));
                 } catch (error) {
-                    message.error(toUserErrorMessage(error, t('DWS 升级失败')));
+                    message.error(error instanceof Error ? error.message : t('DWS 升级失败'));
                     await refresh();
                 } finally {
                     setUpgrading(false);
@@ -242,7 +252,7 @@ export default function ConnectorMarketplacePage(): JSX.Element {
                     setRelease(nextRelease);
                     message.success(t('DWS 已回滚到 {version}', { version: nextRelease.installedVersion ?? release.rollbackVersion ?? '' }));
                 } catch (error) {
-                    message.error(toUserErrorMessage(error, t('DWS 回滚失败')));
+                    message.error(error instanceof Error ? error.message : t('DWS 回滚失败'));
                     await refresh();
                 } finally {
                     setRollingBack(false);
@@ -264,7 +274,7 @@ export default function ConnectorMarketplacePage(): JSX.Element {
                             ? 'WECOM_CONNECTOR'
                             : manifest.id === 'github'
                                 ? 'GITHUB_CONNECTOR'
-                                : 'CONNECTOR_MARKETPLACE',
+                        : 'CONNECTOR_MARKETPLACE',
             },
         });
     };
@@ -286,7 +296,7 @@ export default function ConnectorMarketplacePage(): JSX.Element {
                         ? t('解绑会删除当前电脑中 CEES 专属的企业微信 CLI 授权和工具缓存，不会删除 CEES 业务数据；企业微信侧已创建的智能机器人可能仍需在企业微信中自行管理。')
                         : selectedManifest.id === 'github'
                             ? t('解绑只会删除当前电脑中 CEES 保存的 GitHub OAuth 令牌和工具缓存，不会删除 GitHub 或 CEES 数据。如需撤销 GitHub 侧授权，请在 GitHub Settings 的 Applications 中操作。')
-                            : t('解绑会清除当前连接器保存的授权信息，但不会删除已经写入 CEES 的业务数据。'),
+                        : t('解绑会清除当前连接器保存的授权信息，但不会删除已经写入 CEES 的业务数据。'),
             okText: t('确认解绑'),
             cancelText: t('取消'),
             okButtonProps: { danger: true },
@@ -301,7 +311,7 @@ export default function ConnectorMarketplacePage(): JSX.Element {
                     setSelectedConnectorId(undefined);
                     message.success(t('{name}连接器已解绑', { name: selectedManifest.name }));
                 } catch (error) {
-                    message.error(toUserErrorMessage(error, t('{name}连接器解绑失败', { name: selectedManifest.name })));
+                    message.error(error instanceof Error ? error.message : t('{name}连接器解绑失败', { name: selectedManifest.name }));
                 } finally {
                     setDisconnectingId(undefined);
                 }
@@ -394,7 +404,7 @@ export default function ConnectorMarketplacePage(): JSX.Element {
                                 ? t('智能机器人已授权')
                                 : selectedManifest.id === 'github'
                                     ? selectedGitHubStatus.authorizedLogin || t('GitHub 账号已授权')
-                                    : selectedManifest.name}</strong>
+                            : selectedManifest.name}</strong>
                     <span>{selectedManifest.id === 'dingtalk'
                         ? selectedDingTalkStatus.externalUserName || selectedDingTalkStatus.profile || t('已完成授权')
                         : selectedManifest.id === 'tencent-meeting'
@@ -403,7 +413,7 @@ export default function ConnectorMarketplacePage(): JSX.Element {
                                 ? t('{count} 个企业微信 CLI 工具可用', { count: selectedWeComStatus.toolCount })
                                 : selectedManifest.id === 'github'
                                     ? t('{count} 个 GitHub MCP 工具可用', { count: selectedGitHubStatus.toolCount })
-                                    : selectedStatus.version || t('已完成授权')}</span>
+                        : selectedStatus.version || t('已完成授权')}</span>
                 </div>
                 {selectedManifest.id === 'github' ? <div className="connector-version-panel">
                     <div className="connector-version-summary">
@@ -436,9 +446,6 @@ export default function ConnectorMarketplacePage(): JSX.Element {
                 </div>
                 <h2>{t('连接 {name}', { name: selectedManifest.name })}</h2>
                 <p className="connector-connected-description">{t(selectedManifest.description)}</p>
-                {selectedManifest.id === 'github' && selectedStatus.issueCode === 'GITHUB_OAUTH_CLIENT_ID_MISSING'
-                    ? <div className="connector-version-message is-error">{t('GitHub OAuth Client ID 尚未配置。请由部署方设置 CEES_GITHUB_OAUTH_CLIENT_ID 后重启桌面端。')}</div>
-                    : null}
                 {selectedManifest.id === 'dingtalk' && selectedDingTalkStatus.state === 'PROFILE_REQUIRED'
                     ? <DingTalkProfileSelector
                         status={selectedDingTalkStatus}
@@ -470,7 +477,7 @@ export default function ConnectorMarketplacePage(): JSX.Element {
                         ? t('使用此组织')
                         : selectedManifest.id === 'wecom' && selectedWeComStatus.authorizationState === 'AUTHORIZING'
                             ? t('等待扫码授权')
-                            : t('连接')}
+                        : t('连接')}
                 </Button>
             </div> : null}
         </Modal>
@@ -532,7 +539,7 @@ function connectorErrorStatus(error: unknown, fallback: string): DesktopConnecto
         ...EMPTY_STATUS,
         state: 'ERROR',
         recoveryAction: 'RETRY',
-        error: toUserErrorMessage(error, fallback),
+        error: error instanceof Error ? error.message : fallback,
     };
 }
 

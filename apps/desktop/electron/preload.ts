@@ -62,7 +62,7 @@ contextBridge.exposeInMainWorld('cees', {
     connectors: {
         list: (): Promise<ConnectorManifest[]> => ipcRenderer.invoke('cees:connector-list'),
         status: (connectorId: string): Promise<ConnectorStatus> => ipcRenderer.invoke('cees:connector-status', connectorId),
-        connect: (connectorId: string): Promise<ConnectorStatus> => ipcRenderer.invoke('cees:connector-connect', connectorId),
+        connect: (connectorId: string, options?: unknown): Promise<ConnectorStatus> => ipcRenderer.invoke('cees:connector-connect', connectorId, options),
         disconnect: (connectorId: string): Promise<ConnectorStatus> => ipcRenderer.invoke('cees:connector-disconnect', connectorId),
         tools: (connectorId: string): Promise<ConnectorTool[]> => ipcRenderer.invoke('cees:connector-tools', connectorId),
         execute: (connectorId: string, calls: ConnectorPlannedCall[]): Promise<ConnectorContext[]> =>

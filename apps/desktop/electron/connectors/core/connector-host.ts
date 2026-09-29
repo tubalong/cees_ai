@@ -33,9 +33,9 @@ export class ConnectorHost {
         return status;
     }
 
-    async connect(connectorId: string): Promise<ConnectorStatus> {
+    async connect(connectorId: string, options?: unknown): Promise<ConnectorStatus> {
         const normalizedId = normalizeConnectorId(connectorId);
-        const status = await this.registry.get(normalizedId).connect();
+        const status = await this.registry.get(normalizedId).connect(options);
         this.publishStatus(normalizedId, status);
         return status;
     }

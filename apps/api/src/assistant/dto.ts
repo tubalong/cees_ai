@@ -193,6 +193,25 @@ export class PlanWeComConnectorRequestDto {
   tools!: WeComConnectorToolDto[];
 }
 
+export class GitHubOAuthExchangeRequestDto {
+  @ApiProperty({ minLength: 1, maxLength: 512 })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(512)
+  code!: string;
+
+  @ApiProperty({ minLength: 43, maxLength: 256, pattern: '^[A-Za-z0-9._~-]+$' })
+  @IsString()
+  @MinLength(43)
+  @MaxLength(256)
+  @Matches(/^[A-Za-z0-9._~-]+$/)
+  codeVerifier!: string;
+
+  @ApiProperty({ pattern: '^http://127\\.0\\.0\\.1:[1-9][0-9]{0,4}/oauth/github/callback$' })
+  @IsString()
+  @Matches(/^http:\/\/127\.0\.0\.1:(?:[1-9][0-9]{0,4})\/oauth\/github\/callback$/)
+  redirectUri!: string;
+}
 export class GitHubConnectorToolDto implements GitHubConnectorToolInput {
   @ApiProperty({ maxLength: 120, pattern: '^[A-Za-z][A-Za-z0-9._-]{0,119}$' })
   @IsString()

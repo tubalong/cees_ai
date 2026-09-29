@@ -1686,6 +1686,44 @@ export async function planGitHubConnectorQueries(
     });
 }
 
+export interface GitHubOAuthConfig {
+    clientId: string;
+    authorizationEndpoint: string;
+    scope: string;
+    exchangePath: string;
+}
+
+export interface GitHubOAuthExchangeInput {
+    code: string;
+    codeVerifier: string;
+    redirectUri: string;
+}
+
+export interface GitHubOAuthTokens {
+    accessToken: string;
+    tokenType: string;
+    expiresIn: number | null;
+    refreshToken: string | null;
+    scope: string | null;
+}
+
+export async function getGitHubOAuthConfig(): Promise<GitHubOAuthConfig> {
+    return authorizedRequest<GitHubOAuthConfig>('v1/assistant/connectors/github/oauth/config');
+}
+
+export async function exchangeGitHubOAuthCode(input: GitHubOAuthExchangeInput): Promise<GitHubOAuthTokens> {
+    return authorizedRequest<GitHubOAuthTokens>('v1/assistant/connectors/github/oauth/exchange', {
+        method: 'POST',
+        body: JSON.stringify(input),
+    });
+}
+
+export function getAccessTokenForConnector(): string {
+    const accessToken = getStoredValue(ACCESS_TOKEN_KEY);
+    if (!accessToken) throw new Error('登录状态已失效，请重新登录');
+    return accessToken;
+}
+
 async function streamSse(path: string, init: RequestInit, onEvent: (event: TurnStreamEvent) => void, retry = true): Promise<void> {
     const accessToken = getStoredValue(ACCESS_TOKEN_KEY);
     if (!accessToken) throw new Error('登录状态已失效，请重新登录');

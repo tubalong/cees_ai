@@ -1,4 +1,4 @@
-import { Body, Controller, HttpCode, HttpStatus, Post, UseGuards, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Post, UseGuards, UseInterceptors } from '@nestjs/common';
 import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
 import { TenantContextInterceptor } from '../../tenant/tenant-context.interceptor';
@@ -7,8 +7,9 @@ import { DingTalkConnectorPlannerService } from '../connectors/dingtalk-connecto
 import { TencentMeetingConnectorPlannerService } from '../connectors/tencent-meeting-connector-planner.service';
 import { WeComConnectorPlannerService } from '../connectors/wecom-connector-planner.service';
 import { GitHubConnectorPlannerService } from '../connectors/github-connector-planner.service';
+import { GitHubOAuthBrokerService } from '../connectors/github-oauth-broker.service';
 import { toAssistantHttpException } from '../assistant.errors';
-import { PlanDingTalkConnectorRequestDto, PlanGitHubConnectorRequestDto, PlanTencentMeetingConnectorRequestDto, PlanWeComConnectorRequestDto } from '../dto';
+import { GitHubOAuthExchangeRequestDto, PlanDingTalkConnectorRequestDto, PlanGitHubConnectorRequestDto, PlanTencentMeetingConnectorRequestDto, PlanWeComConnectorRequestDto } from '../dto';
 
 @ApiTags('Conversation')
 @ApiBearerAuth()
@@ -21,6 +22,7 @@ export class AssistantConnectorController {
     private readonly tencentMeetingPlanner: TencentMeetingConnectorPlannerService,
     private readonly weComPlanner: WeComConnectorPlannerService,
     private readonly githubPlanner: GitHubConnectorPlannerService,
+    private readonly githubOAuthBroker: GitHubOAuthBrokerService,
   ) {}
 
   @Post('dingtalk/plan')
@@ -59,6 +61,20 @@ export class AssistantConnectorController {
     }
   }
 
+  @Get('github/oauth/config')
+  @ApiOperation({ summary: '读取 GitHub OAuth 公共配置' })
+  @ApiOkResponse({ description: '返回 Client ID、授权地址和 scope，不返回 Client Secret' })
+  getGitHubOAuthConfig() {
+    return this.githubOAuthBroker.getConfig();
+  }
+
+  @Post('github/oauth/exchange')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: '由服务端代理 GitHub OAuth 授权码换取令牌' })
+  @ApiOkResponse({ description: '返回当前用户 GitHub 访问令牌；服务端不持久化令牌' })
+  async exchangeGitHubOAuthCode(@Body() input: GitHubOAuthExchangeRequestDto) {
+    return this.githubOAuthBroker.exchange(input);
+  }
   @Post('github/plan')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: '规划本机 GitHub 官方远程 MCP 调用' })

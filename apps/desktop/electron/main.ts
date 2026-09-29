@@ -253,8 +253,8 @@ app.whenReady().then(async () => {
     ipcMain.handle('cees:connector-list', () => connectorHost.list());
     ipcMain.handle('cees:connector-status', (_event, connectorId: unknown) =>
         connectorHost.status(assertConnectorId(connectorId)));
-    ipcMain.handle('cees:connector-connect', (_event, connectorId: unknown) =>
-        connectorHost.connect(assertConnectorId(connectorId)));
+    ipcMain.handle('cees:connector-connect', (_event, connectorId: unknown, options: unknown) =>
+        connectorHost.connect(assertConnectorId(connectorId), options));
     ipcMain.handle('cees:connector-disconnect', (_event, connectorId: unknown) =>
         connectorHost.disconnect(assertConnectorId(connectorId)));
     ipcMain.handle('cees:connector-tools', (_event, connectorId: unknown) =>
