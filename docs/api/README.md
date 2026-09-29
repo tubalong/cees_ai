@@ -7,7 +7,8 @@
 
 ### 契约版本与迁移
 
-- **0.47.0**：当前开发基线。连接器受控多步接力。四个 `Plan<Provider>ConnectorRequest` 新增可选 `previousSteps`（最多 3 条、
+- **0.48.0**：当前开发基线。审计保留策略落地，只在接口描述中说明数据可用范围的变化：`GET /audit-events` 与详情只返回 `audit_logs` 热表数据，超过保留期（默认 3 年）的租户审计已迁入 `audit_logs_archive`、连接器只读逐条审计（默认 90 天）到期后物理删除，因此不再出现在列表或详情中。响应结构、参数与错误码均未变化，旧客户端行为不变，客户端需要重新生成。详见 [审计日志保留策略](../architecture/audit-log-retention.md)。
+- **0.47.0**：连接器受控多步接力。四个 `Plan<Provider>ConnectorRequest` 新增可选 `previousSteps`（最多 3 条、
   单条 ≤ 2000 字的脱敏摘要，服务端按不可信数据注入），`Plan<Provider>ConnectorResult` 新增可选
   `followUpMayBeNeeded`（缺省 `false`，只是「本轮调用可能不足以完成请求」的提示，是否进入第二轮由 Desktop
   决定：硬上限两轮、两轮合计 ≤ 3 次调用）。均为兼容新增，旧客户端行为与请求哈希不变，客户端需要重新生成。

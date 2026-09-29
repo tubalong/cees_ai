@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CEES AI API
-  version: 0.47.0
+  version: 0.48.0
   description: 以本文件为唯一事实源的公开 API 契约。资源与操作按 docs/api 约定补充。
 
 servers:
@@ -3046,6 +3046,7 @@ paths:
   /audit-events:
     get:
       summary: 查询当前租户审计事件
+      description: 只返回仍在 audit_logs 热表中的租户审计。超过保留期的租户审计已迁移到 audit_logs_archive，不再通过本接口返回；其中连接器只读逐条审计量级最高，保留期短于其他审计并到期后物理删除。保留期与归档范围见 docs/architecture/audit-log-retention.md。
       operationId: auditListEvents
       tags: [Audit]
       security:
@@ -3143,6 +3144,7 @@ paths:
           format: uuid
     get:
       summary: 获取当前租户审计事件详情
+      description: 只查询仍在 audit_logs 热表中的审计事件；已归档或已清理的事件按不存在处理，返回 404。
       operationId: auditGetEvent
       tags: [Audit]
       security:
