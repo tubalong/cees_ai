@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from app.api.generated.models import (
     ExecutionMetadata,
     KnowledgeAnswerCitation,
@@ -87,28 +89,61 @@ async def answer_question(
         f"[{label}] {chunk.text}"
         for label, chunk in zip(labels, retrieved.chunks, strict=True)
     )
-    result = await llm_router.invoke(
-        request_id=request.request_id,
-        tenant_id=request.tenant_id,
-        user_id=request.user_id,
-        messages=[
-            ChatMessage(role="system", content=_SYSTEM_PROMPT),
-            ChatMessage(
-                role="user",
-                content=f"问题：{request.query}\n\n证据：\n{evidence}",
-            ),
-        ],
-        output_mode=OutputMode.json_schema,
-        role=ModelRole.rag,
-        profile_override=None,
-        temperature=None,
-        max_output_tokens=request.max_answer_tokens or 1024,
-        schema_name="KnowledgeAnswer",
-        json_schema=_ANSWER_SCHEMA,
-    )
-
-    output = result.provider_result.output
-    assert isinstance(output, dict)
+    answer_messages = [
+        ChatMessage(role="system", content=_SYSTEM_PROMPT),
+        ChatMessage(
+            role="user",
+            content=f"问题：{request.query}\n\n证据：\n{evidence}",
+        ),
+    ]
+    try:
+        result = await llm_router.invoke(
+            request_id=request.request_id,
+            tenant_id=request.tenant_id,
+            user_id=request.user_id,
+            messages=answer_messages,
+            output_mode=OutputMode.json_schema,
+            role=ModelRole.rag,
+            profile_override=None,
+            temperature=None,
+            max_output_tokens=request.max_answer_tokens or 1024,
+            schema_name="KnowledgeAnswer",
+            json_schema=_ANSWER_SCHEMA,
+        )
+        output = result.provider_result.output
+        if not isinstance(output, dict):
+            raise ValueError("structured output is not an object")
+    except (AIServiceError, ValueError):
+        # 某些 OpenAI-compatible Provider 在 tool_calls 结束后会返回空 structured
+        # payload。降级到普通文本回答，仍只允许引用服务端提供的 S 编号，避免整轮 502。
+        result = await llm_router.invoke(
+            request_id=request.request_id,
+            tenant_id=request.tenant_id,
+            user_id=request.user_id,
+            messages=answer_messages + [
+                ChatMessage(
+                    role="system",
+                    content=(
+                        "请直接输出简洁的中文答案，并在每个事实后使用证据编号 "
+                        "[S1]、[S2] 引用；不要输出 JSON。"
+                    ),
+                )
+            ],
+            output_mode=OutputMode.text,
+            role=ModelRole.rag,
+            profile_override=None,
+            temperature=None,
+            max_output_tokens=request.max_answer_tokens or 1024,
+            schema_name=None,
+            json_schema=None,
+        )
+        fallback_answer = str(result.provider_result.output or "").strip()
+        fallback_citations = list(dict.fromkeys(re.findall(r"\[S([1-9][0-9]*)\]", fallback_answer)))
+        output = {
+            "answer": fallback_answer,
+            "citation_ids": [f"S{value}" for value in fallback_citations],
+            "insufficient_evidence": not bool(fallback_answer and fallback_citations),
+        }
     citation_ids = output.get("citation_ids") or []
     if not isinstance(citation_ids, list) or any(
         not isinstance(item, str) or item not in labels for item in citation_ids

@@ -2,6 +2,7 @@ import { CalendarOutlined, ClockCircleOutlined, FileDoneOutlined, PlusOutlined, 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, App as AntdApp, Button, Card, Col, Form, Input, InputNumber, Modal, Row, Select, Space, Statistic, Switch, Table, Tabs, Tag } from 'antd';
 import { useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
     adjustHrLeaveBalance, cancelHrEmployeeChange, cancelHrLeaveRequest, cancelHrOvertimeRequest, createHrAttendanceRecord,
     createHrEmployeeChange, createHrLeaveRequest, createHrLeaveType, createHrOvertimeRequest, createHrProfile, deleteHrLeaveType,
@@ -11,14 +12,16 @@ import {
     reviewHrAttendanceRecord, reviewHrEmployeeChange, reviewHrLeaveRequest, reviewHrOvertimeRequest,
     updateHrAttendanceRecord, updateHrLeaveType, updateHrProfile, withdrawHrLeaveRequest,
     type DepartmentNode, type HrAttendanceRecord, type HrAttendanceStatus, type HrEmployeeChange,
-    type HrEmployeeChangeType, type HrLeaveType, type HrProfile, type HrRequestStatus, type MeResult,
+    type HrEmployeeChangeType, type HrLeaveType, type HrProfile, type HrRequestStatus, type MeResult, type PageAssistantContext,
 } from '../../core/api';
 import './hr.css';
+import PageAssistant from '../assistant/PageAssistant';
 
 type Dialog = 'profile' | 'leaveType' | 'balance' | 'leave' | 'attendance' | 'attendanceImport' | 'overtime' | 'change' | null;
 
 export default function HrManagement({ authContext, onSessionExpired }: { authContext: MeResult; onSessionExpired: () => void }): JSX.Element {
     const permissions = new Set(authContext.permissions);
+    const navigate = useNavigate();
     const canReadSensitiveProfile = permissions.has('hr.profile.sensitive.read');
     const canManageSensitiveProfile = permissions.has('hr.profile.sensitive.manage');
     const queryClient = useQueryClient();
@@ -64,6 +67,12 @@ export default function HrManagement({ authContext, onSessionExpired }: { authCo
     const leaveTypeMap = useMemo(() => new Map((leaveTypesQuery.data?.items ?? []).map((item) => [item.id, item.name])), [leaveTypesQuery.data]);
     const memberOptions = members.map((item) => ({ label: `${item.user.displayName}（${item.account}）`, value: item.id }));
     const departmentOptions = departments.map((item) => ({ label: item.name, value: item.id }));
+    const pageAssistantContext: PageAssistantContext = {
+        source: 'hr-management',
+        role: '人力资源助手',
+        selected: undefined,
+        summary: { employeeCount: members.length, profileCount: profilesQuery.data?.items.length ?? 0, departmentCount: departments.length, pendingLeaveCount: leaveRequestsQuery.data?.items.filter((item) => item.status === 'SUBMITTED').length ?? 0 },
+    };
 
     const openProfile = (profile?: HrProfile): void => {
         setEditingProfile(profile); profileForm.resetFields();
@@ -109,11 +118,13 @@ export default function HrManagement({ authContext, onSessionExpired }: { authCo
         { title: '类型', dataIndex: 'leaveTypeId', render: (value: string) => leaveTypeMap.get(value) ?? value },
         { title: '时间', render: (_: unknown, item: { startAt: string; endAt: string }) => `${formatTime(item.startAt)} — ${formatTime(item.endAt)}` },
         { title: '天数', dataIndex: 'durationDays' }, { title: '状态', dataIndex: 'status', render: statusTag },
-        { title: '操作', render: (_: unknown, item: any) => <Space>
-            {item.status === 'SUBMITTED' && !isOwnRecord(item.membershipId) && permissions.has('hr.leave.approve') && <><Button size="small" onClick={() => mutation.mutate(() => reviewHrLeaveRequest(item.id, 'APPROVE', item.version))}>通过</Button><Button size="small" danger onClick={() => mutation.mutate(() => reviewHrLeaveRequest(item.id, 'REJECT', item.version))}>拒绝</Button></>}
-            {item.status === 'SUBMITTED' && item.membershipId === authContext.membership.id && permissions.has('hr.leave.request') && <Button size="small" onClick={() => mutation.mutate(() => withdrawHrLeaveRequest(item.id, item.version))}>撤回</Button>}
-            {['SUBMITTED', 'APPROVED'].includes(item.status) && permissions.has('hr.leave.manage_all') && <Button size="small" danger onClick={() => mutation.mutate(() => cancelHrLeaveRequest(item.id, item.version))}>取消</Button>}
-        </Space> },
+        {
+            title: '操作', render: (_: unknown, item: any) => <Space>
+                {item.status === 'SUBMITTED' && !isOwnRecord(item.membershipId) && permissions.has('hr.leave.approve') && <><Button size="small" onClick={() => mutation.mutate(() => reviewHrLeaveRequest(item.id, 'APPROVE', item.version))}>通过</Button><Button size="small" danger onClick={() => mutation.mutate(() => reviewHrLeaveRequest(item.id, 'REJECT', item.version))}>拒绝</Button></>}
+                {item.status === 'SUBMITTED' && item.membershipId === authContext.membership.id && permissions.has('hr.leave.request') && <Button size="small" onClick={() => mutation.mutate(() => withdrawHrLeaveRequest(item.id, item.version))}>撤回</Button>}
+                {['SUBMITTED', 'APPROVED'].includes(item.status) && permissions.has('hr.leave.manage_all') && <Button size="small" danger onClick={() => mutation.mutate(() => cancelHrLeaveRequest(item.id, item.version))}>取消</Button>}
+            </Space>
+        },
     ];
 
     const profileTab = <Card className="hr-card" title="员工档案" extra={<Space><Button icon={<ReloadOutlined />} onClick={refresh}>刷新</Button>{permissions.has('hr.profile.manage') && <Button type="primary" icon={<PlusOutlined />} onClick={() => openProfile()}>新建档案</Button>}</Space>}>
@@ -141,10 +152,12 @@ export default function HrManagement({ authContext, onSessionExpired }: { authCo
             { title: '员工', dataIndex: 'membershipId', render: memberName(memberMap) }, { title: '日期', dataIndex: 'workDate' },
             { title: '签到', dataIndex: 'checkInAt', render: formatTime }, { title: '签退', dataIndex: 'checkOutAt', render: formatTime },
             { title: '状态', dataIndex: 'status', render: statusTag }, { title: '来源', dataIndex: 'source' },
-            { title: '操作', render: (_: unknown, item: HrAttendanceRecord) => <Space>
-                {permissions.has('hr.attendance.manage') && <Button size="small" onClick={() => { setEditingAttendance(item); attendanceForm.setFieldsValue(item); setDialog('attendance'); }}>编辑</Button>}
-                {permissions.has('hr.attendance.approve') && item.status === 'EXCEPTION' && !isOwnRecord(item.membershipId) && <Button size="small" onClick={() => mutation.mutate(() => reviewHrAttendanceRecord(item.id, 'APPROVE', item.version))}>确认修正</Button>}
-            </Space> },
+            {
+                title: '操作', render: (_: unknown, item: HrAttendanceRecord) => <Space>
+                    {permissions.has('hr.attendance.manage') && <Button size="small" onClick={() => { setEditingAttendance(item); attendanceForm.setFieldsValue(item); setDialog('attendance'); }}>编辑</Button>}
+                    {permissions.has('hr.attendance.approve') && item.status === 'EXCEPTION' && !isOwnRecord(item.membershipId) && <Button size="small" onClick={() => mutation.mutate(() => reviewHrAttendanceRecord(item.id, 'APPROVE', item.version))}>确认修正</Button>}
+                </Space>
+            },
         ]} />
     </Card>;
 
@@ -154,10 +167,12 @@ export default function HrManagement({ authContext, onSessionExpired }: { authCo
             { title: '时间', render: (_: unknown, item: any) => `${formatTime(item.startAt)} — ${formatTime(item.endAt)}` },
             { title: '小时', dataIndex: 'durationHours' }, { title: '原因', dataIndex: 'reason' },
             { title: '状态', dataIndex: 'status', render: statusTag },
-            { title: '操作', render: (_: unknown, item: any) => <Space>
-                {item.status === 'SUBMITTED' && !isOwnRecord(item.membershipId) && permissions.has('hr.overtime.approve') && <><Button size="small" onClick={() => mutation.mutate(() => reviewHrOvertimeRequest(item.id, 'APPROVE', item.version))}>通过</Button><Button size="small" danger onClick={() => mutation.mutate(() => reviewHrOvertimeRequest(item.id, 'REJECT', item.version))}>拒绝</Button></>}
-                {item.status === 'SUBMITTED' && item.membershipId === authContext.membership.id && permissions.has('hr.overtime.request') && <Button size="small" onClick={() => mutation.mutate(() => cancelHrOvertimeRequest(item.id, item.version))}>撤销</Button>}
-            </Space> },
+            {
+                title: '操作', render: (_: unknown, item: any) => <Space>
+                    {item.status === 'SUBMITTED' && !isOwnRecord(item.membershipId) && permissions.has('hr.overtime.approve') && <><Button size="small" onClick={() => mutation.mutate(() => reviewHrOvertimeRequest(item.id, 'APPROVE', item.version))}>通过</Button><Button size="small" danger onClick={() => mutation.mutate(() => reviewHrOvertimeRequest(item.id, 'REJECT', item.version))}>拒绝</Button></>}
+                    {item.status === 'SUBMITTED' && item.membershipId === authContext.membership.id && permissions.has('hr.overtime.request') && <Button size="small" onClick={() => mutation.mutate(() => cancelHrOvertimeRequest(item.id, item.version))}>撤销</Button>}
+                </Space>
+            },
         ]} />
     </Card>;
 
@@ -168,10 +183,12 @@ export default function HrManagement({ authContext, onSessionExpired }: { authCo
             { title: '目标部门', dataIndex: 'toDepartmentId', render: (id: string | null) => id ? departmentMap.get(id) ?? id : '-' },
             { title: '目标职位', dataIndex: 'toPosition', render: (value: string | null) => value || '-' },
             { title: '状态', dataIndex: 'status', render: statusTag },
-            { title: '操作', render: (_: unknown, item: HrEmployeeChange) => <Space>
-                {item.status === 'SUBMITTED' && !isOwnRecord(item.membershipId) && permissions.has('hr.employee_change.approve') && <><Button size="small" onClick={() => mutation.mutate(() => reviewHrEmployeeChange(item.id, 'APPROVE', item.version))}>通过并生效</Button><Button size="small" danger onClick={() => mutation.mutate(() => reviewHrEmployeeChange(item.id, 'REJECT', item.version))}>拒绝</Button></>}
-                {['DRAFT', 'SUBMITTED', 'APPROVED'].includes(item.status) && permissions.has('hr.employee_change.manage') && <Button size="small" onClick={() => mutation.mutate(() => cancelHrEmployeeChange(item.id, item.version))}>撤销</Button>}
-            </Space> },
+            {
+                title: '操作', render: (_: unknown, item: HrEmployeeChange) => <Space>
+                    {item.status === 'SUBMITTED' && !isOwnRecord(item.membershipId) && permissions.has('hr.employee_change.approve') && <><Button size="small" onClick={() => mutation.mutate(() => reviewHrEmployeeChange(item.id, 'APPROVE', item.version))}>通过并生效</Button><Button size="small" danger onClick={() => mutation.mutate(() => reviewHrEmployeeChange(item.id, 'REJECT', item.version))}>拒绝</Button></>}
+                    {['DRAFT', 'SUBMITTED', 'APPROVED'].includes(item.status) && permissions.has('hr.employee_change.manage') && <Button size="small" onClick={() => mutation.mutate(() => cancelHrEmployeeChange(item.id, item.version))}>撤销</Button>}
+                </Space>
+            },
         ]} />
     </Card>;
 
@@ -190,6 +207,7 @@ export default function HrManagement({ authContext, onSessionExpired }: { authCo
     return <div className="workspace-page hr-page">
         <header className="hr-header"><div><h1>人力资源</h1><p>员工档案、假勤、考勤、加班、异动与经营报表统一管理</p></div></header>
         <Tabs items={tabs} />
+        <PageAssistant context={pageAssistantContext} suggestions={['查看员工档案概况', '统计本月请假和加班', '找出异常考勤记录', '生成 HR 运营简报']} onExpand={(context, conversationId) => navigate('/', { state: { ...(conversationId ? { conversationId } : { createNewConversation: true }), forceChat: true, assistantContext: context } })} />
 
         <Modal open={dialog === 'profile'} title={editingProfile ? '编辑员工档案' : '新建员工档案'} width={760} confirmLoading={mutation.isPending} onCancel={() => setDialog(null)} onOk={() => void submitProfile()}>
             {!canManageSensitiveProfile && <Alert type="info" showIcon message="敏感字段受保护" description="手机号、邮箱、证件和紧急联系人仅对具有员工敏感档案管理权限的角色开放编辑。" style={{ marginBottom: 16 }} />}

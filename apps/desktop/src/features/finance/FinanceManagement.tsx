@@ -12,10 +12,12 @@ import {
     markFinanceExpenseReportPaid, reviewFinanceExpenseReport, submitFinanceExpenseReport,
     updateFinanceExpenseCategory, updateFinanceExpenseReport, uploadAttachmentFile, withdrawFinanceExpenseReport,
     type DepartmentNode, type FinanceExpenseCategory, type FinanceExpenseItemInput, type FinanceExpenseReport,
-    type FinanceExpenseReportFilters, type FinanceExpenseStatus, type FinancePaymentMethod, type MeResult,
+    type FinanceExpenseReportFilters, type FinanceExpenseStatus, type FinancePaymentMethod, type MeResult, type PageAssistantContext,
 } from '../../core/api';
 import './finance.css';
 import FinanceLedgerPanel from './FinanceLedgerPanel';
+import PageAssistant from '../assistant/PageAssistant';
+import { useNavigate } from 'react-router-dom';
 
 type ReportFormValues = {
     title: string; description?: string; currency: string;
@@ -26,6 +28,7 @@ type CategoryFormValues = { code: string; name: string; description?: string; en
 
 export default function FinanceManagement({ authContext, onSessionExpired }: { authContext: MeResult; onSessionExpired: () => void }): JSX.Element {
     const permissions = new Set(authContext.permissions);
+    const navigate = useNavigate();
     const queryClient = useQueryClient();
     const { message } = AntdApp.useApp();
     const [reportForm] = Form.useForm<ReportFormValues>();
@@ -133,6 +136,12 @@ export default function FinanceManagement({ authContext, onSessionExpired }: { a
     const submittedReports = reports.filter((item) => item.status === 'SUBMITTED');
     const approvalReports = reports.filter((item) => ['SUBMITTED', 'APPROVED', 'REJECTED', 'PAID'].includes(item.status));
     const paymentReports = reports.filter((item) => item.status === 'APPROVED' || item.status === 'PAID');
+    const pageAssistantContext: PageAssistantContext = {
+        source: 'finance-management',
+        role: '财务分析助手',
+        selected: projectSpendProjectId ? { projectId: projectSpendProjectId, projectName: projectMap.get(projectSpendProjectId) ?? null } : undefined,
+        summary: { reportCount: reports.length, pendingApprovalCount: summaryQuery.data?.pendingApprovalCount ?? 0, pendingPaymentAmount: summaryQuery.data?.pendingPaymentAmount ?? 0, paidAmount: summaryQuery.data?.paidAmount ?? 0 },
+    };
 
     return <div className="finance-page">
         <div className="finance-heading">
@@ -191,6 +200,7 @@ export default function FinanceManagement({ authContext, onSessionExpired }: { a
         <CategoryEditor open={categoryDialog} form={categoryForm} editing={editingCategory} busy={mutation.isPending} onCancel={() => setCategoryDialog(false)} onSave={() => void saveCategory()} />
         <PaymentEditor report={paymentReport} form={paymentForm} busy={mutation.isPending} onCancel={() => setPaymentReport(undefined)} onSave={async () => { const values = await paymentForm.validateFields(); mutation.mutate(() => markFinanceExpenseReportPaid(paymentReport!.id, { ...values, paidAt: new Date(values.paidAt).toISOString(), version: paymentReport!.version })); }} />
         <ReportDetail report={detailReport} memberMap={memberMap} departmentMap={departmentMap} categoryMap={categoryMap} projectMap={projectMap} onClose={() => setDetailReport(undefined)} />
+        <PageAssistant context={pageAssistantContext} suggestions={['分析本月费用异常', '查看待审批报销', '按项目汇总支出', '生成财务分析报告']} onExpand={(context, conversationId) => navigate('/', { state: { ...(conversationId ? { conversationId } : { createNewConversation: true }), forceChat: true, assistantContext: context } })} />
     </div>;
 }
 

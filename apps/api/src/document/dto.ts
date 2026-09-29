@@ -81,6 +81,9 @@ export const DOCUMENT_EXPORT_TEMPLATES = [
     'business-standard',
     'editorial-modern',
     'executive-dark',
+    'product-story',
+    'academic-clean',
+    'minimal-mono',
 ] as const;
 
 export type DocumentExportTemplate = typeof DOCUMENT_EXPORT_TEMPLATES[number];

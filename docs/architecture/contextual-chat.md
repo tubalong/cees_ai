@@ -115,6 +115,21 @@ capabilities = ["chat", "vision"]
 
 如果图片消息还需要触发工具调用，该 profile 还需声明 `tool_calling`。图片生成与编辑继续使用独立的 `[image_profiles.*]`，不与聊天视觉模型混用。
 
+图片输入同样需要第二条候选。`_resolve_candidates` 在请求包含图片时只保留声明了 `vision` capability 的 profile，因此只配置一个视觉 profile 时，它一旦返回可重试错误就没有任何回退目标（直接返回 `UNSUPPORTED_MULTIMODAL` 或 provider 错误）。推荐配置「主视觉 + 备用视觉」：
+
+```toml
+[profiles.vision-backup]
+enabled = true
+provider = "openai_compatible"
+model = "your-backup-vision-model"
+base_url = "https://your-provider/v1"
+api_key_env = "QWEN_API_KEY"
+modes = ["text"]
+capabilities = ["chat", "vision", "tool_calling"]
+```
+
+备用视觉 profile 必须与主视觉分处不同厂商，否则同一 provider 故障时两条链路会一起失效。另需注意：`orchestrator` 角色的**所有**候选都必须声明 `tool_calling`，否则候选解析阶段直接返回 `UNSUPPORTED_TOOL_CALLING`，而不是跳过该候选继续回退。
+
 ## 7. 失败语义
 
 - 最后一条消息不是 `user`：`INVALID_CHAT_REQUEST`，HTTP 422；

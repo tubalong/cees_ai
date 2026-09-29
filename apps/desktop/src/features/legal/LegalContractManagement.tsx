@@ -11,9 +11,11 @@ import {
     listTenantMembers, markLegalContractPendingRenewal, renewLegalContract, terminateLegalContract,
     updateLegalContract, uploadAttachmentFile,
     type DepartmentNode, type LegalContract, type LegalContractFilters, type LegalContractInput,
-    type LegalContractStatus, type LegalContractType, type MeResult,
+    type LegalContractStatus, type LegalContractType, type MeResult, type PageAssistantContext,
 } from '../../core/api';
 import './legal.css';
+import PageAssistant from '../assistant/PageAssistant';
+import { useNavigate } from 'react-router-dom';
 
 type ContractFormValues = Omit<LegalContractInput, 'attachmentIds'>;
 
@@ -29,6 +31,7 @@ const typeLabels: Record<LegalContractType, string> = {
 
 export default function LegalContractManagement({ authContext, onSessionExpired }: { authContext: MeResult; onSessionExpired: () => void }): JSX.Element {
     const permissions = new Set(authContext.permissions);
+    const navigate = useNavigate();
     const queryClient = useQueryClient();
     const { message, modal } = AntdApp.useApp();
     const [form] = Form.useForm<ContractFormValues>();
@@ -76,6 +79,12 @@ export default function LegalContractManagement({ authContext, onSessionExpired 
     const memberMap = new Map(members.map((member) => [member.id, member.user.displayName]));
     const departmentMap = new Map(departments.map((department) => [department.id, department.name]));
     const projectMap = new Map(projects.map((project) => [project.id, project.name]));
+    const pageAssistantContext: PageAssistantContext = {
+        source: 'legal-contracts',
+        role: '法务合同助手',
+        selected: detail ? { id: detail.id, name: detail.name, contractNo: detail.contractNo, status: detail.status } : undefined,
+        summary: { contractCount: contracts.length, activeCount: summaryQuery.data?.activeCount ?? 0, expiringCount: summaryQuery.data?.expiringCount ?? 0, pendingRenewalCount: summaryQuery.data?.pendingRenewalCount ?? 0 },
+    };
 
     const openForm = (contract?: LegalContract): void => {
         setEditing(contract);
@@ -108,13 +117,17 @@ export default function LegalContractManagement({ authContext, onSessionExpired 
     const action = (work: () => Promise<unknown>): void => mutation.mutate(work);
     const renew = (contract: LegalContract): void => {
         let newEndDate = contract.endDate ?? '';
-        modal.confirm({ title: '续签合同', content: <Input type="date" defaultValue={newEndDate} onChange={(event) => { newEndDate = event.target.value; }} />,
-            onOk: async () => { if (!newEndDate) throw new Error('请选择新到期日期'); await renewLegalContract(contract.id, { newEndDate, version: contract.version }); refresh(); }, });
+        modal.confirm({
+            title: '续签合同', content: <Input type="date" defaultValue={newEndDate} onChange={(event) => { newEndDate = event.target.value; }} />,
+            onOk: async () => { if (!newEndDate) throw new Error('请选择新到期日期'); await renewLegalContract(contract.id, { newEndDate, version: contract.version }); refresh(); },
+        });
     };
     const terminate = (contract: LegalContract): void => {
         let effectiveDate = new Date().toISOString().slice(0, 10); let reason = '';
-        modal.confirm({ title: '提前终止合同', content: <Space direction="vertical" className="legal-full-width"><Input type="date" defaultValue={effectiveDate} onChange={(event) => { effectiveDate = event.target.value; }} /><Input.TextArea placeholder="终止原因" onChange={(event) => { reason = event.target.value; }} /></Space>,
-            onOk: async () => { if (!reason.trim()) throw new Error('请填写终止原因'); await terminateLegalContract(contract.id, { effectiveDate, reason, version: contract.version }); refresh(); }, });
+        modal.confirm({
+            title: '提前终止合同', content: <Space direction="vertical" className="legal-full-width"><Input type="date" defaultValue={effectiveDate} onChange={(event) => { effectiveDate = event.target.value; }} /><Input.TextArea placeholder="终止原因" onChange={(event) => { reason = event.target.value; }} /></Space>,
+            onOk: async () => { if (!reason.trim()) throw new Error('请填写终止原因'); await terminateLegalContract(contract.id, { effectiveDate, reason, version: contract.version }); refresh(); },
+        });
     };
 
     if (!canRead) return <Card><Typography.Text type="secondary">缺少合同台账读取权限。</Typography.Text></Card>;
@@ -151,16 +164,18 @@ export default function LegalContractManagement({ authContext, onSessionExpired 
             { title: '负责人', dataIndex: 'ownerMembershipId', width: 120, render: (value: string) => memberMap.get(value) ?? value },
             { title: '到期日期', dataIndex: 'endDate', width: 115, render: (value?: string | null) => value ?? '无固定期限' },
             { title: '状态', dataIndex: 'status', width: 95, render: (value: LegalContractStatus) => <Tag color={statusColors[value]}>{statusLabels[value]}</Tag> },
-            { title: '操作', width: 330, fixed: 'right', render: (_: unknown, contract: LegalContract) => <Space wrap>
-                <Button size="small" onClick={() => setDetail(contract)}>详情</Button>
-                {canUpdate && ['DRAFT', 'ACTIVE', 'PENDING_RENEWAL'].includes(contract.status) && <Button size="small" onClick={() => openForm(contract)}>编辑</Button>}
-                {canUpdate && contract.status === 'DRAFT' && <Button size="small" type="primary" onClick={() => action(() => activateLegalContract(contract.id, contract.version))}>激活</Button>}
-                {canUpdate && contract.status === 'ACTIVE' && contract.endDate && <Button size="small" onClick={() => action(() => markLegalContractPendingRenewal(contract.id, contract.version))}>待续签</Button>}
-                {canUpdate && ['PENDING_RENEWAL', 'EXPIRED'].includes(contract.status) && <Button size="small" onClick={() => renew(contract)}>续签</Button>}
-                {canUpdate && ['ACTIVE', 'PENDING_RENEWAL'].includes(contract.status) && <Button size="small" danger onClick={() => terminate(contract)}>终止</Button>}
-                {canUpdate && ['EXPIRED', 'TERMINATED'].includes(contract.status) && <Button size="small" onClick={() => action(() => archiveLegalContract(contract.id, contract.version))}>归档</Button>}
-                {canDelete && contract.status === 'DRAFT' && <Popconfirm title="确认删除该草稿合同？" onConfirm={() => action(() => deleteLegalContract(contract.id, contract.version))}><Button size="small" danger>删除</Button></Popconfirm>}
-            </Space> },
+            {
+                title: '操作', width: 330, fixed: 'right', render: (_: unknown, contract: LegalContract) => <Space wrap>
+                    <Button size="small" onClick={() => setDetail(contract)}>详情</Button>
+                    {canUpdate && ['DRAFT', 'ACTIVE', 'PENDING_RENEWAL'].includes(contract.status) && <Button size="small" onClick={() => openForm(contract)}>编辑</Button>}
+                    {canUpdate && contract.status === 'DRAFT' && <Button size="small" type="primary" onClick={() => action(() => activateLegalContract(contract.id, contract.version))}>激活</Button>}
+                    {canUpdate && contract.status === 'ACTIVE' && contract.endDate && <Button size="small" onClick={() => action(() => markLegalContractPendingRenewal(contract.id, contract.version))}>待续签</Button>}
+                    {canUpdate && ['PENDING_RENEWAL', 'EXPIRED'].includes(contract.status) && <Button size="small" onClick={() => renew(contract)}>续签</Button>}
+                    {canUpdate && ['ACTIVE', 'PENDING_RENEWAL'].includes(contract.status) && <Button size="small" danger onClick={() => terminate(contract)}>终止</Button>}
+                    {canUpdate && ['EXPIRED', 'TERMINATED'].includes(contract.status) && <Button size="small" onClick={() => action(() => archiveLegalContract(contract.id, contract.version))}>归档</Button>}
+                    {canDelete && contract.status === 'DRAFT' && <Popconfirm title="确认删除该草稿合同？" onConfirm={() => action(() => deleteLegalContract(contract.id, contract.version))}><Button size="small" danger>删除</Button></Popconfirm>}
+                </Space>
+            },
         ]} scroll={{ x: 1450 }} />
             {(contractsQuery.hasNextPage || contracts.length > 0) && <Space className="legal-load-more">
                 <Typography.Text type="secondary">已加载 {contracts.length} 条</Typography.Text>
@@ -200,6 +215,7 @@ export default function LegalContractManagement({ authContext, onSessionExpired 
             <Typography.Title level={5}>附件</Typography.Title>{detail.attachments.length ? detail.attachments.map((attachment) => <Tag key={attachment.id}>{attachment.originalName}</Tag>) : <Typography.Text type="secondary">暂无附件</Typography.Text>}
             <Typography.Title level={5}>状态历史</Typography.Title><Timeline items={detail.statusHistory.map((history) => ({ children: `${statusLabels[history.toStatus]} · ${new Date(history.createdAt).toLocaleString()}${history.comment ? ` · ${history.comment}` : ''}` }))} />
         </>}</Drawer>
+        <PageAssistant context={pageAssistantContext} suggestions={['查看即将到期合同', '找出高风险合同', '分析合同归属和负责人', '生成合同风险简报']} onExpand={(context, conversationId) => navigate('/', { state: { ...(conversationId ? { conversationId } : { createNewConversation: true }), forceChat: true, assistantContext: context } })} />
     </div>;
 }
 

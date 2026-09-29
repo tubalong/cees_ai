@@ -27,6 +27,8 @@ import { TenantContext } from '../../tenant/tenant-context';
 import { describeAssistantError } from '../assistant.errors';
 import {
   ConnectorContextInput,
+  GenerationOptionsInput,
+  PageAssistantContextInput,
   isTerminalTurnStatus,
   PublicTurn,
   PublicTurnCapabilities,
@@ -105,6 +107,8 @@ export class TurnRunnerService implements OnModuleDestroy {
     imageFileIds?: string[];
     documentFileIds?: string[];
     connectorContexts?: ConnectorContextInput[];
+    assistantContext?: PageAssistantContextInput;
+    generationOptions?: GenerationOptionsInput;
     /** 未显式指定时使用会话的默认模式。 */
     mode?: PublicTurnMode;
     /** 本轮是否允许检索知识库；省略时默认关闭。 */
@@ -144,6 +148,8 @@ export class TurnRunnerService implements OnModuleDestroy {
       connectorContexts,
       input.knowledgeBaseEnabled ?? false,
       input.webSearchEnabled ?? false,
+      input.assistantContext,
+      input.generationOptions,
     );
 
     // 本轮有效能力 = 用户显式开关 ∪ 服务端意图识别结果。意图识别只把用户
@@ -207,6 +213,8 @@ export class TurnRunnerService implements OnModuleDestroy {
       permissions: context.permissions,
       capabilities,
       signal: abortController.signal,
+      assistantContext: input.assistantContext,
+      generationOptions: input.generationOptions,
     });
 
     return { turnId: turn.id };
@@ -265,6 +273,8 @@ export class TurnRunnerService implements OnModuleDestroy {
     permissions: string[];
     /** 本轮有效能力（显式开关 ∪ 意图识别），决定哪些检索工具可进入模型工具列表。 */
     capabilities: PublicTurnCapabilities;
+    assistantContext?: PageAssistantContextInput;
+    generationOptions?: GenerationOptionsInput;
     signal: AbortSignal;
   }): Promise<void> {
     try {
@@ -328,6 +338,8 @@ export class TurnRunnerService implements OnModuleDestroy {
     requestId: string;
     mode: PublicTurnMode;
     capabilities: PublicTurnCapabilities;
+    assistantContext?: PageAssistantContextInput;
+    generationOptions?: GenerationOptionsInput;
     signal: AbortSignal;
   }): Promise<void> {
     const { turnId, conversation } = input;
@@ -342,7 +354,8 @@ export class TurnRunnerService implements OnModuleDestroy {
     // 未启用的能力通过可信 instructions 告知模型，避免它凭记忆编造外部/内部信息，
     // 并引导它在用户确有需求时提示开启开关或改写为明确请求。
     const guidance = buildCapabilityGuidance(input.capabilities);
-    if (guidance) chatRequest.instructions = guidance;
+    const instructions = combineAssistantInstructions(guidance, input.assistantContext, input.generationOptions);
+    if (instructions) chatRequest.instructions = instructions;
     if (input.signal.aborted) return;
 
     const upstream = await this.gateway.streamChat(
@@ -397,6 +410,8 @@ export class TurnRunnerService implements OnModuleDestroy {
     permissions: string[];
     allowedTools: ReturnType<ToolRegistryService['listAllowed']>;
     capabilities: PublicTurnCapabilities;
+    assistantContext?: PageAssistantContextInput;
+    generationOptions?: GenerationOptionsInput;
     signal: AbortSignal;
   }): Promise<void> {
     const { turnId, conversation } = input;
@@ -425,7 +440,7 @@ export class TurnRunnerService implements OnModuleDestroy {
         user_id: input.userId,
         conversation_id: conversation.id,
         mode: input.mode === 'ultra' ? 'ultra' : 'standard',
-        instructions: buildCapabilityGuidance(input.capabilities) ?? null,
+        instructions: combineAssistantInstructions(buildCapabilityGuidance(input.capabilities), input.assistantContext, input.generationOptions),
         conversation_summary: messages.summary ?? null,
         user_memories: messages.userMemories.length > 0 ? messages.userMemories : null,
         messages: messages.items,
@@ -1063,6 +1078,8 @@ function hashTurnRequest(
   connectorContexts: readonly ConnectorContextInput[] = [],
   knowledgeBaseEnabled = false,
   webSearchEnabled = false,
+  assistantContext?: PageAssistantContextInput,
+  generationOptions?: GenerationOptionsInput,
 ): string {
   return createHash('sha256')
     .update(JSON.stringify({
@@ -1074,8 +1091,46 @@ function hashTurnRequest(
       connectorContexts,
       knowledgeBaseEnabled,
       webSearchEnabled,
+      assistantContext,
+      generationOptions,
     }))
     .digest('hex');
+}
+
+function combineAssistantInstructions(guidance: string | null, assistantContext?: PageAssistantContextInput, generationOptions?: GenerationOptionsInput): string | null {
+  const instructions: string[] = [];
+  if (assistantContext) {
+    const context = normalizePageAssistantContext(assistantContext);
+    instructions.push(
+      `当前页面角色：${context.role}`,
+      `当前页面来源：${context.source}`,
+      `当前页面结构化摘要：${JSON.stringify({ selected: context.selected ?? null, summary: context.summary ?? null })}`,
+      '以上页面上下文仅用于理解用户当前工作位置，不代表权限或业务事实；查询和写入仍必须调用受控工具并遵守权限与确认流程。',
+    );
+  }
+  if (generationOptions) instructions.push(`当前生成参数（不要原样展示给用户）：${JSON.stringify(normalizeGenerationOptions(generationOptions))}`);
+  if (guidance) instructions.push(guidance);
+  return instructions.length ? instructions.join('\n') : null;
+}
+
+function normalizeGenerationOptions(input: GenerationOptionsInput): GenerationOptionsInput {
+  if (input.kind !== 'image' && input.kind !== 'document') throw new BadRequestException({ code: 'GENERATION_OPTIONS_INVALID', message: '生成参数类型无效' });
+  return { kind: input.kind, ...(input.aspectRatio ? { aspectRatio: input.aspectRatio } : {}), ...(input.quality ? { quality: input.quality } : {}), ...(input.template ? { template: input.template } : {}) };
+}
+
+function normalizePageAssistantContext(input: PageAssistantContextInput): PageAssistantContextInput {
+  const allowedSources: PageAssistantContextInput['source'][] = ['project-management', 'finance-management', 'legal-contracts', 'knowledge-management', 'organization-management', 'hr-management'];
+  if (!allowedSources.includes(input.source)) {
+    throw new BadRequestException({ code: 'PAGE_ASSISTANT_CONTEXT_INVALID', message: '页面助手上下文来源无效' });
+  }
+  if (typeof input.role !== 'string' || input.role.trim().length === 0 || input.role.length > 80) {
+    throw new BadRequestException({ code: 'PAGE_ASSISTANT_CONTEXT_INVALID', message: '页面助手角色无效' });
+  }
+  const serialized = JSON.stringify(input);
+  if (Buffer.byteLength(serialized, 'utf8') > 16 * 1024) {
+    throw new BadRequestException({ code: 'PAGE_ASSISTANT_CONTEXT_TOO_LARGE', message: '页面助手上下文过大，请缩小当前页面范围后重试' });
+  }
+  return { source: input.source, role: input.role.trim(), selected: input.selected, summary: input.summary };
 }
 
 function normalizeConnectorContexts(input: readonly ConnectorContextInput[] | undefined): ConnectorContextInput[] {
