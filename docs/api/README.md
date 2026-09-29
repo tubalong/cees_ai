@@ -465,6 +465,12 @@ GET    /api/v1/projects/{projectId}/tasks/{taskId}/activities
 - Prisma 新增 `20260920031236_assistant_turn_related_questions` 迁移：`assistant_turns` 增加 `related_questions` JSONB 列；
 - 详细业务边界见 [Assistant / Conversation API](assistant-api.md)，架构说明见 [公开 AI 对话链路与上下文压缩](../architecture/contextual-chat.md)。
 
+## 编排决策模型角色说明（2026-09-29，内部契约 0.8.0）
+
+- ai-service 内部契约版本由 `0.7.0` 提升为 `0.8.0`；`ModelRole` 兼容新增 `orchestration_decision`，用于 AI 任务编排的原子决策调用（结构化输出 `{choice, confidence, rationale}`，服务端按 JSON Schema 校验并失败重试一次）；
+- 不新增端点：调用走既有 `POST /internal/v1/llm/invoke` 链路，该角色输出模式为 json_schema；`config/models.*.toml` 的 `[roles]` 需登记 `orchestration_decision`（未登记时该角色不可用，编排侧按"放行提问"兜底并记审计）；
+- 调用方为 NestJS 编排层决策器（`apps/api/src/assistant/orchestration/decider/`），决策语义与演进见 [AI 任务编排技术设计](../architecture/ai-orchestration-technical.md) 第 6 节。
+
 ## 契约事实源
 
 - `packages/contracts/openapi/openapi.yaml` 是 NestJS 公开 API 的事实源。

@@ -40,7 +40,7 @@ export type KnowledgeIndexStatus = {
     epoch: string;
 };
 
-export type ModelRole = 'default' | 'structured' | 'reasoning' | 'rag' | 'orchestrator';
+export type ModelRole = 'default' | 'structured' | 'reasoning' | 'rag' | 'orchestrator' | 'orchestration_decision';
 
 export type MessageRole = 'system' | 'user' | 'assistant';
 

@@ -53,6 +53,7 @@ class ModelRole(StrEnum):
     reasoning = 'reasoning'
     rag = 'rag'
     orchestrator = 'orchestrator'
+    orchestration_decision = 'orchestration_decision'
 
 
 class MessageRole(StrEnum):
