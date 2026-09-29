@@ -57,6 +57,24 @@ describe('SaveToKnowledgeTool', () => {
             });
     });
 
+    it('rejects inline content beyond the streaming tool-argument budget with actionable guidance', () => {
+        // content 是模型逐段吐出的流式工具参数，受工具调用模型输出上限约束。
+        // 超长内容必须在参数校验阶段被拒：模型据此改用 sourceType/sourceId 引用，
+        // 而不是让 JSON 在传输中截断导致整轮以「参数不是合法 JSON」失败。
+        const tooLong = '手'.repeat(801);
+        expect(() => definition?.validate({ content: tooLong, knowledgeBaseId: 'kb-1' }))
+            .toThrow('content 不能超过 800 字符');
+        // 提示必须告诉模型改走引用路径，否则它只会反复重试同样超长的 content。
+        expect(() => definition?.validate({ content: tooLong, knowledgeBaseId: 'kb-1' }))
+            .toThrow('sourceType/sourceId');
+        expect(definition?.validate({ content: '手'.repeat(800), knowledgeBaseId: 'kb-1' }))
+            .toEqual({
+                knowledgeBaseId: 'kb-1',
+                content: '手'.repeat(800),
+                visibilityScope: 'PRIVATE',
+            });
+    });
+
     it('validates optional name and visibility options', () => {
         expect(() => definition?.validate({
             sourceType: 'DOCUMENT',

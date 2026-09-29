@@ -26,7 +26,7 @@ interface Harness {
     prisma: {
         assistantActionDraft: { findFirst: jest.Mock; findMany: jest.Mock; create: jest.Mock; updateMany: jest.Mock };
         toolCall: { updateMany: jest.Mock };
-        conversationMessage: { create: jest.Mock };
+        conversationMessage: { create: jest.Mock; upsert: jest.Mock };
         auditLog: { create: jest.Mock };
         $transaction: jest.Mock;
     };
@@ -39,7 +39,7 @@ function createHarness(): Harness {
     const prisma = {
         assistantActionDraft: { findFirst: jest.fn(), findMany: jest.fn(), create: jest.fn(), updateMany: jest.fn() },
         toolCall: { updateMany: jest.fn() },
-        conversationMessage: { create: jest.fn() },
+        conversationMessage: { create: jest.fn(), upsert: jest.fn() },
         auditLog: { create: jest.fn() },
         $transaction: jest.fn(),
     };
@@ -173,6 +173,7 @@ describe('AssistantActionDraftService', () => {
             harness.prisma.assistantActionDraft.updateMany.mockResolvedValue({ count: 1 });
             harness.prisma.toolCall.updateMany.mockResolvedValue({ count: 1 });
             harness.prisma.conversationMessage.create.mockResolvedValue({});
+            harness.prisma.conversationMessage.upsert.mockResolvedValue({});
             harness.prisma.auditLog.create.mockResolvedValue({});
 
             const result = await harness.service.confirm(DRAFT_ID);
@@ -214,6 +215,7 @@ describe('AssistantActionDraftService', () => {
             harness.prisma.assistantActionDraft.updateMany.mockResolvedValue({ count: 1 });
             harness.prisma.toolCall.updateMany.mockResolvedValue({ count: 1 });
             harness.prisma.conversationMessage.create.mockResolvedValue({});
+            harness.prisma.conversationMessage.upsert.mockResolvedValue({});
             harness.prisma.auditLog.create.mockResolvedValue({});
             const internalSummary = JSON.stringify({
                 type: 'knowledge_base_created',
@@ -237,13 +239,26 @@ describe('AssistantActionDraftService', () => {
             const persistedMessages = harness.prisma.conversationMessage.create.mock.calls.map((call) => call[0] as {
                 data: { role: string; content: string; toolCallId?: string };
             });
-            const internalMessage = persistedMessages.find((message) => message.data.role === 'TOOL');
-            expect(internalMessage?.data.content).toBe(internalSummary);
-            expect(internalMessage?.data.toolCallId).toBe(TOOL_CALL_ID);
             const visibleMessage = persistedMessages.find((message) => message.data.role === 'ASSISTANT')!;
             expect(visibleMessage.data.content).toBe('知识库「产品知识库」已创建，你是该知识库的管理员。');
             expect(visibleMessage.data.content).not.toContain('knowledge_base_id');
             expect(visibleMessage.data.content).not.toContain('MANAGER');
+            // TOOL 消息在草稿生成时已由 turn-state 写入，确认后必须原地更新以带上内部结果
+            // （save_to_knowledge 依赖其中的 knowledge_base_id），而不能用 create 再插一条：
+            // toolCallId 在 conversation_messages 上唯一，重复插入会让结算事务回滚，
+            // 于是「写入已提交但草稿被标记失败」，用户重试后产生重复数据。
+            const toolMessageUpsert = harness.prisma.conversationMessage.upsert.mock.calls[0][0] as {
+                where: { toolCallId: string };
+                update: { content: string };
+                create: { data?: unknown; content: string; toolCallId: string };
+            };
+            expect(toolMessageUpsert.where.toolCallId).toBe(TOOL_CALL_ID);
+            expect(toolMessageUpsert.update.content).toBe(internalSummary);
+            expect(toolMessageUpsert.create.toolCallId).toBe(TOOL_CALL_ID);
+            const createdToolMessages = harness.prisma.conversationMessage.create.mock.calls
+                .map((call) => call[0] as { data: { role: string } })
+                .filter((call) => call.data.role === 'TOOL');
+            expect(createdToolMessages).toHaveLength(0);
             const draftUpdate = harness.prisma.assistantActionDraft.updateMany.mock.calls[1][0] as {
                 data: { resultSummary: string };
             };
@@ -255,6 +270,7 @@ describe('AssistantActionDraftService', () => {
             harness.prisma.assistantActionDraft.updateMany.mockResolvedValue({ count: 1 });
             harness.prisma.toolCall.updateMany.mockResolvedValue({ count: 1 });
             harness.prisma.conversationMessage.create.mockResolvedValue({});
+            harness.prisma.conversationMessage.upsert.mockResolvedValue({});
             harness.prisma.auditLog.create.mockResolvedValue({});
             harness.execute.mockRejectedValue(new Error('connect ECONNREFUSED 10.0.0.5:5432'));
 
@@ -262,6 +278,9 @@ describe('AssistantActionDraftService', () => {
 
             expect(result.status).toEqual('FAILED');
             expect(result.summary).not.toContain('ECONNREFUSED');
+            // 工具可能已经提交了写入、随后在结算阶段失败，因此不能向用户断言
+            // 「未产生业务写入」——那会诱导重试并产生重复数据。
+            expect(result.summary).not.toContain('未产生业务写入');
             const draftUpdate = harness.prisma.assistantActionDraft.updateMany.mock.calls[1][0] as { data: { status: string; errorCode: string } };
             expect(draftUpdate.data.status).toEqual(DraftStatus.FAILED);
             expect(draftUpdate.data.errorCode).toEqual('ACTION_EXECUTION_FAILED');
@@ -274,6 +293,7 @@ describe('AssistantActionDraftService', () => {
             harness.prisma.assistantActionDraft.updateMany.mockResolvedValue({ count: 1 });
             harness.prisma.toolCall.updateMany.mockResolvedValue({ count: 1 });
             harness.prisma.conversationMessage.create.mockResolvedValue({});
+            harness.prisma.conversationMessage.upsert.mockResolvedValue({});
             harness.prisma.auditLog.create.mockResolvedValue({});
 
             await harness.service.confirm(DRAFT_ID);

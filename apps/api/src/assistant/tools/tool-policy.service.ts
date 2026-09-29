@@ -5,9 +5,13 @@ import { ToolRegistryService } from './tool-registry';
 export type ToolRejectionCode = 'UNKNOWN_TOOL' | 'PERMISSION_DENIED' | 'INVALID_ARGUMENTS';
 
 /**
- * 工具审批拒绝错误。message 面向服务端（落库、日志与公开事件的 error 字段）；
- * userFacingSummary 是回喂模型的固定友好文案，不携带权限码、错误码等内部信息，
- * 保证模型输出（含用户诱导场景）不可能泄露系统内部细节。
+ * 工具审批拒绝错误。
+ *
+ * - `message` 会进入公开事件的 error 字段并原样展示给最终用户（桌面端「本次操作未完成」告警的
+ *   说明行），因此必须使用中文可读措辞，不得出现英文变量名、开关名或原始堆栈；工具/权限标识
+ *   可以保留在括号或句尾，用于日志与工单定位。
+ * - `userFacingSummary` 是回喂模型的固定友好文案，不携带权限码、错误码等内部信息，
+ *   保证模型输出（含用户诱导场景）不可能泄露系统内部细节。
  */
 export class ToolPolicyError extends Error {
   constructor(
@@ -33,7 +37,7 @@ export interface ToolApproval {
  */
 @Injectable()
 export class ToolPolicyService {
-  constructor(private readonly registry: ToolRegistryService) {}
+  constructor(private readonly registry: ToolRegistryService) { }
 
   /** 执行前的第二点检查：状态可能已变化，给模型工具列表时通过不代表现在仍可执行。 */
   approve(input: {

@@ -58,3 +58,4 @@
 - [持续集成（CI）](engineering/ci.md)：GitHub Actions 触发条件、必需检查与本地验证命令。
 - [AI 合并冲突修复助手](engineering/ai-conflict-resolver.md)：维护者触发的半自动冲突修复、候选 PR、限制与安全边界。
 - [桌面端状态管理约定](engineering/desktop-state-management.md)：服务端数据、全局 UI 偏好与局部 UI 状态的分层归属约定。
+- [全系统手工测试用例集](engineering/system-manual-test-cases.md)：对话、联网、知识库、图片、文档生成、业务工具、本机能力、连接器与权限边界的人工验收问法与判定标准。

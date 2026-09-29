@@ -253,10 +253,10 @@ export default function ProjectManagement({ authContext, onSessionExpired }: Pro
             {permissions.has('project.create') && <div className="header-actions"><Button type="primary" icon={<PlusOutlined />} onClick={openCreateProject}>{t('新建项目')}</Button></div>}
         </header>
         <section className="project-signal-grid">
-            <Card bordered={false}><span>当前项目</span><strong>{projects.length}</strong><small>{activeProjectCount} 个进行中</small></Card>
-            <Card bordered={false}><span>当前任务</span><strong>{selected ? allTasks.length : '-'}</strong><small>{overdueTaskCount ? `${overdueTaskCount} 个逾期` : '暂无逾期'}</small></Card>
-            <Card bordered={false}><span>完成进度</span><Progress type="circle" percent={completionRate} size={54} strokeColor="var(--primary)" /><small>{selected ? selected.name : '选择项目查看'}</small></Card>
-            <Card bordered={false}><span>协作状态</span><Tag color={selected ? 'processing' : 'default'}>{selected ? '已连接项目上下文' : '等待选择项目'}</Tag><small>可直接询问 AI</small></Card>
+            <Card variant="borderless"><span>当前项目</span><strong>{projects.length}</strong><small>{activeProjectCount} 个进行中</small></Card>
+            <Card variant="borderless"><span>当前任务</span><strong>{selected ? allTasks.length : '-'}</strong><small>{overdueTaskCount ? `${overdueTaskCount} 个逾期` : '暂无逾期'}</small></Card>
+            <Card variant="borderless"><span>完成进度</span><Progress type="circle" percent={completionRate} size={54} strokeColor="var(--primary)" /><small>{selected ? selected.name : '选择项目查看'}</small></Card>
+            <Card variant="borderless"><span>协作状态</span><Tag color={selected ? 'processing' : 'default'}>{selected ? '已连接项目上下文' : '等待选择项目'}</Tag><small>可直接询问 AI</small></Card>
         </section>
         <div className="project-layout">
             <aside className="surface-panel project-list-panel">

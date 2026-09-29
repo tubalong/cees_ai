@@ -16,7 +16,7 @@ export class KnowledgeSearchTool implements OnModuleInit {
     constructor(
         private readonly registry: ToolRegistryService,
         private readonly knowledgeService: KnowledgeService,
-    ) {}
+    ) { }
 
     onModuleInit(): void {
         this.registry.register(this.definition);
@@ -53,10 +53,12 @@ export class KnowledgeSearchTool implements OnModuleInit {
         input: Record<string, unknown>,
     ): Promise<ToolExecutionResult> {
         // 开关兜底校验：正常情况下开关关闭时模型拿不到本工具，这里防止任何绕过路径。
+        // message 会随公开事件直达桌面端并展示给用户，因此使用中文可读措辞；
+        // 工具内部标识保留在句尾，便于日志与工单定位。
         if (!context.knowledgeBaseEnabled) {
             throw new ToolPolicyError(
                 'PERMISSION_DENIED',
-                'knowledgeBaseEnabled=false 时拒绝执行 knowledge_search',
+                '本轮未启用知识库检索，已拒绝执行 knowledge_search',
                 '知识库检索未在本轮对话中启用；请告知用户如需查询知识库可在输入框开启相应选项',
                 ['knowledge_base.query'],
             );

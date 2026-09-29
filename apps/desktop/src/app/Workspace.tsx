@@ -41,6 +41,7 @@ import ManagedDocumentsPage from '../features/documents/ManagedDocumentsPage';
 import AiWorkspaceHome from '../features/dashboard/AiWorkspaceHome';
 import { useDateFormatter, useI18n } from '../core/i18n';
 import { toUserErrorMessage } from '../core/user-error';
+import { usePreferences } from './preferences';
 import PageAssistant from '../features/assistant/PageAssistant';
 import DomainWorkbenchPage from '../features/dashboard/DomainWorkbenchPage';
 
@@ -340,6 +341,8 @@ function extractWeComAuthorizationRequests(
 
 interface ToolFailureNotice {
     toolCallId: string;
+    /** 失败的工具名（如 web_search）；用于在提示里直接给出「开启并重试」的入口。 */
+    toolName?: string;
     status: 'failed' | 'rejected';
     /** 可展示给用户的失败原因（不含参数快照）。 */
     message: string;
@@ -951,6 +954,7 @@ function WeComAuthorizationCard({ request, retrying, onRetry }: {
 function AssistantPage({ permissions, authContext, landing = false, historyOnly = false }: { permissions: string[]; authContext: MeResult; landing?: boolean; historyOnly?: boolean }): JSX.Element {
     const { t } = useI18n();
     const { message, modal } = AntdApp.useApp();
+    const preferences = usePreferences();
     const location = useLocation();
     const navigate = useNavigate();
     const navigationState = location.state as AssistantNavigationState | null;
@@ -962,8 +966,9 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
     const [selectedPrompt, setSelectedPrompt] = useState<string>();
     const [generationOptions, setGenerationOptions] = useState<GenerationOptions>();
     const [mode, setMode] = useState<'standard' | 'ultra'>('standard');
-    const [networkSearch, setNetworkSearch] = useState(Boolean(navigationState?.webSearchEnabled));
-    const [knowledgeBase, setKnowledgeBase] = useState(Boolean(navigationState?.knowledgeBaseEnabled));
+    // 优先用导航参数（页面助手等显式指定），其次用上次的开关状态，最后才落到固定默认。
+    const [networkSearch, setNetworkSearch] = useState(navigationState?.webSearchEnabled ?? preferences.webSearchPreference ?? false);
+    const [knowledgeBase, setKnowledgeBase] = useState(navigationState?.knowledgeBaseEnabled ?? preferences.knowledgeSearchPreference ?? false);
     const [autoEnabledCapabilities, setAutoEnabledCapabilities] = useState<Array<'web_search' | 'knowledge_search'>>([]);
     const [attachment, setAttachment] = useState<{ name: string; id: string; isImage: boolean }>();
     const [uploadingAttachment, setUploadingAttachment] = useState(false);
@@ -1090,36 +1095,36 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
 
     useEffect(() => {
         if (initialConversationLoadStarted.current) return; initialConversationLoadStarted.current = true;
-        let cancelled = false;
         const createNewConversation = navigationState?.createNewConversation === true;
         if (navigationState?.source === 'DINGTALK_CONNECTOR') setPreferredConnector('dingtalk');
         if (navigationState?.source === 'TENCENT_MEETING_CONNECTOR') setPreferredConnector('tencent-meeting');
         if (navigationState?.source === 'WECOM_CONNECTOR') setPreferredConnector('wecom');
         if (navigationState?.source === 'GITHUB_CONNECTOR') setPreferredConnector('github');
+        // 不能用 cleanup 里的 cancelled 标志：React 18 StrictMode 在开发模式下
+        // 会执行「挂载 → 清理 → 再挂载」，清理会把标志置为已取消、再挂载又被上面的
+        // run-once 守卫直接拦下，结果是首次请求的返回值被丢弃，历史列表永远为空
+        // （生产构建不做双调用，因此只在开发环境复现）。
+        // 这里改为只依赖 run-once 守卫：真正卸载后 setState 在 React 18 下是空操作。
         void listConversations()
             .then(async (result) => {
-                if (cancelled) return;
                 setConversations(result.items);
                 if (navigationState?.conversationId) {
                     const target = result.items.find((item) => item.id === navigationState.conversationId);
-                    if (target && !cancelled) await selectConversation(target);
+                    if (target) await selectConversation(target);
                 } else if (createNewConversation) {
                     try {
-                        if (cancelled) return;
                         await createAndActivateConversation();
                     } catch (error) {
-                        if (cancelled) return;
                         message.error(toUserErrorMessage(error, t('创建会话失败')));
                         if (result.items[0]) await selectConversation(result.items[0]);
                     } finally {
-                        if (!cancelled) navigate(location.pathname, { replace: true, state: null });
+                        navigate(location.pathname, { replace: true, state: null });
                     }
                     return;
                 }
-                if (!cancelled && (!landing || historyOnly) && result.items[0]) await selectConversation(result.items[0]);
+                if ((!landing || historyOnly) && result.items[0]) await selectConversation(result.items[0]);
             })
-            .catch((error) => { if (!cancelled) message.error(toUserErrorMessage(error, t('加载会话失败'))); });
-        return () => { cancelled = true; };
+            .catch((error) => { message.error(toUserErrorMessage(error, t('加载会话失败'))); });
     }, []);
     useEffect(() => {
         const connector = window.cees?.connectors?.dingtalk;
@@ -1530,8 +1535,12 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
             setMessages((items) => [...items, userMessage]);
             const conversationId = activeConversationId ?? (await createConversation()).id;
             setActiveConversationId(conversationId);
-            if (!conversations.some((item) => item.id === conversationId)) setConversations((items) => [{ id: conversationId, title: t('新对话'), mode, visibility: 'PRIVATE', version: 1, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }, ...items]);
-            let turnId = ''; let seq = 0; let answer = ''; let terminal = false; const streamingMessageId = `streaming-${Date.now()}`; const resources = new Map<string, ChatResource>(); const sources: ChatSource[] = []; const citations: ChatCitation[] = []; const toolTypes = new Map<string, ChatResource['type']>(); const toolFormats = new Map<string, ChatResource['format']>(); const toolFailures = new Map<string, ToolFailureNotice>();
+            if (!conversations.some((item) => item.id === conversationId)) setConversations((items) => [{ id: conversationId, title: '', mode, visibility: 'PRIVATE', version: 1, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }, ...items]);
+            // 会话标题由服务端在首轮完成后写入（setTitleFromFirstUserMessage）。
+            // 本地占位标题为空，侧栏回退显示「新对话」；完成后需回填服务端真实标题，
+            // 否则侧栏会一直停在「新对话」。
+            let turnId = ''; let seq = 0; let answer = ''; let terminal = false; const streamingMessageId = `streaming-${Date.now()}`; const resources = new Map<string, ChatResource>(); const sources: ChatSource[] = []; const citations: ChatCitation[] = []; const toolTypes = new Map<string, ChatResource['type']>(); const toolFormats = new Map<string, ChatResource['format']>(); const toolFailures = new Map<string, ToolFailureNotice>(); const toolNames = new Map<string, string>();
+            const needsTitleBackfill = !conversations.find((item) => item.id === activeConversationId)?.title;
             // 待确认写操作不再挂在消息上（改为页面级抽屉，见 pendingDrafts）：
             // 消息是流式重建的，挂在消息上既只能显示最后一条，刷新后也不可恢复。
             const updateStreamingMessage = (): void => setMessages((items) => [...items.filter((item) => item.id !== streamingMessageId), { id: streamingMessageId, role: 'assistant', content: answer, resources: [...resources.values()], sources: [...sources], citations: [...citations], toolFailures: [...toolFailures.values()], weComAuthorizations }]);
@@ -1542,6 +1551,7 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
                 if (event.type === 'started') { turnId = event.turnId; setActiveTurn({ conversationId, turnId, seq }); setAutoEnabledCapabilities(event.capabilities?.autoEnabled ?? []); }
                 if (event.type === 'content_delta') { answer += event.text; if (!streamFlush.current) streamFlush.current = setTimeout(() => { streamFlush.current = undefined; updateStreamingMessage(); }, 50); }
                 if (event.type === 'tool_call') {
+                    toolNames.set(event.toolCallId, event.name);
                     if (event.name === 'generate_document' || event.name === 'generate_docx' || event.name === 'generate_pdf' || event.name === 'generate_pptx' || event.name === 'generate_xlsx') {
                         toolTypes.set(event.toolCallId, 'DOCUMENT');
                         if (event.name !== 'generate_document') toolFormats.set(event.toolCallId, event.name.replace('generate_', '') as ChatResource['format']);
@@ -1564,6 +1574,7 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
                     // 不展示就等于用户只知道「失败了」，只能反复重试。
                     toolFailures.set(event.toolCallId, {
                         toolCallId: event.toolCallId,
+                        toolName: toolNames.get(event.toolCallId),
                         status: event.status,
                         message: event.error?.message || t('操作未完成'),
                     });
@@ -1590,6 +1601,11 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
                         setActiveTurn(undefined);
                     }
                     if (event.finishReason === 'length') message.warning(t('回答达到长度上限，内容可能不完整'));
+                    if (needsTitleBackfill && version === requestVersion.current) {
+                        void listConversations()
+                            .then((result) => { if (version === requestVersion.current) setConversations(result.items); })
+                            .catch(() => undefined);
+                    }
                 }
             };
             const replay = async (): Promise<void> => {
@@ -1657,6 +1673,15 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
         navigate('/');
     };
 
+    /** 取某条消息之前最近的一条用户提问；「开启并重试」需要原样重发同一问题。 */
+    const previousUserPrompt = (index: number): string | undefined => {
+        for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+            const candidate = messages[cursor];
+            if (candidate?.role === 'user' && candidate.content.trim()) return candidate.content;
+        }
+        return undefined;
+    };
+
     return <div className={`assistant-layout ${activeChat ? 'is-active-chat' : ''} ${historyVisible && !showLanding ? 'has-history' : ''} ${showLanding ? 'is-landing' : ''} ${previewDocument ? 'has-preview' : ''}`}>
         {!showLanding && historyVisible && <aside className="conversation-list">
             <div className="conversation-heading"><h2>{t('对话')}</h2><span><Button type="primary" icon={<PlusOutlined />} onClick={newConversation}>{t('新对话')}</Button><button className="conversation-collapse" type="button" onClick={() => setHistoryVisible(false)} aria-label={t('收起历史')}><ChevronLeft size={16} /></button></span></div>
@@ -1671,7 +1696,7 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
             <header className="chat-header"><span><button type="button" className="chat-back" onClick={returnToLanding} aria-label={t('返回首页')}><ArrowLeft size={16} /></button><i><CeesLogo /></i><strong>{t('CEES AI')}</strong></span><span>{activeTurn && <Button size="small" danger onClick={() => { abortController.current?.abort(); setImageGenerating(false); void cancelTurn(activeTurn.conversationId, activeTurn.turnId).finally(() => setActiveTurn(undefined)); }}>{t('停止生成')}</Button>}</span></header>
             <div className="message-stream-shell">
                 <div className="message-stream" ref={messageStream} onScroll={syncActiveQuestion}>
-                    {messages.map((item) => <div className={`chat-message ${item.role}`} key={item.id} ref={item.role === 'user' ? (element) => { if (element) questionAnchors.current.set(item.id, element); else questionAnchors.current.delete(item.id); } : undefined}>
+                    {messages.map((item, index) => <div className={`chat-message ${item.role}`} key={item.id} ref={item.role === 'user' ? (element) => { if (element) questionAnchors.current.set(item.id, element); else questionAnchors.current.delete(item.id); } : undefined}>
                         {item.role === 'assistant' && <i className="assistant-avatar"><CeesLogo /></i>}
                         <div className="chat-message-body">
                             <div className="chat-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownRenderComponents}>{item.content}</ReactMarkdown></div>
@@ -1681,13 +1706,26 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
                                 retrying={sending}
                                 onRetry={() => void sendMessage(request.originalQuery, 'wecom')}
                             />)}
-                            {item.toolFailures?.map((failure) => <Alert
-                                key={failure.toolCallId}
-                                type={failure.status === 'failed' ? 'error' : 'warning'}
-                                showIcon
-                                className="chat-tool-failure"
-                                message={t('本次操作未完成')}
-                                description={failure.message} />)}
+                            {item.toolFailures?.map((failure) => {
+                                // 检索类工具被开关拦下时，用户看到的不该只是「未完成」：
+                                // 直接给出开启入口并重发同一问题，避免用户回到输入框找开关。
+                                const retryTool = failure.toolName === 'web_search' || failure.toolName === 'knowledge_search' ? failure.toolName : undefined;
+                                return <Alert
+                                    key={failure.toolCallId}
+                                    type={failure.status === 'failed' ? 'error' : 'warning'}
+                                    showIcon
+                                    className="chat-tool-failure"
+                                    message={t('本次操作未完成')}
+                                    description={failure.message}
+                                    action={retryTool ? <Button size="small" onClick={() => {
+                                        const prompt = previousUserPrompt(index);
+                                        if (!prompt) return;
+                                        const enableWebSearch = retryTool === 'web_search';
+                                        if (enableWebSearch) { preferences.setWebSearchPreference(true); setNetworkSearch(true); }
+                                        else { preferences.setKnowledgeSearchPreference(true); setKnowledgeBase(true); }
+                                        void sendMessage(prompt, undefined, { webSearch: enableWebSearch || networkSearch, knowledgeSearch: !enableWebSearch || knowledgeBase });
+                                    }}>{retryTool === 'web_search' ? t('开启联网搜索并重试') : t('开启知识库检索并重试')}</Button> : undefined} />;
+                            })}
                             {item.resources?.map((resource) => <ChatResourceCard key={chatResourceKey(resource)} resource={resource} onPreviewDocument={setPreviewDocument} onSaveToKnowledge={canSaveToKnowledge ? setSaveTarget : undefined} />)}
                             {item.sources?.length ? <div className="chat-sources">{item.sources.map((source) => <ChatSourceCard key={source.id} source={source} />)}</div> : null}
                             {item.citations?.length ? <div className="chat-sources">{groupCitations(item.citations).map((citation) => <KnowledgeCitationCard key={citation.id} citation={citation} onDeleted={handleCitationDeleted} />)}</div> : null}
@@ -1748,8 +1786,8 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
                         <div className="composer-footer">
                             <Dropdown trigger={['click']} menu={{ items: [{ key: 'upload', icon: <Upload size={16} />, label: '上传文件或图片', onClick: () => { if (!sending && !uploadingAttachment) fileInput.current?.click(); } }, { key: 'image', icon: <ImagePlus size={16} />, label: '生成图片', onClick: () => { setSelectedPrompt('生成图片'); setGenerationOptions({ kind: 'image', aspectRatio: 'square', quality: 'standard' }); } }, { key: 'document', icon: <FileTextIcon size={16} />, label: '生成文档', onClick: () => { setSelectedPrompt('生成文档'); setGenerationOptions({ kind: 'document', template: 'editorial-modern' }); } }, { key: 'spreadsheet', icon: <FileTextIcon size={16} />, label: '上传台账表格', onClick: () => { if (!sending && !uploadingAttachment) fileInput.current?.click(); } }] }}><Button type="text" className="composer-add" icon={<PlusOutlined />} disabled={sending || uploadingAttachment} /></Dropdown>
                             <input ref={fileInput} type="file" hidden accept="image/*,.pdf,.doc,.docx,.txt,.md,.xlsx,.xls,.csv" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; if (!file || sending || uploadingAttachment) return; setUploadingAttachment(true); void uploadAttachmentFile(file).then((id) => setAttachment({ name: file.name, id, isImage: file.type.startsWith('image/') })).catch((error) => message.error(toUserErrorMessage(error, '附件上传失败'))).finally(() => setUploadingAttachment(false)); }} />
-                            <Button type="text" className={`composer-option ${networkSearch ? 'is-selected' : ''}`} icon={<Globe2 size={15} />} onClick={() => setNetworkSearch((value) => !value)}>联网搜索</Button>
-                            <Button type="text" className={`composer-option ${knowledgeBase ? 'is-selected' : ''}`} icon={<BookOpen size={15} />} onClick={() => setKnowledgeBase((value) => !value)}>知识库</Button>
+                            <Button type="text" className={`composer-option ${networkSearch ? 'is-selected' : ''}`} icon={<Globe2 size={15} />} onClick={() => setNetworkSearch((value) => { preferences.setWebSearchPreference(!value); return !value; })}>联网搜索</Button>
+                            <Button type="text" className={`composer-option ${knowledgeBase ? 'is-selected' : ''}`} icon={<BookOpen size={15} />} onClick={() => setKnowledgeBase((value) => { preferences.setKnowledgeSearchPreference(!value); return !value; })}>知识库</Button>
                             {dingtalkConnected ? <Tag color="success">{t('钉钉已连接')}</Tag> : null}
                             <Select className="composer-mode" size="small" value={mode} onChange={setMode} options={[{ label: '快速模式', value: 'standard' }, { label: '深度模式', value: 'ultra' }]} />
                             <Button type="primary" className="composer-send" icon={<Send size={16} />} loading={sending || uploadingAttachment} disabled={uploadingAttachment} onClick={(event) => { event.preventDefault(); event.stopPropagation(); void sendMessage(); }}>{uploadingAttachment ? '上传中' : '发送'}</Button>

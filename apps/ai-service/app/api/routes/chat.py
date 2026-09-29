@@ -44,6 +44,7 @@ from app.chat.tool_turn import PreparedToolTurn, ToolTurnOrchestrator
 from app.core.config import ModelProfile
 from app.core.errors import (
     AIServiceError,
+    ProviderOutputError,
     ProviderPermanentError,
     ProviderTransientError,
     describe_provider_rejection,
@@ -308,6 +309,29 @@ async def _tool_turn_stream_events(
             code=rejection.code,
             message=rejection.message,
             retryable=rejection.retryable,
+        )
+        return
+    except ProviderOutputError as exc:
+        # 工具参数不是合法 JSON：常见原因是参数被输出上限截断（例如让模型把长文档
+        # 内联进工具参数）。专用错误码让 NestJS 能给出可执行的中文提示，
+        # 而不是落到下面的笼统 INTERNAL_ERROR。
+        logger.warning(
+            "llm tool turn stream produced invalid tool arguments",
+            extra={
+                "request_id": payload.request_id,
+                "profile": routed.profile_name,
+                "error_category": type(exc).__name__,
+                "detail": str(exc),
+            },
+        )
+        yield _encode_stream_error(
+            request_id=payload.request_id,
+            code="LLM_TOOL_ARGUMENTS_INVALID",
+            message=(
+                "tool call arguments were incomplete, usually truncated by the "
+                "output token limit"
+            ),
+            retryable=False,
         )
         return
     except Exception as exc:

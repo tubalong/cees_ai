@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import {
     clearPlatformSession, clearSession, getMe, getPlatformMe, hasStoredPlatformSession,
     activateTenantInvitation, hasStoredSession, login, persistLogin, persistPlatformLogin, platformLogin,
+    setSessionExpiredHandler,
     type ActivateTenantInvitationInput, type LoginInput, type LoginResult, type MeResult, type PlatformLoginInput,
     type PlatformLoginResult, type PlatformMeResult,
 } from '../core/api';
@@ -206,6 +207,13 @@ export default function App(): JSX.Element {
             setAuthState('anonymous');
         });
     }, [authDomain, authState]);
+
+    // 会话在后台被判定失效（刷新令牌过期或已撤销）时，立即回到登录页，
+    // 避免工作台停留在已登录外观、仅遗留持续 401 的轮询请求。
+    useEffect(() => {
+        setSessionExpiredHandler(() => setAuthState('anonymous'));
+        return () => setSessionExpiredHandler(undefined);
+    }, []);
 
     const handleLogin = (result: LoginResult, remember: boolean): void => {
         persistLogin(result, remember);

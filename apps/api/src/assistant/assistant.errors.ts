@@ -39,6 +39,18 @@ export function describeAssistantError(error: unknown): PublicAssistantError {
     };
   }
 
+  if (error.code === 'LLM_TOOL_ARGUMENTS_INVALID') {
+    // 模型输出的工具参数不完整，最常见原因是被输出上限截断（例如试图把长文档
+    // 内联进工具参数）。给用户可执行的下一步，而不是笼统的「AI 请求失败」。
+    return {
+      code: error.code,
+      message: '模型这次生成的工具参数不完整（内容过多被截断）。请缩小本次请求的范围后重试；'
+        + '长文档请先上传附件或先生成文档，再让助手引用保存。',
+      retryable: false,
+      status: HttpStatus.BAD_GATEWAY,
+    };
+  }
+
   return {
     code: error.code,
     message: error.message,
