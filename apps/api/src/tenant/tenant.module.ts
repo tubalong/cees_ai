@@ -11,12 +11,13 @@ import { TenantContextInterceptor } from './tenant-context.interceptor';
 import { TenantController } from './tenant.controller';
 import { TenantGuard } from './tenant.guard';
 import { TenantService } from './tenant.service';
+import { TenantTimeZoneService } from './tenant-time-zone.service';
 
 @Global()
 @Module({
     imports: [AuthModule, RbacModule],
     controllers: [TenantController, TenantInvitationController, TenantInvitationAcceptanceController],
-    providers: [TenantContext, TenantContextInterceptor, TenantGuard, TenantService, TenantInvitationService],
-    exports: [TenantContext, TenantContextInterceptor, TenantGuard, TenantService, TenantInvitationService],
+    providers: [TenantContext, TenantContextInterceptor, TenantGuard, TenantService, TenantInvitationService, TenantTimeZoneService],
+    exports: [TenantContext, TenantContextInterceptor, TenantGuard, TenantService, TenantInvitationService, TenantTimeZoneService],
 })
 export class TenantModule { }

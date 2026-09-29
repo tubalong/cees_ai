@@ -122,6 +122,21 @@ export interface ConnectorRoutingCandidateInput {
   toolCount?: number;
 }
 
+/** 最近一轮对话摘要，只用于消解代词与省略表达，不作为业务事实。 */
+export interface ConnectorRoutingRecentMessageInput {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+/**
+ * 路由请求的对话上下文。两个字段都是客户端自报：
+ * `previousProviders` 必须先与就绪候选集求交后才可作为提示，不能当作授权。
+ */
+export interface ConnectorRoutingContextInput {
+  previousProviders?: ConnectorRoutingProvider[];
+  recentMessages?: ConnectorRoutingRecentMessageInput[];
+}
+
 export interface ConnectorRoutingResult {
   providers: ConnectorRoutingProvider[];
   clarification: string | null;

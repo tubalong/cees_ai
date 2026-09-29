@@ -2,6 +2,7 @@ import { BadGatewayException, BadRequestException } from '@nestjs/common';
 import type { ToolTurnStreamEvent } from '@cees/ai-service-client';
 import type { AiServiceGateway } from '../../ai-orchestration/ai-service-gateway.service';
 import type { TenantContext } from '../../tenant/tenant-context';
+import type { TenantTimeZoneService } from '../../tenant/tenant-time-zone.service';
 import type { WeComConnectorToolInput } from '../assistant.types';
 import {
   MODEL_TOOL_DESCRIPTION_MAX_LENGTH,
@@ -202,6 +203,7 @@ describe('WeComConnectorPlannerService', () => {
     return new WeComConnectorPlannerService(
       { streamToolTurn } as unknown as AiServiceGateway,
       { require: () => context } as unknown as TenantContext,
+      { resolve: async () => 'Asia/Shanghai' } as unknown as TenantTimeZoneService,
     );
   }
 });

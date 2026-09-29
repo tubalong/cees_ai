@@ -14,6 +14,8 @@ import {
 const ROOT_DEPARTMENT_ID = '1';
 const MAX_DEPARTMENTS = 5000;
 const MAX_USERS = 20000;
+/** 非 JSON 文本兜底的单条上限，与 sanitizeConnectorData 的字符串截断保持一致。 */
+const MAX_UNPARSED_TEXT_LENGTH = 4000;
 let managedExecutablePath: string | null = null;
 const dwsTransport = new LocalCliTransport({
     resolveExecutable: resolveDwsExecutable,
@@ -352,6 +354,35 @@ export async function runDwsJson(
         }
     }
     throw new Error('DWS 查询重试失败');
+}
+
+/**
+ * 只读查询的宽松解析。DWS 个别只读命令（例如 `dev connect list`）在缺少 JSON 开关时
+ * 返回纯文本（`no connectors found`），严格解析会整轮报「无法解析的 JSON 数据」。
+ * 这里在 JSON 解析失败时保留原始文本，让模型看到真实返回并如实转述；执行本身失败
+ * （非零退出码）仍由 runDws 抛出命令错误，不会走到这条兜底分支。
+ */
+export async function runDwsJsonOrText(
+    args: string[],
+    timeout: number,
+    envOverrides: NodeJS.ProcessEnv = {},
+): Promise<unknown> {
+    const output = await runDws(args, timeout, envOverrides);
+    return parseJsonOutputOrText(output);
+}
+
+/** JSON 优先、纯文本兜底的解析；独立出来便于单测覆盖兜底语义。 */
+export function parseJsonOutputOrText(output: string): unknown {
+    try {
+        return parseJsonOutput(output);
+    } catch {
+        const text = output.trim();
+        if (!text) return { unparsedText: '', note: 'DWS 未返回任何内容' };
+        return {
+            unparsedText: text.slice(0, MAX_UNPARSED_TEXT_LENGTH),
+            note: 'DWS 未返回 JSON，以上为原始文本输出；请如实转述，不要臆造字段',
+        };
+    }
 }
 
 export async function readDingTalkDwsSchema(cliPath?: string): Promise<unknown> {

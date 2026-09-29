@@ -3,6 +3,7 @@ import type { ChatToolDefinition, ToolCall } from '@cees/ai-service-client';
 import { randomUUID } from 'node:crypto';
 import { AiServiceGateway } from '../../ai-orchestration/ai-service-gateway.service';
 import { TenantContext } from '../../tenant/tenant-context';
+import { TenantTimeZoneService } from '../../tenant/tenant-time-zone.service';
 import type {
   ConnectorPreviousStepInput,
   DingTalkConnectorPlannedCall,
@@ -14,6 +15,7 @@ import {
   connectorPreviousStepsInstructions,
   MODEL_TOOL_LIMIT,
   renderConnectorPreviousSteps,
+  renderCurrentTimeInstructions,
   splitConnectorFollowUpCalls,
 } from './model-tool-definition';
 
@@ -39,6 +41,7 @@ export class DingTalkConnectorPlannerService {
   constructor(
     private readonly gateway: AiServiceGateway,
     private readonly tenantContext: TenantContext,
+    private readonly tenantTimeZone: TenantTimeZoneService,
   ) {}
 
   async plan(
@@ -47,6 +50,7 @@ export class DingTalkConnectorPlannerService {
     previousSteps: ConnectorPreviousStepInput[] = [],
   ): Promise<{ calls: DingTalkConnectorPlannedCall[]; followUpMayBeNeeded: boolean }> {
     const context = this.tenantContext.require();
+    const timeZone = await this.tenantTimeZone.resolve(context.tenantId);
     if (Buffer.byteLength(JSON.stringify(tools), 'utf8') > MAX_TOOL_CATALOG_BYTES) {
       throw new BadRequestException('钉钉 DWS 工具目录过大');
     }
@@ -78,6 +82,7 @@ export class DingTalkConnectorPlannerService {
       instructions: [
         'You plan read-only DingTalk DWS queries for a desktop connector.',
         'Call tools only when the user needs current DingTalk data available through the supplied tools.',
+        ...renderCurrentTimeInstructions(new Date(), timeZone),
         'Prefer CEES composite tools and DWS shortcut tools that resolve the current user or recursively collect complete data.',
         'For personal attendance or punch-record questions, prefer the CEES personal attendance tool named cees.my_attendance_records when it is present. Its time fields are already normalized; never recalculate timestamps or treat workDate as a clock time.',
         'When the user asks whether personal attendance data can be queried, use a matching no-argument personal attendance tool to verify instead of answering from assumptions.',

@@ -17,6 +17,7 @@ import {
     readDingTalkDwsSchema,
     runDws,
     runDwsJson,
+    runDwsJsonOrText,
     type DingTalkDwsSnapshot,
     type DingTalkDwsStatus,
 } from './dingtalk-dws';
@@ -38,7 +39,13 @@ const MAX_TOOL_COUNT = 1500;
 const MAX_CALLS = 3;
 const TOOL_ID_PATTERN = /^dws_read_[a-f0-9]{16}$/;
 const UNSAFE_PARAMETER_PATTERN = /(?:token|secret|cookie|authorization|credential|password|app[-_]?key|app[-_]?secret)/i;
-const CONTROL_PARAMETERS = new Set(['help', 'format', 'output', 'jq', 'fields', 'dry-run', 'confirm', 'confirmed', 'force', 'yes']);
+/**
+ * 由连接器自己接管、不交给模型的 CLI 控制参数。
+ * `json` 单独列出：DWS 部分命令（例如 `dev connect list`）用布尔开关 `--json` 输出 JSON，
+ * 而不是 `--format json`；连接器始终需要可解析的 JSON，因此必须由这里统一补开关，
+ * 不能留给模型填，也不能出现在模型可见的工具 Schema 里。
+ */
+const CONTROL_PARAMETERS = new Set(['help', 'format', 'json', 'output', 'jq', 'fields', 'dry-run', 'confirm', 'confirmed', 'force', 'yes']);
 const ATTENDANCE_RECORD_TOOL_NAMES = new Set([
     'attendance.shortcut_my_attendance',
     'attendance.shortcut_check_record',
@@ -582,10 +589,11 @@ export async function executeDingTalkReadCalls(calls: DingTalkConnectorPlannedCa
             .find((item) => item.toolId === call.toolId && item.name === tool.name && item.cliPath === tool.cliPath);
         if (!current) throw new Error('钉钉 DWS 工具安全属性已变化，已拒绝执行');
         const args = buildDwsArguments(current, call.arguments);
-        const payload = await runDwsJson(args, 60_000);
-        const data = ATTENDANCE_RECORD_TOOL_NAMES.has(current.name)
-            ? normalizeDingTalkAttendanceContext(payload)
-            : sanitizeConnectorData(payload);
+        // 考勤记录要先拿到真正的 JSON 才能做确定性换算，因此不走文本兜底；
+        // 其余只读工具在 DWS 返回纯文本时保留原文，避免把「查询成功但无数据」变成解析失败。
+        const isAttendanceRecord = ATTENDANCE_RECORD_TOOL_NAMES.has(current.name);
+        const payload = isAttendanceRecord ? await runDwsJson(args, 60_000) : await runDwsJsonOrText(args, 60_000);
+        const data = isAttendanceRecord ? normalizeDingTalkAttendanceContext(payload) : sanitizeConnectorData(payload);
         contexts.push(connectorContext(current, data));
     }
     if (Buffer.byteLength(JSON.stringify(contexts), 'utf8') > MAX_CONTEXT_BYTES) {
@@ -1098,6 +1106,10 @@ export function buildDwsArguments(tool: DiscoveredDwsTool, input: Record<string,
     for (const [name, parameter] of Object.entries(tool.rawParameters)) {
         if (name === 'format') {
             args.push('--format', 'json');
+            continue;
+        }
+        if (name === 'json' && normalizeJsonType(parameter.type) === 'boolean') {
+            args.push('--json');
             continue;
         }
         if (CONTROL_PARAMETERS.has(name) || UNSAFE_PARAMETER_PATTERN.test(name)) continue;

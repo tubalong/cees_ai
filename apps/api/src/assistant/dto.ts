@@ -24,6 +24,7 @@ import type {
   ConnectorContextInput,
   ConnectorPreviousStepInput,
   ConnectorRoutingCandidateInput,
+  ConnectorRoutingRecentMessageInput,
   ConnectorRoutingProvider,
   ConnectorRoutingState,
   DingTalkConnectorToolInput,
@@ -369,6 +370,18 @@ export class ConnectorRoutingCandidateDto implements ConnectorRoutingCandidateIn
   toolCount?: number;
 }
 
+export class ConnectorRoutingRecentMessageDto implements ConnectorRoutingRecentMessageInput {
+  @ApiProperty({ enum: ['user', 'assistant'] })
+  @IsIn(['user', 'assistant'])
+  role!: 'user' | 'assistant';
+
+  @ApiProperty({ minLength: 1, maxLength: 2000 })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(2000)
+  content!: string;
+}
+
 export class RouteConnectorRequestDto {
   @ApiProperty({ maxLength: 10000 })
   @IsString()
@@ -383,6 +396,21 @@ export class RouteConnectorRequestDto {
   @Type(() => ConnectorRoutingCandidateDto)
   @ValidateNested({ each: true })
   connectors!: ConnectorRoutingCandidateDto[];
+
+  @ApiPropertyOptional({ enum: ['DINGTALK', 'TENCENT_MEETING', 'WECOM', 'GITHUB'], maxItems: 8 })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(8)
+  @IsIn(['DINGTALK', 'TENCENT_MEETING', 'WECOM', 'GITHUB'], { each: true })
+  previousProviders?: ConnectorRoutingProvider[];
+
+  @ApiPropertyOptional({ type: [ConnectorRoutingRecentMessageDto], maxItems: 6 })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(6)
+  @Type(() => ConnectorRoutingRecentMessageDto)
+  @ValidateNested({ each: true })
+  recentMessages?: ConnectorRoutingRecentMessageDto[];
 }
 
 export class CreateConversationRequestDto {

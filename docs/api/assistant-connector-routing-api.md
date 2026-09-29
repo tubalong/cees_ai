@@ -4,6 +4,8 @@
 
 公开契约 `0.44.0` 新增 `POST /assistant/connectors/route` 与 `CreateTurnRequest.connectorRoutingHint`。两者都是兼容新增：不带提示的轮次请求哈希与升级前一致，因此部署后客户端重试同一 `Idempotency-Key` 不会被误判成「同键不同内容」。客户端需要重新生成。
 
+公开契约 `0.54.0` 为同一端点补齐**对话上下文**：请求可选新增 `recentMessages`（≤6 条，每条 ≤2000 字）与 `previousProviders`（≤8 个，去重）。同样是兼容新增，响应 `ConnectorRoutingResult` 与 `connectorRoutingHint` 语义均未改变；`packages/api-client` 需重新生成。
+
 路由只决定「本轮该试哪些连接器」，不改变任何既有 `POST /assistant/connectors/<provider>/plan` 的语义，也不放宽权限：被命中的连接器仍要走二级规划、目录校验、风险确认和 Desktop 本地执行。
 
 ## 2. `POST /assistant/connectors/route`
@@ -13,6 +15,11 @@ Desktop 在触发连接器规划前提交查询和一级能力摘要：
 ```json
 {
   "query": "把明天的会整理成纪要发到项目群",
+  "previousProviders": ["TENCENT_MEETING"],
+  "recentMessages": [
+    { "role": "user", "content": "我今天的会议有哪些" },
+    { "role": "assistant", "content": "你今天有两场会议。" }
+  ],
   "connectors": [
     {
       "provider": "DINGTALK",
@@ -42,6 +49,8 @@ Desktop 在触发连接器规划前提交查询和一级能力摘要：
 - `connectors` 为 1~8 条，同一 `provider` 不能重复（重复返回 400）。
 - 只有 `state=READY` 的连接器参与路由；`state` 取值与 Desktop `ConnectorState` 一致（`NOT_INSTALLED`/`AUTH_REQUIRED`/`PROFILE_REQUIRED`/`READY`/`ERROR`）。
 - 没有就绪连接器、或只有一个就绪连接器时不调用模型，直接返回确定性结果（后者是「单连接器不存在歧义」的短路）。
+- `recentMessages` 与 `previousProviders` 只用于消解代词与省略式追问（例如「那这个月的呢」「还有呢」），避免省略表达被当成全新话题而路由到错误连接器；两者都不作为业务事实。
+- `previousProviders` 是**客户端自报**字段：服务端必须先与就绪候选集求交（未就绪或目录外的 provider 一律丢弃）后才可作为提示，且绝不能当作授权依据。这与 `ConnectorContext` 的 `riskLevel`、`confirmed` 自报口径一致。
 - 有歧义时返回 `providers: []` 加 `clarification`；`clarification` 非空时 `providers` 一定为空。
 - 一次请求最多一次模型调用（工具式结构化选择 `select_connectors`，不解析自由文本），不执行任何外部调用，不接触凭据。
 - 移动端当前不执行连接器，暂未接入该接口。
@@ -65,8 +74,9 @@ Desktop 在触发连接器规划前提交查询和一级能力摘要：
 ## 5. Desktop 调用顺序
 
 1. 用户消息命中点名识别（钉钉 / 腾讯会议 / 企业微信 / GitHub 关键词），或从连接器卡片进入对话（`preferredConnector` / `forcedConnector`）→ 直接硬命中，不调用本接口；
-2. 否则调用本接口，只对返回的 `provider` 调用既有 `POST /assistant/connectors/<provider>/plan`；
-3. `clarification` 非空 → 不调用任何 `/plan`，把提示作为 `connectorRoutingHint` 提交给本轮对话。
+2. 否则调用本接口，并把最近 6 轮对话与上一轮尝试过的 provider 作为上下文一并提交；
+3. 只对返回的 `provider` 调用既有 `POST /assistant/connectors/<provider>/plan`；
+4. `clarification` 非空 → 不调用任何 `/plan`，把提示作为 `connectorRoutingHint` 提交给本轮对话。
 
 ## 6. 相关文档
 

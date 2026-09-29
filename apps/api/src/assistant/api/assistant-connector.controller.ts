@@ -33,7 +33,10 @@ export class AssistantConnectorController {
   @ApiOkResponse({ description: '返回需要激活的 provider 列表；clarification 非空时 Desktop 不得规划或执行任何连接器调用' })
   async routeConnectors(@Body() input: RouteConnectorRequestDto) {
     try {
-      return await this.connectorRouting.route(input.query, input.connectors);
+      return await this.connectorRouting.route(input.query, input.connectors, {
+        previousProviders: input.previousProviders,
+        recentMessages: input.recentMessages,
+      });
     } catch (error) {
       throw toAssistantHttpException(error);
     }
