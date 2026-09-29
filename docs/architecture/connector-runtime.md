@@ -11,6 +11,7 @@
 - 已落地企业微信官方 CLI 托管安装、二维码机器人授权、动态 Schema、API 无副作用规划和 Desktop 确认执行；
 - 已落地 GitHub 官方远程 MCP、OAuth PKCE、官方 MCP SDK、动态工具目录、API 无副作用规划和 Desktop 确认执行；
 - 已落地连接器语义路由：Desktop 只上报一级能力摘要（`ConnectorManifest.capabilitySummary` / `routingExamples`），由 `POST /assistant/connectors/route` 决定本轮激活哪些连接器，不接收工具目录与凭据；
+- 已落地连接器调用分级审计：上下文随轮次上报客户端自报的 `ConnectorContext.riskLevel` / `confirmed`，服务端对写/破坏性调用逐条写 `CONNECTOR_WRITE_OPERATION`、对只读调用默认每轮聚合一条 `CONNECTOR_READ_OPERATION`（租户可用 `connectorReadAuditEnabled` 改为逐条）；审计只保留字段白名单摘要，不记录调用参数、本地路径或凭据；
 - 已删除腾讯会议旧服务端 OAuth、Token 托管、固定工具网关和数据表。
 
 ## 2. 目标

@@ -3,6 +3,7 @@ import {
     ArrayMaxSize,
     ArrayUnique,
     IsArray,
+    IsBoolean,
     IsEnum,
     IsInt,
     IsIn,
@@ -30,6 +31,10 @@ export class UpdateTenantDto {
     @MinLength(1)
     @MaxLength(64)
     timezone?: string;
+
+    @IsOptional()
+    @IsBoolean()
+    connectorReadAuditEnabled?: boolean;
 
     @IsInt()
     @Min(1)

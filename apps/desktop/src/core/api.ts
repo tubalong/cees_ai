@@ -1600,6 +1600,8 @@ export interface ConnectorContext {
     toolName: string;
     fetchedAt: string;
     data: Record<string, unknown>;
+    riskLevel?: 'READ' | 'WRITE' | 'DESTRUCTIVE';
+    confirmed?: boolean;
 }
 
 export interface DingTalkConnectorTool {

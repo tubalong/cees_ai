@@ -8,6 +8,7 @@
 - 服务端不接受客户端提供的租户 ID 作为授权依据；查询必须按租户与数据范围过滤。
 - AI 服务只接收 NestJS 传入的内部可信上下文，生产环境校验内部 Token 或请求签名。
 - 审计事件记录租户、操作者、请求、资源与扩展元数据。
+- 外部连接器调用只由 Desktop 执行，服务端按分级补写审计：写/破坏性调用逐条写 `CONNECTOR_WRITE_OPERATION`，只读调用默认每轮聚合一条 `CONNECTOR_READ_OPERATION`（租户可用 `connectorReadAuditEnabled` 改为逐条）。metadata 只保留 provider、工具标识、客户端自报的 `riskLevel` / `confirmed`、结果字节数与字段白名单内的状态摘要，不记录调用参数、本地路径、凭据或正文；`riskLevel` / `confirmed` 只是审计分类与留痕，不作为权限判定依据。
 - 平台登录和跨租户管理写入独立 PlatformAuditLog；涉及具体租户的变更同时写入目标租户审计。
 - 租户邀请只保存 Token Hash，明文令牌仅在创建响应中出现一次并通过受控渠道交付；新用户接受邀请时自行设置密码。
 - Secret 只允许来自环境变量或平台 Secrets，示例值一律 `change_me`。

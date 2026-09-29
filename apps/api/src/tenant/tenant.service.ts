@@ -44,7 +44,8 @@ export class TenantService {
         const context = this.tenantContext.require();
         const name = input.name?.trim();
         const timezone = input.timezone?.trim();
-        if (!name && !timezone) {
+        const connectorReadAuditEnabled = input.connectorReadAuditEnabled;
+        if (!name && !timezone && connectorReadAuditEnabled === undefined) {
             throw new BadRequestException({ code: 'TENANT_UPDATE_EMPTY', message: '至少提供一个需要修改的字段' });
         }
         if (timezone && !isValidTimeZone(timezone)) {
@@ -61,6 +62,9 @@ export class TenantService {
         const data: Prisma.TenantUpdateManyMutationInput = { version: { increment: 1 } };
         if (name) data.name = name;
         if (timezone) data.timezone = timezone;
+        if (connectorReadAuditEnabled !== undefined) {
+            data.connectorReadAuditEnabled = connectorReadAuditEnabled;
+        }
 
         await this.prisma.$transaction(async (transaction) => {
             const updated = await transaction.tenant.updateMany({
@@ -73,17 +77,24 @@ export class TenantService {
                     tenantId: context.tenantId,
                     actorUserId: context.userId,
                     actorMembershipId: context.membershipId,
-                    action: !name && timezone ? 'TENANT_TIMEZONE_CHANGED' : 'TENANT_UPDATED',
+                    action: tenantUpdateAction({ name, timezone, connectorReadAuditEnabled }),
                     outcome: AuditOutcome.SUCCESS,
                     resourceType: 'TENANT',
                     resourceId: context.tenantId,
                     requestId: context.requestId,
                     metadata: {
                         actorMembershipId: context.membershipId,
-                        before: { name: current.name, timezone: current.timezone, version: current.version },
+                        before: {
+                            name: current.name,
+                            timezone: current.timezone,
+                            connectorReadAuditEnabled: current.connectorReadAuditEnabled,
+                            version: current.version,
+                        },
                         after: {
                             name: name ?? current.name,
                             timezone: timezone ?? current.timezone,
+                            connectorReadAuditEnabled:
+                                connectorReadAuditEnabled ?? current.connectorReadAuditEnabled,
                             version: current.version + 1,
                         },
                     },
@@ -443,11 +454,28 @@ export class TenantService {
     }
 }
 
+/**
+ * 单字段修改写入专属 action，便于审计检索；改名或同时修改多个字段仍归入 TENANT_UPDATED。
+ */
+function tenantUpdateAction(input: {
+    name?: string;
+    timezone?: string;
+    connectorReadAuditEnabled?: boolean;
+}): string {
+    if (input.name) return 'TENANT_UPDATED';
+    if (input.timezone && input.connectorReadAuditEnabled === undefined) return 'TENANT_TIMEZONE_CHANGED';
+    if (input.connectorReadAuditEnabled !== undefined && !input.timezone) {
+        return 'TENANT_CONNECTOR_READ_AUDIT_CHANGED';
+    }
+    return 'TENANT_UPDATED';
+}
+
 function toTenantResult(tenant: {
     id: string;
     code: string;
     name: string;
     timezone: string;
+    connectorReadAuditEnabled: boolean;
     status: TenantResult['status'];
     version: number;
     createdAt: Date;
@@ -458,6 +486,7 @@ function toTenantResult(tenant: {
         code: tenant.code,
         name: tenant.name,
         timezone: tenant.timezone,
+        connectorReadAuditEnabled: tenant.connectorReadAuditEnabled,
         status: tenant.status,
         version: tenant.version,
         createdAt: tenant.createdAt,

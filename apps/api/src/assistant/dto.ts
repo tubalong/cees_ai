@@ -58,6 +58,16 @@ export class ConnectorContextDto implements ConnectorContextInput {
   @ApiProperty({ type: 'object', additionalProperties: true })
   @IsObject()
   data!: Record<string, unknown>;
+
+  @ApiProperty({ enum: ['READ', 'WRITE', 'DESTRUCTIVE'], required: false })
+  @IsOptional()
+  @IsIn(['READ', 'WRITE', 'DESTRUCTIVE'])
+  riskLevel?: 'READ' | 'WRITE' | 'DESTRUCTIVE';
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsBoolean()
+  confirmed?: boolean;
 }
 
 export class DingTalkConnectorToolDto implements DingTalkConnectorToolInput {

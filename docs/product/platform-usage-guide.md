@@ -1334,6 +1334,7 @@ Prisma 自动维护的迁移历史表，记录迁移名称、校验值、开始/
 | `id` | 租户 UUID |
 | `code` | 全局唯一租户编码，用于租户登录 |
 | `name` | 租户展示名称 |
+| `connector_read_audit_enabled` | 连接器只读调用是否逐条审计，默认 `false`（每轮聚合一条）；写/破坏性调用始终逐条审计 |
 | `status` | `PENDING_ACTIVATION/ACTIVE/SUSPENDED` |
 | `created_at/updated_at` | 创建和更新时间 |
 | `deleted_at` | 软删除时间 |

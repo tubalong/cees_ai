@@ -461,6 +461,8 @@ model Tenant {
   code                      String                         @unique
   name                      String
   timezone                  String                         @default("Asia/Shanghai")
+  /// 连接器读操作是否逐条审计；默认 false 时读调用按轮次级聚合成一条审计，写/破坏性操作始终逐条审计。
+  connectorReadAuditEnabled Boolean                        @default(false) @map("connector_read_audit_enabled")
   status                    TenantStatus                   @default(ACTIVE)
   memberships               TenantMembership[]
   authSessions              AuthSession[]

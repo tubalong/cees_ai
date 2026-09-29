@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CEES AI API
-  version: 0.45.0
+  version: 0.46.0
   description: 以本文件为唯一事实源的公开 API 契约。资源与操作按 docs/api 约定补充。
 
 servers:
@@ -10894,6 +10894,18 @@ components:
           type: object
           additionalProperties: true
           description: 已脱敏的连接器结构化结果，不得包含 Token、Cookie、AppSecret 或授权凭据
+        riskLevel:
+          type: string
+          enum: [READ, WRITE, DESTRUCTIVE]
+          description: >-
+            客户端依据同一次 plan 的工具目录自报的风险等级，只用于服务端分级审计，
+            不作为权限或业务写入依据。省略时按 DESTRUCTIVE 处理（与既有「未识别工具按
+            DESTRUCTIVE」一致），逐条审计而不并入轮次级聚合。
+        confirmed:
+          type: boolean
+          description: >-
+            客户端自报的「本轮执行前已获得用户确认」，只用于审计留痕，不代表服务端授权；
+            服务端不据此放行任何写入。
 
     TencentMeetingConnectorToolRisk:
       type: string
@@ -14148,6 +14160,7 @@ components:
         - code
         - name
         - timezone
+        - connectorReadAuditEnabled
         - status
         - version
         - createdAt
@@ -14176,6 +14189,12 @@ components:
         updatedAt:
           type: string
           format: date-time
+        connectorReadAuditEnabled:
+          type: boolean
+          description: >-
+            连接器读操作是否逐条审计。默认 false：连接器读调用按轮次级聚合成一条
+            CONNECTOR_READ_OPERATION 审计；开启后每次读调用各留一条。写/破坏性操作始终
+            逐条审计，不受该开关影响。修改需要 tenant.update 权限。
 
     UpdateTenantRequest:
       type: object
@@ -14194,6 +14213,9 @@ components:
           description: IANA 时区标识；与 name 至少提供一个，非法标识返回 400 TENANT_TIMEZONE_INVALID
           examples:
             - Asia/Shanghai
+        connectorReadAuditEnabled:
+          type: boolean
+          description: 连接器读操作审计开关；省略表示不修改。与 name / timezone 至少提供一个
         version:
           type: integer
           minimum: 1
