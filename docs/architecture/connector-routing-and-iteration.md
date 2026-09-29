@@ -1,6 +1,6 @@
 # 连接器语义路由、受控多步接力与调用审计（设计草案）
 
-> 状态：**差距一（语义路由）已落地**（契约 `0.44.0`）；差距二（受控多步接力）与差距三（连接器调用审计）仍为设计草案，尚未实现。本文定义目标、边界与改动点；每期实现前必须先落 `packages/contracts`，并按 §9 状态表逐项标注已落地 / 暂缓 / 待确认。
+> 状态：**差距一（语义路由）与差距三（连接器调用审计）已落地**（契约 `0.44.0` / `0.45.0`）；差距二（受控多步接力）仍为设计草案，尚未实现。本文定义目标、边界与改动点；每期实现前必须先落 `packages/contracts`，并按 §9 状态表逐项标注已落地 / 暂缓 / 待确认。
 > Owner：B（`apps/desktop/src/app/**` 与 `apps/api/src/assistant/**` 的唯一 owner）
 > 关联文档：
 > - [Desktop 连接器运行时](connector-runtime.md)：连接器生命周期、凭据位置、动态工具与规划边界
@@ -19,7 +19,7 @@
 
 本文把这三件事定义成可独立交付的三期，并明确不做的事：**不把连接器搬进 `apps/api`，不让 API 接触凭据，不让模型指定可执行文件、网络目标或 Header**。
 
-差距一已按本文实现，接口契约见 [连接器语义路由 API](../api/assistant-connector-routing-api.md)；差距二、差距三的实现范围见 §9 状态表。
+差距一已按本文实现，接口契约见 [连接器语义路由 API](../api/assistant-connector-routing-api.md)；差距三已按 §5 实现，契约见 [API 与契约约定](../api/README.md) 的 `0.45.0` 条目。差距二的实现范围见 §9 状态表。
 
 ## 2. 现状核查
 
@@ -33,7 +33,7 @@
 | 结果限长与脱敏 | 已落地：每连接器 ≤ 56 KiB，剥离 token/secret/cookie/authorization/credential/password/private_key 等键 | 各 `*.connector.ts` 的 `MAX_CONTEXT_BYTES` 与 `sanitizeValue` |
 | 依赖链 | **不支持**：规划期无执行结果，后一条命令不能引用前一条的实时返回值 | [腾讯会议连接器](../product/tencent-meeting-connector.md) §4；腾讯会议因此不开放 `contact` 独立查询 |
 | CEES 自有工具循环 | 已落地：`MAX_TOOL_TURNS = 5`、`MAX_TOOL_STEPS = 10`，工具结果回喂模型继续决策 | `apps/api/src/assistant/runtime/turn-runner.service.ts`（约 :59） |
-| 连接器调用审计 | **缺失**：只对 `provider === 'LOCAL_SYSTEM'` 写审计 | `apps/api/src/assistant/runtime/turn-state.service.ts`（约 :143-176） |
+| 连接器调用审计 | 已落地分级审计：写/破坏性逐条（`CONNECTOR_WRITE_OPERATION`），只读默认按轮次级聚合成一条（`CONNECTOR_READ_OPERATION`），租户可用 `connectorReadAuditEnabled` 改为逐条；只记录字段白名单内的状态摘要 | `apps/api/src/assistant/runtime/turn-state.service.ts` 的 `writeOperationAudits`、`tenants.connector_read_audit_enabled` |
 | 危险操作门禁 | 已落地且**代码强制**：`requiresConfirmation = riskLevel !== 'READ'`，Desktop 在执行前拦截；未识别工具按 `DESTRUCTIVE` | 各 `classify*ToolRisk` |
 
 ## 3. 差距一：语义路由
@@ -148,6 +148,12 @@ Renderer -> 仅对被激活的 provider 调 POST /assistant/connectors/<provider
 
 ## 5. 差距三：连接器调用审计
 
+> **状态：已落地**（契约 `0.45.0`，Prisma 迁移 `20260929120000_connector_read_audit_toggle`）。§5.2 的分级即为现行实现，实现要点与对草案的偏差见 §5.3。
+>
+> - 写/破坏性调用逐条审计（`CONNECTOR_WRITE_OPERATION`）；只读调用默认写一条轮次级聚合审计（`CONNECTOR_READ_OPERATION`）。
+> - 租户级读审计开关落在 `tenants.connector_read_audit_enabled`（默认 `false`），通过既有 `PATCH /tenants/current`（`tenant.update`）修改，未新增专用端点。
+> - metadata 只含 `provider` / `toolId` / `toolName` / `riskLevel` / `confirmed` / `resultBytes` 与字段白名单内的结果状态摘要；`riskLevel` 省略或非法一律按 `DESTRUCTIVE` 处理。
+
 ### 5.1 目标
 
 外部连接器调用在服务端留痕，同时不破坏既有原则：**审计只记动作摘要与字段白名单，绝不记录完整本地路径、凭据或正文**。
@@ -160,8 +166,9 @@ Renderer -> 仅对被激活的 provider 调 POST /assistant/connectors/<provider
 | `READ` | 默认**轮次级聚合**一条：provider 列表、调用数、结果字节数 | `CONNECTOR_READ_OPERATION` |
 | `READ` 逐条（可选） | 租户管理员开启后逐条记录 | 同上的 action + 扩展元数据 |
 
-- 现有 `LOCAL_SYSTEM` 行为不变，只把函数从 `writeLocalOperationAudits` 扩成覆盖连接器的 `writeLocalOperationAudits` + 连接器分支（实现时重命名为 `writeOperationAudits`）。
+- 现有 `LOCAL_SYSTEM` 行为不变：原 `writeLocalOperationAudits` 已重命名为 `writeOperationAudits`，在同一事务内追加连接器分支，本机操作仍逐条审计。
 - `riskLevel` 由 Desktop 依据同一次 plan 的工具目录填充。**它是客户端自报的分类依据，不作为权限判定依据**，权限与业务写入仍只由 `apps/api` 决定。
+- 字节级偏差：`ConnectorContext` 只携带脱敏结果、没有调用参数，因此本期记录的是**结果侧**状态摘要而不是参数摘要；参数摘要（`argumentsDigest`）随差距二的 `previousSteps` 一并引入。
 
 ### 5.3 改动点
 
@@ -171,16 +178,21 @@ Renderer -> 仅对被激活的 provider 调 POST /assistant/connectors/<provider
 | API | `apps/api/src/assistant/dto.ts` | `ConnectorContextDto` 增加可选 `riskLevel`、`confirmed` |
 | 数据 | 新 Prisma 迁移 | 租户级读操作审计开关（见 §5.4） |
 | Desktop | 四个 `*.connector.ts` | 执行结果回传时带上 `riskLevel` 与 `confirmed` |
+| Desktop | `apps/desktop/electron/connectors/core/connector.types.ts` | `ConnectorContext` 增加可选 `riskLevel`、`confirmed`，并随轮次上报（钉钉 DWS 只暴露只读工具，固定 `READ`） |
+| API | `apps/api/src/tenant/{dto,tenant.service,tenant.types}.ts` | `PATCH /tenants/current` 支持该开关；单字段修改写 `TENANT_CONNECTOR_READ_AUDIT_CHANGED` |
+| 数据 | `apps/api/prisma/migrations/20260929120000_connector_read_audit_toggle` | `tenants.connector_read_audit_enabled`（默认 `false`）与字段注释 |
+| 测试 | `apps/api/src/assistant/runtime/turn-state.operation-audit.spec.ts` | 覆盖分级、开关、字段白名单与「缺失 riskLevel 按 DESTRUCTIVE」 |
 
 ### 5.4 契约与迁移
 
-- `ConnectorContext` 增加可选 `riskLevel`（`READ|WRITE|DESTRUCTIVE`）与 `confirmed`（boolean），兼容新增；
-- 租户配置增加 `connectorReadAuditEnabled`（默认 `false`），对应一条 Prisma migration；
-- `docs/security/README.md` 与 `docs/database/README.md` 需同步审计口径与保留策略。
+- `ConnectorContext` 增加可选 `riskLevel`（`READ|WRITE|DESTRUCTIVE`）与 `confirmed`（boolean），兼容新增；省略即旧行为（按 `DESTRUCTIVE` 逐条审计）；
+- `TenantDetail` 增加必填 `connectorReadAuditEnabled`，`UpdateTenantRequest` 增加同名可选字段；
+- 租户配置 `connector_read_audit_enabled`（默认 `false`）由迁移 `20260929120000_connector_read_audit_toggle` 添加，存量租户按默认值回填；
+- `docs/security/README.md` 与 `docs/database/README.md` 已同步审计口径；审计保留策略仍待确认（§10）。
 
-### 5.4 验收
+### 5.5 验收
 
-- 发一条钉钉消息后，审计表出现 `provider=DINGTALK`、`riskLevel=WRITE`、确认结果与参数摘要；
+- 发一条钉钉消息后，审计表出现 `provider=DINGTALK`、`riskLevel=WRITE`、确认结果与结果状态摘要（`action=CONNECTOR_WRITE_OPERATION`）；
 - 纯读查询默认只产生一条轮次级聚合审计；
 - 审计 metadata 不含路径、凭据、正文；即使客户端多传字段也不会被写入（沿用字段白名单提取）；
 - 开启租户开关后读操作逐条留痕。
@@ -218,14 +230,14 @@ Renderer -> 仅对被激活的 provider 调 POST /assistant/connectors/<provider
 | 正则降级为兜底 | 已落地：正则只用于识别点名与未就绪引导，触发连接器改由路由决定 |
 | `previousSteps` 多步接力 | 待实现 |
 | `followUpMayBeNeeded` | 待实现 |
-| 连接器写操作逐条审计 | 待实现 |
-| 连接器读操作轮次级聚合审计 | 待实现 |
-| 租户级读审计开关 | 待实现 |
+| 连接器写操作逐条审计 | 已落地（契约 `0.45.0`，`CONNECTOR_WRITE_OPERATION`） |
+| 连接器读操作轮次级聚合审计 | 已落地（默认，`CONNECTOR_READ_OPERATION` 每轮一条） |
+| 租户级读审计开关 | 已落地（`tenants.connector_read_audit_enabled`，经 `PATCH /tenants/current` 修改） |
 
 ## 10. 待确认问题
 
 1. **第二轮触发判据**：由模型返回 `followUpMayBeNeeded` 提示，还是由 Desktop 按「意图含写操作或多连接器」的确定性规则判断？前者更贴合语义，后者更可预测。
 2. **两轮的总调用上限**：保持合计 ≤ 3，还是放宽到每轮 ≤ 3（合计最多 6）？放宽会增加确认次数与上下文体积。
 3. ~~**路由成本**：每个未点名品牌的问题都会多一次路由模型调用。是否只在「已连接连接器 ≥ 2」时才启用路由，单连接器直接命中？~~ **已决定**：就绪连接器 ≤ 1 时不调用模型，直接返回确定性结果（无就绪连接器返回空，单就绪连接器直接命中）；≥ 2 时才做一次路由模型调用，且未点名的问题才需要它。
-4. **读操作审计默认值**：默认关闭是否足够？安全侧可能希望默认开启轮次级聚合、只有逐条才需要开关。
+4. ~~**读操作审计默认值**：默认关闭是否足够？~~ **已决定**：默认即写入一条轮次级聚合审计（`CONNECTOR_READ_OPERATION`），开关 `connectorReadAuditEnabled` 只决定是否进一步逐条。因此「默认关闭」不会让只读调用完全无痕；开启后按次留痕，代价是审计量级上升。
 5. **审计保留策略**：连接器审计量级远高于现有业务审计，`audit_logs` 是否需要保留期与归档策略（当前未见相关约定）。

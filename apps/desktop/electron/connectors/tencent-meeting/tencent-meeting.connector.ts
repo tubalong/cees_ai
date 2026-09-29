@@ -243,6 +243,8 @@ export async function executeTencentMeetingCalls(
             toolName: tool.name,
             fetchedAt: new Date().toISOString(),
             data,
+            riskLevel: tool.riskLevel ?? 'DESTRUCTIVE',
+            confirmed: call.confirmed === true,
         });
     }
     return contexts;

@@ -15,5 +15,9 @@ export type TenantDetail = {
     version: number;
     createdAt: string;
     updatedAt: string;
+    /**
+     * 连接器读操作是否逐条审计。默认 false：连接器读调用按轮次级聚合成一条 CONNECTOR_READ_OPERATION 审计；开启后每次读调用各留一条。写/破坏性操作始终 逐条审计，不受该开关影响。修改需要 tenant.update 权限。
+     */
+    connectorReadAuditEnabled: boolean;
 };
 

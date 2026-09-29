@@ -122,7 +122,7 @@ export class TurnStateService {
             connectorContexts: (input.connectorContexts ?? []) as unknown as Prisma.InputJsonValue,
           },
         });
-        await this.writeLocalOperationAudits(transaction, input, turn.id);
+        await this.writeOperationAudits(transaction, input, turn.id);
         return turn;
       });
     } catch (error) {
@@ -132,15 +132,20 @@ export class TurnStateService {
   }
 
   /**
-   * 本机操作审计（本机工具计划 §4.6）：云端只记录动作摘要与清单 hash，**不记录完整本地路径**。
+   * 外部操作审计（本机工具计划 §4.6、连接器三期计划 §5）：云端只记录动作摘要与字段白名单，
+   * **不记录完整本地路径、凭据或正文**。
    *
    * 桌面端的本机操作（磁盘扫描、隔离/恢复/清理）结果以 `LOCAL_SYSTEM` 只读上下文随轮次上报，
-   * 此前完全不落审计——用户机器上发生了改动，服务端却没有痕迹。这里在轮次创建事务内补写审计。
+   * 外部连接器调用同样只在客户端执行，服务端此前零记录；两者都在轮次创建事务内补写审计。
    *
    * metadata 按**字段白名单**提取，绝不原样序列化 `context.data`：即使将来客户端多传了路径、
    * 文件名或其它明细，也不会被写进审计表。这是纵深防御，不依赖客户端自觉。
+   *
+   * 分级：本机操作与连接器写/破坏性调用逐条审计；连接器读调用默认按轮次级聚合成一条，
+   * 租户开启 `connectorReadAuditEnabled` 后逐条记录。`riskLevel` 由客户端自报，只影响审计粒度，
+   * 不构成服务端授权。
    */
-  private async writeLocalOperationAudits(
+  private async writeOperationAudits(
     transaction: Prisma.TransactionClient,
     input: {
       tenantId: string;
@@ -151,7 +156,10 @@ export class TurnStateService {
     },
     turnId: string,
   ): Promise<void> {
-    for (const context of input.connectorContexts ?? []) {
+    const contexts = input.connectorContexts ?? [];
+    if (contexts.length === 0) return;
+
+    for (const context of contexts) {
       if (context.provider !== 'LOCAL_SYSTEM') continue;
       await transaction.auditLog.create({
         data: {
@@ -173,6 +181,79 @@ export class TurnStateService {
         },
       });
     }
+
+    const connectorContexts = contexts.filter((context) => isConnectorProvider(context.provider));
+    if (connectorContexts.length === 0) return;
+
+    const auditBase = {
+      tenantId: input.tenantId,
+      actorUserId: input.userId,
+      actorMembershipId: input.membershipId,
+      outcome: AuditOutcome.SUCCESS,
+      resourceType: 'CONNECTOR',
+      resourceId: null,
+      requestId: input.requestId,
+    };
+
+    const writeContexts = connectorContexts.filter((context) => resolveConnectorRiskLevel(context) !== 'READ');
+    for (const context of writeContexts) {
+      await transaction.auditLog.create({
+        data: {
+          ...auditBase,
+          action: 'CONNECTOR_WRITE_OPERATION',
+          metadata: {
+            turnId,
+            ...connectorAuditMetadata(context),
+          } as unknown as Prisma.InputJsonValue,
+        },
+      });
+    }
+
+    const readContexts = connectorContexts.filter((context) => resolveConnectorRiskLevel(context) === 'READ');
+    if (readContexts.length === 0) return;
+
+    if (await this.isConnectorReadAuditEnabled(transaction, input.tenantId)) {
+      for (const context of readContexts) {
+        await transaction.auditLog.create({
+          data: {
+            ...auditBase,
+            action: 'CONNECTOR_READ_OPERATION',
+            metadata: {
+              turnId,
+              aggregated: false,
+              ...connectorAuditMetadata(context),
+            } as unknown as Prisma.InputJsonValue,
+          },
+        });
+      }
+      return;
+    }
+
+    await transaction.auditLog.create({
+      data: {
+        ...auditBase,
+        action: 'CONNECTOR_READ_OPERATION',
+        metadata: {
+          turnId,
+          aggregated: true,
+          providers: [...new Set(readContexts.map((context) => context.provider))].sort(),
+          callCount: readContexts.length,
+          resultBytes: readContexts.reduce((total, context) => total + connectorDataBytes(context.data), 0),
+        } as unknown as Prisma.InputJsonValue,
+      },
+    });
+  }
+
+  /** 租户级连接器读审计开关；缺失（存量数据或未配置）按 false 处理，即默认轮次级聚合。 */
+  private async isConnectorReadAuditEnabled(
+    transaction: Prisma.TransactionClient,
+    tenantId: string,
+  ): Promise<boolean> {
+    const tenant = await transaction.tenant.findUnique({
+      where: { id: tenantId },
+      select: { connectorReadAuditEnabled: true },
+    });
+    return tenant?.connectorReadAuditEnabled === true;
   }
 
   /** 刷新执行租约并写入当前检查点；返回 false 表示 Turn 已被取消或失去所有权。 */
@@ -1027,4 +1108,72 @@ function pickLocalAuditSummary(data: Record<string, unknown>): Record<string, un
     summary[key] = value;
   }
   return summary;
+}
+
+/**
+ * 允许写入连接器审计的结果状态字段白名单（连接器三期计划 §5）。
+ * 值仍按类型收敛：字符串截断、只保留数值映射形式的聚合计数，数组与嵌套对象一律丢弃；
+ * 白名单之外一律不落库，因此客户端多传字段也不会把正文、路径或凭据写进审计表。
+ */
+const CONNECTOR_AUDIT_SUMMARY_KEYS = [
+  'schemaVersion',
+  'status',
+  'executed',
+  'itemCount',
+  'totalCount',
+  'count',
+  'truncated',
+  'elapsedMs',
+  'resultCounts',
+] as const;
+
+function isConnectorProvider(provider: ConnectorContextInput['provider']): boolean {
+  return provider === 'DINGTALK'
+    || provider === 'TENCENT_MEETING'
+    || provider === 'WECOM'
+    || provider === 'GITHUB';
+}
+
+/** 客户端自报风险等级；缺失或非法值一律按 DESTRUCTIVE 处理，保证审计粒度只增不减。 */
+function resolveConnectorRiskLevel(context: ConnectorContextInput): 'READ' | 'WRITE' | 'DESTRUCTIVE' {
+  const level = context.riskLevel;
+  return level === 'READ' || level === 'WRITE' || level === 'DESTRUCTIVE' ? level : 'DESTRUCTIVE';
+}
+
+function connectorDataBytes(data: Record<string, unknown> | undefined): number {
+  return Buffer.byteLength(JSON.stringify(data ?? {}), 'utf8');
+}
+
+function connectorAuditMetadata(context: ConnectorContextInput): Record<string, unknown> {
+  const summary: Record<string, unknown> = {};
+  for (const key of CONNECTOR_AUDIT_SUMMARY_KEYS) {
+    const sanitized = sanitizeConnectorAuditValue(key, context.data?.[key]);
+    if (sanitized === undefined) continue;
+    summary[key] = sanitized;
+  }
+  return {
+    provider: context.provider,
+    toolId: context.toolId,
+    toolName: context.toolName,
+    riskLevel: resolveConnectorRiskLevel(context),
+    confirmed: context.confirmed === true,
+    resultBytes: connectorDataBytes(context.data),
+    summary,
+  };
+}
+
+function sanitizeConnectorAuditValue(key: string, value: unknown): unknown {
+  if (typeof value === 'number' || typeof value === 'boolean') return value;
+  if (typeof value === 'string') return value.slice(0, 120);
+  if (key === 'resultCounts' && value !== null && typeof value === 'object' && !Array.isArray(value)) {
+    const counts: Record<string, number> = {};
+    let kept = 0;
+    for (const [name, count] of Object.entries(value as Record<string, unknown>)) {
+      if (typeof count !== 'number' || kept >= 24) continue;
+      counts[name.slice(0, 60)] = count;
+      kept += 1;
+    }
+    return counts;
+  }
+  return undefined;
 }

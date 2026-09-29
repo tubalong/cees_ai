@@ -139,6 +139,8 @@ Accept: text/event-stream
     "toolId": "dws_read_0123456789abcdef",
     "toolName": "attendance.record.get",
     "fetchedAt": "2026-09-20T08:00:00.000Z",
+    "riskLevel": "READ",
+    "confirmed": false,
     "data": { "date": "2026-09-20", "result": { "records": [] } }
   }]
 }
@@ -169,6 +171,7 @@ Accept: text/event-stream
 
 - API 会将上下文和用户消息一起持久化，重连、重放和模型上下文构建都以数据库记录为准；客户端不提交 DWS Token、Cookie、AppSecret 或其他凭据。
 - 单轮所有连接器上下文最大 64KB；包含 `token`、`secret`、`cookie`、`authorization`、`credential` 或 `password` 等键名时拒绝请求。
+- 每项上下文可携带 `riskLevel`（`READ`/`WRITE`/`DESTRUCTIVE`）与 `confirmed`（boolean），两者都是**客户端自报**、只用于服务端分级审计，不代表服务端授权：写与破坏性调用逐条写 `CONNECTOR_WRITE_OPERATION`，只读调用默认每轮聚合一条 `CONNECTOR_READ_OPERATION`，租户开启 `connectorReadAuditEnabled` 后改为逐条。省略或传入非法 `riskLevel` 一律按 `DESTRUCTIVE` 处理。审计只记录 `provider`/`toolId`/`toolName`/`riskLevel`/`confirmed`/结果字节数与字段白名单内的状态摘要，不记录正文、路径或凭据。
 - 上下文进入模型时包在只读参考标记中，不能成为系统指令、权限依据或正式业务写入依据；连接器当前不支持通过对话修改 CEES 或钉钉数据。
 - 钉钉组织同步仍使用 `POST /api/v1/dingtalk/organization/snapshot`，需要 CEES 租户管理员确认，不通过 `connectorContexts` 绕过组织导入权限。
 

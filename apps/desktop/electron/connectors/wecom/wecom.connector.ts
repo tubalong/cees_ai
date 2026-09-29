@@ -225,6 +225,8 @@ export async function executeWeComCalls(calls: WeComConnectorPlannedCall[]): Pro
             toolName: tool.name,
             fetchedAt: new Date().toISOString(),
             data: limitContext(sanitizeValue(result, 0)),
+            riskLevel: tool.riskLevel ?? 'DESTRUCTIVE',
+            confirmed: call.confirmed === true,
         });
     }
     return contexts;

@@ -7,6 +7,7 @@
 
 ### 契约版本与迁移
 
+- **0.45.0**：连接器调用审计落地。`ConnectorContext` 新增可选 `riskLevel`（`READ|WRITE|DESTRUCTIVE`）与 `confirmed`，服务端据此分级审计：写/破坏性调用逐条留痕，只读调用默认按轮次级聚合成一条；省略 `riskLevel` 按 `DESTRUCTIVE` 处理，旧客户端行为不变。新增租户级开关 `TenantDetail.connectorReadAuditEnabled`（默认 `false`），`UpdateTenantRequest` 可修改（需要 `tenant.update`）。客户端需要重新生成。详见 [连接器语义路由、多步接力与调用审计](../architecture/connector-routing-and-iteration.md) §5。
 - **0.44.0**：新增连接器语义路由 POST /assistant/connectors/route（只接收一级能力摘要，返回需要激活的 provider 与可选 clarification），并给 CreateTurnRequest 增加可选 connectorRoutingHint（≤1000 字，用于消歧反问，不落库、不作为事实或权限依据）。未携带提示的轮次请求哈希与升级前一致，旧客户端的 Idempotency-Key 重试不受影响；客户端需要重新生成。详见 [连接器语义路由 API](assistant-connector-routing-api.md)。
 - **0.43.0**：当前开发基线。新增平台 AI Credit 配置管理 API：`/platform/ai-credit/*` 共 21 个操作（能力目录、档位、费率、订阅参数、加油包、全局计费配置），列表响应统一为 `{ items }` 信封，权限码 `platform.aiCredit.read/write`。客户端需要重新生成。详见 [AI 计费系统设计](../product/ai-credit-system-design.md)。
 - **0.43.0**：新增 GitHub OAuth Broker 配置与授权码换码接口，并保留官方远程 MCP 规划接口；客户端需重新生成。详见 [GitHub 连接器 API](github-connector-api.md)。
