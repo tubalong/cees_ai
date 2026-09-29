@@ -4,6 +4,8 @@
 /* eslint-disable */
 import type { AssistantActionDraftListEnvelope } from '../models/AssistantActionDraftListEnvelope';
 import type { AssistantActionDraftResolutionEnvelope } from '../models/AssistantActionDraftResolutionEnvelope';
+import type { ConnectorRoutingRequest } from '../models/ConnectorRoutingRequest';
+import type { ConnectorRoutingResponseEnvelope } from '../models/ConnectorRoutingResponseEnvelope';
 import type { ConversationDetailResponseEnvelope } from '../models/ConversationDetailResponseEnvelope';
 import type { ConversationListResponseEnvelope } from '../models/ConversationListResponseEnvelope';
 import type { ConversationResponseEnvelope } from '../models/ConversationResponseEnvelope';
@@ -179,6 +181,36 @@ export class ConversationService {
                 401: `Authentication or tenant membership is invalid`,
                 502: `AI provider returned an invalid plan`,
                 503: `AI service or model is temporarily unavailable`,
+            },
+        });
+    }
+    /**
+     * 选择本轮回答需要激活的连接器
+     * Desktop 在触发连接器规划前，先把已连接连接器的一级能力摘要（只含名称、能力描述、典型问法和就绪状态，
+     * 不含完整工具目录）交给服务端。服务端只用模型做语义路由，返回需要激活的 provider 列表，
+     * 不接收凭据、不接收工具参数、不执行任何外部调用。
+     * 用户明确点名某个连接器或从连接器卡片进入对话时，Desktop 直接硬命中，不调用本接口。
+     * 返回的 clarification 非空表示目标不唯一：Desktop 不得调用任何连接器或规划接口，
+     * 只把该提示作为本轮 `connectorRoutingHint` 提交，让模型自然反问。
+     *
+     * @returns ConnectorRoutingResponseEnvelope 需要激活的连接器；providers 为空表示本轮不使用任何连接器
+     * @throws ApiError
+     */
+    public static routeAssistantConnector({
+        requestBody,
+    }: {
+        requestBody: ConnectorRoutingRequest,
+    }): CancelablePromise<ConnectorRoutingResponseEnvelope> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/assistant/connectors/route',
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                400: `查询内容或连接器摘要不合法`,
+                401: `登录状态无效、已过期或缺少有效租户成员身份`,
+                502: `模型返回了目录外的连接器或无效路由结果`,
+                503: `ai-service 或模型暂时不可用`,
             },
         });
     }

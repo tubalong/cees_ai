@@ -4,12 +4,13 @@ import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
 import { TenantContextInterceptor } from '../../tenant/tenant-context.interceptor';
 import { TenantGuard } from '../../tenant/tenant.guard';
 import { DingTalkConnectorPlannerService } from '../connectors/dingtalk-connector-planner.service';
+import { ConnectorRoutingService } from '../connectors/connector-routing.service';
 import { TencentMeetingConnectorPlannerService } from '../connectors/tencent-meeting-connector-planner.service';
 import { WeComConnectorPlannerService } from '../connectors/wecom-connector-planner.service';
 import { GitHubConnectorPlannerService } from '../connectors/github-connector-planner.service';
 import { GitHubOAuthBrokerService } from '../connectors/github-oauth-broker.service';
 import { toAssistantHttpException } from '../assistant.errors';
-import { GitHubOAuthExchangeRequestDto, PlanDingTalkConnectorRequestDto, PlanGitHubConnectorRequestDto, PlanTencentMeetingConnectorRequestDto, PlanWeComConnectorRequestDto } from '../dto';
+import { GitHubOAuthExchangeRequestDto, PlanDingTalkConnectorRequestDto, PlanGitHubConnectorRequestDto, PlanTencentMeetingConnectorRequestDto, PlanWeComConnectorRequestDto, RouteConnectorRequestDto } from '../dto';
 
 @ApiTags('Conversation')
 @ApiBearerAuth()
@@ -18,12 +19,25 @@ import { GitHubOAuthExchangeRequestDto, PlanDingTalkConnectorRequestDto, PlanGit
 @UseInterceptors(TenantContextInterceptor)
 export class AssistantConnectorController {
   constructor(
+    private readonly connectorRouting: ConnectorRoutingService,
     private readonly planner: DingTalkConnectorPlannerService,
     private readonly tencentMeetingPlanner: TencentMeetingConnectorPlannerService,
     private readonly weComPlanner: WeComConnectorPlannerService,
     private readonly githubPlanner: GitHubConnectorPlannerService,
     private readonly githubOAuthBroker: GitHubOAuthBrokerService,
   ) {}
+
+  @Post('route')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: '选择本轮回答需要激活的连接器' })
+  @ApiOkResponse({ description: '返回需要激活的 provider 列表；clarification 非空时 Desktop 不得规划或执行任何连接器调用' })
+  async routeConnectors(@Body() input: RouteConnectorRequestDto) {
+    try {
+      return await this.connectorRouting.route(input.query, input.connectors);
+    } catch (error) {
+      throw toAssistantHttpException(error);
+    }
+  }
 
   @Post('dingtalk/plan')
   @HttpCode(HttpStatus.OK)

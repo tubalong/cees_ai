@@ -1686,6 +1686,38 @@ export async function planGitHubConnectorQueries(
     });
 }
 
+export type ConnectorRoutingProvider = 'DINGTALK' | 'TENCENT_MEETING' | 'WECOM' | 'GITHUB';
+
+/** 参与连接器语义路由的一级目录项；只描述能回答哪类问题，不含工具名、参数或凭据。 */
+export interface ConnectorRoutingCandidate {
+    provider: ConnectorRoutingProvider;
+    displayName: string;
+    capabilitySummary: string;
+    routingExamples?: string[];
+    state: 'NOT_INSTALLED' | 'AUTH_REQUIRED' | 'PROFILE_REQUIRED' | 'READY' | 'ERROR';
+    toolCount?: number;
+}
+
+export interface ConnectorRoutingResult {
+    providers: ConnectorRoutingProvider[];
+    clarification: string | null;
+    reason: string;
+}
+
+/**
+ * 连接器语义路由：只决定本轮该试哪些连接器，不执行任何外部调用、不接收凭据。
+ * clarification 非空时不得再调用任何连接器规划或执行接口，只把提示交给本轮对话让模型反问。
+ */
+export async function routeAssistantConnector(
+    query: string,
+    connectors: ConnectorRoutingCandidate[],
+): Promise<ConnectorRoutingResult> {
+    return authorizedRequest<ConnectorRoutingResult>('v1/assistant/connectors/route', {
+        method: 'POST',
+        body: JSON.stringify({ query, connectors }),
+    });
+}
+
 export interface GitHubOAuthConfig {
     clientId: string;
     authorizationEndpoint: string;
@@ -1736,7 +1768,7 @@ async function streamSse(path: string, init: RequestInit, onEvent: (event: TurnS
     try { while (true) { const { value, done } = await reader.read(); if (done) { consume(decoder.decode()); if (buffer.trim()) throw new Error('事件流意外中断'); break; } consume(decoder.decode(value, { stream: true })); } } finally { reader.releaseLock(); }
 }
 
-export function createTurn(conversationId: string, input: { content: string; mode: ChatMode; imageFileIds?: string[]; fileIds?: string[]; connectorContexts?: ConnectorContext[]; assistantContext?: PageAssistantContext; generationOptions?: GenerationOptions; knowledgeBaseEnabled?: boolean; webSearchEnabled?: boolean }, idempotencyKey: string, onEvent: (event: TurnStreamEvent) => void, signal?: AbortSignal): Promise<void> { return streamSse(`v1/conversations/${encodeURIComponent(conversationId)}/turns`, { method: 'POST', body: JSON.stringify({ content: input.content, mode: input.mode, ...(input.imageFileIds?.length ? { imageFileIds: input.imageFileIds } : {}), ...(input.fileIds?.length ? { fileIds: input.fileIds } : {}), ...(input.connectorContexts?.length ? { connectorContexts: input.connectorContexts } : {}), ...(input.assistantContext ? { assistantContext: input.assistantContext } : {}), ...(input.generationOptions ? { generationOptions: input.generationOptions } : {}), ...(input.knowledgeBaseEnabled ? { knowledgeBaseEnabled: true } : {}), ...(input.webSearchEnabled ? { webSearchEnabled: true } : {}) }), signal, headers: { 'Idempotency-Key': idempotencyKey } }, onEvent); }
+export function createTurn(conversationId: string, input: { content: string; mode: ChatMode; imageFileIds?: string[]; fileIds?: string[]; connectorContexts?: ConnectorContext[]; assistantContext?: PageAssistantContext; generationOptions?: GenerationOptions; knowledgeBaseEnabled?: boolean; webSearchEnabled?: boolean; connectorRoutingHint?: string | null }, idempotencyKey: string, onEvent: (event: TurnStreamEvent) => void, signal?: AbortSignal): Promise<void> { return streamSse(`v1/conversations/${encodeURIComponent(conversationId)}/turns`, { method: 'POST', body: JSON.stringify({ content: input.content, mode: input.mode, ...(input.imageFileIds?.length ? { imageFileIds: input.imageFileIds } : {}), ...(input.fileIds?.length ? { fileIds: input.fileIds } : {}), ...(input.connectorContexts?.length ? { connectorContexts: input.connectorContexts } : {}), ...(input.assistantContext ? { assistantContext: input.assistantContext } : {}), ...(input.generationOptions ? { generationOptions: input.generationOptions } : {}), ...(input.knowledgeBaseEnabled ? { knowledgeBaseEnabled: true } : {}), ...(input.webSearchEnabled ? { webSearchEnabled: true } : {}), ...(input.connectorRoutingHint ? { connectorRoutingHint: input.connectorRoutingHint } : {}) }), signal, headers: { 'Idempotency-Key': idempotencyKey } }, onEvent); }
 export function replayTurnEvents(conversationId: string, turnId: string, afterSeq: number, onEvent: (event: TurnStreamEvent) => void, signal?: AbortSignal): Promise<void> { return streamSse(`v1/conversations/${encodeURIComponent(conversationId)}/turns/${encodeURIComponent(turnId)}/events?afterSeq=${afterSeq}`, { method: 'GET', signal }, onEvent); }
 export async function cancelTurn(conversationId: string, turnId: string): Promise<Turn> { return authorizedRequest<Turn>(`v1/conversations/${encodeURIComponent(conversationId)}/turns/${encodeURIComponent(turnId)}/cancel`, { method: 'POST' }); }
 

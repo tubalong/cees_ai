@@ -10,6 +10,7 @@
 - 已落地腾讯会议官方 CLI 托管安装、浏览器 OAuth、版本化命令 Schema、API 无副作用规划和 Desktop 确认执行；
 - 已落地企业微信官方 CLI 托管安装、二维码机器人授权、动态 Schema、API 无副作用规划和 Desktop 确认执行；
 - 已落地 GitHub 官方远程 MCP、OAuth PKCE、官方 MCP SDK、动态工具目录、API 无副作用规划和 Desktop 确认执行；
+- 已落地连接器语义路由：Desktop 只上报一级能力摘要（`ConnectorManifest.capabilitySummary` / `routingExamples`），由 `POST /assistant/connectors/route` 决定本轮激活哪些连接器，不接收工具目录与凭据；
 - 已删除腾讯会议旧服务端 OAuth、Token 托管、固定工具网关和数据表。
 
 ## 2. 目标
@@ -162,7 +163,7 @@ GitHub Manifest 使用 `REMOTE_MCP`、`DESKTOP`、`OAUTH`，不自动安装第�
 
 GitHub 目录超过候选上限时，规划器固定保留 `search_repositories`、`list_commits`、`get_file_contents`、`list_branches`、`list_pull_requests`、`list_issues` 等仓库类只读工具作为候选（最多 12 个），再由选择器补充其他候选。否则选择器可能在 50 个以上工具里裁掉全部仓库类工具，使「查看我的私有仓库」这类问题只能拿到账号公开资料。
 
-语义路由、受控多步接力和连接器调用审计目前仍是设计草案，均未实现；目标、契约改动与实施顺序见 [连接器语义路由、多步接力与调用审计](connector-routing-and-iteration.md)。
+语义路由已落地：Desktop 只上报一级能力摘要，由 `POST /assistant/connectors/route` 决定本轮激活哪些连接器，被命中的连接器再走上面的二级规划；用户点名连接器或从连接器卡片进入对话时直接硬命中，不调用路由。契约见 [连接器语义路由 API](../api/assistant-connector-routing-api.md)；受控多步接力与连接器调用审计仍是设计草案，见 [连接器语义路由、多步接力与调用审计](connector-routing-and-iteration.md)。
 
 ## 8. 安全边界
 

@@ -24,6 +24,13 @@ export interface ConnectorManifest<ConnectorId extends string = string> {
     id: ConnectorId;
     name: string;
     description: string;
+    /**
+     * 一级能力摘要：供连接器语义路由判断「这条问题该不该试这个连接器」。
+     * 只描述能回答哪类问题，不得包含工具名、参数 Schema、账号或凭据。
+     */
+    capabilitySummary: string;
+    /** 典型用户问法，作为语义路由的匹配示例；最多 5 条短句。 */
+    routingExamples: readonly string[];
     icon: string;
     transportType: ConnectorTransportType;
     executionLocation: ConnectorExecutionLocation;

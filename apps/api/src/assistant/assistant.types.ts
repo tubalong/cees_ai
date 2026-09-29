@@ -84,6 +84,32 @@ export interface GitHubConnectorPlannedCall {
   arguments: Record<string, unknown>;
 }
 
+/** 参与连接器语义路由的本地连接器；LOCAL_SYSTEM 本机工具不参与路由。 */
+export type ConnectorRoutingProvider = 'DINGTALK' | 'TENCENT_MEETING' | 'WECOM' | 'GITHUB';
+
+/** 与 Desktop ConnectorState 一致；只有 READY 的连接器可以被路由命中。 */
+export type ConnectorRoutingState =
+  | 'NOT_INSTALLED'
+  | 'AUTH_REQUIRED'
+  | 'PROFILE_REQUIRED'
+  | 'READY'
+  | 'ERROR';
+
+export interface ConnectorRoutingCandidateInput {
+  provider: ConnectorRoutingProvider;
+  displayName: string;
+  capabilitySummary: string;
+  routingExamples?: string[];
+  state: ConnectorRoutingState;
+  toolCount?: number;
+}
+
+export interface ConnectorRoutingResult {
+  providers: ConnectorRoutingProvider[];
+  clarification: string | null;
+  reason: string;
+}
+
 /** 工具产生的稳定正式资源引用；访问 URL 由对应资源接口按需签发。 */
 export interface PublicResourceReference {
   type: 'IMAGE' | 'DOCUMENT';
