@@ -1,3 +1,5 @@
+import { toUserErrorMessage } from './user-error';
+
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000/api/';
 // export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://192.168.5.29:3000/api/';
 // export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://132.232.159.186:3000/api/';
@@ -664,7 +666,7 @@ export async function exportDocument(
     const suffix = format === 'docx' ? 'export' : `export/${format}`;
     const requestUrl = new URL(`v1/documents/${encodeURIComponent(documentId)}/${suffix}`, API_BASE_URL);
     if (format !== 'docx') requestUrl.searchParams.set('template', template);
-    const response = await fetch(requestUrl, {
+    const response = await userFetch(requestUrl, {
         headers: { Authorization: `Bearer ${accessToken}` },
     });
     if (!response.ok) {
@@ -688,7 +690,7 @@ export async function downloadGeneratedDocumentFile(
 ): Promise<void> {
     const accessToken = getStoredValue(ACCESS_TOKEN_KEY);
     if (!accessToken) throw new Error('登录状态已失效，请重新登录');
-    const response = await fetch(new URL(`v1/documents/${encodeURIComponent(documentId)}/file`, API_BASE_URL), {
+    const response = await userFetch(new URL(`v1/documents/${encodeURIComponent(documentId)}/file`, API_BASE_URL), {
         headers: { Authorization: `Bearer ${accessToken}` },
         redirect: 'follow',
     });
@@ -714,7 +716,7 @@ export async function downloadGeneratedDocumentFile(
 export async function fetchGeneratedDocumentBytes(documentId: string): Promise<Uint8Array> {
     const accessToken = getStoredValue(ACCESS_TOKEN_KEY);
     if (!accessToken) throw new Error('登录状态已失效，请重新登录');
-    const response = await fetch(new URL(`v1/documents/${encodeURIComponent(documentId)}/file`, API_BASE_URL), {
+    const response = await userFetch(new URL(`v1/documents/${encodeURIComponent(documentId)}/file`, API_BASE_URL), {
         headers: { Authorization: `Bearer ${accessToken}` },
         redirect: 'follow',
     });
@@ -774,7 +776,7 @@ export function filenameFromDisposition(disposition: string | null, format: stri
 async function authorizedRequest<T>(path: string, init: RequestInit = {}, retry = true): Promise<T> {
     const accessToken = getStoredValue(ACCESS_TOKEN_KEY);
     if (!accessToken) throw new Error('登录状态已失效，请重新登录');
-    const response = await fetch(new URL(path, API_BASE_URL), {
+    const response = await userFetch(new URL(path, API_BASE_URL), {
         ...init,
         headers: {
             'Content-Type': 'application/json',
@@ -790,7 +792,7 @@ async function authorizedRequest<T>(path: string, init: RequestInit = {}, retry 
 }
 
 async function publicRequest<T>(path: string, init: RequestInit): Promise<T> {
-    const response = await fetch(new URL(path, API_BASE_URL), {
+    const response = await userFetch(new URL(path, API_BASE_URL), {
         ...init,
         headers: { 'Content-Type': 'application/json', ...init.headers },
     });
@@ -823,6 +825,19 @@ async function refreshTokens(): Promise<TokenPair> {
     }
 }
 
+async function userFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+    const controller = init?.signal ? undefined : new AbortController();
+    let timedOut = false;
+    const timeout = controller ? setTimeout(() => { timedOut = true; controller.abort(); }, 60_000) : undefined;
+    try {
+        return await fetch(input, controller ? { ...init, signal: controller.signal } : init);
+    } catch (error) {
+        throw new Error(timedOut ? '请求超时，请稍后重试' : toUserErrorMessage(error, '网络连接失败，请检查网络或服务是否已启动'));
+    } finally {
+        if (timeout) clearTimeout(timeout);
+    }
+}
+
 async function readResponse<T>(response: Response): Promise<T> {
     if (response.status === 204) return undefined as T;
     const body = await readBody(response);
@@ -841,10 +856,10 @@ async function readBody(response: Response): Promise<ApiSuccess<unknown> | ApiEr
 function getErrorMessage(body: ApiSuccess<unknown> | ApiErrorBody | undefined): string {
     if (!body || 'success' in body) return '请求失败，请稍后重试';
     const details = body.error?.details;
-    if (Array.isArray(details) && typeof details[0] === 'string') return details[0];
+    if (Array.isArray(details) && typeof details[0] === 'string') return toUserErrorMessage(details[0]);
     const message = body.message ?? body.error?.message;
-    if (Array.isArray(message)) return message[0] ?? '请求失败，请稍后重试';
-    return message ?? '请求失败，请稍后重试';
+    if (Array.isArray(message)) return toUserErrorMessage(message[0], '请求失败，请稍后重试');
+    return toUserErrorMessage(message, '请求失败，请稍后重试');
 }
 
 function getStoredValue(key: string): string | null {
@@ -949,7 +964,7 @@ export async function removePlatformTenantAdministrator(tenantId: string, member
 async function platformAuthorizedRequest<T>(path: string, init: RequestInit = {}, retry = true): Promise<T> {
     const accessToken = getStoredValue(PLATFORM_ACCESS_TOKEN_KEY);
     if (!accessToken) throw new Error('平台登录状态已失效，请重新登录');
-    const response = await fetch(new URL(path, API_BASE_URL), {
+    const response = await userFetch(new URL(path, API_BASE_URL), {
         ...init,
         headers: {
             'Content-Type': 'application/json',
@@ -1489,8 +1504,8 @@ export async function createUploadSession(input: CreateUploadSessionInput, idemp
 }
 
 export async function uploadToPresignedUrl(url: string, headers: Record<string, string>, blob: Blob): Promise<void> {
-    const response = await fetch(url, { method: 'PUT', headers, body: blob });
-    if (!response.ok) throw new Error(`文件直传失败（HTTP ${response.status}）`);
+    const response = await userFetch(url, { method: 'PUT', headers, body: blob });
+    if (!response.ok) throw new Error(`文件上传失败，请稍后重试（状态码 ${response.status}）`);
 }
 
 export async function completeUploadSession(uploadSessionId: string): Promise<UploadSessionCompleted> {
@@ -1526,6 +1541,18 @@ export interface Turn { id: string; conversationId: string; status: 'RECEIVED' |
 export interface ImageAccess { id: string; resourceId: string; mimeType: 'image/png' | 'image/jpeg' | 'image/webp'; sizeBytes: number; url: string; prompt?: string | null; model?: string | null; createdAt: string; }
 /** 本轮实际生效的对话能力；autoEnabled 只包含服务端因意图识别自动启用的能力。 */
 export interface TurnCapabilities { webSearch: boolean; knowledgeBase: boolean; autoEnabled: Array<'web_search' | 'knowledge_search'>; }
+export interface PageAssistantContext {
+    source: 'project-management' | 'finance-management' | 'legal-contracts' | 'knowledge-management' | 'organization-management' | 'hr-management';
+    role: string;
+    selected?: Record<string, string | number | boolean | null>;
+    summary?: Record<string, string | number | boolean | null>;
+}
+export interface GenerationOptions {
+    kind: 'image' | 'document';
+    aspectRatio?: 'square' | 'landscape' | 'portrait';
+    quality?: 'standard' | 'high';
+    template?: 'business-standard' | 'editorial-modern' | 'executive-dark' | 'product-story' | 'academic-clean' | 'minimal-mono';
+}
 /** 写操作待确认预览；确认前不产生任何业务副作用。 */
 export interface ToolResultConfirmation {
     draftId: string;
@@ -1662,7 +1689,7 @@ export async function planGitHubConnectorQueries(
 async function streamSse(path: string, init: RequestInit, onEvent: (event: TurnStreamEvent) => void, retry = true): Promise<void> {
     const accessToken = getStoredValue(ACCESS_TOKEN_KEY);
     if (!accessToken) throw new Error('登录状态已失效，请重新登录');
-    const response = await fetch(new URL(path, API_BASE_URL), { ...init, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}`, ...init.headers } });
+    const response = await userFetch(new URL(path, API_BASE_URL), { ...init, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}`, ...init.headers } });
     if (response.status === 401 && retry) { await refreshTokens(); return streamSse(path, init, onEvent, false); }
     if (!response.ok) { const error = new Error(getErrorMessage(await readBody(response))); (error as Error & { status?: number }).status = response.status; throw error; }
     if (!response.body) throw new Error('服务器未返回事件流');
@@ -1671,7 +1698,7 @@ async function streamSse(path: string, init: RequestInit, onEvent: (event: TurnS
     try { while (true) { const { value, done } = await reader.read(); if (done) { consume(decoder.decode()); if (buffer.trim()) throw new Error('事件流意外中断'); break; } consume(decoder.decode(value, { stream: true })); } } finally { reader.releaseLock(); }
 }
 
-export function createTurn(conversationId: string, input: { content: string; mode: ChatMode; imageFileIds?: string[]; fileIds?: string[]; connectorContexts?: ConnectorContext[]; knowledgeBaseEnabled?: boolean; webSearchEnabled?: boolean }, idempotencyKey: string, onEvent: (event: TurnStreamEvent) => void, signal?: AbortSignal): Promise<void> { return streamSse(`v1/conversations/${encodeURIComponent(conversationId)}/turns`, { method: 'POST', body: JSON.stringify({ content: input.content, mode: input.mode, ...(input.imageFileIds?.length ? { imageFileIds: input.imageFileIds } : {}), ...(input.fileIds?.length ? { fileIds: input.fileIds } : {}), ...(input.connectorContexts?.length ? { connectorContexts: input.connectorContexts } : {}), ...(input.knowledgeBaseEnabled ? { knowledgeBaseEnabled: true } : {}), ...(input.webSearchEnabled ? { webSearchEnabled: true } : {}) }), signal, headers: { 'Idempotency-Key': idempotencyKey } }, onEvent); }
+export function createTurn(conversationId: string, input: { content: string; mode: ChatMode; imageFileIds?: string[]; fileIds?: string[]; connectorContexts?: ConnectorContext[]; assistantContext?: PageAssistantContext; generationOptions?: GenerationOptions; knowledgeBaseEnabled?: boolean; webSearchEnabled?: boolean }, idempotencyKey: string, onEvent: (event: TurnStreamEvent) => void, signal?: AbortSignal): Promise<void> { return streamSse(`v1/conversations/${encodeURIComponent(conversationId)}/turns`, { method: 'POST', body: JSON.stringify({ content: input.content, mode: input.mode, ...(input.imageFileIds?.length ? { imageFileIds: input.imageFileIds } : {}), ...(input.fileIds?.length ? { fileIds: input.fileIds } : {}), ...(input.connectorContexts?.length ? { connectorContexts: input.connectorContexts } : {}), ...(input.assistantContext ? { assistantContext: input.assistantContext } : {}), ...(input.generationOptions ? { generationOptions: input.generationOptions } : {}), ...(input.knowledgeBaseEnabled ? { knowledgeBaseEnabled: true } : {}), ...(input.webSearchEnabled ? { webSearchEnabled: true } : {}) }), signal, headers: { 'Idempotency-Key': idempotencyKey } }, onEvent); }
 export function replayTurnEvents(conversationId: string, turnId: string, afterSeq: number, onEvent: (event: TurnStreamEvent) => void, signal?: AbortSignal): Promise<void> { return streamSse(`v1/conversations/${encodeURIComponent(conversationId)}/turns/${encodeURIComponent(turnId)}/events?afterSeq=${afterSeq}`, { method: 'GET', signal }, onEvent); }
 export async function cancelTurn(conversationId: string, turnId: string): Promise<Turn> { return authorizedRequest<Turn>(`v1/conversations/${encodeURIComponent(conversationId)}/turns/${encodeURIComponent(turnId)}/cancel`, { method: 'POST' }); }
 

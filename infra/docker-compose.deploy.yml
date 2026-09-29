@@ -37,11 +37,12 @@ services:
       # 模型配置通过 profile 的 api_key_env 按名称读取这些变量；缺少任一已启用
       # profile 对应的变量都会让 /ready 返回 503，容器被判定为 unhealthy。
       PRIMARY_LLM_API_KEY: ${PRIMARY_LLM_API_KEY}
-      BACKUP_LLM_API_KEY: ${BACKUP_LLM_API_KEY:-}
+      QWEN_API_KEY: ${QWEN_API_KEY}
       VISION_LLM_API_KEY: ${VISION_LLM_API_KEY:-}
       IMAGE_GEN_API_KEY: ${IMAGE_GEN_API_KEY:-}
       IMAGE_GEN_BACKUP_API_KEY: ${IMAGE_GEN_BACKUP_API_KEY:-}
       EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
+      EMBEDDING_BACKUP_API_KEY: ${EMBEDDING_BACKUP_API_KEY:-}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       # 知识库向量库（pgvector 为独立数据库；memory 用于开发/测试）。
       KNOWLEDGE_VECTOR_STORE: ${KNOWLEDGE_VECTOR_STORE:-memory}

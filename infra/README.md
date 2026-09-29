@@ -162,7 +162,7 @@ bash infra/deploy-cos-release.sh <environment> <release-reference>
 
 Compose 只会把 `infra/docker-compose.deploy.yml` 中显式声明的变量注入容器；`--env-file .env.<environment>` 仅用于 Compose 插值，不会自动把文件中的全部变量传给 API。联网搜索的 `WEB_SEARCH_PROVIDER`、`WEB_SEARCH_API_KEY`、`WEB_SEARCH_TIMEOUT_MS`、`WEB_SEARCH_MAX_RESULTS` 和 `WEB_SEARCH_MAX_SNIPPET_CHARS` 已在 Compose 中显式透传，其中 Staging 和 Production 当前都以 `NODE_ENV=production` 运行，必须提供真实的 `WEB_SEARCH_API_KEY`，不能使用 `change_me`；缺失时 Compose 会在启动前直接报错。
 
-ai-service 只接收 `docker-compose.deploy.yml` 中显式声明的环境变量。模型配置里每个已启用 profile 的 `api_key_env` 都必须在 `.env.<environment>` 中提供非空值，并由 Compose 透传；当前透传 `PRIMARY_LLM_API_KEY`、`BACKUP_LLM_API_KEY`、`VISION_LLM_API_KEY`、`IMAGE_GEN_API_KEY` 和 `IMAGE_GEN_BACKUP_API_KEY`。新增已启用 profile、启用带 `vision` capability 的 profile 或改用新的 `api_key_env` 名称时，必须同时修改模型配置、环境文件和 `docker-compose.deploy.yml`，否则 ai-service 的 `/ready` 返回 503，容器被判定为 unhealthy，`api` 因 `depends_on: service_healthy` 无法启动。
+ai-service 只接收 `docker-compose.deploy.yml` 中显式声明的环境变量。模型配置里每个已启用 profile 的 `api_key_env` 都必须在 `.env.<environment>` 中提供非空值，并由 Compose 透传；当前透传 `PRIMARY_LLM_API_KEY`、`QWEN_API_KEY`、`VISION_LLM_API_KEY`、`IMAGE_GEN_API_KEY`、`IMAGE_GEN_BACKUP_API_KEY`、`EMBEDDING_API_KEY` 和 `EMBEDDING_BACKUP_API_KEY`。新增已启用 profile、启用带 `vision` capability 的 profile 或改用新的 `api_key_env` 名称时，必须同时修改模型配置、环境文件和 `docker-compose.deploy.yml`，否则 ai-service 的 `/ready` 返回 503，容器被判定为 unhealthy，`api` 因 `depends_on: service_healthy` 无法启动。
 
 服务器目录结构不变时，日常发布无需重新打目录包，只需发布新镜像并再次执行 `deploy-cos-release.sh`。
 

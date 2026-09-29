@@ -5,14 +5,16 @@ import {
 import { App as AntdApp, Avatar, Button, Empty, Form, Input, Modal, Select, Spin, Tag } from 'antd';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
     assignMemberDepartment, createDepartment, deleteDepartment, hasStoredSession,
     listDepartmentMembers, listDepartments, updateDepartment,
-    type DepartmentNode, type MeResult, type TenantMember,
+    type DepartmentNode, type MeResult, type PageAssistantContext, type TenantMember,
 } from '../../core/api';
 import InvitationManager from './InvitationManager';
 import OrganizationImportModal from './OrganizationImportModal';
 import { useDateFormatter, useI18n } from '../../core/i18n';
+import PageAssistant from '../assistant/PageAssistant';
 
 interface DepartmentFormValues {
     name: string;
@@ -35,6 +37,7 @@ export default function OrganizationManagement({ authContext, fallbackMembers, m
     const [form] = Form.useForm<DepartmentFormValues>();
     const { message, modal } = AntdApp.useApp();
     const { t } = useI18n();
+    const navigate = useNavigate();
     const formatDate = useDateFormatter();
     const queryClient = useQueryClient();
     const permissions = new Set(authContext.permissions);
@@ -53,6 +56,12 @@ export default function OrganizationManagement({ authContext, fallbackMembers, m
     const visibleMembers = sourceMembers.filter((member) => `${member.user.displayName}${member.account}${member.roles.map((role) => role.name).join('')}`.toLowerCase().includes(keyword.toLowerCase()));
     const selectedMember = sourceMembers.find((member) => member.id === selectedMemberId) ?? sourceMembers[0];
     const selectedDepartment = flatDepartments.find((department) => department.id === selectedDepartmentId);
+    const pageAssistantContext: PageAssistantContext = {
+        source: 'organization-management',
+        role: '组织管理助手',
+        selected: selectedDepartment ? { id: selectedDepartment.id, name: selectedDepartment.name, status: selectedDepartment.status } : undefined,
+        summary: { departmentCount: flatDepartments.length, visibleMemberCount: visibleMembers.length, selectedDepartmentMemberCount: selectedDepartment?.memberCount ?? visibleMembers.length },
+    };
 
     useEffect(() => {
         if ((departmentsQuery.error || departmentMembersQuery.error) && !hasStoredSession()) onSessionExpired();
@@ -131,6 +140,7 @@ export default function OrganizationManagement({ authContext, fallbackMembers, m
             void queryClient.invalidateQueries({ queryKey: ['departments'] });
             void queryClient.invalidateQueries({ queryKey: ['tenant-members'] });
         }} />
+        <PageAssistant context={pageAssistantContext} suggestions={['查看组织架构概况', '查找某个部门成员', '把成员调整到其他部门', '邀请新的部门成员']} onExpand={(context, conversationId) => navigate('/', { state: { ...(conversationId ? { conversationId } : { createNewConversation: true }), forceChat: true, assistantContext: context } })} />
     </div>;
 }
 

@@ -8,12 +8,14 @@ import {
     listTenantMembers, removeKnowledgeBaseMember, retryKnowledgeDocument, updateKnowledgeBase,
     updateKnowledgeBaseMember, uploadAttachmentFile, uploadKnowledgeDocument,
     type DepartmentNode, type KnowledgeBaseMemberPermission, type KnowledgeBaseMemberSummary,
-    type KnowledgeBaseSummary, type KnowledgeBaseVisibilityScope, type KnowledgeDocumentResult, type MeResult,
+    type KnowledgeBaseSummary, type KnowledgeBaseVisibilityScope, type KnowledgeDocumentResult, type MeResult, type PageAssistantContext,
 } from '../../core/api';
 import { useDateFormatter, useI18n } from '../../core/i18n';
 import KnowledgeDocumentUploader, { type KnowledgeDocumentUploadInput } from './KnowledgeDocumentUploader';
 import '../../styles/shared.css';
 import './knowledge.css';
+import PageAssistant from '../assistant/PageAssistant';
+import { useNavigate } from 'react-router-dom';
 
 const scopeLabels: Record<KnowledgeBaseVisibilityScope, string> = {
     PRIVATE: '私有（仅成员）',
@@ -106,6 +108,7 @@ interface KnowledgeManagementProps {
  * 锚点人群（部门/项目/全员）与 read_all 用户恒为 READER，只读浏览。
  */
 export default function KnowledgeManagement({ authContext, onSessionExpired }: KnowledgeManagementProps): JSX.Element {
+    const navigate = useNavigate();
     const { message } = AntdApp.useApp();
     const { t } = useI18n();
     const formatDate = useDateFormatter();
@@ -138,7 +141,6 @@ export default function KnowledgeManagement({ authContext, onSessionExpired }: K
     const selectedManaged = selected ? isManager(selected) : false;
     // 文档写入门槛为库内 EDITOR 及以上（后端对上传/重试校验 EDITOR 等级）。
     const selectedEditable = selected ? selected.myPermission === 'EDITOR' || isManager(selected) : false;
-
     // 成员列表仅对 MANAGER 开放（后端对 listMembers 校验 MANAGER 等级）。
     const membersQuery = useQuery({
         queryKey: ['knowledge-base-members', selected?.id],
@@ -156,6 +158,13 @@ export default function KnowledgeManagement({ authContext, onSessionExpired }: K
             return items.some((document) => PROCESSING_DOCUMENT_STATUSES.includes(document.status)) ? 5000 : false;
         },
     });
+
+    const pageAssistantContext: PageAssistantContext = {
+        source: 'knowledge-management',
+        role: '知识库助手',
+        selected: selected ? { id: selected.id, name: selected.name, visibilityScope: selected.visibilityScope, permission: selected.myPermission } : undefined,
+        summary: { knowledgeBaseCount: bases.length, documentCount: documentsQuery.data?.items.length ?? 0, memberCount: selected?.memberCount ?? 0 },
+    };
 
     useEffect(() => {
         if (basesQuery.error && !hasStoredSession()) onSessionExpired();
@@ -581,5 +590,6 @@ export default function KnowledgeManagement({ authContext, onSessionExpired }: K
             onCancel={() => setUploadOpen(false)}
             onSubmit={(input) => void submitUpload(input)}
         />
+        <PageAssistant context={pageAssistantContext} suggestions={['搜索当前知识库', '总结最近上传的文档', '找出相关制度和流程', '生成知识库内容简报']} onExpand={(context, conversationId) => navigate('/', { state: { ...(conversationId ? { conversationId } : { createNewConversation: true }), forceChat: true, assistantContext: context } })} />
     </div>;
 }

@@ -18,7 +18,7 @@ import {
     cancelActionDraft, cancelTurn, confirmActionDraft, createConversation, createTurn, deleteConversation, downloadGeneratedDocumentFile, exportDocument, fetchGeneratedDocumentBytes, getConversation, getDashboardOverview, getDashboardTodos, getDashboardUpcomingMeetings, getDocument, getImage, listAssistantActionDrafts, planDingTalkConnectorQueries, planGitHubConnectorQueries, planTencentMeetingConnectorQueries, planWeComConnectorQueries, replayTurnEvents, updateConversation, uploadAttachmentFile,
     getUnreadNotificationCount, hasStoredSession, listConversations, listDocuments, listTenantMembers, logout,
     createKnowledgeDocument, deleteKnowledgeDocument, listWritableKnowledgeBases,
-    type Conversation, type ConversationMessage, type DashboardOverview, type DashboardTodoItem, type DashboardUpcomingMeeting, type ImageAccess,
+    type Conversation, type ConversationMessage, type DashboardOverview, type DashboardTodoItem, type DashboardUpcomingMeeting, type GenerationOptions, type ImageAccess, type PageAssistantContext,
     type ConnectorContext, type GitHubConnectorTool, type TencentMeetingConnectorTool, type TurnStreamEvent, type WeComConnectorTool,
     type KnowledgeBaseSummary, type KnowledgeSourceType,
     type ManagedDocumentSummary, type MeResult, type TenantMember,
@@ -40,6 +40,9 @@ import KnowledgeManagement from '../features/knowledge/KnowledgeManagement';
 import ManagedDocumentsPage from '../features/documents/ManagedDocumentsPage';
 import AiWorkspaceHome from '../features/dashboard/AiWorkspaceHome';
 import { useDateFormatter, useI18n } from '../core/i18n';
+import { toUserErrorMessage } from '../core/user-error';
+import PageAssistant from '../features/assistant/PageAssistant';
+import DomainWorkbenchPage from '../features/dashboard/DomainWorkbenchPage';
 
 interface WebviewElement extends HTMLWebViewElement {
     goBack: () => void;
@@ -418,7 +421,7 @@ function ChatResourceCard({ resource, onPreviewDocument, onSaveToKnowledge }: { 
     }, [resource.id, resource.type, resource.url, resource.format]);
     const exportAs = async (format: 'docx' | 'pdf' | 'pptx'): Promise<void> => {
         try { await exportDocument(resource.id, format, documentTitle); }
-        catch (error) { message.error(error instanceof Error ? error.message : '资源下载失败'); }
+        catch (error) { message.error(toUserErrorMessage(error, '资源下载失败')); }
     };
     const download = async (): Promise<void> => {
         try {
@@ -438,7 +441,7 @@ function ChatResourceCard({ resource, onPreviewDocument, onSaveToKnowledge }: { 
                 const blobUrl = URL.createObjectURL(new Blob([documentContent], { type: 'text/markdown;charset=utf-8' }));
                 const anchor = document.createElement('a'); anchor.href = blobUrl; anchor.download = `${documentTitle}.md`; anchor.click(); URL.revokeObjectURL(blobUrl);
             }
-        } catch (error) { message.error(error instanceof Error ? error.message : '资源下载失败'); }
+        } catch (error) { message.error(toUserErrorMessage(error, '资源下载失败')); }
     };
     const [savingLocal, setSavingLocal] = useState(false);
     /**
@@ -479,16 +482,20 @@ function ChatResourceCard({ resource, onPreviewDocument, onSaveToKnowledge }: { 
             else if (result.canceled) message.info(t('已取消保存'));
             else message.error(t('保存未完成'));
         } catch (error) {
-            message.error(error instanceof Error ? error.message : t('保存失败'));
+            message.error(toUserErrorMessage(error, t('保存失败')));
         } finally {
             setSavingLocal(false);
         }
     };
     const canSaveAsLocal = Boolean(window.cees?.localSystem?.saveGeneratedFile);
     return <div className={`chat-resource ${resource.type.toLowerCase()}`}>
-        {resource.type === 'IMAGE' && <>{image || resource.url ? <AntImage className="chat-resource-image" src={image?.url ?? resource.url ?? undefined} alt="AI 生成图片" preview={{ mask: '点击放大' }} /> : <Spin size="small" />}<Button size="small" disabled={!image && !resource.url} icon={<Download size={15} />} onClick={() => void download()}>{'下载'}</Button>{canSaveAsLocal && <Button size="small" loading={savingLocal} icon={<Save size={15} />} onClick={() => void saveAsLocal()}>{t('保存到…')}</Button>}</>}
+        {resource.type === 'IMAGE' && <>
+            <div className="chat-resource-media">{image || resource.url ? <AntImage className="chat-resource-image" src={image?.url ?? resource.url ?? undefined} alt="AI 生成图片" preview={{ mask: '点击放大' }} /> : <Spin size="small" />}</div>
+            <div className="chat-resource-footer"><span className="chat-resource-meta">AI 生成图片</span><span className="chat-resource-actions"><Tooltip title="下载图片"><Button type="text" size="small" disabled={!image && !resource.url} icon={<Download size={15} />} onClick={() => void download()} /></Tooltip>{canSaveAsLocal && <Tooltip title={t('保存到本地')}><Button type="text" size="small" loading={savingLocal} icon={<Save size={15} />} onClick={() => void saveAsLocal()} /></Tooltip>}</span></div>
+        </>}
         {resource.type === 'DOCUMENT' && <>
-            <div className="chat-resource-header"><span><FileTextIcon size={17} />{documentTitle}</span><span className="chat-resource-actions"><Tooltip title={onSaveToKnowledge ? undefined : t('无存入知识库权限')}><span><Button size="small" disabled={!onSaveToKnowledge} icon={<Save size={15} />} onClick={() => onSaveToKnowledge?.({ sourceType: 'DOCUMENT', sourceId: resource.id, defaultName: documentTitle })}>{t('存入知识库')}</Button></span></Tooltip><Button size="small" disabled={documentContent === undefined} icon={<Eye size={15} />} onClick={() => documentContent !== undefined && onPreviewDocument({ id: resource.id, title: documentTitle, content: documentContent })}>{'查看内容'}</Button>{documentFormat ? <Button size="small" disabled={documentContent === undefined} icon={<Download size={15} />} onClick={() => void download()}>{`下载 ${documentFormat.toUpperCase()}`}</Button> : documentExportable ? <Dropdown trigger={['click']} menu={{ items: [{ key: 'docx', label: 'DOCX' }, { key: 'pdf', label: 'PDF' }, { key: 'pptx', label: 'PPTX' }], onClick: ({ key }) => void exportAs(key as 'docx' | 'pdf' | 'pptx') }}><Button size="small" icon={<Download size={15} />}>{'导出文档'}</Button></Dropdown> : <Button size="small" disabled={documentContent === undefined} icon={<Download size={15} />} onClick={() => void download()}>{'下载 Markdown'}</Button>}{canSaveAsLocal && <Button size="small" loading={savingLocal} icon={<Save size={15} />} onClick={() => void saveAsLocal()}>{t('保存到…')}</Button>}</span></div>
+            <div className="chat-resource-header"><span className="chat-resource-title"><i><FileTextIcon size={17} /></i><strong title={documentTitle}>{documentTitle}</strong><Tag>{documentFormat?.toUpperCase() ?? '文档'}</Tag></span><small>AI 生成文档</small></div>
+            <div className="chat-resource-actions"><Tooltip title={onSaveToKnowledge ? undefined : t('无存入知识库权限')}><span><Button size="small" type="text" disabled={!onSaveToKnowledge} icon={<Save size={15} />} onClick={() => onSaveToKnowledge?.({ sourceType: 'DOCUMENT', sourceId: resource.id, defaultName: documentTitle })}>{t('存入知识库')}</Button></span></Tooltip><Button size="small" type="text" disabled={documentContent === undefined} icon={<Eye size={15} />} onClick={() => documentContent !== undefined && onPreviewDocument({ id: resource.id, title: documentTitle, content: documentContent })}>{'查看内容'}</Button>{documentFormat ? <Button size="small" type="text" disabled={documentContent === undefined} icon={<Download size={15} />} onClick={() => void download()}>{`下载 ${documentFormat.toUpperCase()}`}</Button> : documentExportable ? <Dropdown trigger={['click']} menu={{ items: [{ key: 'docx', label: 'DOCX' }, { key: 'pdf', label: 'PDF' }, { key: 'pptx', label: 'PPTX' }], onClick: ({ key }) => void exportAs(key as 'docx' | 'pdf' | 'pptx') }}><Button size="small" type="text" icon={<Download size={15} />}>{'导出文档'}</Button></Dropdown> : <Button size="small" type="text" disabled={documentContent === undefined} icon={<Download size={15} />} onClick={() => void download()}>{'下载 Markdown'}</Button>}{canSaveAsLocal && <Button size="small" type="text" loading={savingLocal} icon={<Save size={15} />} onClick={() => void saveAsLocal()}>{t('保存到…')}</Button>}</div>
         </>}
     </div>;
 }
@@ -558,7 +565,7 @@ function KnowledgeCitationCard({ citation, onDeleted }: { citation: GroupedCitat
                     onDeleted?.(citation.id);
                     message.success(t('文档已删除'));
                 } catch (error) {
-                    message.error(error instanceof Error ? error.message : t('删除失败'));
+                    message.error(toUserErrorMessage(error, t('删除失败')));
                 }
             },
         });
@@ -593,7 +600,7 @@ function SaveToKnowledgeModal({ target, onClose, onSaved }: {
                 setKnowledgeBases(result.items);
                 if (result.items.length === 1) setKnowledgeBaseId(result.items[0].id);
             })
-            .catch((error) => message.error(error instanceof Error ? error.message : t('加载知识库失败')));
+            .catch((error) => message.error(toUserErrorMessage(error, t('加载知识库失败'))));
     }, []);
     const submit = async (): Promise<void> => {
         if (!knowledgeBaseId || saving) return;
@@ -607,7 +614,7 @@ function SaveToKnowledgeModal({ target, onClose, onSaved }: {
             });
             onSaved(document);
         } catch (error) {
-            message.error(error instanceof Error ? error.message : t('转存失败'));
+            message.error(toUserErrorMessage(error, t('转存失败')));
         } finally {
             setSaving(false);
         }
@@ -637,7 +644,10 @@ const DELETED_CITATIONS_KEY = 'cees.chat.citations.deleted';
 
 interface AssistantNavigationState {
     createNewConversation?: boolean;
+    forceChat?: boolean;
+    conversationId?: string;
     initialPrompt?: string;
+    assistantContext?: PageAssistantContext;
     webSearchEnabled?: boolean;
     knowledgeBaseEnabled?: boolean;
     source?: 'DINGTALK_CONNECTOR' | 'TENCENT_MEETING_CONNECTOR' | 'WECOM_CONNECTOR' | 'GITHUB_CONNECTOR' | 'CONNECTOR_MARKETPLACE';
@@ -792,7 +802,7 @@ function WeComAuthorizationCard({ request, retrying, onRetry }: {
         try {
             await desktopBridge.openExternal(safeUrl);
         } catch (error) {
-            message.error(error instanceof Error ? error.message : t('无法打开企业微信授权页面'));
+            message.error(toUserErrorMessage(error, t('无法打开企业微信授权页面')));
         }
     };
     return <div className="wecom-authorization-card">
@@ -816,14 +826,18 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
     const navigate = useNavigate();
     const navigationState = location.state as AssistantNavigationState | null;
     const initialPrompt = useRef(navigationState?.initialPrompt?.trim());
+    const initialAssistantContext = useRef(navigationState?.assistantContext);
+    const assistantContextRef = useRef(navigationState?.assistantContext);
     const canSaveToKnowledge = permissions.includes('knowledge_base.read');
     const [input, setInput] = useState('');
     const [selectedPrompt, setSelectedPrompt] = useState<string>();
+    const [generationOptions, setGenerationOptions] = useState<GenerationOptions>();
     const [mode, setMode] = useState<'standard' | 'ultra'>('standard');
     const [networkSearch, setNetworkSearch] = useState(Boolean(navigationState?.webSearchEnabled));
     const [knowledgeBase, setKnowledgeBase] = useState(Boolean(navigationState?.knowledgeBaseEnabled));
     const [autoEnabledCapabilities, setAutoEnabledCapabilities] = useState<Array<'web_search' | 'knowledge_search'>>([]);
     const [attachment, setAttachment] = useState<{ name: string; id: string; isImage: boolean }>();
+    const [uploadingAttachment, setUploadingAttachment] = useState(false);
     const [imageGenerating, setImageGenerating] = useState(false);
     const fileInput = useRef<HTMLInputElement>(null);
     const [sending, setSending] = useState(false);
@@ -884,7 +898,7 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
                 };
             }));
         } catch (error) {
-            if (!options.silent) message.error(error instanceof Error ? error.message : t('加载待确认操作失败'));
+            if (!options.silent) message.error(toUserErrorMessage(error, t('加载待确认操作失败')));
         }
     };
 
@@ -905,7 +919,7 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
             void refreshPendingDrafts({ silent: true });
         } catch (error) {
             patchConfirmation(draftId, { resolving: false });
-            message.error(error instanceof Error ? error.message : t('操作未完成，请刷新后重试'));
+            message.error(toUserErrorMessage(error, t('操作未完成，请刷新后重试')));
         }
     };
 
@@ -926,8 +940,9 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
                     else if (resolved === 'cancelled') message.info(result.summary);
                     else message.error(result.summary);
                 } catch (error) {
-                    patchConfirmation(draft.draftId, { resolving: false, resolved: 'failed', resultSummary: error instanceof Error ? error.message : t('操作未完成') });
-                    message.error(error instanceof Error ? error.message : t('操作未完成'));
+                    const errorMessage = toUserErrorMessage(error, t('操作未完成'));
+                    patchConfirmation(draft.draftId, { resolving: false, resolved: 'failed', resultSummary: errorMessage });
+                    message.error(errorMessage);
                 }
             }
         } finally {
@@ -946,6 +961,7 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
 
     useEffect(() => {
         if (initialConversationLoadStarted.current) return; initialConversationLoadStarted.current = true;
+        let cancelled = false;
         const createNewConversation = navigationState?.createNewConversation === true;
         if (navigationState?.source === 'DINGTALK_CONNECTOR') setPreferredConnector('dingtalk');
         if (navigationState?.source === 'TENCENT_MEETING_CONNECTOR') setPreferredConnector('tencent-meeting');
@@ -953,21 +969,28 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
         if (navigationState?.source === 'GITHUB_CONNECTOR') setPreferredConnector('github');
         void listConversations()
             .then(async (result) => {
+                if (cancelled) return;
                 setConversations(result.items);
-                if (createNewConversation) {
+                if (navigationState?.conversationId) {
+                    const target = result.items.find((item) => item.id === navigationState.conversationId);
+                    if (target && !cancelled) await selectConversation(target);
+                } else if (createNewConversation) {
                     try {
+                        if (cancelled) return;
                         await createAndActivateConversation();
                     } catch (error) {
-                        message.error(error instanceof Error ? error.message : t('创建会话失败'));
+                        if (cancelled) return;
+                        message.error(toUserErrorMessage(error, t('创建会话失败')));
                         if (result.items[0]) await selectConversation(result.items[0]);
                     } finally {
-                        navigate(location.pathname, { replace: true, state: null });
+                        if (!cancelled) navigate(location.pathname, { replace: true, state: null });
                     }
                     return;
                 }
-                if ((!landing || historyOnly) && result.items[0]) await selectConversation(result.items[0]);
+                if (!cancelled && (!landing || historyOnly) && result.items[0]) await selectConversation(result.items[0]);
             })
-            .catch((error) => message.error(error instanceof Error ? error.message : t('加载会话失败')));
+            .catch((error) => { if (!cancelled) message.error(toUserErrorMessage(error, t('加载会话失败'))); });
+        return () => { cancelled = true; };
     }, []);
     useEffect(() => {
         const connector = window.cees?.connectors?.dingtalk;
@@ -1028,7 +1051,7 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
         if (!title || title === target.title) { setRenameTarget(undefined); return; }
         void updateConversation(target.id, title, target.version)
             .then((updated) => setConversations((items) => items.map((item) => item.id === updated.id ? updated : item)))
-            .catch((error) => message.error(error instanceof Error ? error.message : t('重命名失败')))
+            .catch((error) => message.error(toUserErrorMessage(error, t('重命名失败'))))
             .finally(() => setRenameTarget(undefined));
     };
 
@@ -1043,12 +1066,12 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
                 setMessages([]);
             }
         } catch (error) {
-            message.error(error instanceof Error ? error.message : t('删除对话失败，请稍后重试'));
+            message.error(toUserErrorMessage(error, t('删除对话失败，请稍后重试')));
         }
     };
 
     const newConversation = (): void => {
-        void createAndActivateConversation().catch((error) => message.error(error instanceof Error ? error.message : t('创建会话失败')));
+        void createAndActivateConversation().catch((error) => message.error(toUserErrorMessage(error, t('创建会话失败'))));
     };
 
     /** 删除成功后只记录该文档 ID，重开对话时按 ID 标记已删除态（块 4）。 */
@@ -1115,20 +1138,32 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
         if (!activeConversationId && conversations[0]) void selectConversation(conversations[0]);
     }, [historyOnly, conversations, activeConversationId]);
 
-    const sendMessage = async (overrideContent?: string, forcedConnector?: 'wecom' | 'github', capabilityOverride?: { webSearch: boolean; knowledgeSearch: boolean }): Promise<void> => {
+    const sendMessage = async (overrideContent?: string, forcedConnector?: 'wecom' | 'github', capabilityOverride?: { webSearch: boolean; knowledgeSearch: boolean }, assistantContext?: PageAssistantContext): Promise<void> => {
         const isRetry = typeof overrideContent === 'string';
         const text = (overrideContent ?? input).trim();
         const turnAttachment = isRetry ? undefined : attachment;
         const imageFileIds = turnAttachment?.isImage ? [turnAttachment.id] : [];
         const fileIds = turnAttachment && !turnAttachment.isImage ? [turnAttachment.id] : [];
-        const options = [turnAttachment && !turnAttachment.isImage && `参考附件：${turnAttachment.name}`].filter(Boolean);
         const content = isRetry
             ? text
-            : [selectedPrompt, ...options, text].filter(Boolean).join('\n') || (imageFileIds.length ? t('请分析这张图片') : '');
+            : text || (imageFileIds.length ? t('请分析这张图片') : '');
         if ((!content && !imageFileIds.length && !fileIds.length) || sending) return;
+        if (uploadingAttachment) {
+            message.info(t('附件仍在上传，请等待上传完成后再发送'));
+            return;
+        }
+        if (!turnAttachment && /(?:参考附件|根据.*(?:pdf|简历)|(?:pdf|简历).*(?:更新|修改|重写|生成))/i.test(content)) {
+            message.info(t('请先点击输入框左下角的加号上传 PDF 或简历文件'));
+            return;
+        }
         setSending(true);
         const version = ++requestVersion.current;
         const controller = new AbortController();
+        let timedOut = false;
+        const generationTimeout = setTimeout(() => {
+            timedOut = true;
+            controller.abort();
+        }, 180_000);
         abortController.current = controller;
         try {
             let connectorContexts: ConnectorContext[] = [];
@@ -1153,9 +1188,17 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
             }
             if (permanentCleanupRequested && localSystem) {
                 const job = await localSystem.cleanLatest();
+                if (!job) {
+                    message.info(t('隔离区当前没有可永久清理的内容'));
+                    return;
+                }
                 connectorContexts.push(localCleanupContext('local_cleanup', '永久清理隔离区', job));
             } else if (restoreRequested && localSystem) {
                 const job = await localSystem.restoreLatest();
+                if (!job) {
+                    message.info(t('当前没有可恢复的隔离任务'));
+                    return;
+                }
                 connectorContexts.push(localCleanupContext('local_restore', '恢复隔离内容', job));
             } else if (quarantineRequested && localSystem) {
                 const selectionKind = /目录|文件夹/.test(content) ? 'directory' : 'files';
@@ -1358,7 +1401,7 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
                     const resourceType = event.resource?.type ?? toolTypes.get(event.toolCallId);
                     if (resourceId && resourceType) { const resource = { id: resourceId, type: resourceType, url: event.resourceUrl, format: toolFormats.get(event.toolCallId) }; resources.set(chatResourceKey(resource), resource); if (resourceType === 'IMAGE') setImageGenerating(false); updateStreamingMessage(); }
                 }
-                if (event.type === 'error') { terminal = true; setImageGenerating(false); throw new Error(event.error.message); }
+                if (event.type === 'error') { terminal = true; setImageGenerating(false); throw new Error(toUserErrorMessage(event.error.message, t('AI 请求失败，请稍后重试'))); }
                 if (event.type === 'completed') {
                     terminal = true;
                     setImageGenerating(false);
@@ -1379,7 +1422,8 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
                 if (!terminal) throw new Error(t('连接已断开，请稍后重试'));
             };
             try {
-                await createTurn(conversationId, { content, mode, imageFileIds, fileIds, connectorContexts: connectorContexts.length ? connectorContexts : undefined, knowledgeBaseEnabled: capabilityOverride?.knowledgeSearch ?? knowledgeBase, webSearchEnabled: capabilityOverride?.webSearch ?? networkSearch }, crypto.randomUUID(), handle, controller.signal);
+                const effectiveAssistantContext = assistantContext ?? assistantContextRef.current;
+                await createTurn(conversationId, { content, mode, imageFileIds, fileIds, connectorContexts: connectorContexts.length ? connectorContexts : undefined, assistantContext: effectiveAssistantContext, generationOptions, knowledgeBaseEnabled: capabilityOverride?.knowledgeSearch ?? (effectiveAssistantContext?.source === 'knowledge-management' ? true : knowledgeBase), webSearchEnabled: capabilityOverride?.webSearch ?? networkSearch }, crypto.randomUUID(), handle, controller.signal);
             } catch (error) {
                 if (!turnId || controller.signal.aborted || terminal) throw error;
                 await replay();
@@ -1387,8 +1431,10 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
             if (!terminal && turnId && !controller.signal.aborted) await replay();
             if (version === requestVersion.current) setActiveTurn(undefined);
         } catch (error) {
-            if (!controller.signal.aborted && version === requestVersion.current) {
-                const errorMessage = error instanceof Error ? error.message : t('AI 请求失败，请稍后重试');
+            if (version === requestVersion.current && (!controller.signal.aborted || timedOut)) {
+                const errorMessage = timedOut
+                    ? t('生成超时，可能是附件较大或服务响应较慢，请稍后重试')
+                    : toUserErrorMessage(error, t('AI 请求失败，请稍后重试'));
                 if (errorMessage.includes('连接器页面')) {
                     Modal.confirm({
                         title: errorMessage.includes('腾讯会议')
@@ -1404,6 +1450,7 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
                 } else message.error(errorMessage);
             }
         } finally {
+            clearTimeout(generationTimeout);
             if (version === requestVersion.current) {
                 setSending(false);
                 abortController.current = undefined;
@@ -1418,12 +1465,12 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
         const prompt = initialPrompt.current;
         if (!prompt || !activeConversationId || sending) return;
         initialPrompt.current = undefined;
-        void sendMessage(prompt);
+        void sendMessage(prompt, undefined, undefined, initialAssistantContext.current);
     }, [activeConversationId, sending]);
 
     const questions = messages.filter((item) => item.role === 'user');
     const activeChat = messages.length > 0 || sending;
-    const showLanding = landing && !activeChat;
+    const showLanding = landing && !activeChat && !navigationState?.forceChat;
     const returnToLanding = (): void => {
         requestVersion.current += 1;
         abortController.current?.abort();
@@ -1509,19 +1556,28 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
                     <span>{t('本轮已自动启用：')}</span>
                     {autoEnabledCapabilities.map((capability) => <Tag key={capability} closable color="processing" onClose={() => setAutoEnabledCapabilities((items) => items.filter((item) => item !== capability))}>{capability === 'web_search' ? t('联网搜索') : t('知识库检索')}</Tag>)}
                 </div>}
+                {generationOptions?.kind === 'image' && <div className="generation-options-bar">
+                    <span className="generation-options-label">图片参数</span>
+                    <span className="generation-option-group"><small>比例</small>{([['square', '1:1'], ['landscape', '横向 3:2'], ['portrait', '竖向 2:3']] as const).map(([value, label]) => <button type="button" className={generationOptions.aspectRatio === value ? 'is-selected' : ''} key={value} onClick={() => setGenerationOptions({ ...generationOptions, aspectRatio: value })}>{label}</button>)}</span>
+                    <span className="generation-option-group"><small>质量</small>{([['standard', '标准'], ['high', '高清']] as const).map(([value, label]) => <button type="button" className={generationOptions.quality === value ? 'is-selected' : ''} key={value} onClick={() => setGenerationOptions({ ...generationOptions, quality: value })}>{label}</button>)}</span>
+                </div>}
+                {generationOptions?.kind === 'document' && <div className="generation-options-bar document-template-options">
+                    <span className="generation-options-label">文档风格</span>
+                    {([['editorial-modern', '现代图文', 'teal'], ['business-standard', '稳重商务', 'violet'], ['executive-dark', '深色高管', 'dark'], ['product-story', '产品叙事', 'rose'], ['academic-clean', '研究报告', 'blue'], ['minimal-mono', '极简黑白', 'mono']] as const).map(([value, label, tone]) => <button type="button" className={`document-template-swatch tone-${tone} ${generationOptions.template === value ? 'is-selected' : ''}`} key={value} onClick={() => setGenerationOptions({ ...generationOptions, template: value })}><span /><small>{label}</small></button>)}
+                </div>}
                 <div className="message-composer">
                     <div className="message-editor">
-                        {selectedPrompt && <Tag closable onClose={() => setSelectedPrompt(undefined)}>{t(selectedPrompt)}</Tag>}
+                        {selectedPrompt && <Tag closable onClose={() => { setSelectedPrompt(undefined); setGenerationOptions(undefined); }}>{t(selectedPrompt)}</Tag>}
                         {attachment && <Tag closable icon={attachment.isImage ? <FileImage size={14} /> : <FileTextIcon size={14} />} onClose={() => setAttachment(undefined)}>{attachment.name}{canSaveToKnowledge && <button className="attachment-save" type="button" title={t('存入知识库')} onClick={() => setSaveTarget({ sourceType: 'FILE_OBJECT', sourceId: attachment.id, defaultName: attachment.name })}><Save size={12} /></button>}</Tag>}
                         <Input.TextArea autoSize={{ minRows: 3, maxRows: 8 }} value={input} onChange={(event) => setInput(event.target.value)} onPressEnter={(event) => { if (!event.shiftKey) { event.preventDefault(); void sendMessage(); } }} placeholder={t('输入消息，Enter 发送')} />
                         <div className="composer-footer">
-                            <Dropdown trigger={['click']} menu={{ items: [{ key: 'upload', icon: <Upload size={16} />, label: '上传文件或图片', onClick: () => fileInput.current?.click() }, { key: 'image', icon: <ImagePlus size={16} />, label: '生成图片', onClick: () => setSelectedPrompt('生成图片') }, { key: 'document', icon: <FileTextIcon size={16} />, label: '生成文档', onClick: () => setSelectedPrompt('生成文档') }, { key: 'spreadsheet', icon: <FileTextIcon size={16} />, label: '上传台账表格', onClick: () => fileInput.current?.click() }] }}><Button type="text" className="composer-add" icon={<PlusOutlined />} /></Dropdown>
-                            <input ref={fileInput} type="file" hidden accept="image/*,.pdf,.doc,.docx,.txt,.md,.xlsx,.xls,.csv" onChange={(event) => { const file = event.target.files?.[0]; if (!file) return; void uploadAttachmentFile(file).then((id) => setAttachment({ name: file.name, id, isImage: file.type.startsWith('image/') })).catch((error) => message.error(error instanceof Error ? error.message : '附件上传失败')); event.target.value = ''; }} />
+                            <Dropdown trigger={['click']} menu={{ items: [{ key: 'upload', icon: <Upload size={16} />, label: '上传文件或图片', onClick: () => { if (!sending && !uploadingAttachment) fileInput.current?.click(); } }, { key: 'image', icon: <ImagePlus size={16} />, label: '生成图片', onClick: () => { setSelectedPrompt('生成图片'); setGenerationOptions({ kind: 'image', aspectRatio: 'square', quality: 'standard' }); } }, { key: 'document', icon: <FileTextIcon size={16} />, label: '生成文档', onClick: () => { setSelectedPrompt('生成文档'); setGenerationOptions({ kind: 'document', template: 'editorial-modern' }); } }, { key: 'spreadsheet', icon: <FileTextIcon size={16} />, label: '上传台账表格', onClick: () => { if (!sending && !uploadingAttachment) fileInput.current?.click(); } }] }}><Button type="text" className="composer-add" icon={<PlusOutlined />} disabled={sending || uploadingAttachment} /></Dropdown>
+                            <input ref={fileInput} type="file" hidden accept="image/*,.pdf,.doc,.docx,.txt,.md,.xlsx,.xls,.csv" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; if (!file || sending || uploadingAttachment) return; setUploadingAttachment(true); void uploadAttachmentFile(file).then((id) => setAttachment({ name: file.name, id, isImage: file.type.startsWith('image/') })).catch((error) => message.error(toUserErrorMessage(error, '附件上传失败'))).finally(() => setUploadingAttachment(false)); }} />
                             <Button type="text" className={`composer-option ${networkSearch ? 'is-selected' : ''}`} icon={<Globe2 size={15} />} onClick={() => setNetworkSearch((value) => !value)}>联网搜索</Button>
                             <Button type="text" className={`composer-option ${knowledgeBase ? 'is-selected' : ''}`} icon={<BookOpen size={15} />} onClick={() => setKnowledgeBase((value) => !value)}>知识库</Button>
                             {dingtalkConnected ? <Tag color="success">{t('钉钉已连接')}</Tag> : null}
                             <Select className="composer-mode" size="small" value={mode} onChange={setMode} options={[{ label: '快速模式', value: 'standard' }, { label: '深度模式', value: 'ultra' }]} />
-                            <Button type="primary" className="composer-send" icon={<Send size={16} />} loading={sending} onClick={() => void sendMessage()}>发送</Button>
+                            <Button type="primary" className="composer-send" icon={<Send size={16} />} loading={sending || uploadingAttachment} disabled={uploadingAttachment} onClick={(event) => { event.preventDefault(); event.stopPropagation(); void sendMessage(); }}>{uploadingAttachment ? '上传中' : '发送'}</Button>
                         </div>
                     </div>
                 </div>
@@ -1634,6 +1690,8 @@ function CurrentPage({ authContext, members, documents, membersLoading, document
     if (location.pathname === '/history') return <AssistantPage permissions={authContext.permissions} authContext={authContext} historyOnly />;
     if (location.pathname === '/agents') return <ApplicationsPage />;
     if (location.pathname === '/skills') return <SkillsPage />;
+    if (location.pathname.startsWith('/workbench/')) return <DomainWorkbenchPage authContext={authContext} />;
+    if (location.pathname === '/workbench') return <AiWorkspaceHome authContext={authContext} />;
     if (location.pathname === '/projects') return <ProjectManagement authContext={authContext} onSessionExpired={onSessionExpired} />;
     if (location.pathname === '/meetings') return <MeetingManagement authContext={authContext} onSessionExpired={onSessionExpired} />;
     if (location.pathname === '/reports') return <WorkReportPage authContext={authContext} onSessionExpired={onSessionExpired} />;
@@ -1665,7 +1723,7 @@ function CurrentPage({ authContext, members, documents, membersLoading, document
             setLoading(true);
             getDocument(documentId)
                 .then((doc) => { setDocument(doc); setContent(doc.content); })
-                .catch((error) => message.error(error instanceof Error ? error.message : t('加载文档失败')))
+                .catch((error) => message.error(toUserErrorMessage(error, t('加载文档失败'))))
                 .finally(() => setLoading(false));
         }, [documentId, message, t]);
      
@@ -1677,7 +1735,7 @@ function CurrentPage({ authContext, members, documents, membersLoading, document
                 setDocument(updated);
                 message.success(t('已保存'));
             } catch (error) {
-                message.error(error instanceof Error ? error.message : t('保存失败'));
+                message.error(toUserErrorMessage(error, t('保存失败')));
             } finally {
                 setSaving(false);
             }
@@ -1689,7 +1747,7 @@ function CurrentPage({ authContext, members, documents, membersLoading, document
             try {
                 await exportDocument(document.id, format, document.title);
             } catch (error) {
-                message.error(error instanceof Error ? error.message : t('导出失败'));
+                message.error(toUserErrorMessage(error, t('导出失败')));
             } finally {
                 setExporting(undefined);
             }

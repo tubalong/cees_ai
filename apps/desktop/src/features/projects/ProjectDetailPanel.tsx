@@ -1,5 +1,5 @@
 import { DeleteOutlined, DownOutlined, EditOutlined } from '@ant-design/icons';
-import { Button, Dropdown, Empty, Popconfirm, Tag } from 'antd';
+import { Button, Dropdown, Empty, Popconfirm, Tag, Tooltip } from 'antd';
 import { useState } from 'react';
 import type { DepartmentNode, ProjectMemberSummary, ProjectSummary, ProjectTransitionAction, TaskStatus, TaskSummary, TenantMember } from '../../core/api';
 import { useDateFormatter, useI18n } from '../../core/i18n';
@@ -42,6 +42,7 @@ export default function ProjectDetailPanel(props: ProjectDetailPanelProps): JSX.
     const formatDate = useDateFormatter();
     const [tab, setTab] = useState<'tasks' | 'members'>('tasks');
     const transitions = projectTransitions[project.status];
+    const hasTasks = (project.taskCount ?? 0) > 0;
     const departmentName = project.departmentId
         ? departments.find((department) => department.id === project.departmentId)?.name ?? '-'
         : '-';
@@ -63,7 +64,7 @@ export default function ProjectDetailPanel(props: ProjectDetailPanelProps): JSX.
                 >
                     <Button type={transitions.some((option) => option.action === 'complete') ? 'primary' : 'default'}>{t('状态操作')} <DownOutlined /></Button>
                 </Dropdown>}
-                {!readOnly && permissions.has('project.delete') && isOwner && <Popconfirm title={t('确认删除该项目？')} onConfirm={onDelete}><Button danger icon={<DeleteOutlined />} /></Popconfirm>}
+                {!readOnly && permissions.has('project.delete') && isOwner && <Tooltip title={hasTasks ? t('项目已有任务，不能删除，请完成或归档项目') : undefined}><span><Popconfirm disabled={hasTasks} title={t('确认删除该项目？')} onConfirm={onDelete}><Button danger disabled={hasTasks} icon={<DeleteOutlined />} /></Popconfirm></span></Tooltip>}
             </div>
         </div>
         <dl className="project-meta-grid">

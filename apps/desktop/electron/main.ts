@@ -218,7 +218,7 @@ app.whenReady().then(async () => {
         const job = (await cleanupManager.listJobs()).find((item) =>
             ['QUARANTINED', 'PARTIAL', 'RECOVERY_REQUIRED'].includes(item.status)
             && item.items.some((entry) => entry.status === 'QUARANTINED'));
-        if (!job) throw new Error('没有可恢复的隔离任务');
+        if (!job) return null;
         const confirmed = await confirmCleanupPlan(job, '恢复最近的隔离任务', '恢复不会覆盖原路径已有内容；冲突项目会跳过。');
         return confirmed ? cleanupManager.restore(job.id) : job;
     });
@@ -226,7 +226,7 @@ app.whenReady().then(async () => {
         const job = (await cleanupManager.listJobs()).find((item) =>
             ['QUARANTINED', 'PARTIAL', 'RECOVERY_REQUIRED'].includes(item.status)
             && item.items.some((entry) => entry.status === 'QUARANTINED'));
-        if (!job) throw new Error('隔离区没有可永久清理的任务');
+        if (!job) return null;
         const confirmed = await confirmCleanupPlan(job, '永久清理隔离区内容', '该操作不可恢复。只会删除已在 CEES 隔离区中的副本。', true);
         return confirmed ? cleanupManager.cleanup(job.id) : job;
     });

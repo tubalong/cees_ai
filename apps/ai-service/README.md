@@ -81,17 +81,19 @@ AI_INTERNAL_TOKEN=change_me
 AI_DOCS_ENABLED=true
 AI_MODEL_CONFIG_PATH=config/models.toml
 PRIMARY_LLM_API_KEY=change_me
-BACKUP_LLM_API_KEY=change_me
+QWEN_API_KEY=change_me
 VISION_LLM_API_KEY=change_me
 IMAGE_GEN_API_KEY=change_me
 IMAGE_GEN_BACKUP_API_KEY=change_me
+EMBEDDING_API_KEY=change_me
+EMBEDDING_BACKUP_API_KEY=change_me
 ```
 
 `models.toml` 只保存非敏感 profile、角色映射、Chat 模式策略和图片生成 profile。API Key 通过 profile 的 `api_key_env` 从环境变量读取。生产环境不得将任何角色绑定到 Mock profile，图片生成 profile 也必须使用真实模型。容器只会看到 Compose 显式声明的变量：新增已启用 profile 或改用新的 `api_key_env` 名称时，必须同时更新 `infra/docker-compose.deploy.yml` 与部署环境文件，否则 `/ready` 会因该变量为空返回 503。
 
 升级现有部署时，部署拥有的模型配置必须补充 `[chat]`、`[chat.modes.standard]` 和 `[chat.modes.ultra]`；缺少任一模式时 `/ready` 返回 503。`/ready` 的 `configured_chat_modes` 会列出当前已配置模式。
 
-Staging 示例默认只启用 `deepseek-v4-flash` 主模型，并通过 `PRIMARY_LLM_API_KEY` 注入密钥；初始测试环境不配置备用模型。需要增加备用模型时，应同时修改模型 profile、角色候选顺序和对应环境变量。
+Staging / Production 示例都启用了主模型（`PRIMARY_LLM_API_KEY`）与跨厂商备用模型 `backup-qwen`（`QWEN_API_KEY`），并为 `default`、`structured`、`reasoning`、`rag`、`orchestrator` 五个角色配置了候选顺序；图片理解链路由 `vision-primary` 与 `vision-backup` 两条组成，图片生成与编辑走独立的 `[image_profiles.*]`。候选按声明顺序回退，且只有可重试的瞬时错误才会触发下一个候选；永久错误不会跨模型重试。新增或调整备用模型时，必须同时修改模型 profile、角色候选顺序、`.env.<environment>` 与 `infra/docker-compose.deploy.yml`，否则 `/ready` 返回 503。
 
 ## 验证
 

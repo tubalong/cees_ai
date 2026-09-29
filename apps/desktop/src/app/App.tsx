@@ -12,6 +12,7 @@ import {
 import PlatformWorkspace from '../features/platform/PlatformWorkspace';
 import Workspace from './Workspace';
 import { LanguageSwitcher, useI18n } from '../core/i18n';
+import { toUserErrorMessage } from '../core/user-error';
 
 function BrandLogo(): JSX.Element {
     const [imageAvailable, setImageAvailable] = useState(true);
@@ -71,7 +72,7 @@ function LoginPage({ onTenantLogin, onPlatformLogin }: { onTenantLogin: (result:
                 message.success(t('欢迎回来，{name}', { name: result.user.displayName }));
             }
         } catch (error) {
-            message.error(error instanceof Error ? error.message : t('登录失败，请稍后重试'));
+            message.error(toUserErrorMessage(error, t('登录失败，请稍后重试')));
         } finally {
             setSubmitting(false);
         }
@@ -106,7 +107,7 @@ function LoginPage({ onTenantLogin, onPlatformLogin }: { onTenantLogin: (result:
             form.setFieldsValue({ tenantCode: values.tenantCode.trim(), account: values.account.trim().toLowerCase(), password: '' });
             message.success(t('账号激活成功，请使用新密码登录'));
         } catch (error) {
-            message.error(error instanceof Error ? error.message : t('账号激活失败'));
+            message.error(toUserErrorMessage(error, t('账号激活失败')));
         } finally {
             setActivating(false);
         }

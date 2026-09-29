@@ -31,8 +31,8 @@ declare global {
                     topDirectories: Array<{ name: string; sizeBytes: number; fileCount: number }>;
                 } | null>;
                 chooseAndQuarantine: (selectionKind: 'files' | 'directory') => Promise<LocalCleanupJob | null>;
-                restoreLatest: () => Promise<LocalCleanupJob>;
-                cleanLatest: () => Promise<LocalCleanupJob>;
+                restoreLatest: () => Promise<LocalCleanupJob | null>;
+                cleanLatest: () => Promise<LocalCleanupJob | null>;
                 /** 另存为：目标位置由主进程系统保存对话框产生，渲染层不传路径。 */
                 saveGeneratedFile: (request: {
                     suggestedName: string;
