@@ -33,6 +33,7 @@ import { PlanService } from './orchestration/plan.service';
 import { StepRunnerService } from './orchestration/step-runner.service';
 import { StepStateService } from './orchestration/step-state.service';
 import { TaskEventService } from './orchestration/task-event.service';
+import { TaskOutputsService } from './orchestration/task-outputs.service';
 import { TaskRunnerService } from './orchestration/task-runner.service';
 import { TaskService } from './orchestration/task.service';
 import { ContextBuilderService } from './runtime/context-builder.service';
@@ -101,6 +102,7 @@ import { AssignTaskTool } from './tools/executors/assign-task.tool';
     orchestrationDeciderProvider,
     FailureHandlingService,
     TaskService,
+    TaskOutputsService,
     StepStateService,
     StepRunnerService,
     TaskRunnerService,

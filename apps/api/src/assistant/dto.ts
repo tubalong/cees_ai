@@ -503,6 +503,31 @@ export class CancelAssistantTaskRequestDto {
   reason?: string | null;
 }
 
+export class TaskOutputArchiveItemDto {
+  @ApiProperty({ description: '产出资产 ID（任务步骤的回流产出）', format: 'uuid' })
+  @IsUUID()
+  documentId!: string;
+
+  @ApiProperty({ description: '归档目标知识库；当前成员须具备编辑（EDITOR）及以上权限', format: 'uuid' })
+  @IsUUID()
+  knowledgeBaseId!: string;
+}
+
+export class ConfirmAssistantTaskOutputsRequestDto {
+  @ApiProperty({
+    description: '逐产出的验收与归档提交；仅任务终态可提交',
+    type: [TaskOutputArchiveItemDto],
+    minItems: 1,
+    maxItems: 20,
+  })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(20)
+  @Type(() => TaskOutputArchiveItemDto)
+  @ValidateNested({ each: true })
+  outputs!: TaskOutputArchiveItemDto[];
+}
+
 export class ResolveTaskInteractionRequestDto {
   @ApiProperty({
     description: '解决动作：approve / reject 授权批准或拒绝（仅 AUTHORIZATION）；answer 提问答复（仅 QUESTION）；choose 裁决选项（仅 DECISION）',

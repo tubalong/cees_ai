@@ -167,6 +167,58 @@ export interface PublicTaskListResult {
   nextCursor: string | null;
 }
 
+/** 知识库可见范围（与契约 KnowledgeBaseVisibilityScope 一致）。 */
+export type PublicTaskVisibilityScope = 'PRIVATE' | 'DEPARTMENT' | 'PROJECT' | 'TENANT';
+
+/** 产出归档结果（与契约 AssistantTaskOutputArchive 一致）。 */
+export interface PublicTaskOutputArchive {
+  knowledgeBaseId: string;
+  /** 知识库侧文档 ID（转存产物；同源重复转存追加版本）。 */
+  knowledgeDocumentId: string;
+  visibilityScope: PublicTaskVisibilityScope;
+  confirmedAt: Date;
+}
+
+/** 归档目标建议（与契约 AssistantTaskOutputSuggestion 一致）。 */
+export interface PublicTaskOutputSuggestion {
+  knowledgeBaseId: string;
+  /** 推荐理由（规则路径=组织归属；LLM 路径=模型基于产出主题给出）。 */
+  reason: string;
+}
+
+/** 可归档知识库候选（与契约 AssistantTaskOutputArchiveOption 一致）。 */
+export interface PublicTaskOutputArchiveOption {
+  knowledgeBaseId: string;
+  name: string;
+  visibilityScope: PublicTaskVisibilityScope;
+}
+
+/** 产出验收条目（与契约 AssistantTaskOutput 一致）。 */
+export interface PublicTaskOutput {
+  /** 产出资产（AI 文档）；验收与归档的载体。 */
+  documentId: string;
+  title: string;
+  /** 产出步骤的计划内稳定标识。 */
+  stepKey: string;
+  /** 产出步骤的简短名；计划未给出时为 null。 */
+  stepTitle: string | null;
+  /** 内容验收与归档确认是否已完成。 */
+  confirmed: boolean;
+  /** 已确认时的归档结果；未确认为 null。 */
+  archive: PublicTaskOutputArchive | null;
+  /** 归档目标建议；未确认时给出，已确认时为空数组。 */
+  suggestions: PublicTaskOutputSuggestion[];
+}
+
+/** 产出验收视图（与契约 AssistantTaskOutputsView 一致）。 */
+export interface PublicTaskOutputsView {
+  taskId: string;
+  status: PublicTaskStatus;
+  outputs: PublicTaskOutput[];
+  /** 可归档知识库候选（当前成员具 EDITOR 及以上；服务端权限硬过滤）。 */
+  archiveOptions: PublicTaskOutputArchiveOption[];
+}
+
 /**
  * 任务事件流（SSE）联合，与契约 AssistantTaskStreamEvent 一一对应；
  * 步骤级事件（step_*）由执行器（task-runner / step-runner）在 M2 产出。
@@ -261,6 +313,16 @@ export type PublicTaskStreamEvent =
     scope: PublicTaskInteractionScope | null;
     resolvedAt: string;
   }
+  | {
+    type: 'output_confirmed';
+    seq: number;
+    /** 产出资产 ID（步骤回流的 AI 文档）。 */
+    documentId: string;
+    knowledgeBaseId: string;
+    /** 知识库侧文档 ID（同源重复转存追加版本，不重复归档）。 */
+    knowledgeDocumentId: string;
+    visibilityScope: PublicTaskVisibilityScope;
+  }
   | { type: 'task_completed'; seq: number }
   | { type: 'task_failed'; seq: number; reason: string | null }
   | { type: 'task_cancelled'; seq: number };
@@ -287,6 +349,7 @@ export function toAssistantTaskEventType(
     case 'step_skipped': return AssistantTaskEventType.STEP_SKIPPED;
     case 'interaction_requested': return AssistantTaskEventType.INTERACTION_REQUESTED;
     case 'interaction_resolved': return AssistantTaskEventType.INTERACTION_RESOLVED;
+    case 'output_confirmed': return AssistantTaskEventType.OUTPUT_CONFIRMED;
     case 'task_completed': return AssistantTaskEventType.TASK_COMPLETED;
     case 'task_failed': return AssistantTaskEventType.TASK_FAILED;
     case 'task_cancelled': return AssistantTaskEventType.TASK_CANCELLED;

@@ -26,6 +26,7 @@ import { TenantContextInterceptor } from '../../tenant/tenant-context.intercepto
 import { TenantGuard } from '../../tenant/tenant.guard';
 import {
   CancelAssistantTaskRequestDto,
+  ConfirmAssistantTaskOutputsRequestDto,
   ConfirmAssistantTaskPlanRequestDto,
   ListAssistantTasksQueryDto,
   ReplayTaskEventsQueryDto,
@@ -33,8 +34,10 @@ import {
 import type {
   PublicTaskDetail,
   PublicTaskListResult,
+  PublicTaskOutputsView,
 } from '../orchestration/orchestration.types';
 import { TaskEventService } from '../orchestration/task-event.service';
+import { TaskOutputsService } from '../orchestration/task-outputs.service';
 import { TaskService } from '../orchestration/task.service';
 import { attachCloseHandler, writeSse } from './sse.util';
 
@@ -54,6 +57,7 @@ export class AssistantTasksController {
   constructor(
     private readonly taskService: TaskService,
     private readonly taskEvents: TaskEventService,
+    private readonly taskOutputs: TaskOutputsService,
   ) { }
 
   @Get()
@@ -120,6 +124,28 @@ export class AssistantTasksController {
       decision: input.decision,
       answers: input.answers,
     });
+  }
+
+  @Get(':taskId/outputs')
+  @RequirePermissions('ai.task.read')
+  @ApiOperation({ summary: '查询任务产出验收视图（产出清单与归档候选）' })
+  @ApiOkResponse({ description: '产出清单（含归档结果与建议）与可归档知识库候选' })
+  getTaskOutputs(
+    @Param('taskId', new ParseUUIDPipe()) taskId: string,
+  ): Promise<PublicTaskOutputsView> {
+    return this.taskOutputs.getOutputsView(taskId);
+  }
+
+  @Post(':taskId/outputs/confirm')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions('ai.task.read')
+  @ApiOperation({ summary: '产出验收与归档确认（逐产出指定知识库）' })
+  @ApiOkResponse({ description: '返回更新后的产出验收视图' })
+  confirmTaskOutputs(
+    @Param('taskId', new ParseUUIDPipe()) taskId: string,
+    @Body() input: ConfirmAssistantTaskOutputsRequestDto,
+  ): Promise<PublicTaskOutputsView> {
+    return this.taskOutputs.confirmOutputs(taskId, { outputs: input.outputs });
   }
 
   @Post(':taskId/cancel')
