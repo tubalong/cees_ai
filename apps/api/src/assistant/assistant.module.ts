@@ -17,6 +17,7 @@ import { DingTalkConnectorPlannerService } from './connectors/dingtalk-connector
 import { TencentMeetingConnectorPlannerService } from './connectors/tencent-meeting-connector-planner.service';
 import { WeComConnectorPlannerService } from './connectors/wecom-connector-planner.service';
 import { GitHubConnectorPlannerService } from './connectors/github-connector-planner.service';
+import { GitHubOAuthBrokerService } from './connectors/github-oauth-broker.service';
 import { ConversationService } from './conversation/conversation.service';
 import { EventService } from './conversation/event.service';
 import { AssistantActionDraftService } from './drafts/assistant-action-draft.service';
@@ -65,6 +66,7 @@ import { AssignTaskTool } from './tools/executors/assign-task.tool';
     TencentMeetingConnectorPlannerService,
     WeComConnectorPlannerService,
     GitHubConnectorPlannerService,
+    GitHubOAuthBrokerService,
     EventService,
     ContextBuilderService,
     IntentCapabilityService,
