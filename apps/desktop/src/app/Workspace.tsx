@@ -961,36 +961,36 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
 
     useEffect(() => {
         if (initialConversationLoadStarted.current) return; initialConversationLoadStarted.current = true;
-        let cancelled = false;
         const createNewConversation = navigationState?.createNewConversation === true;
         if (navigationState?.source === 'DINGTALK_CONNECTOR') setPreferredConnector('dingtalk');
         if (navigationState?.source === 'TENCENT_MEETING_CONNECTOR') setPreferredConnector('tencent-meeting');
         if (navigationState?.source === 'WECOM_CONNECTOR') setPreferredConnector('wecom');
         if (navigationState?.source === 'GITHUB_CONNECTOR') setPreferredConnector('github');
+        // 不能用 cleanup 里的 cancelled 标志：React 18 StrictMode 在开发模式下
+        // 会执行「挂载 → 清理 → 再挂载」，清理会把标志置为已取消、再挂载又被上面的
+        // run-once 守卫直接拦下，结果是首次请求的返回值被丢弃，历史列表永远为空
+        // （生产构建不做双调用，因此只在开发环境复现）。
+        // 这里改为只依赖 run-once 守卫：真正卸载后 setState 在 React 18 下是空操作。
         void listConversations()
             .then(async (result) => {
-                if (cancelled) return;
                 setConversations(result.items);
                 if (navigationState?.conversationId) {
                     const target = result.items.find((item) => item.id === navigationState.conversationId);
-                    if (target && !cancelled) await selectConversation(target);
+                    if (target) await selectConversation(target);
                 } else if (createNewConversation) {
                     try {
-                        if (cancelled) return;
                         await createAndActivateConversation();
                     } catch (error) {
-                        if (cancelled) return;
                         message.error(toUserErrorMessage(error, t('创建会话失败')));
                         if (result.items[0]) await selectConversation(result.items[0]);
                     } finally {
-                        if (!cancelled) navigate(location.pathname, { replace: true, state: null });
+                        navigate(location.pathname, { replace: true, state: null });
                     }
                     return;
                 }
-                if (!cancelled && (!landing || historyOnly) && result.items[0]) await selectConversation(result.items[0]);
+                if ((!landing || historyOnly) && result.items[0]) await selectConversation(result.items[0]);
             })
-            .catch((error) => { if (!cancelled) message.error(toUserErrorMessage(error, t('加载会话失败'))); });
-        return () => { cancelled = true; };
+            .catch((error) => { message.error(toUserErrorMessage(error, t('加载会话失败'))); });
     }, []);
     useEffect(() => {
         const connector = window.cees?.connectors?.dingtalk;
@@ -1355,8 +1355,12 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
             setMessages((items) => [...items, userMessage]);
             const conversationId = activeConversationId ?? (await createConversation()).id;
             setActiveConversationId(conversationId);
-            if (!conversations.some((item) => item.id === conversationId)) setConversations((items) => [{ id: conversationId, title: t('新对话'), mode, visibility: 'PRIVATE', version: 1, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }, ...items]);
+            if (!conversations.some((item) => item.id === conversationId)) setConversations((items) => [{ id: conversationId, title: '', mode, visibility: 'PRIVATE', version: 1, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }, ...items]);
+            // 会话标题由服务端在首轮完成后写入（setTitleFromFirstUserMessage）。
+            // 本地占位标题为空，侧栏回退显示「新对话」；完成后需回填服务端真实标题，
+            // 否则侧栏会一直停在「新对话」。
             let turnId = ''; let seq = 0; let answer = ''; let terminal = false; const streamingMessageId = `streaming-${Date.now()}`; const resources = new Map<string, ChatResource>(); const sources: ChatSource[] = []; const citations: ChatCitation[] = []; const toolTypes = new Map<string, ChatResource['type']>(); const toolFormats = new Map<string, ChatResource['format']>(); const toolFailures = new Map<string, ToolFailureNotice>();
+            const needsTitleBackfill = !conversations.find((item) => item.id === activeConversationId)?.title;
             // 待确认写操作不再挂在消息上（改为页面级抽屉，见 pendingDrafts）：
             // 消息是流式重建的，挂在消息上既只能显示最后一条，刷新后也不可恢复。
             const updateStreamingMessage = (): void => setMessages((items) => [...items.filter((item) => item.id !== streamingMessageId), { id: streamingMessageId, role: 'assistant', content: answer, resources: [...resources.values()], sources: [...sources], citations: [...citations], toolFailures: [...toolFailures.values()], weComAuthorizations }]);
@@ -1415,6 +1419,11 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
                         setActiveTurn(undefined);
                     }
                     if (event.finishReason === 'length') message.warning(t('回答达到长度上限，内容可能不完整'));
+                    if (needsTitleBackfill && version === requestVersion.current) {
+                        void listConversations()
+                            .then((result) => { if (version === requestVersion.current) setConversations(result.items); })
+                            .catch(() => undefined);
+                    }
                 }
             };
             const replay = async (): Promise<void> => {

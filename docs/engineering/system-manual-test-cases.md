@@ -1050,6 +1050,8 @@
 | RG-08 | 知识库结构化输出 502 | 见 TC-REL-02 | 兜底回答 |
 | RG-09 | `/ready` 因缺 `QWEN_API_KEY` 503 | 本地起 ai-service | 补齐后 `/ready` 200 |
 | RG-10 | `GitHubOAuthBrokerService` 未注册导致启动失败 | 启动 API | 正常启动，connector 接口可用 |
+| RG-11 | 开发模式下历史列表恒为空（StrictMode 双调用丢弃首次加载结果） | `pnpm --filter @cees/desktop dev` 打开 `localhost:5173` 并登录 | 侧栏能看到已存在的历史会话 |
+| RG-12 | 首轮对话后标题停留在「新对话」，未回填服务端标题 | 新建会话并发送第一条消息 | 侧栏标题变为该条消息内容（截断 30 字） |
 
 ---
 
