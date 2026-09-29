@@ -158,6 +158,10 @@ GitHub Manifest 使用 `REMOTE_MCP`、`DESKTOP`、`OAUTH`，不自动安装第�
 
 工具超过模型单次可接受数量时，规划器先做候选选择，再规划实际调用。腾讯会议最多接收 128 个目录项，GitHub 和企业微信最多接收 256 个目录项；各规划器最多选择 32 个候选并返回三条调用。
 
+规划器不能把连接器内部 toolId 直接当作模型工具名。ai-service 的 `ChatToolDefinition` 只接受匹配 `^[A-Za-z][A-Za-z0-9_-]*$` 且不超过 128 字符的 `name`，`description` 上限 2048 字符；腾讯会议官方 CLI 的 `meeting.list`、企业微信的 `calendar.schedules.list` 这类带点号的 ID 不满足该约束，会直接被 ai-service 请求校验拦成 422，整轮规划失败。因此各规划器统一通过 `buildConnectorModelToolDefinitions` 生成 `<命名空间>_tool_<序号>` 形式的模型工具名，把内部 toolId 与风险标记写进描述，超长描述按契约上限截断，并在规划结果里用模型名回映射成连接器内部 toolId。
+
+GitHub 目录超过候选上限时，规划器固定保留 `search_repositories`、`list_commits`、`get_file_contents`、`list_branches`、`list_pull_requests`、`list_issues` 等仓库类只读工具作为候选（最多 12 个），再由选择器补充其他候选。否则选择器可能在 50 个以上工具里裁掉全部仓库类工具，使「查看我的私有仓库」这类问题只能拿到账号公开资料。
+
 ## 8. 安全边界
 
 - 模型不能指定本地可执行文件、Shell、环境变量、网络地址、Header 或 Token；

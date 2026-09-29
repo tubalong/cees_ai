@@ -2,6 +2,7 @@ import { BadGatewayException } from '@nestjs/common';
 import type { ToolTurnStreamEvent } from '@cees/ai-service-client';
 import type { AiServiceGateway } from '../../ai-orchestration/ai-service-gateway.service';
 import type { TenantContext } from '../../tenant/tenant-context';
+import { MODEL_TOOL_DESCRIPTION_MAX_LENGTH, MODEL_TOOL_NAME_PATTERN } from './model-tool-definition';
 import { DingTalkConnectorPlannerService } from './dingtalk-connector-planner.service';
 
 describe('DingTalkConnectorPlannerService', () => {
@@ -79,7 +80,7 @@ describe('DingTalkConnectorPlannerService', () => {
 
   it('只返回目录内的模型工具调用', async () => {
     const streamToolTurn = jest.fn(async () => stream([
-      { type: 'tool_calls', tool_calls: [{ id: 'call-1', name: tools[0]!.toolId, arguments: { start: '2026-09-20' } }] },
+      { type: 'tool_calls', tool_calls: [{ id: 'call-1', name: 'dingtalk_tool_1', arguments: { start: '2026-09-20' } }] },
       { type: 'completed', latency_ms: 1, finish_reason: 'tool_calls' },
     ]));
     const service = new DingTalkConnectorPlannerService(
@@ -93,8 +94,28 @@ describe('DingTalkConnectorPlannerService', () => {
     expect(streamToolTurn).toHaveBeenCalledWith(expect.objectContaining({
       tenant_id: context.tenantId,
       user_id: context.userId,
-      tools: [expect.objectContaining({ name: tools[0]!.toolId })],
+      tools: [expect.objectContaining({ name: 'dingtalk_tool_1', description: expect.stringContaining(tools[0]!.toolId) })],
     }), expect.objectContaining({ membershipId: context.membershipId }));
+  });
+
+  it('模型工具定义满足 ai-service 契约的名称与描述上限', async () => {
+    const longTool = { ...tools[0]!, description: '钉钉日程说明'.repeat(400) };
+    const streamToolTurn = jest.fn().mockResolvedValueOnce(stream([
+      { type: 'completed', latency_ms: 1, finish_reason: 'stop' },
+    ]));
+    const service = new DingTalkConnectorPlannerService(
+      { streamToolTurn } as unknown as AiServiceGateway,
+      { require: () => context } as unknown as TenantContext,
+    );
+
+    await expect(service.plan('查询钉钉数据', [longTool])).resolves.toEqual({ calls: [] });
+    const definitions = streamToolTurn.mock.calls[0]![0].tools as Array<{ name: string; description: string }>;
+    expect(definitions).toHaveLength(1);
+    definitions.forEach((definition, index) => {
+      expect(definition.name).toBe(`dingtalk_tool_${index + 1}`);
+      expect(definition.name).toMatch(MODEL_TOOL_NAME_PATTERN);
+      expect(definition.description.length).toBeLessThanOrEqual(MODEL_TOOL_DESCRIPTION_MAX_LENGTH);
+    });
   });
 
   it('拒绝模型返回目录外工具', async () => {
@@ -122,7 +143,7 @@ describe('DingTalkConnectorPlannerService', () => {
         { type: 'completed', latency_ms: 1, finish_reason: 'tool_calls' },
       ]))
       .mockResolvedValueOnce(stream([
-        { type: 'tool_calls', tool_calls: [{ id: 'call-1', name: selected.toolId, arguments: { start: '2026-09-20' } }] },
+        { type: 'tool_calls', tool_calls: [{ id: 'call-1', name: 'dingtalk_tool_1', arguments: { start: '2026-09-20' } }] },
         { type: 'completed', latency_ms: 1, finish_reason: 'tool_calls' },
       ]));
     const service = new DingTalkConnectorPlannerService(
@@ -135,7 +156,9 @@ describe('DingTalkConnectorPlannerService', () => {
     });
     expect(streamToolTurn).toHaveBeenCalledTimes(2);
     expect(streamToolTurn.mock.calls[0]![0].tools).toHaveLength(1);
-    expect(streamToolTurn.mock.calls[1]![0].tools).toEqual([expect.objectContaining({ name: selected.toolId })]);
+    expect(streamToolTurn.mock.calls[1]![0].tools).toEqual([
+      expect.objectContaining({ name: 'dingtalk_tool_1', description: expect.stringContaining(selected.toolId) }),
+    ]);
   });
 
   it('大目录始终保留本人考勤和完整组织复合工具作为优先候选', async () => {
@@ -164,9 +187,9 @@ describe('DingTalkConnectorPlannerService', () => {
 
     await expect(service.plan('查询钉钉数据', [...priorityTools, ...otherTools])).resolves.toEqual({ calls: [] });
     expect(streamToolTurn.mock.calls[1]![0].tools).toEqual(expect.arrayContaining([
-      expect.objectContaining({ name: priorityTools[0]!.toolId }),
-      expect.objectContaining({ name: priorityTools[1]!.toolId }),
-      expect.objectContaining({ name: selected.toolId }),
+      expect.objectContaining({ name: 'dingtalk_tool_1', description: expect.stringContaining(priorityTools[0]!.toolId) }),
+      expect.objectContaining({ name: 'dingtalk_tool_2', description: expect.stringContaining(priorityTools[1]!.toolId) }),
+      expect.objectContaining({ name: 'dingtalk_tool_3', description: expect.stringContaining(selected.toolId) }),
     ]));
     expect(streamToolTurn.mock.calls[1]![0].tools).toHaveLength(3);
   });
