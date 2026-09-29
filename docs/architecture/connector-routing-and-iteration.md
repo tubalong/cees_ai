@@ -1,6 +1,6 @@
 # 连接器语义路由、受控多步接力与调用审计（设计草案）
 
-> 状态：**设计草案，三项能力均未实现**（2026-09-29）。本文只定义目标、边界与改动点；开始实现前必须先落 `packages/contracts`，实现过程中按 §9 状态表逐项标注已落地 / 暂缓 / 待确认。
+> 状态：**差距一（语义路由）已落地**（契约 `0.44.0`）；差距二（受控多步接力）与差距三（连接器调用审计）仍为设计草案，尚未实现。本文定义目标、边界与改动点；每期实现前必须先落 `packages/contracts`，并按 §9 状态表逐项标注已落地 / 暂缓 / 待确认。
 > Owner：B（`apps/desktop/src/app/**` 与 `apps/api/src/assistant/**` 的唯一 owner）
 > 关联文档：
 > - [Desktop 连接器运行时](connector-runtime.md)：连接器生命周期、凭据位置、动态工具与规划边界
@@ -19,11 +19,13 @@
 
 本文把这三件事定义成可独立交付的三期，并明确不做的事：**不把连接器搬进 `apps/api`，不让 API 接触凭据，不让模型指定可执行文件、网络目标或 Header**。
 
+差距一已按本文实现，接口契约见 [连接器语义路由 API](../api/assistant-connector-routing-api.md)；差距二、差距三的实现范围见 §9 状态表。
+
 ## 2. 现状核查
 
 | 能力 | 现状 | 证据 |
 | --- | --- | --- |
-| 连接器触发 | **正则硬匹配**：钉钉 `/钉钉|dingtalk|dws/i`、腾讯会议 `/腾讯会议|wemeet|腾讯.*会议/i`、企微 `/企业微信|企微|wecom/i`、GitHub 关键词组；另有 `preferredConnector` / `forcedConnector` 强制通路 | `apps/desktop/src/app/Workspace.tsx`（约 :1230 / :1254 / :1286 / :1317） |
+| 连接器触发 | 已落地语义路由：点名（正则识别）或 `preferredConnector` / `forcedConnector` 直接硬命中，其余问题由 `POST /assistant/connectors/route` 只凭一级能力摘要决定激活哪些连接器；正则不再是主判据 | `apps/desktop/src/app/Workspace.tsx` 的 `detectNamedConnectors` / `collectConnectorRoutingCandidates`、`apps/api/src/assistant/connectors/connector-routing.service.ts` |
 | 工具目录下发 | **批量下发**：Desktop 现场发现工具后整份（含参数 Schema、`riskLevel`、`requiresConfirmation`）交给 API；目录 > 32 时先跑一次选择器 | `apps/api/src/assistant/connectors/*-planner.service.ts`、`apps/api/src/assistant/dto.ts` |
 | 规划/执行边界 | 已落地：`/assistant/connectors/<provider>/plan` 只规划，不持有凭据、不执行 | `apps/api/src/assistant/api/assistant-connector.controller.ts` |
 | 单轮调用上限 | 每个连接器每次最多 3 个调用；同一轮连接器上下文合计 ≤ 3 条 | `apps/desktop/electron/connectors/*/*.connector.ts` 的 `MAX_CALLS`、`Workspace.tsx` 的 `connectorContexts.length > 3` 校验 |
@@ -59,7 +61,7 @@ Renderer -> 仅对被激活的 provider 调 POST /assistant/connectors/<provider
 
 - `capabilitySummary` 每个连接器 ≤ 300 字，`routingExamples` ≤ 5 条短句；四个连接器合计控制在 2 KB 量级，可常驻。
 - 路由复用现有「工具式结构化选择」模式（`select_connectors` 工具 + 白名单校验），**不解析自由文本**，避免模型输出格式漂移。
-- 用户明确点名 provider、或从连接器卡片进入（`preferredConnector` / `forcedConnector`）时**直接硬命中，不调路由**。正则从主判据降级为兜底，保留「宁可多触发一次规划」的兜底能力。
+- 用户明确点名 provider、或从连接器卡片进入（`preferredConnector` / `forcedConnector`）时**直接硬命中，不调路由**。此时正则只承担「识别点名」这一件事，使未就绪的连接器仍能给出「请先安装并授权」的确定性引导。
 - `clarification` 非空时，Desktop 不调用任何连接器，把该提示作为新的可选请求字段 `connectorRoutingHint`（≤ 1000 字）注入本轮，让模型自然反问。**不复用 `ConnectorContext`**，避免把路由提示混进事实通道与审计白名单。
 
 ### 3.3 改动点
@@ -68,26 +70,30 @@ Renderer -> 仅对被激活的 provider 调 POST /assistant/connectors/<provider
 | --- | --- | --- |
 | Desktop | `apps/desktop/electron/connectors/core/connector.types.ts` | `ConnectorManifest` 增加 `capabilitySummary`、`routingExamples` |
 | Desktop | 四个 `connectors/<provider>/<provider>.manifest.ts` | 各写一份能力摘要与典型问法 |
-| Desktop | `apps/desktop/electron/main.ts`、preload、`apps/desktop/src/core/api.ts` | 新增 route IPC 与客户端方法 |
-| Desktop | `apps/desktop/src/app/Workspace.tsx` | 路由分支改为「点名/强制 → 硬命中；否则调 route」 |
+| Desktop | `apps/desktop/src/core/api.ts` | 新增 `routeAssistantConnector`；`createTurn` 增加 `connectorRoutingHint` |
+| Desktop | `apps/desktop/src/app/Workspace.tsx` | 路由分支改为「点名/强制 → 硬命中；否则调 route」，并采集一级目录 |
 | API | `apps/api/src/assistant/connectors/connector-routing.service.ts`（新增） | 一级目录路由，沿用 `streamToolTurn` |
-| API | `apps/api/src/assistant/api/assistant-connector.controller.ts`、`dto.ts` | 新增 route 端点与 DTO |
+| API | `apps/api/src/assistant/api/assistant-connector.controller.ts`、`dto.ts`、`assistant.module.ts` | 新增 route 端点、请求 DTO 与服务注册 |
+| API | `apps/api/src/assistant/runtime/turn-runner.service.ts`、`api/assistant.controller.ts` | `connectorRoutingHint` 参与本轮 instructions 与请求哈希 |
+
+实现时没有新增 Electron IPC：一级目录由 Renderer 通过既有 `cees:connector-list` / `cees:connector-status` 采集，路由请求由 Renderer 直接用已鉴权的公开 API 客户端发出。这样不需要为路由扩大 IPC 暴露面。
 
 ### 3.4 契约改动
 
 `packages/contracts/openapi/openapi.yaml`：
 
 - 新增 `POST /assistant/connectors/route`；
-- 新增 `ConnectorRoutingCandidate`、`RouteConnectorsRequest`、`RouteConnectorsResponse`；
+- 新增 `ConnectorRoutingProvider`、`ConnectorRoutingCandidate`、`ConnectorRoutingRequest`、`ConnectorRoutingResult`、`ConnectorRoutingResponseEnvelope`；
 - 轮次创建请求新增可选 `connectorRoutingHint`（`maxLength: 1000`，省略即无提示）。
 
 随后执行 `pnpm --filter @cees/contracts` 校验并重新生成 `packages/api-client`（移动端若接入路由需同步 Dart 客户端）。
 
 ### 3.5 失败语义
 
-- 路由失败（模型不可用 / 输出不合法）→ **回退到正则兜底**，不阻断对话，不暴露内部错误码。
-- 路由返回未就绪的连接器 → 直接忽略，交给二级规划返回既有的「请先安装并授权」错误。
+- 路由失败（模型不可用 / 输出不合法 / 网络失败）→ 本轮不激活任何连接器，不阻断对话，不暴露内部错误码；未点名时的效果等价于正则兜底（即不试连接器）。
+- 未就绪的连接器不进入一级目录，也不会被模型选中；用户点名未就绪连接器时仍由既有分支给出「请先安装并授权」的确定性错误。
 - 路由不得放大权限：它只决定「试哪个连接器」，任何调用仍需过二级规划、目录校验与 Desktop 确认。
+- 服务端 502/400 语义见 [连接器语义路由 API](../api/assistant-connector-routing-api.md) §3。
 
 ### 3.6 验收
 
@@ -206,10 +212,10 @@ Renderer -> 仅对被激活的 provider 调 POST /assistant/connectors/<provider
 
 | 项 | 状态 |
 | --- | --- |
-| 一级目录路由（`/assistant/connectors/route`） | 待实现 |
-| `ConnectorManifest.capabilitySummary` / `routingExamples` | 待实现 |
-| `connectorRoutingHint` 消歧注入 | 待实现 |
-| 正则降级为兜底 | 待实现 |
+| 一级目录路由（`/assistant/connectors/route`） | 已落地（契约 `0.44.0`） |
+| `ConnectorManifest.capabilitySummary` / `routingExamples` | 已落地 |
+| `connectorRoutingHint` 消歧注入 | 已落地 |
+| 正则降级为兜底 | 已落地：正则只用于识别点名与未就绪引导，触发连接器改由路由决定 |
 | `previousSteps` 多步接力 | 待实现 |
 | `followUpMayBeNeeded` | 待实现 |
 | 连接器写操作逐条审计 | 待实现 |
@@ -220,6 +226,6 @@ Renderer -> 仅对被激活的 provider 调 POST /assistant/connectors/<provider
 
 1. **第二轮触发判据**：由模型返回 `followUpMayBeNeeded` 提示，还是由 Desktop 按「意图含写操作或多连接器」的确定性规则判断？前者更贴合语义，后者更可预测。
 2. **两轮的总调用上限**：保持合计 ≤ 3，还是放宽到每轮 ≤ 3（合计最多 6）？放宽会增加确认次数与上下文体积。
-3. **路由成本**：每个未点名品牌的问题都会多一次路由模型调用。是否只在「已连接连接器 ≥ 2」时才启用路由，单连接器直接命中？
+3. ~~**路由成本**：每个未点名品牌的问题都会多一次路由模型调用。是否只在「已连接连接器 ≥ 2」时才启用路由，单连接器直接命中？~~ **已决定**：就绪连接器 ≤ 1 时不调用模型，直接返回确定性结果（无就绪连接器返回空，单就绪连接器直接命中）；≥ 2 时才做一次路由模型调用，且未点名的问题才需要它。
 4. **读操作审计默认值**：默认关闭是否足够？安全侧可能希望默认开启轮次级聚合、只有逐条才需要开关。
 5. **审计保留策略**：连接器审计量级远高于现有业务审计，`audit_logs` 是否需要保留期与归档策略（当前未见相关约定）。

@@ -22,6 +22,9 @@ import {
 } from 'class-validator';
 import type {
   ConnectorContextInput,
+  ConnectorRoutingCandidateInput,
+  ConnectorRoutingProvider,
+  ConnectorRoutingState,
   DingTalkConnectorToolInput,
   PublicTurnMode,
   TencentMeetingConnectorToolInput,
@@ -260,6 +263,60 @@ export class PlanGitHubConnectorRequestDto {
   tools!: GitHubConnectorToolDto[];
 }
 
+export class ConnectorRoutingCandidateDto implements ConnectorRoutingCandidateInput {
+  @ApiProperty({ enum: ['DINGTALK', 'TENCENT_MEETING', 'WECOM', 'GITHUB'] })
+  @IsIn(['DINGTALK', 'TENCENT_MEETING', 'WECOM', 'GITHUB'])
+  provider!: ConnectorRoutingProvider;
+
+  @ApiProperty({ minLength: 1, maxLength: 60 })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(60)
+  displayName!: string;
+
+  @ApiProperty({ minLength: 1, maxLength: 300 })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(300)
+  capabilitySummary!: string;
+
+  @ApiPropertyOptional({ type: [String], maxItems: 5 })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(5)
+  @IsString({ each: true })
+  @MinLength(1, { each: true })
+  @MaxLength(60, { each: true })
+  routingExamples?: string[];
+
+  @ApiProperty({ enum: ['NOT_INSTALLED', 'AUTH_REQUIRED', 'PROFILE_REQUIRED', 'READY', 'ERROR'] })
+  @IsIn(['NOT_INSTALLED', 'AUTH_REQUIRED', 'PROFILE_REQUIRED', 'READY', 'ERROR'])
+  state!: ConnectorRoutingState;
+
+  @ApiPropertyOptional({ minimum: 0, maximum: 5000 })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(5000)
+  toolCount?: number;
+}
+
+export class RouteConnectorRequestDto {
+  @ApiProperty({ maxLength: 10000 })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(10000)
+  query!: string;
+
+  @ApiProperty({ type: [ConnectorRoutingCandidateDto], minItems: 1, maxItems: 8 })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(8)
+  @Type(() => ConnectorRoutingCandidateDto)
+  @ValidateNested({ each: true })
+  connectors!: ConnectorRoutingCandidateDto[];
+}
+
 export class CreateConversationRequestDto {
   @ApiPropertyOptional({
     description: '会话标题；省略时服务端在首轮完成后根据首条消息自动生成',
@@ -411,6 +468,19 @@ export class CreateTurnRequestDto {
   @IsOptional()
   @IsBoolean()
   webSearchEnabled?: boolean;
+
+  @ApiPropertyOptional({
+    description: 'Desktop 连接器语义路由判定目标不唯一时注入的本轮消歧提示；与 assistantContext 相同，只用于本轮回答'
+      + '，不落库、不作为业务写入或权限依据，也不属于 ConnectorContext 事实通道',
+    nullable: true,
+    minLength: 1,
+    maxLength: 1000,
+  })
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(1000)
+  connectorRoutingHint?: string | null;
 }
 
 export class ReplayTurnEventsQueryDto {

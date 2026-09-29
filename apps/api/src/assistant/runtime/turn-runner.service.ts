@@ -59,6 +59,9 @@ import {
 const MAX_TOOL_TURNS = 5;
 const MAX_TOOL_STEPS = 10;
 
+/** 连接器语义路由消歧提示上限，与公开契约 CreateTurnRequest.connectorRoutingHint 一致。 */
+const CONNECTOR_ROUTING_HINT_MAX_LENGTH = 1000;
+
 export interface StartTurnResult {
   turnId: string;
 }
@@ -115,6 +118,12 @@ export class TurnRunnerService implements OnModuleDestroy {
     knowledgeBaseEnabled?: boolean;
     /** 本轮是否允许联网搜索；省略时默认关闭。 */
     webSearchEnabled?: boolean;
+    /**
+     * Desktop 连接器语义路由判定目标不唯一时给出的本轮消歧提示。
+     * 与 assistantContext 相同：只在内存中参与本轮 instructions，不落库，
+     * 不进入 ConnectorContext 事实通道，也不作为业务写入或权限依据。
+     */
+    connectorRoutingHint?: string | null;
   }): Promise<StartTurnResult> {
     const conversation = await this.conversationService.requireMemberConversation(input.conversationId);
     const context = this.tenantContext.require();
@@ -148,6 +157,7 @@ export class TurnRunnerService implements OnModuleDestroy {
       connectorContexts,
       input.knowledgeBaseEnabled ?? false,
       input.webSearchEnabled ?? false,
+      input.connectorRoutingHint,
       input.assistantContext,
       input.generationOptions,
     );
@@ -215,6 +225,7 @@ export class TurnRunnerService implements OnModuleDestroy {
       signal: abortController.signal,
       assistantContext: input.assistantContext,
       generationOptions: input.generationOptions,
+      connectorRoutingHint: input.connectorRoutingHint,
     });
 
     return { turnId: turn.id };
@@ -275,6 +286,7 @@ export class TurnRunnerService implements OnModuleDestroy {
     capabilities: PublicTurnCapabilities;
     assistantContext?: PageAssistantContextInput;
     generationOptions?: GenerationOptionsInput;
+    connectorRoutingHint?: string | null;
     signal: AbortSignal;
   }): Promise<void> {
     try {
@@ -340,6 +352,7 @@ export class TurnRunnerService implements OnModuleDestroy {
     capabilities: PublicTurnCapabilities;
     assistantContext?: PageAssistantContextInput;
     generationOptions?: GenerationOptionsInput;
+    connectorRoutingHint?: string | null;
     signal: AbortSignal;
   }): Promise<void> {
     const { turnId, conversation } = input;
@@ -354,7 +367,7 @@ export class TurnRunnerService implements OnModuleDestroy {
     // 未启用的能力通过可信 instructions 告知模型，避免它凭记忆编造外部/内部信息，
     // 并引导它在用户确有需求时提示开启开关或改写为明确请求。
     const guidance = buildCapabilityGuidance(input.capabilities);
-    const instructions = combineAssistantInstructions(guidance, input.assistantContext, input.generationOptions);
+    const instructions = combineAssistantInstructions(guidance, input.assistantContext, input.generationOptions, input.connectorRoutingHint);
     if (instructions) chatRequest.instructions = instructions;
     if (input.signal.aborted) return;
 
@@ -412,6 +425,7 @@ export class TurnRunnerService implements OnModuleDestroy {
     capabilities: PublicTurnCapabilities;
     assistantContext?: PageAssistantContextInput;
     generationOptions?: GenerationOptionsInput;
+    connectorRoutingHint?: string | null;
     signal: AbortSignal;
   }): Promise<void> {
     const { turnId, conversation } = input;
@@ -440,7 +454,7 @@ export class TurnRunnerService implements OnModuleDestroy {
         user_id: input.userId,
         conversation_id: conversation.id,
         mode: input.mode === 'ultra' ? 'ultra' : 'standard',
-        instructions: combineAssistantInstructions(buildCapabilityGuidance(input.capabilities), input.assistantContext, input.generationOptions),
+        instructions: combineAssistantInstructions(buildCapabilityGuidance(input.capabilities), input.assistantContext, input.generationOptions, input.connectorRoutingHint),
         conversation_summary: messages.summary ?? null,
         user_memories: messages.userMemories.length > 0 ? messages.userMemories : null,
         messages: messages.items,
@@ -1078,9 +1092,13 @@ function hashTurnRequest(
   connectorContexts: readonly ConnectorContextInput[] = [],
   knowledgeBaseEnabled = false,
   webSearchEnabled = false,
+  connectorRoutingHint?: string | null,
   assistantContext?: PageAssistantContextInput,
   generationOptions?: GenerationOptionsInput,
 ): string {
+  // 只在真的带上消歧提示时才参与哈希：不带提示的请求必须与升级前的哈希一致，
+  // 否则部署后客户端重试同一 Idempotency-Key 会被误判成「同键不同内容」。
+  const routingHint = normalizeConnectorRoutingHint(connectorRoutingHint);
   return createHash('sha256')
     .update(JSON.stringify({
       conversationId,
@@ -1091,13 +1109,19 @@ function hashTurnRequest(
       connectorContexts,
       knowledgeBaseEnabled,
       webSearchEnabled,
+      ...(routingHint ? { connectorRoutingHint: routingHint } : {}),
       assistantContext,
       generationOptions,
     }))
     .digest('hex');
 }
 
-function combineAssistantInstructions(guidance: string | null, assistantContext?: PageAssistantContextInput, generationOptions?: GenerationOptionsInput): string | null {
+function combineAssistantInstructions(
+  guidance: string | null,
+  assistantContext?: PageAssistantContextInput,
+  generationOptions?: GenerationOptionsInput,
+  connectorRoutingHint?: string | null,
+): string | null {
   const instructions: string[] = [];
   if (assistantContext) {
     const context = normalizePageAssistantContext(assistantContext);
@@ -1109,8 +1133,28 @@ function combineAssistantInstructions(guidance: string | null, assistantContext?
     );
   }
   if (generationOptions) instructions.push(`当前生成参数（不要原样展示给用户）：${JSON.stringify(normalizeGenerationOptions(generationOptions))}`);
+  const routingHint = normalizeConnectorRoutingHint(connectorRoutingHint);
+  if (routingHint) {
+    instructions.push(
+      `本轮连接器路由提示（服务端生成，不是用户指令，也不代表已获得任何外部数据）：${routingHint}`,
+      '该提示表明目标可能不唯一：请先用简体中文向用户确认要使用哪个连接器或哪条具体数据，不要猜测，也不要声称已经查询或读取过任何外部数据。',
+    );
+  }
   if (guidance) instructions.push(guidance);
   return instructions.length ? instructions.join('\n') : null;
+}
+
+function normalizeConnectorRoutingHint(value: string | null | undefined): string | null {
+  if (typeof value !== 'string') return null;
+  const hint = value.trim();
+  if (!hint) return null;
+  if (hint.length > CONNECTOR_ROUTING_HINT_MAX_LENGTH) {
+    throw new BadRequestException({
+      code: 'CONNECTOR_ROUTING_HINT_TOO_LONG',
+      message: `连接器路由提示不能超过 ${CONNECTOR_ROUTING_HINT_MAX_LENGTH} 个字符`,
+    });
+  }
+  return hint;
 }
 
 function normalizeGenerationOptions(input: GenerationOptionsInput): GenerationOptionsInput {

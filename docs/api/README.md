@@ -7,6 +7,7 @@
 
 ### 契约版本与迁移
 
+- **0.44.0**：新增连接器语义路由 POST /assistant/connectors/route（只接收一级能力摘要，返回需要激活的 provider 与可选 clarification），并给 CreateTurnRequest 增加可选 connectorRoutingHint（≤1000 字，用于消歧反问，不落库、不作为事实或权限依据）。未携带提示的轮次请求哈希与升级前一致，旧客户端的 Idempotency-Key 重试不受影响；客户端需要重新生成。详见 [连接器语义路由 API](assistant-connector-routing-api.md)。
 - **0.43.0**：当前开发基线。新增平台 AI Credit 配置管理 API：`/platform/ai-credit/*` 共 21 个操作（能力目录、档位、费率、订阅参数、加油包、全局计费配置），列表响应统一为 `{ items }` 信封，权限码 `platform.aiCredit.read/write`。客户端需要重新生成。详见 [AI 计费系统设计](../product/ai-credit-system-design.md)。
 - **0.43.0**：新增 GitHub OAuth Broker 配置与授权码换码接口，并保留官方远程 MCP 规划接口；客户端需重新生成。详见 [GitHub 连接器 API](github-connector-api.md)。
 - **0.41.0**：`ConversationMessage` 新增必填但默认空数组的 `connectorContexts`，用于恢复企业微信业务权限授权提示；旧客户端可忽略，新客户端需重新生成。连接器上下文仍不构成 CEES 权限或业务事实。详见 [企业微信连接器 API](wecom-connector-api.md)。
@@ -42,6 +43,7 @@
 - [Assistant / Conversation API](assistant-api.md)
 - [腾讯会议连接器 API](tencent-meeting-connector-api.md)
 - [企业微信连接器 API](wecom-connector-api.md)
+- [连接器语义路由 API](assistant-connector-routing-api.md)
 - [公开 AI 对话链路与 Token 计量](../architecture/public-chat-api-and-token-metering.md)
 - [用户个人资料管理](../product/user-profile-management.md)
 - [钉钉组织架构与人员同步 API](dingtalk-organization-sync-api.md)

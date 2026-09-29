@@ -15,11 +15,11 @@ import ReactMarkdown, { type Components } from 'react-markdown';
 import { useLocation, useNavigate } from 'react-router-dom';
 import remarkGfm from 'remark-gfm';
 import {
-    cancelActionDraft, cancelTurn, confirmActionDraft, createConversation, createTurn, deleteConversation, downloadGeneratedDocumentFile, exportDocument, fetchGeneratedDocumentBytes, getConversation, getDashboardOverview, getDashboardTodos, getDashboardUpcomingMeetings, getDocument, getImage, listAssistantActionDrafts, planDingTalkConnectorQueries, planGitHubConnectorQueries, planTencentMeetingConnectorQueries, planWeComConnectorQueries, replayTurnEvents, updateConversation, uploadAttachmentFile,
+    cancelActionDraft, cancelTurn, confirmActionDraft, createConversation, createTurn, deleteConversation, downloadGeneratedDocumentFile, exportDocument, fetchGeneratedDocumentBytes, getConversation, getDashboardOverview, getDashboardTodos, getDashboardUpcomingMeetings, getDocument, getImage, listAssistantActionDrafts, planDingTalkConnectorQueries, planGitHubConnectorQueries, planTencentMeetingConnectorQueries, planWeComConnectorQueries, replayTurnEvents, routeAssistantConnector, updateConversation, uploadAttachmentFile,
     getUnreadNotificationCount, hasStoredSession, listConversations, listDocuments, listTenantMembers, logout,
     createKnowledgeDocument, deleteKnowledgeDocument, listWritableKnowledgeBases,
     type Conversation, type ConversationMessage, type DashboardOverview, type DashboardTodoItem, type DashboardUpcomingMeeting, type GenerationOptions, type ImageAccess, type PageAssistantContext,
-    type ConnectorContext, type GitHubConnectorTool, type TencentMeetingConnectorTool, type TurnStreamEvent, type WeComConnectorTool,
+    type ConnectorContext, type ConnectorRoutingCandidate, type ConnectorRoutingProvider, type GitHubConnectorTool, type TencentMeetingConnectorTool, type TurnStreamEvent, type WeComConnectorTool,
     type KnowledgeBaseSummary, type KnowledgeSourceType,
     type ManagedDocumentSummary, type MeResult, type TenantMember,
 } from '../core/api';
@@ -781,6 +781,61 @@ function ActionConfirmationCard({ confirmation, onResolve }: {
     </div>;
 }
 
+/** 参与连接器语义路由的本地连接器 ID。 */
+type RoutingConnectorId = 'dingtalk' | 'tencent-meeting' | 'wecom' | 'github';
+
+const ROUTING_PROVIDER_BY_CONNECTOR_ID: Record<RoutingConnectorId, ConnectorRoutingProvider> = {
+    dingtalk: 'DINGTALK',
+    'tencent-meeting': 'TENCENT_MEETING',
+    wecom: 'WECOM',
+    github: 'GITHUB',
+};
+
+const ROUTING_CONNECTOR_ID_BY_PROVIDER: Record<ConnectorRoutingProvider, RoutingConnectorId> = {
+    DINGTALK: 'dingtalk',
+    TENCENT_MEETING: 'tencent-meeting',
+    WECOM: 'wecom',
+    GITHUB: 'github',
+};
+
+/**
+ * 用户明确点名连接器时直接硬命中，不调用语义路由。正则在这里只用于识别「点名」：
+ * 未就绪的连接器必须仍然给出「请先安装并授权」的确定性引导，而不是被静默跳过。
+ */
+function detectNamedConnectors(content: string): Set<RoutingConnectorId> {
+    const named = new Set<RoutingConnectorId>();
+    if (/钉钉|dingtalk|dws/i.test(content)) named.add('dingtalk');
+    if (/腾讯会议|wemeet|腾讯.*会议/i.test(content)) named.add('tencent-meeting');
+    if (/企业微信|企微|wecom/i.test(content)) named.add('wecom');
+    if (/github|git hub|issue|pull request|\bpr\b|actions|commit|commits|提交记录|提交总结|私有仓库|private repository/i.test(content)) named.add('github');
+    return named;
+}
+
+/** 一级目录：只上报清单里的能力摘要与典型问法加上本机读到的就绪状态，不读取工具目录。 */
+async function collectConnectorRoutingCandidates(
+    connectors: NonNullable<NonNullable<Window['cees']>['connectors']>,
+): Promise<ConnectorRoutingCandidate[]> {
+    const manifests = await connectors.list();
+    const candidates: ConnectorRoutingCandidate[] = [];
+    for (const manifest of manifests) {
+        const provider = ROUTING_PROVIDER_BY_CONNECTOR_ID[manifest.id as RoutingConnectorId];
+        if (!provider) continue;
+        try {
+            const status = await connectors.status(manifest.id);
+            candidates.push({
+                provider,
+                displayName: manifest.name,
+                capabilitySummary: manifest.capabilitySummary,
+                routingExamples: manifest.routingExamples.length ? [...manifest.routingExamples] : undefined,
+                state: status.state,
+            });
+        } catch {
+            // 单个连接器状态读取失败不影响其余连接器参与路由
+        }
+    }
+    return candidates;
+}
+
 function WeComAuthorizationCard({ request, retrying, onRetry }: {
     request: WeComAuthorizationRequest;
     retrying: boolean;
@@ -1225,9 +1280,27 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
                     });
                 }
             }
+            // 连接器语义路由：点名连接器或从连接器卡片进入对话时直接硬命中；否则只把
+            // 「就绪连接器的一级能力摘要」交给服务端做一次语义路由，由模型判断该试哪些连接器。
+            // 路由失败不阻断对话，也不激活任何连接器（等价于正则兜底：未点名时不试连接器）。
+            const pinnedConnectors = detectNamedConnectors(content);
+            if (preferredConnector) pinnedConnectors.add(preferredConnector);
+            if (forcedConnector) pinnedConnectors.add(forcedConnector);
+            const activeConnectors = new Set<RoutingConnectorId>(pinnedConnectors);
+            let connectorRoutingHint: string | null = null;
+            if (pinnedConnectors.size === 0 && window.cees?.connectors) {
+                try {
+                    const routing = await routeAssistantConnector(content, await collectConnectorRoutingCandidates(window.cees.connectors));
+                    routing.providers.forEach((provider) => activeConnectors.add(ROUTING_CONNECTOR_ID_BY_PROVIDER[provider]));
+                    connectorRoutingHint = routing.clarification;
+                } catch {
+                    connectorRoutingHint = null;
+                }
+            }
             const dingtalkConnector = window.cees?.connectors?.dingtalk;
-            if (dingtalkConnector) {
-                const mentionsDingTalk = /钉钉|dingtalk|dws/i.test(content);
+            if (dingtalkConnector && activeConnectors.has('dingtalk')) {
+                // 进入本分支只有两种情况：用户点名钉钉（可能未就绪，需要确定性引导），
+                // 或语义路由选中钉钉（此时一定已就绪）。
                 let connectorRequired = false;
                 try {
                     const status = await dingtalkConnector.status();
@@ -1238,7 +1311,7 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
                             connectorRequired = plan.calls.length > 0;
                             connectorContexts.push(...await dingtalkConnector.execute(plan.calls));
                         }
-                    } else if (mentionsDingTalk) {
+                    } else {
                         if (status.state === 'PROFILE_REQUIRED') {
                             throw new Error('当前钉钉连接已登录多个组织，请先在连接器页面选择当前组织');
                         }
@@ -1247,13 +1320,11 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
                 } catch (error) {
                     const latestStatus = await dingtalkConnector.status().catch(() => undefined);
                     setDingtalkConnected(latestStatus?.state === 'READY');
-                    if (mentionsDingTalk || connectorRequired) throw error;
+                    if (pinnedConnectors.has('dingtalk') || connectorRequired) throw error;
                 }
             }
             const tencentMeetingConnector = window.cees?.connectors;
-            const mentionsTencentMeeting = /腾讯会议|wemeet|腾讯.*会议/i.test(content)
-                || preferredConnector === 'tencent-meeting';
-            if (tencentMeetingConnector && mentionsTencentMeeting) {
+            if (tencentMeetingConnector && activeConnectors.has('tencent-meeting')) {
                 const status = await tencentMeetingConnector.status('tencent-meeting');
                 if (status.state !== 'READY') {
                     throw new Error(status.error || '请先在连接器页面安装并授权腾讯会议连接器');
@@ -1283,8 +1354,7 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
                 }
             }
             const weComConnector = window.cees?.connectors;
-            const mentionsWeCom = /企业微信|企微|wecom/i.test(content) || preferredConnector === 'wecom' || forcedConnector === 'wecom';
-            if (weComConnector && mentionsWeCom) {
+            if (weComConnector && activeConnectors.has('wecom')) {
                 const status = await weComConnector.status('wecom');
                 if (status.state !== 'READY') {
                     throw new Error(status.error || '请先在连接器页面安装并扫码授权企业微信连接器');
@@ -1314,8 +1384,7 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
                 }
             }
             const githubConnector = window.cees?.connectors;
-            const mentionsGitHub = /github|git hub|issue|pull request|\bpr\b|actions|commit|commits|提交记录|提交总结|私有仓库|private repository/i.test(content) || preferredConnector === 'github' || forcedConnector === 'github';
-            if (githubConnector && mentionsGitHub) {
+            if (githubConnector && activeConnectors.has('github')) {
                 const status = await githubConnector.status('github') as GitHubConnectorStatus;
                 if (status.state !== 'READY') throw new Error(status.error || '请先在连接器页面连接 GitHub');
                 const tools = await githubConnector.tools('github') as GitHubConnectorTool[];
@@ -1423,7 +1492,7 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
             };
             try {
                 const effectiveAssistantContext = assistantContext ?? assistantContextRef.current;
-                await createTurn(conversationId, { content, mode, imageFileIds, fileIds, connectorContexts: connectorContexts.length ? connectorContexts : undefined, assistantContext: effectiveAssistantContext, generationOptions, knowledgeBaseEnabled: capabilityOverride?.knowledgeSearch ?? (effectiveAssistantContext?.source === 'knowledge-management' ? true : knowledgeBase), webSearchEnabled: capabilityOverride?.webSearch ?? networkSearch }, crypto.randomUUID(), handle, controller.signal);
+                await createTurn(conversationId, { content, mode, imageFileIds, fileIds, connectorContexts: connectorContexts.length ? connectorContexts : undefined, assistantContext: effectiveAssistantContext, generationOptions, knowledgeBaseEnabled: capabilityOverride?.knowledgeSearch ?? (effectiveAssistantContext?.source === 'knowledge-management' ? true : knowledgeBase), webSearchEnabled: capabilityOverride?.webSearch ?? networkSearch, connectorRoutingHint }, crypto.randomUUID(), handle, controller.signal);
             } catch (error) {
                 if (!turnId || controller.signal.aborted || terminal) throw error;
                 await replay();
