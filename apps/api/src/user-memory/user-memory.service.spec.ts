@@ -334,12 +334,26 @@ describe('UserMemoryService', () => {
         expect(prisma.auditLog.create).not.toHaveBeenCalled();
     });
 
+    it('drops candidates whose content exceeds the length limit', async () => {
+        const prisma = createPrismaMock();
+        prisma.userMemory.findMany.mockResolvedValue([]);
+        const service = createService(prisma);
+
+        await service.applyCandidates(
+            [{ type: MemoryType.FACT, content: '长'.repeat(201) }],
+            { conversationId: 'conversation-1' },
+        );
+
+        expect(prisma.$transaction).not.toHaveBeenCalled();
+        expect(prisma.userMemory.create).not.toHaveBeenCalled();
+    });
+
     it('evicts the least recently updated memory when the limit is reached', async () => {
         const prisma = createPrismaMock();
         const oldest = memoryRecord({ updatedAt: new Date('2026-09-01T00:00:00.000Z') });
         prisma.userMemory.findMany.mockResolvedValue([
             oldest,
-            ...Array.from({ length: 29 }, (_unused, index) =>
+            ...Array.from({ length: 49 }, (_unused, index) =>
                 memoryRecord({
                     id: `70000000-0000-0000-0000-0000000001${String(index).padStart(2, '0')}`,
                     content: `既有记忆 ${index}`,
@@ -363,7 +377,7 @@ describe('UserMemoryService', () => {
             data: expect.objectContaining({
                 action: 'USER_MEMORY_EVICTED',
                 resourceId: oldest.id,
-                metadata: { reason: 'capacity_limit', limit: 30 },
+                metadata: { reason: 'capacity_limit', limit: 50 },
             }),
         });
         expect(prisma.userMemory.create).toHaveBeenCalled();
