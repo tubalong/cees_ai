@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CEES AI API
-  version: 0.46.0
+  version: 0.47.0
   description: 以本文件为唯一事实源的公开 API 契约。资源与操作按 docs/api 约定补充。
 
 servers:
@@ -11184,6 +11184,9 @@ components:
           type: array
           description: 前置步骤的 stepKey；空数组表示可立即开始
           items: { type: string }
+        carriedFromStepKey:
+          type: [string, 'null']
+          description: 重排沿用的历史步骤 stepKey（该步骤产出直接沿用、不再执行）；无则为 null
 
     AssistantTaskClarificationOption:
       type: object
@@ -11502,6 +11505,7 @@ components:
       oneOf:
         - $ref: '#/components/schemas/AssistantTaskCreatedEvent'
         - $ref: '#/components/schemas/AssistantTaskPlanReadyEvent'
+        - $ref: '#/components/schemas/AssistantTaskPlanRevisionRequestedEvent'
         - $ref: '#/components/schemas/AssistantTaskPlanConfirmedEvent'
         - $ref: '#/components/schemas/AssistantTaskStepStartedEvent'
         - $ref: '#/components/schemas/AssistantTaskStepProgressEvent'
@@ -11518,6 +11522,7 @@ components:
         mapping:
           task_created: '#/components/schemas/AssistantTaskCreatedEvent'
           plan_ready: '#/components/schemas/AssistantTaskPlanReadyEvent'
+          plan_revision_requested: '#/components/schemas/AssistantTaskPlanRevisionRequestedEvent'
           plan_confirmed: '#/components/schemas/AssistantTaskPlanConfirmedEvent'
           step_started: '#/components/schemas/AssistantTaskStepStartedEvent'
           step_progress: '#/components/schemas/AssistantTaskStepProgressEvent'
@@ -11555,6 +11560,18 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/AssistantTaskClarification'
+
+    AssistantTaskPlanRevisionRequestedEvent:
+      type: object
+      additionalProperties: false
+      required: [type, seq, version]
+      properties:
+        type: { type: string, const: plan_revision_requested }
+        seq: { type: integer, minimum: 1 }
+        version:
+          type: integer
+          minimum: 1
+          description: 请求调整时的当前计划版本（继续对话补充调整要求后将生成新版本草案）
 
     AssistantTaskPlanConfirmedEvent:
       type: object

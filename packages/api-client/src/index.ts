@@ -97,6 +97,7 @@ export { AssistantTaskOriginType } from './models/AssistantTaskOriginType';
 export { AssistantTaskPlan } from './models/AssistantTaskPlan';
 export type { AssistantTaskPlanConfirmedEvent } from './models/AssistantTaskPlanConfirmedEvent';
 export type { AssistantTaskPlanReadyEvent } from './models/AssistantTaskPlanReadyEvent';
+export type { AssistantTaskPlanRevisionRequestedEvent } from './models/AssistantTaskPlanRevisionRequestedEvent';
 export type { AssistantTaskPlanStep } from './models/AssistantTaskPlanStep';
 export { AssistantTaskStatus } from './models/AssistantTaskStatus';
 export { AssistantTaskStep } from './models/AssistantTaskStep';

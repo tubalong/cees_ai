@@ -32,5 +32,9 @@ export type AssistantTaskPlanStep = {
      * 前置步骤的 stepKey；空数组表示可立即开始
      */
     dependsOnStepKeys?: Array<string>;
+    /**
+     * 重排沿用的历史步骤 stepKey（该步骤产出直接沿用、不再执行）；无则为 null
+     */
+    carriedFromStepKey?: string | null;
 };
 

@@ -10,10 +10,11 @@ import type { AssistantTaskInteractionRequestedEvent } from './AssistantTaskInte
 import type { AssistantTaskInteractionResolvedEvent } from './AssistantTaskInteractionResolvedEvent';
 import type { AssistantTaskPlanConfirmedEvent } from './AssistantTaskPlanConfirmedEvent';
 import type { AssistantTaskPlanReadyEvent } from './AssistantTaskPlanReadyEvent';
+import type { AssistantTaskPlanRevisionRequestedEvent } from './AssistantTaskPlanRevisionRequestedEvent';
 import type { AssistantTaskStepCompletedEvent } from './AssistantTaskStepCompletedEvent';
 import type { AssistantTaskStepFailedEvent } from './AssistantTaskStepFailedEvent';
 import type { AssistantTaskStepProgressEvent } from './AssistantTaskStepProgressEvent';
 import type { AssistantTaskStepSkippedEvent } from './AssistantTaskStepSkippedEvent';
 import type { AssistantTaskStepStartedEvent } from './AssistantTaskStepStartedEvent';
-export type AssistantTaskStreamEvent = (AssistantTaskCreatedEvent | AssistantTaskPlanReadyEvent | AssistantTaskPlanConfirmedEvent | AssistantTaskStepStartedEvent | AssistantTaskStepProgressEvent | AssistantTaskStepCompletedEvent | AssistantTaskStepFailedEvent | AssistantTaskStepSkippedEvent | AssistantTaskInteractionRequestedEvent | AssistantTaskInteractionResolvedEvent | AssistantTaskCompletedEvent | AssistantTaskFailedEvent | AssistantTaskCancelledEvent);
+export type AssistantTaskStreamEvent = (AssistantTaskCreatedEvent | AssistantTaskPlanReadyEvent | AssistantTaskPlanRevisionRequestedEvent | AssistantTaskPlanConfirmedEvent | AssistantTaskStepStartedEvent | AssistantTaskStepProgressEvent | AssistantTaskStepCompletedEvent | AssistantTaskStepFailedEvent | AssistantTaskStepSkippedEvent | AssistantTaskInteractionRequestedEvent | AssistantTaskInteractionResolvedEvent | AssistantTaskCompletedEvent | AssistantTaskFailedEvent | AssistantTaskCancelledEvent);
 
