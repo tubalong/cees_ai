@@ -167,7 +167,7 @@ GitHub 目录超过候选上限时，规划器固定保留 `search_repositories`
 
 语义路由已落地：Desktop 只上报一级能力摘要，由 `POST /assistant/connectors/route` 决定本轮激活哪些连接器，被命中的连接器再走上面的二级规划；用户点名连接器或从连接器卡片进入对话时直接硬命中，不调用路由。契约见 [连接器语义路由 API](../api/assistant-connector-routing-api.md)。
 
-受控多步接力与连接器调用分级审计亦已落地（契约 `0.46.0` / `0.45.0`）：循环、轮数上限（2）、调用上限（合计 ≤ 3）与摘要构造都在 Desktop 的 `Workspace.tsx`，服务端只负责把摘要当不可信数据注入规划指令，并按分级写审计。设计、落地偏差与验收口径见 [连接器语义路由、多步接力与调用审计](connector-routing-and-iteration.md)。
+受控多步接力与连接器调用分级审计亦已落地（契约 `0.47.0` / `0.45.0`）：循环、轮数上限（2）、调用上限（合计 ≤ 3）与摘要构造都在 Desktop 的 `Workspace.tsx`，服务端只负责把摘要当不可信数据注入规划指令，并按分级写审计。设计、落地偏差与验收口径见 [连接器语义路由、多步接力与调用审计](connector-routing-and-iteration.md)。
 
 ## 8. 安全边界
 

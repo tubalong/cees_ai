@@ -53,7 +53,7 @@ CEES API 不保存腾讯会议凭据、不下载或启动 CLI，也不执行腾�
 }
 ```
 
-受控多步接力（契约 `0.46.0`）：请求可带可选 `previousSteps`（最多 3 条、单条摘要 ≤ 2000 字，服务端按不可信数据注入规划指令），响应可带可选 `followUpMayBeNeeded`（缺省 `false`，只是「本轮调用可能不足以完成这次请求」的提示）。是否进入第二轮由 Desktop 决定：硬上限两轮、两轮合计 ≤ 3 次调用，且每一轮执行前仍各自确认。详见 [连接器语义路由、受控多步接力与调用审计](../architecture/connector-routing-and-iteration.md) §4。
+受控多步接力（契约 `0.47.0`）：请求可带可选 `previousSteps`（最多 3 条、单条摘要 ≤ 2000 字，服务端按不可信数据注入规划指令），响应可带可选 `followUpMayBeNeeded`（缺省 `false`，只是「本轮调用可能不足以完成这次请求」的提示）。是否进入第二轮由 Desktop 决定：硬上限两轮、两轮合计 ≤ 3 次调用，且每一轮执行前仍各自确认。详见 [连接器语义路由、受控多步接力与调用审计](../architecture/connector-routing-and-iteration.md) §4。
 
 约束：
 
