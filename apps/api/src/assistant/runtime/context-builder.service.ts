@@ -26,6 +26,21 @@ const RETAIN_RECENT_COUNT = 20;
 export const MODEL_MESSAGE_LIMIT = 120;
 
 /**
+ * 单次压缩的输入上限（字符）。
+ *
+ * ai-service 用 `compaction_max_output_tokens`（当前 2048）**一次性**为整批消息生成摘要，
+ * 输入过大时模型必然触顶，返回 `CHAT_COMPACTION_TRUNCATED` 且**不落库**；
+ * 下一轮又会重试压缩、又失败——用户看到的是该会话彻底不可用（连图片生成这类
+ * 无关请求也会被拦在压缩这一步）。
+ *
+ * 因此单批输入必须按「摘要输出预算」反向约束：8k 字符正文对应的摘要远小于 2048 token。
+ * 剩余前缀由后续轮次继续压缩，逐步回到阈值内。
+ */
+const COMPACTION_MAX_INPUT_CHARS = 8_000;
+/** 单次压缩的输入条数上限；与 RETAIN_RECENT_COUNT 同量级，保证每次都有明显收敛。 */
+const COMPACTION_MAX_MESSAGES_PER_RUN = 20;
+
+/**
  * 各模式输入 Token 预算的兜底默认值（Standard 64K / Ultra 128K）。
  * 权威值来自 ai-service `/ready` 的 `chat_context_budgets`（运行时拉取）；
  * 仅在 ai-service 未就绪、字段缺失或调用失败时回退到该值。
@@ -254,18 +269,33 @@ export class ContextBuilderService {
         compactCount++;
       }
     }
+    // 对齐后仍要按单批预算封顶：否则一次把几十条消息交给模型，摘要必然被输出上限截断。
+    // 剩余前缀留到后续轮次继续压缩，逐步收敛。
+    const boundedCount = resolveBoundedCompactionCount(textHistory, compactCount);
+    if (boundedCount > 0) compactCount = boundedCount;
     const toCompact = textHistory.slice(0, compactCount);
-    const compacted = await this.gateway.compactChat(
-      {
-        request_id: requestId,
-        tenant_id: conversation.tenantId,
-        user_id: userId,
-        conversation_id: conversation.id,
-        previous_summary: summary,
-        messages: await Promise.all(toCompact.map((message) => this.toChatMessage(message, input))),
-      },
-      { membershipId, turnId },
-    );
+    let compacted;
+    try {
+      compacted = await this.gateway.compactChat(
+        {
+          request_id: requestId,
+          tenant_id: conversation.tenantId,
+          user_id: userId,
+          conversation_id: conversation.id,
+          previous_summary: summary,
+          messages: await Promise.all(toCompact.map((message) => this.toChatMessage(message, input))),
+        },
+        { membershipId, turnId },
+      );
+    } catch (error) {
+      // 压缩是上下文优化，不是本轮的必要条件：消息条数已由 MODEL_MESSAGE_LIMIT 兜住，
+      // 超出 Token 预算时 ai-service 仍会自行裁剪。这里必须降级继续，
+      // 否则一次压缩故障会让该会话**每一轮**都失败，用户无法自救。
+      this.logger.warn(
+        `chat compaction failed for conversation ${conversation.id}; continuing without a new summary: ${String(error)}`,
+      );
+      return { summary, history: includeToolMessages ? history : textHistory };
+    }
     summary = compacted.summary;
     // 压缩顺带提炼的记忆候选：校验通过即落库；失败只记录，不阻断压缩与上下文组装。
     if (compacted.memory_candidates.length > 0) {
@@ -434,6 +464,41 @@ export class ContextBuilderService {
 function normalizePersistedConnectorContexts(value: Prisma.JsonValue): Array<Record<string, unknown>> {
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is Prisma.JsonObject => Boolean(item && typeof item === 'object' && !Array.isArray(item)));
+}
+
+/**
+ * 在单批预算内，取**尽可能长且不切断任何一轮对话**的前缀条数。
+ *
+ * 不切断 Turn 的原因与压缩边界对齐一致：把用户请求压进摘要、却把该轮回答留在
+ * 增量区间，会造成语义重复，工具消息也会失去配对。
+ * 至少包含第一轮（否则永远无法收敛）；超出预算的部分留给下一轮继续压缩。
+ */
+export function resolveBoundedCompactionCount(textHistory: HistoryMessage[], desired: number): number {
+  const limit = Math.min(desired, textHistory.length);
+  let count = 0;
+  let chars = 0;
+  let index = 0;
+  while (index < limit) {
+    const turnId = textHistory[index].turnId;
+    let end = index + 1;
+    if (turnId !== null) {
+      while (end < textHistory.length && textHistory[end].turnId === turnId) end += 1;
+    }
+    if (end > limit) break;
+    const turnChars = textHistory
+      .slice(index, end)
+      .reduce((sum, message) => sum + message.content.length, 0);
+    if (count > 0 && (
+      chars + turnChars > COMPACTION_MAX_INPUT_CHARS
+      || count + (end - index) > COMPACTION_MAX_MESSAGES_PER_RUN
+    )) {
+      break;
+    }
+    chars += turnChars;
+    count = end;
+    index = end;
+  }
+  return count;
 }
 
 /**

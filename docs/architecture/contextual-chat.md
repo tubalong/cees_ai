@@ -104,6 +104,10 @@ completed
 
 压缩输入不会静默截断；超过 `compaction_context_budget_tokens` 时返回 `CHAT_CONTEXT_TOO_LARGE`。Provider 达到输出上限时返回 `CHAT_COMPACTION_TRUNCATED`，不把不完整摘要作为成功结果。
 
+**单批压缩必须有界（NestJS 侧约束）。** 摘要输出预算是固定的（`compaction_max_output_tokens`，当前 2048），而压缩输入由 NestJS 决定：一次性把几十条消息交给模型，摘要必然触顶 → `CHAT_COMPACTION_TRUNCATED`，而失败不落库，下一轮又重试压缩又失败——该会话**每一轮**都会失败（连图片生成这类与历史无关的请求也会被拦在压缩这一步）。因此 NestJS 按「条数 ≤ 20 + 字符 ≤ 8000 + 不切断任何一轮对话」取尽可能长的前缀，剩余前缀由后续轮次继续压缩，逐步收敛回阈值内。
+
+**压缩失败必须降级，不能阻断本轮。** 压缩是上下文优化：消息条数已由 `MODEL_MESSAGE_LIMIT` 兜住，Token 超预算时 ai-service 仍会自行裁剪（`recent_only`）。失败时保留上一份摘要继续本轮并记 WARN，否则一次压缩故障会让会话永久不可用。
+
 ## 6.1 视觉模型建议
 
 图片理解应优先使用专用视觉模型，而不是强制主文本模型支持 `vision`。推荐单独配置一个视觉 profile，并按需加入可能接收图片的角色：

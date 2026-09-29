@@ -291,10 +291,14 @@ describe('ContextBuilderService compaction triggers', () => {
 
         expect(gateway.compactChat).toHaveBeenCalledTimes(1);
         const [body] = gateway.compactChat.mock.calls[0];
-        expect(body.messages).toHaveLength(61);
-        expect(request.messages).toHaveLength(20);
-        expect(request.messages[0].id).toBe('m61');
-        expect(request.messages[19].id).toBe('m80');
+        // 单批压缩有上限：一次只压最老的 20 条，剩余前缀留到后续轮次继续压缩。
+        // 把 61 条一次性交给固定输出预算（compaction_max_output_tokens=2048）的摘要调用，
+        // 必然被截断成 CHAT_COMPACTION_TRUNCATED，而且失败不落库会让该会话每一轮都失败。
+        expect(body.messages).toHaveLength(20);
+        expect(body.messages[0].id).toBe('m0');
+        expect(request.messages).toHaveLength(61);
+        expect(request.messages[0].id).toBe('m20');
+        expect(request.messages[60].id).toBe('m80');
     });
 
     it('uses budgets fetched from ai-service instead of the built-in default', async () => {
@@ -405,6 +409,65 @@ describe('ContextBuilderService compaction triggers', () => {
         expect(result.items[0].role).not.toBe('tool');
         // 保留最新一段：最后一条工具结果必须还在。
         expect(result.items[result.items.length - 1]).toEqual(expect.objectContaining({ role: 'tool' }));
+    });
+
+    it('bounds the history handed to a single compaction call', async () => {
+        // ai-service 用固定输出预算**一次性**为整批消息生成摘要：输入过大必然被截断，
+        // 返回 CHAT_COMPACTION_TRUNCATED 且不落库，于是该会话每一轮都失败。
+        const history: HistoryMessageRow[] = Array.from({ length: 120 }, (_, index) => ({
+            id: `m${index}`,
+            role: (index % 2 === 0 ? ConversationMessageRole.USER : ConversationMessageRole.ASSISTANT) as ConversationMessageRole,
+            content: '内容'.repeat(50),
+            turnId: `turn-${index}`,
+            toolCallId: null,
+        }));
+        const { service, gateway } = createService(history, []);
+
+        await service.buildChatRequest(buildInput());
+
+        const [request] = gateway.compactChat.mock.calls[0] as [{ messages: unknown[] }];
+        expect(request.messages.length).toBeLessThanOrEqual(20);
+    });
+
+    it('keeps whole turns in a compaction batch', async () => {
+        // 每轮 3 条消息：批次必须按整轮收敛，不能把某一轮从中间切开，
+        // 否则会把用户请求压进摘要、却把该轮回答留在增量区间。
+        const history: HistoryMessageRow[] = Array.from({ length: 120 }, (_, index) => ({
+            id: `m${index}`,
+            role: (index % 3 === 0 ? ConversationMessageRole.USER : ConversationMessageRole.ASSISTANT) as ConversationMessageRole,
+            content: '内容',
+            turnId: `turn-${Math.floor(index / 3)}`,
+            toolCallId: null,
+        }));
+        const { service, gateway } = createService(history, []);
+
+        await service.buildChatRequest(buildInput());
+
+        const [request] = gateway.compactChat.mock.calls[0] as [{ messages: unknown[] }];
+        expect(request.messages.length % 3).toBe(0);
+        expect(request.messages.length).toBeLessThanOrEqual(20);
+    });
+
+    it('continues the turn when compaction fails instead of failing the conversation', async () => {
+        // 压缩是上下文优化，不是本轮的必要条件：失败必须降级继续，
+        // 否则一次压缩故障会让该会话每一轮都失败，用户无法自救。
+        const history: HistoryMessageRow[] = Array.from({ length: 90 }, (_, index) => ({
+            id: `m${index}`,
+            role: (index % 2 === 0 ? ConversationMessageRole.USER : ConversationMessageRole.ASSISTANT) as ConversationMessageRole,
+            content: `消息 ${index}`,
+            turnId: `turn-${index}`,
+            toolCallId: null,
+        }));
+        const { service, gateway, prisma } = createService(history, []);
+        gateway.compactChat.mockRejectedValue(new Error('CHAT_COMPACTION_TRUNCATED'));
+
+        const request = await service.buildChatRequest(buildInput());
+
+        expect(gateway.compactChat).toHaveBeenCalled();
+        expect(request.messages.length).toBeGreaterThan(0);
+        // 没有成功摘要就不应写入摘要边界，否则会丢掉未被摘要覆盖的历史。
+        expect(request.conversation_summary).toBeNull();
+        expect(prisma.conversationSummary.create).not.toHaveBeenCalled();
     });
 });
 
