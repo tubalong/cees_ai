@@ -7,6 +7,8 @@ import type { AssistantTaskConfirmRequest } from '../models/AssistantTaskConfirm
 import type { AssistantTaskDetailResponseEnvelope } from '../models/AssistantTaskDetailResponseEnvelope';
 import type { AssistantTaskInteractionResolveRequest } from '../models/AssistantTaskInteractionResolveRequest';
 import type { AssistantTaskListResponseEnvelope } from '../models/AssistantTaskListResponseEnvelope';
+import type { AssistantTaskOutputsConfirmRequest } from '../models/AssistantTaskOutputsConfirmRequest';
+import type { AssistantTaskOutputsViewResponseEnvelope } from '../models/AssistantTaskOutputsViewResponseEnvelope';
 import type { AssistantTaskStatus } from '../models/AssistantTaskStatus';
 import type { AssistantTaskStreamEvent } from '../models/AssistantTaskStreamEvent';
 import type { CancelablePromise } from '../core/CancelablePromise';
@@ -195,6 +197,77 @@ export class AssistantTasksService {
                 403: `缺少任务查看权限`,
                 404: `任务不存在或不属于当前成员`,
                 409: `任务已处于终态，不能取消`,
+            },
+        });
+    }
+    /**
+     * 查询任务产出验收视图（产出清单与归档候选）
+     * 返回任务产出的可归档文档（跨计划版本聚合、按最近完成步骤去重）与可归档知识库候选；
+     * 已验收产出携带归档结果，未验收产出携带归档目标建议。归档建议由服务端生成：
+     * 有明确组织归属时为确定性默认（所属部门知识库）；无明确归属时基于产出主题生成推荐与理由。
+     * 候选集为当前成员具编辑（EDITOR）及以上权限的库，服务端硬过滤，绝不出现无权选项。
+     * 仅任务终态（COMPLETED / FAILED / CANCELLED）可验收，非终态返回 409。
+     *
+     * @returns AssistantTaskOutputsViewResponseEnvelope 产出验收视图
+     * @throws ApiError
+     */
+    public static getAssistantTaskOutputs({
+        taskId,
+    }: {
+        /**
+         * 任务 ID
+         */
+        taskId: string,
+    }): CancelablePromise<AssistantTaskOutputsViewResponseEnvelope> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/assistant/tasks/{taskId}/outputs',
+            path: {
+                'taskId': taskId,
+            },
+            errors: {
+                400: `请求字段校验失败`,
+                401: `登录状态无效、已过期或缺少有效租户成员身份`,
+                403: `缺少任务查看权限`,
+                404: `任务不存在或不属于当前成员`,
+                409: `任务尚未进入终态，产出验收不可用`,
+            },
+        });
+    }
+    /**
+     * 产出验收与归档确认（逐产出指定知识库）
+     * 确认产出内容并将其归档入知识库：逐产出携带知识库目标，服务端校验目标库编辑（EDITOR）
+     * 及以上权限后触发既有转存链路（同源重复转存追加版本，不重复归档），并逐条写 output_confirmed 事件。
+     * 幂等：重复提交已验收且归档位置一致的产出返回当前状态而不是报错；
+     * 已归档到其他知识库的产出提交时返回 409。仅任务终态（COMPLETED / FAILED / CANCELLED）可验收。
+     *
+     * @returns AssistantTaskOutputsViewResponseEnvelope 返回更新后的产出验收视图
+     * @throws ApiError
+     */
+    public static confirmAssistantTaskOutputs({
+        taskId,
+        requestBody,
+    }: {
+        /**
+         * 任务 ID
+         */
+        taskId: string,
+        requestBody: AssistantTaskOutputsConfirmRequest,
+    }): CancelablePromise<AssistantTaskOutputsViewResponseEnvelope> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/assistant/tasks/{taskId}/outputs/confirm',
+            path: {
+                'taskId': taskId,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                400: `请求字段校验失败或产出不属于该任务`,
+                401: `登录状态无效、已过期或缺少有效租户成员身份`,
+                403: `缺少任务查看权限或目标知识库编辑权限不足`,
+                404: `任务、产出或目标知识库不存在（含不属于当前成员）`,
+                409: `任务尚未进入终态，或产出已归档到其他知识库`,
             },
         });
     }

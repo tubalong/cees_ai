@@ -94,6 +94,14 @@ export { AssistantTaskInteractionType } from './models/AssistantTaskInteractionT
 export type { AssistantTaskListResponseEnvelope } from './models/AssistantTaskListResponseEnvelope';
 export type { AssistantTaskListResult } from './models/AssistantTaskListResult';
 export { AssistantTaskOriginType } from './models/AssistantTaskOriginType';
+export type { AssistantTaskOutput } from './models/AssistantTaskOutput';
+export type { AssistantTaskOutputArchive } from './models/AssistantTaskOutputArchive';
+export type { AssistantTaskOutputArchiveOption } from './models/AssistantTaskOutputArchiveOption';
+export type { AssistantTaskOutputConfirmedEvent } from './models/AssistantTaskOutputConfirmedEvent';
+export type { AssistantTaskOutputsConfirmRequest } from './models/AssistantTaskOutputsConfirmRequest';
+export type { AssistantTaskOutputSuggestion } from './models/AssistantTaskOutputSuggestion';
+export type { AssistantTaskOutputsView } from './models/AssistantTaskOutputsView';
+export type { AssistantTaskOutputsViewResponseEnvelope } from './models/AssistantTaskOutputsViewResponseEnvelope';
 export { AssistantTaskPlan } from './models/AssistantTaskPlan';
 export type { AssistantTaskPlanConfirmedEvent } from './models/AssistantTaskPlanConfirmedEvent';
 export type { AssistantTaskPlanReadyEvent } from './models/AssistantTaskPlanReadyEvent';

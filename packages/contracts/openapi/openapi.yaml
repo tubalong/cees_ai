@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CEES AI API
-  version: 0.47.0
+  version: 0.48.0
   description: 以本文件为唯一事实源的公开 API 契约。资源与操作按 docs/api 约定补充。
 
 servers:
@@ -1068,6 +1068,129 @@ paths:
                 $ref: '#/components/schemas/ErrorResponseEnvelope'
         '409':
           description: 任务已处于终态，不能取消
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+  /assistant/tasks/{taskId}/outputs:
+    get:
+      summary: 查询任务产出验收视图（产出清单与归档候选）
+      description: |
+        返回任务产出的可归档文档（跨计划版本聚合、按最近完成步骤去重）与可归档知识库候选；
+        已验收产出携带归档结果，未验收产出携带归档目标建议。归档建议由服务端生成：
+        有明确组织归属时为确定性默认（所属部门知识库）；无明确归属时基于产出主题生成推荐与理由。
+        候选集为当前成员具编辑（EDITOR）及以上权限的库，服务端硬过滤，绝不出现无权选项。
+        仅任务终态（COMPLETED / FAILED / CANCELLED）可验收，非终态返回 409。
+      operationId: getAssistantTaskOutputs
+      tags: [Assistant Tasks]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          description: 任务 ID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: 产出验收视图
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssistantTaskOutputsViewResponseEnvelope'
+        '400':
+          description: 请求字段校验失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '401':
+          description: 登录状态无效、已过期或缺少有效租户成员身份
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '403':
+          description: 缺少任务查看权限
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '404':
+          description: 任务不存在或不属于当前成员
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '409':
+          description: 任务尚未进入终态，产出验收不可用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+  /assistant/tasks/{taskId}/outputs/confirm:
+    post:
+      summary: 产出验收与归档确认（逐产出指定知识库）
+      description: |
+        确认产出内容并将其归档入知识库：逐产出携带知识库目标，服务端校验目标库编辑（EDITOR）
+        及以上权限后触发既有转存链路（同源重复转存追加版本，不重复归档），并逐条写 output_confirmed 事件。
+        幂等：重复提交已验收且归档位置一致的产出返回当前状态而不是报错；
+        已归档到其他知识库的产出提交时返回 409。仅任务终态（COMPLETED / FAILED / CANCELLED）可验收。
+      operationId: confirmAssistantTaskOutputs
+      tags: [Assistant Tasks]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          description: 任务 ID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssistantTaskOutputsConfirmRequest'
+      responses:
+        '200':
+          description: 返回更新后的产出验收视图
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssistantTaskOutputsViewResponseEnvelope'
+        '400':
+          description: 请求字段校验失败或产出不属于该任务
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '401':
+          description: 登录状态无效、已过期或缺少有效租户成员身份
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '403':
+          description: 缺少任务查看权限或目标知识库编辑权限不足
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '404':
+          description: 任务、产出或目标知识库不存在（含不属于当前成员）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '409':
+          description: 任务尚未进入终态，或产出已归档到其他知识库
           content:
             application/json:
               schema:
@@ -11399,6 +11522,149 @@ components:
           type: [string, 'null']
           maxLength: 500
 
+    AssistantTaskOutputArchive:
+      type: object
+      additionalProperties: false
+      required: [knowledgeBaseId, knowledgeDocumentId, visibilityScope, confirmedAt]
+      properties:
+        knowledgeBaseId:
+          type: string
+          format: uuid
+          description: 归档目标知识库
+        knowledgeDocumentId:
+          type: string
+          format: uuid
+          description: 知识库侧文档 ID（转存产物；同源重复转存追加版本）
+        visibilityScope:
+          $ref: '#/components/schemas/KnowledgeBaseVisibilityScope'
+          description: 归档库的可见范围（公司库全员可检索 / 部门库本部门 / 项目库项目成员 / 个人库仅本人）
+        confirmedAt:
+          type: string
+          format: date-time
+          description: 验收归档时间
+
+    AssistantTaskOutputSuggestion:
+      type: object
+      additionalProperties: false
+      required: [knowledgeBaseId, reason]
+      properties:
+        knowledgeBaseId:
+          type: string
+          format: uuid
+          description: 建议的归档目标知识库
+        reason:
+          type: string
+          maxLength: 500
+          description: 推荐理由（规则路径=组织归属；LLM 路径=模型基于产出主题给出）
+
+    AssistantTaskOutputArchiveOption:
+      type: object
+      additionalProperties: false
+      required: [knowledgeBaseId, name, visibilityScope]
+      properties:
+        knowledgeBaseId:
+          type: string
+          format: uuid
+        name:
+          type: string
+          maxLength: 128
+        visibilityScope:
+          $ref: '#/components/schemas/KnowledgeBaseVisibilityScope'
+
+    AssistantTaskOutput:
+      type: object
+      additionalProperties: false
+      required: [documentId, title, stepKey, confirmed, suggestions]
+      properties:
+        documentId:
+          type: string
+          format: uuid
+          description: 产出资产（AI 文档）；验收与归档的载体
+        title:
+          type: string
+          maxLength: 256
+          description: 产出标题（AI 生成文档标题）
+        stepKey:
+          type: string
+          description: 产出步骤的计划内稳定标识
+        stepTitle:
+          type: [string, 'null']
+          description: 产出步骤的简短名；计划未给出时为 null
+        confirmed:
+          type: boolean
+          description: 内容验收与归档确认是否已完成
+        archive:
+          oneOf:
+            - $ref: '#/components/schemas/AssistantTaskOutputArchive'
+            - type: 'null'
+          description: 已确认时的归档结果；未确认为 null
+        suggestions:
+          type: array
+          maxItems: 5
+          default: []
+          description: 归档目标建议（未确认时给出：规则路径为组织归属默认，LLM 路径基于产出主题）；已确认时为空数组
+          items:
+            $ref: '#/components/schemas/AssistantTaskOutputSuggestion'
+
+    AssistantTaskOutputsView:
+      type: object
+      additionalProperties: false
+      required: [taskId, status, outputs, archiveOptions]
+      properties:
+        taskId:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/AssistantTaskStatus'
+        outputs:
+          type: array
+          description: 任务产出的可归档文档（跨计划版本聚合、按最近完成步骤去重）；无产出时为空数组
+          items:
+            $ref: '#/components/schemas/AssistantTaskOutput'
+        archiveOptions:
+          type: array
+          description: 可归档知识库候选（当前成员具 EDITOR 及以上；服务端权限硬过滤，绝不出现无权库）
+          items:
+            $ref: '#/components/schemas/AssistantTaskOutputArchiveOption'
+
+    AssistantTaskOutputsViewResponseEnvelope:
+      type: object
+      additionalProperties: false
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: '#/components/schemas/AssistantTaskOutputsView'
+        requestId:
+          type: [string, 'null']
+          description: 公开 API 请求追踪 ID
+
+    AssistantTaskOutputsConfirmRequest:
+      type: object
+      additionalProperties: false
+      required: [outputs]
+      properties:
+        outputs:
+          type: array
+          minItems: 1
+          maxItems: 20
+          description: 逐产出的验收与归档提交；仅任务终态可提交
+          items:
+            type: object
+            additionalProperties: false
+            required: [documentId, knowledgeBaseId]
+            properties:
+              documentId:
+                type: string
+                format: uuid
+                description: 产出资产 ID（任务步骤的回流产出）
+              knowledgeBaseId:
+                type: string
+                format: uuid
+                description: 归档目标知识库；当前成员须具备编辑（EDITOR）及以上权限
+
     AssistantTaskInteractionResolveRequest:
       type: object
       additionalProperties: false
@@ -11514,6 +11780,7 @@ components:
         - $ref: '#/components/schemas/AssistantTaskStepSkippedEvent'
         - $ref: '#/components/schemas/AssistantTaskInteractionRequestedEvent'
         - $ref: '#/components/schemas/AssistantTaskInteractionResolvedEvent'
+        - $ref: '#/components/schemas/AssistantTaskOutputConfirmedEvent'
         - $ref: '#/components/schemas/AssistantTaskCompletedEvent'
         - $ref: '#/components/schemas/AssistantTaskFailedEvent'
         - $ref: '#/components/schemas/AssistantTaskCancelledEvent'
@@ -11531,6 +11798,7 @@ components:
           step_skipped: '#/components/schemas/AssistantTaskStepSkippedEvent'
           interaction_requested: '#/components/schemas/AssistantTaskInteractionRequestedEvent'
           interaction_resolved: '#/components/schemas/AssistantTaskInteractionResolvedEvent'
+          output_confirmed: '#/components/schemas/AssistantTaskOutputConfirmedEvent'
           task_completed: '#/components/schemas/AssistantTaskCompletedEvent'
           task_failed: '#/components/schemas/AssistantTaskFailedEvent'
           task_cancelled: '#/components/schemas/AssistantTaskCancelledEvent'
@@ -11745,6 +12013,29 @@ components:
         resolvedAt:
           type: string
           format: date-time
+
+    AssistantTaskOutputConfirmedEvent:
+      type: object
+      additionalProperties: false
+      required: [type, seq, documentId, knowledgeBaseId, knowledgeDocumentId, visibilityScope]
+      properties:
+        type: { type: string, const: output_confirmed }
+        seq: { type: integer, minimum: 1 }
+        documentId:
+          type: string
+          format: uuid
+          description: 产出资产 ID（步骤回流的 AI 文档）
+        knowledgeBaseId:
+          type: string
+          format: uuid
+          description: 归档目标知识库
+        knowledgeDocumentId:
+          type: string
+          format: uuid
+          description: 知识库侧文档 ID（同源重复转存追加版本，不重复归档）
+        visibilityScope:
+          $ref: '#/components/schemas/KnowledgeBaseVisibilityScope'
+          description: 归档库的可见范围（公司库全员可检索 / 部门库本部门 / 项目库项目成员 / 个人库仅本人）
 
     AssistantTaskCompletedEvent:
       type: object
