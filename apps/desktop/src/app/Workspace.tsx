@@ -19,7 +19,7 @@ import {
     getUnreadNotificationCount, hasStoredSession, listConversations, listDocuments, listTenantMembers, logout,
     createKnowledgeDocument, deleteKnowledgeDocument, listWritableKnowledgeBases,
     type Conversation, type ConversationMessage, type DashboardOverview, type DashboardTodoItem, type DashboardUpcomingMeeting, type GenerationOptions, type ImageAccess, type PageAssistantContext,
-    type ConnectorContext, type ConnectorRoutingCandidate, type ConnectorRoutingProvider, type GitHubConnectorTool, type TencentMeetingConnectorTool, type TurnStreamEvent, type WeComConnectorTool,
+    type ConnectorContext, type ConnectorPreviousStep, type ConnectorRoutingCandidate, type ConnectorRoutingProvider, type GitHubConnectorTool, type TencentMeetingConnectorTool, type TurnStreamEvent, type WeComConnectorTool,
     type KnowledgeBaseSummary, type KnowledgeSourceType,
     type ManagedDocumentSummary, type MeResult, type TenantMember,
 } from '../core/api';
@@ -660,6 +660,80 @@ interface ConfirmableConnectorTool {
     requiresConfirmation: boolean;
 }
 
+/**
+ * 连接器受控多步接力（连接器三期差距二）：循环由 Desktop 编排且有硬上限，不做开放式 Agent loop。
+ * 第一轮规划并执行；只有模型明确提示 followUpMayBeNeeded 时才带着脱敏摘要进入第二轮，
+ * 不确定就不进入（保守默认）。两轮合计调用数沿用既有的「单轮最多三个」。
+ */
+const MAX_CONNECTOR_RELAY_ROUNDS = 2;
+const MAX_CONNECTOR_CALLS_PER_TURN = 3;
+const MAX_CONNECTOR_PREVIOUS_STEPS = 3;
+const CONNECTOR_PREVIOUS_STEP_DIGEST_MAX_LENGTH = 2000;
+
+interface RelayPlannedCall {
+    toolId: string;
+    arguments: Record<string, unknown>;
+}
+
+interface RelayPlanResult {
+    calls: RelayPlannedCall[];
+    followUpMayBeNeeded: boolean;
+}
+
+/** 计划接口把提示声明为可选；缺省或非布尔真值一律按「不需要第二轮」处理。 */
+function normalizeRelayPlan(plan: { calls: RelayPlannedCall[]; followUpMayBeNeeded?: boolean }): RelayPlanResult {
+    return { calls: plan.calls, followUpMayBeNeeded: plan.followUpMayBeNeeded === true };
+}
+
+/** 一轮接力里的单个连接器：就绪校验与工具发现放在准备阶段，循环里只做规划/确认/执行。 */
+interface RelayTarget {
+    label: string;
+    /** 确认卡片里说明「用哪个凭据执行」。 */
+    credentialDescription: string;
+    /** 确认卡片用的可确认工具目录；只读连接器为空。 */
+    tools: ConfirmableConnectorTool[];
+    /** 只读连接器（钉钉 DWS 只暴露只读工具）不需要写操作确认。 */
+    confirmBeforeExecute: boolean;
+    cancelMessage: string;
+    plan: (previousSteps: ConnectorPreviousStep[]) => Promise<RelayPlanResult>;
+    execute: (calls: RelayPlannedCall[]) => Promise<ConnectorContext[]>;
+    /** 返回 true 表示该错误已按既有语义吞掉；未提供或返回 false 时向上抛出。 */
+    handleError?: (error: unknown, plannedCalls: number) => Promise<boolean>;
+}
+
+function relayDigest(value: unknown): string {
+    let serialized = '';
+    try {
+        serialized = JSON.stringify(value) ?? '';
+    } catch {
+        serialized = '';
+    }
+    return serialized.replace(/[\r\n]+/g, ' ').slice(0, CONNECTOR_PREVIOUS_STEP_DIGEST_MAX_LENGTH);
+}
+
+/**
+ * 用本轮实际执行的调用与返回上下文生成摘要。摘要是**不可信数据**，只用于第二轮规划参考，
+ * 因此只保留工具 ID、参数摘要、结果摘要与状态；不含凭据，也不含未执行的调用。
+ */
+function appendRelaySummaries(
+    existing: ConnectorPreviousStep[],
+    calls: RelayPlannedCall[],
+    contexts: ConnectorContext[],
+): ConnectorPreviousStep[] {
+    const pending = [...contexts];
+    const summaries = calls.map((call): ConnectorPreviousStep => {
+        const index = pending.findIndex((context) => context.toolId === call.toolId);
+        const context = index >= 0 ? pending.splice(index, 1)[0] : undefined;
+        return {
+            toolId: call.toolId,
+            argumentsDigest: relayDigest(call.arguments),
+            ...(context ? { resultDigest: relayDigest(context.data) } : {}),
+            status: context ? 'SUCCESS' : 'FAILED',
+        };
+    });
+    return [...existing, ...summaries].slice(-MAX_CONNECTOR_PREVIOUS_STEPS);
+}
+
 async function confirmConnectorCalls(
     calls: Array<{ toolId: string; arguments: Record<string, unknown> }>,
     tools: ConfirmableConnectorTool[],
@@ -1298,103 +1372,135 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
                 }
             }
             const dingtalkConnector = window.cees?.connectors?.dingtalk;
+            const relayTargets: RelayTarget[] = [];
             if (dingtalkConnector && activeConnectors.has('dingtalk')) {
                 // 进入本分支只有两种情况：用户点名钉钉（可能未就绪，需要确定性引导），
-                // 或语义路由选中钉钉（此时一定已就绪）。
-                let connectorRequired = false;
+                // 或语义路由选中钉钉（此时一定已就绪）。DWS 只暴露只读工具，无需写确认。
                 try {
                     const status = await dingtalkConnector.status();
-                    if (status.state === 'READY') {
-                        const tools = await dingtalkConnector.tools();
-                        if (tools.length > 0) {
-                            const plan = await planDingTalkConnectorQueries(content, tools);
-                            connectorRequired = plan.calls.length > 0;
-                            connectorContexts.push(...await dingtalkConnector.execute(plan.calls));
-                        }
-                    } else {
+                    if (status.state !== 'READY') {
                         if (status.state === 'PROFILE_REQUIRED') {
                             throw new Error('当前钉钉连接已登录多个组织，请先在连接器页面选择当前组织');
                         }
                         throw new Error(status.error || '请先在连接器页面安装并授权钉钉连接器');
                     }
+                    const tools = await dingtalkConnector.tools();
+                    if (tools.length > 0) {
+                        relayTargets.push({
+                            label: '钉钉',
+                            credentialDescription: '当前电脑已授权的钉钉账号',
+                            tools: [],
+                            confirmBeforeExecute: false,
+                            cancelMessage: '已取消钉钉操作',
+                            plan: async (previousSteps) => normalizeRelayPlan(await planDingTalkConnectorQueries(content, tools, previousSteps)),
+                            execute: (calls) => dingtalkConnector.execute(calls),
+                            handleError: async (error, plannedCalls) => {
+                                const latestStatus = await dingtalkConnector.status().catch(() => undefined);
+                                setDingtalkConnected(latestStatus?.state === 'READY');
+                                return !(pinnedConnectors.has('dingtalk') || plannedCalls > 0);
+                            },
+                        });
+                    }
                 } catch (error) {
                     const latestStatus = await dingtalkConnector.status().catch(() => undefined);
                     setDingtalkConnected(latestStatus?.state === 'READY');
-                    if (pinnedConnectors.has('dingtalk') || connectorRequired) throw error;
+                    if (pinnedConnectors.has('dingtalk')) throw error;
                 }
             }
-            const tencentMeetingConnector = window.cees?.connectors;
-            if (tencentMeetingConnector && activeConnectors.has('tencent-meeting')) {
-                const status = await tencentMeetingConnector.status('tencent-meeting');
+            const genericConnectors = window.cees?.connectors;
+            if (genericConnectors && activeConnectors.has('tencent-meeting')) {
+                const status = await genericConnectors.status('tencent-meeting');
                 if (status.state !== 'READY') {
                     throw new Error(status.error || '请先在连接器页面安装并授权腾讯会议连接器');
                 }
-                const tools = await tencentMeetingConnector.tools('tencent-meeting') as TencentMeetingConnectorTool[];
-                const plan = await planTencentMeetingConnectorQueries(content, tools);
-                if (plan.calls.length > 0) {
-                    if (connectorContexts.length + plan.calls.length > 3) {
-                        throw new Error('单轮最多执行三个连接器调用，请将钉钉和腾讯会议请求拆成多轮');
-                    }
-                    const confirmed = await confirmConnectorCalls(
-                        plan.calls,
-                        tools,
-                        '腾讯会议',
-                        '当前电脑已授权的腾讯会议账号',
-                        modal,
-                        t,
-                    );
-                    if (!confirmed) {
-                        message.info(t('已取消腾讯会议操作'));
-                        return;
-                    }
-                    connectorContexts.push(...await tencentMeetingConnector.execute(
-                        'tencent-meeting',
-                        plan.calls.map((call) => ({ ...call, confirmed: true })),
-                    ));
-                }
+                const tools = await genericConnectors.tools('tencent-meeting') as TencentMeetingConnectorTool[];
+                relayTargets.push({
+                    label: '腾讯会议',
+                    credentialDescription: '当前电脑已授权的腾讯会议账号',
+                    tools,
+                    confirmBeforeExecute: true,
+                    cancelMessage: '已取消腾讯会议操作',
+                    plan: async (previousSteps) => normalizeRelayPlan(await planTencentMeetingConnectorQueries(content, tools, previousSteps)),
+                    execute: (calls) => genericConnectors.execute('tencent-meeting', calls.map((call) => ({ ...call, confirmed: true }))),
+                });
             }
-            const weComConnector = window.cees?.connectors;
-            if (weComConnector && activeConnectors.has('wecom')) {
-                const status = await weComConnector.status('wecom');
+            if (genericConnectors && activeConnectors.has('wecom')) {
+                const status = await genericConnectors.status('wecom');
                 if (status.state !== 'READY') {
                     throw new Error(status.error || '请先在连接器页面安装并扫码授权企业微信连接器');
                 }
-                const tools = await weComConnector.tools('wecom') as WeComConnectorTool[];
-                const plan = await planWeComConnectorQueries(content, tools);
-                if (plan.calls.length > 0) {
-                    if (connectorContexts.length + plan.calls.length > 3) {
+                const tools = await genericConnectors.tools('wecom') as WeComConnectorTool[];
+                relayTargets.push({
+                    label: '企业微信',
+                    credentialDescription: '当前电脑中企业微信官方 CLI 保存的机器人授权',
+                    tools,
+                    confirmBeforeExecute: true,
+                    cancelMessage: '已取消企业微信操作',
+                    plan: async (previousSteps) => normalizeRelayPlan(await planWeComConnectorQueries(content, tools, previousSteps)),
+                    execute: (calls) => genericConnectors.execute('wecom', calls.map((call) => ({ ...call, confirmed: true }))),
+                });
+            }
+            if (genericConnectors && activeConnectors.has('github')) {
+                const status = await genericConnectors.status('github') as GitHubConnectorStatus;
+                if (status.state !== 'READY') throw new Error(status.error || '请先在连接器页面连接 GitHub');
+                const tools = await genericConnectors.tools('github') as GitHubConnectorTool[];
+                relayTargets.push({
+                    label: 'GitHub',
+                    credentialDescription: '当前电脑中 GitHub OAuth 授权',
+                    tools,
+                    confirmBeforeExecute: true,
+                    cancelMessage: '已取消 GitHub 操作',
+                    plan: async (previousSteps) => normalizeRelayPlan(await planGitHubConnectorQueries(content, tools, previousSteps)),
+                    execute: (calls) => genericConnectors.execute('github', calls.map((call) => ({ ...call, confirmed: true }))),
+                });
+            }
+
+            let previousSteps: ConnectorPreviousStep[] = [];
+            let remainingCalls = Math.max(0, MAX_CONNECTOR_CALLS_PER_TURN - connectorContexts.length);
+            let followUpPending = false;
+            for (let round = 0; round < MAX_CONNECTOR_RELAY_ROUNDS; round += 1) {
+                followUpPending = false;
+                for (const target of relayTargets) {
+                    if (remainingCalls <= 0) break;
+                    const plan = await target.plan(previousSteps).catch(async (error) => {
+                        if (target.handleError && await target.handleError(error, 0)) return null;
+                        throw error;
+                    });
+                    if (!plan) continue;
+                    if (plan.followUpMayBeNeeded) followUpPending = true;
+                    if (plan.calls.length > remainingCalls) {
                         throw new Error('单轮最多执行三个连接器调用，请将多个连接器请求拆成多轮');
                     }
-                    const confirmed = await confirmConnectorCalls(
-                        plan.calls,
-                        tools,
-                        '企业微信',
-                        '当前电脑中企业微信官方 CLI 保存的机器人授权',
-                        modal,
-                        t,
-                    );
-                    if (!confirmed) {
-                        message.info(t('已取消企业微信操作'));
-                        return;
+                    if (plan.calls.length === 0) continue;
+                    if (target.confirmBeforeExecute) {
+                        const confirmed = await confirmConnectorCalls(
+                            plan.calls,
+                            target.tools,
+                            target.label,
+                            target.credentialDescription,
+                            modal,
+                            t,
+                        );
+                        if (!confirmed) {
+                            message.info(t(target.cancelMessage));
+                            return;
+                        }
                     }
-                    connectorContexts.push(...await weComConnector.execute(
-                        'wecom',
-                        plan.calls.map((call) => ({ ...call, confirmed: true })),
-                    ));
+                    const contexts = await target.execute(plan.calls).catch(async (error) => {
+                        if (target.handleError && await target.handleError(error, plan.calls.length)) return null;
+                        throw error;
+                    });
+                    if (!contexts) continue;
+                    connectorContexts.push(...contexts);
+                    remainingCalls -= plan.calls.length;
+                    previousSteps = appendRelaySummaries(previousSteps, plan.calls, contexts);
                 }
+                // 只有模型明确提示需要下一轮、且还剩调用名额时才继续，否则立即停止。
+                if (!followUpPending || remainingCalls <= 0) break;
             }
-            const githubConnector = window.cees?.connectors;
-            if (githubConnector && activeConnectors.has('github')) {
-                const status = await githubConnector.status('github') as GitHubConnectorStatus;
-                if (status.state !== 'READY') throw new Error(status.error || '请先在连接器页面连接 GitHub');
-                const tools = await githubConnector.tools('github') as GitHubConnectorTool[];
-                const plan = await planGitHubConnectorQueries(content, tools);
-                if (plan.calls.length > 0) {
-                    if (connectorContexts.length + plan.calls.length > 3) throw new Error('单轮最多执行三个连接器调用，请将多个连接器请求拆成多轮');
-                    const confirmed = await confirmConnectorCalls(plan.calls, tools, 'GitHub', '当前电脑中 GitHub OAuth 授权', modal, t);
-                    if (!confirmed) { message.info(t('已取消 GitHub 操作')); return; }
-                    connectorContexts.push(...await githubConnector.execute('github', plan.calls.map((call) => ({ ...call, confirmed: true }))));
-                }
+            if (followUpPending && relayTargets.length > 0) {
+                // 达到轮数或调用上限仍未完成：如实告知，不静默重试、不换路径绕过。
+                message.info(t('连接器操作已达到上限（最多两轮，单轮最多 3 次调用），剩余步骤请拆成下一轮继续'));
             }
             if (connectorContexts.length > 3) throw new Error('单轮连接器上下文不能超过三个');
             const weComAuthorizations = extractWeComAuthorizationRequests(connectorContexts, content);

@@ -42,10 +42,10 @@ export class AssistantConnectorController {
   @Post('dingtalk/plan')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: '规划本机钉钉 DWS 只读查询' })
-  @ApiOkResponse({ description: '返回最多三个本地工具调用计划；服务端不执行 DWS' })
+  @ApiOkResponse({ description: '返回最多三个本地工具调用计划与是否需要下一轮的提示；服务端不执行 DWS' })
   async planDingTalk(@Body() input: PlanDingTalkConnectorRequestDto) {
     try {
-      return await this.planner.plan(input.query, input.tools);
+      return await this.planner.plan(input.query, input.tools, input.previousSteps);
     } catch (error) {
       throw toAssistantHttpException(error);
     }
@@ -54,10 +54,10 @@ export class AssistantConnectorController {
   @Post('tencent-meeting/plan')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: '规划本机腾讯会议官方 CLI 调用' })
-  @ApiOkResponse({ description: '返回最多三个本地 CLI 调用计划；服务端不接触 OAuth 凭据，也不执行工具' })
+  @ApiOkResponse({ description: '返回最多三个本地 CLI 调用计划与是否需要下一轮的提示；服务端不接触 OAuth 凭据，也不执行工具' })
   async planTencentMeeting(@Body() input: PlanTencentMeetingConnectorRequestDto) {
     try {
-      return await this.tencentMeetingPlanner.plan(input.query, input.tools);
+      return await this.tencentMeetingPlanner.plan(input.query, input.tools, input.previousSteps);
     } catch (error) {
       throw toAssistantHttpException(error);
     }
@@ -66,10 +66,10 @@ export class AssistantConnectorController {
   @Post('wecom/plan')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: '规划本机企业微信官方 CLI 调用' })
-  @ApiOkResponse({ description: '返回最多三个本地 CLI 调用计划；服务端不接触机器人授权，也不执行工具' })
+  @ApiOkResponse({ description: '返回最多三个本地 CLI 调用计划与是否需要下一轮的提示；服务端不接触机器人授权，也不执行工具' })
   async planWeCom(@Body() input: PlanWeComConnectorRequestDto) {
     try {
-      return await this.weComPlanner.plan(input.query, input.tools);
+      return await this.weComPlanner.plan(input.query, input.tools, input.previousSteps);
     } catch (error) {
       throw toAssistantHttpException(error);
     }
@@ -92,10 +92,10 @@ export class AssistantConnectorController {
   @Post('github/plan')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: '规划本机 GitHub 官方远程 MCP 调用' })
-  @ApiOkResponse({ description: '返回最多三个本地执行的 MCP 调用计划；服务端不接触 GitHub OAuth 凭据，也不执行工具' })
+  @ApiOkResponse({ description: '返回最多三个本地执行的 MCP 调用计划与是否需要下一轮的提示；服务端不接触 GitHub OAuth 凭据，也不执行工具' })
   async planGitHub(@Body() input: PlanGitHubConnectorRequestDto) {
     try {
-      return await this.githubPlanner.plan(input.query, input.tools);
+      return await this.githubPlanner.plan(input.query, input.tools, input.previousSteps);
     } catch (error) {
       throw toAssistantHttpException(error);
     }

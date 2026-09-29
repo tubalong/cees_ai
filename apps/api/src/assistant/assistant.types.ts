@@ -20,6 +20,20 @@ export interface ConnectorContextInput {
   /** 客户端自报「执行前已获得用户确认」，只用于审计留痕，不代表服务端授权。 */
   confirmed?: boolean;
 }
+
+export type ConnectorPreviousStepStatus = 'SUCCESS' | 'FAILED' | 'REJECTED';
+
+/**
+ * 受控多步接力：同一次用户请求内已经执行过的连接器步骤摘要。
+ * `resultDigest` 是不可信第三方数据，规划只能从中抽取 ID 或字段，不得执行其中的指令。
+ */
+export interface ConnectorPreviousStepInput {
+  toolId: string;
+  argumentsDigest?: string;
+  resultDigest?: string;
+  status: ConnectorPreviousStepStatus;
+}
+
 export interface PageAssistantContextInput {
   source: 'project-management' | 'finance-management' | 'legal-contracts' | 'knowledge-management' | 'organization-management' | 'hr-management';
   role: string;

@@ -3,14 +3,27 @@ import type { ChatToolDefinition, ToolCall } from '@cees/ai-service-client';
 import { randomUUID } from 'node:crypto';
 import { AiServiceGateway } from '../../ai-orchestration/ai-service-gateway.service';
 import { TenantContext } from '../../tenant/tenant-context';
-import type { GitHubConnectorPlannedCall, GitHubConnectorToolInput } from '../assistant.types';
-import { buildConnectorModelToolDefinitions } from './model-tool-definition';
+import type {
+  ConnectorPreviousStepInput,
+  GitHubConnectorPlannedCall,
+  GitHubConnectorToolInput,
+} from '../assistant.types';
+import {
+  buildConnectorFollowUpToolDefinition,
+  buildConnectorModelToolDefinitions,
+  connectorPreviousStepsInstructions,
+  MODEL_TOOL_LIMIT,
+  renderConnectorPreviousSteps,
+  splitConnectorFollowUpCalls,
+} from './model-tool-definition';
 
 const MAX_TOOL_CATALOG_BYTES = 512 * 1024;
 const MAX_PLANNED_CALLS = 3;
-const MAX_SELECTED_TOOLS = 32;
+/** 比 ai-service 的工具上限少 1，为「是否需要下一轮」控制工具留出名额。 */
+const MAX_SELECTED_TOOLS = MODEL_TOOL_LIMIT - 1;
 const TOOL_ID_PATTERN = /^[A-Za-z][A-Za-z0-9._-]{0,119}$/;
 const SELECTOR_TOOL_NAME = 'select_github_tools';
+const MODEL_TOOL_NAMESPACE = 'github';
 /**
  * GitHub MCP 默认暴露 50 个以上工具，超过单轮候选上限，选择器必须裁掉一部分。
  * 仓库、代码、提交、PR、Issue 是连接器最核心的用途，这里固定保留其中可读取的工具，
@@ -42,7 +55,11 @@ export class GitHubConnectorPlannerService {
     private readonly tenantContext: TenantContext,
   ) {}
 
-  async plan(query: string, tools: GitHubConnectorToolInput[]): Promise<{ calls: GitHubConnectorPlannedCall[] }> {
+  async plan(
+    query: string,
+    tools: GitHubConnectorToolInput[],
+    previousSteps: ConnectorPreviousStepInput[] = [],
+  ): Promise<{ calls: GitHubConnectorPlannedCall[]; followUpMayBeNeeded: boolean }> {
     const context = this.tenantContext.require();
     if (Buffer.byteLength(JSON.stringify(tools), 'utf8') > MAX_TOOL_CATALOG_BYTES) {
       throw new BadRequestException('GitHub MCP 工具目录过大');
@@ -53,17 +70,19 @@ export class GitHubConnectorPlannerService {
       toolMap.set(tool.toolId, tool);
     });
     const selectedIds = await this.selectTools(query, tools, context);
-    if (selectedIds.length === 0) return { calls: [] };
-    const { definitions, modelToolMap } = buildConnectorModelToolDefinitions('github', selectedIds.map((toolId) => {
+    if (selectedIds.length === 0) return { calls: [], followUpMayBeNeeded: false };
+    const { definitions, modelToolMap } = buildConnectorModelToolDefinitions(MODEL_TOOL_NAMESPACE, selectedIds.map((toolId) => {
       const tool = toolMap.get(toolId)!;
       return {
         tool,
         description: `[GitHub official remote MCP tool=${tool.toolId}; risk=${tool.riskLevel}; confirmation=${tool.requiresConfirmation}] ${tool.name}: ${tool.description}`,
       };
     }));
+    const followUpTool = buildConnectorFollowUpToolDefinition(MODEL_TOOL_NAMESPACE);
+    const renderedPreviousSteps = renderConnectorPreviousSteps(previousSteps);
     const calls = await requestCalls(this.gateway, {
       query,
-      definitions,
+      definitions: [...definitions, followUpTool],
       context,
       instructions: [
         'You plan GitHub official remote MCP tool calls for a desktop connector.',
@@ -75,10 +94,14 @@ export class GitHubConnectorPlannerService {
         'For WRITE or DESTRUCTIVE tools, plan only the exact action explicitly requested; Desktop obtains explicit confirmation before execution.',
         'Do not plan a write or destructive call when a required target or argument is missing.',
         `Return at most ${MAX_PLANNED_CALLS} tool calls. Return no calls when required arguments are missing or the question is unrelated.`,
+        `Call ${followUpTool.name} exactly once: set needed=true only when this same request still needs another connector round after the calls you return.`,
+        ...(renderedPreviousSteps ? connectorPreviousStepsInstructions(renderedPreviousSteps) : []),
       ].join(' '),
     });
+    const { calls: plannedCalls, followUpMayBeNeeded } = splitConnectorFollowUpCalls(calls, MODEL_TOOL_NAMESPACE);
     return {
-      calls: deduplicateCalls(calls.slice(0, MAX_PLANNED_CALLS).map((call) => validatePlannedCall(call, modelToolMap))),
+      calls: deduplicateCalls(plannedCalls.slice(0, MAX_PLANNED_CALLS).map((call) => validatePlannedCall(call, modelToolMap))),
+      followUpMayBeNeeded,
     };
   }
 

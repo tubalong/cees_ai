@@ -1611,12 +1611,31 @@ export interface DingTalkConnectorTool {
     parameters: Record<string, unknown>;
 }
 
-export interface DingTalkConnectorPlan {
-    calls: Array<{ toolId: string; arguments: Record<string, unknown> }>;
+/**
+ * 受控多步接力：同一次用户请求内已执行的连接器步骤摘要。
+ * `resultDigest` 由连接器返回内容生成，属于不可信数据，服务端只允许用它抽取 ID 或字段。
+ */
+export interface ConnectorPreviousStep {
+    toolId: string;
+    argumentsDigest?: string;
+    resultDigest?: string;
+    status: 'SUCCESS' | 'FAILED' | 'REJECTED';
 }
 
-export async function planDingTalkConnectorQueries(query: string, tools: DingTalkConnectorTool[]): Promise<DingTalkConnectorPlan> {
-    return authorizedRequest<DingTalkConnectorPlan>('v1/assistant/connectors/dingtalk/plan', { method: 'POST', body: JSON.stringify({ query, tools }) });
+export interface DingTalkConnectorPlan {
+    calls: Array<{ toolId: string; arguments: Record<string, unknown> }>;
+    followUpMayBeNeeded?: boolean;
+}
+
+export async function planDingTalkConnectorQueries(
+    query: string,
+    tools: DingTalkConnectorTool[],
+    previousSteps: ConnectorPreviousStep[] = [],
+): Promise<DingTalkConnectorPlan> {
+    return authorizedRequest<DingTalkConnectorPlan>('v1/assistant/connectors/dingtalk/plan', {
+        method: 'POST',
+        body: JSON.stringify({ query, tools, ...(previousSteps.length ? { previousSteps } : {}) }),
+    });
 }
 
 export interface TencentMeetingConnectorTool {
@@ -1630,15 +1649,17 @@ export interface TencentMeetingConnectorTool {
 
 export interface TencentMeetingConnectorPlan {
     calls: Array<{ toolId: string; arguments: Record<string, unknown> }>;
+    followUpMayBeNeeded?: boolean;
 }
 
 export async function planTencentMeetingConnectorQueries(
     query: string,
     tools: TencentMeetingConnectorTool[],
+    previousSteps: ConnectorPreviousStep[] = [],
 ): Promise<TencentMeetingConnectorPlan> {
     return authorizedRequest<TencentMeetingConnectorPlan>('v1/assistant/connectors/tencent-meeting/plan', {
         method: 'POST',
-        body: JSON.stringify({ query, tools }),
+        body: JSON.stringify({ query, tools, ...(previousSteps.length ? { previousSteps } : {}) }),
     });
 }
 
@@ -1653,15 +1674,17 @@ export interface WeComConnectorTool {
 
 export interface WeComConnectorPlan {
     calls: Array<{ toolId: string; arguments: Record<string, unknown> }>;
+    followUpMayBeNeeded?: boolean;
 }
 
 export async function planWeComConnectorQueries(
     query: string,
     tools: WeComConnectorTool[],
+    previousSteps: ConnectorPreviousStep[] = [],
 ): Promise<WeComConnectorPlan> {
     return authorizedRequest<WeComConnectorPlan>('v1/assistant/connectors/wecom/plan', {
         method: 'POST',
-        body: JSON.stringify({ query, tools }),
+        body: JSON.stringify({ query, tools, ...(previousSteps.length ? { previousSteps } : {}) }),
     });
 }
 
@@ -1676,15 +1699,17 @@ export interface GitHubConnectorTool {
 
 export interface GitHubConnectorPlan {
     calls: Array<{ toolId: string; arguments: Record<string, unknown> }>;
+    followUpMayBeNeeded?: boolean;
 }
 
 export async function planGitHubConnectorQueries(
     query: string,
     tools: GitHubConnectorTool[],
+    previousSteps: ConnectorPreviousStep[] = [],
 ): Promise<GitHubConnectorPlan> {
     return authorizedRequest<GitHubConnectorPlan>('v1/assistant/connectors/github/plan', {
         method: 'POST',
-        body: JSON.stringify({ query, tools }),
+        body: JSON.stringify({ query, tools, ...(previousSteps.length ? { previousSteps } : {}) }),
     });
 }
 
