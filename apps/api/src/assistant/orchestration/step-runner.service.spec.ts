@@ -239,6 +239,8 @@ describe('StepRunnerService', () => {
         stepKey: 's1',
         permissionCode: 'finance.ledger.import',
         toolName: 'import_finance_ledger',
+        requestId: `task:${TASK_ID}:step:${STEP_ID}`,
+        membershipId: MEMBERSHIP_ID,
       }),
     );
     expect(harness.state.suspendStepInTransaction).toHaveBeenCalledWith(
@@ -281,6 +283,8 @@ describe('StepRunnerService', () => {
       interactionId: 'interaction-1',
       membershipId: MEMBERSHIP_ID,
       tenantId: TENANT_ID,
+      stepId: STEP_ID,
+      toolCallId: 'tc-call-w1',
     }));
     expect(writeExecute).toHaveBeenCalledTimes(1);
     expect(harness.state.completeStepToolCall).toHaveBeenCalledWith(expect.objectContaining({ summary: '导入 128 条' }));

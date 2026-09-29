@@ -633,6 +633,8 @@ export class StepRunnerService {
           interactionId: authorizationToConsume.id,
           membershipId: context.task.membershipId,
           requestId: context.requestId,
+          stepId: context.step.id,
+          toolCallId: effectiveToolCallId,
         });
         if (!consumed) {
           const settled = await this.state.failStepToolCall({
@@ -750,6 +752,8 @@ export class StepRunnerService {
             reason: '该操作会修改或新增企业业务数据，需要你授权后 AI 同事才能继续执行',
             permissionCode: request.permissionCode,
             toolName: request.definition.name,
+            requestId: context.requestId,
+            membershipId: context.task.membershipId,
           });
         }
         const suspended = await this.state.suspendStepInTransaction(transaction, {

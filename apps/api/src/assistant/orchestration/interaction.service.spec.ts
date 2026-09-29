@@ -74,6 +74,8 @@ describe('InteractionService', () => {
       reason: AUTHORIZATION_PAYLOAD.reason,
       permissionCode: 'knowledge.document.create',
       toolName: 'save_to_knowledge',
+      requestId: REQUEST_ID,
+      membershipId: MEMBERSHIP_ID,
     });
 
     expect(created.id).toBe(INTERACTION_ID);
@@ -107,6 +109,20 @@ describe('InteractionService', () => {
         options: [],
       }),
     );
+    // 申请段审计：与「决定 / 使用」两段对称（操作者、请求、资源与元数据）。
+    expect(harness.tx.auditLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        action: 'TASK_INTERACTION_REQUESTED',
+        resourceId: INTERACTION_ID,
+        requestId: REQUEST_ID,
+        actorMembershipId: MEMBERSHIP_ID,
+        metadata: expect.objectContaining({
+          taskId: TASK_ID,
+          interactionType: 'AUTHORIZATION',
+          permissionCode: 'knowledge.document.create',
+        }),
+      }),
+    });
   });
 
   it('rejects an option interaction without candidates', async () => {
@@ -118,6 +134,7 @@ describe('InteractionService', () => {
       type: 'QUESTION',
       summary: '需要补充哪个区域的数据？',
       options: [],
+      requestId: REQUEST_ID,
     })).rejects.toMatchObject({ response: { code: 'INTERACTION_INPUT_INVALID' } });
   });
 
@@ -365,6 +382,8 @@ describe('InteractionService', () => {
       interactionId: INTERACTION_ID,
       membershipId: MEMBERSHIP_ID,
       requestId: REQUEST_ID,
+      stepId: '30000000-0000-0000-0000-000000000001',
+      toolCallId: 'tc-w1',
       now,
     })).resolves.toBe(true);
 
@@ -384,6 +403,11 @@ describe('InteractionService', () => {
       data: expect.objectContaining({
         action: 'TASK_AUTHORIZATION_USED',
         resourceId: INTERACTION_ID,
+        metadata: expect.objectContaining({
+          usedAt: now.toISOString(),
+          stepId: '30000000-0000-0000-0000-000000000001',
+          toolCallId: 'tc-w1',
+        }),
       }),
     });
   });

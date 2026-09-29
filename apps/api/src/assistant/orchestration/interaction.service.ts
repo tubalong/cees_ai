@@ -49,6 +49,10 @@ export interface CreateInteractionInput {
   toolName?: string;
   /** 超时失效时间；不限时为空。 */
   expiresAt?: Date | null;
+  /** 申请请求的 requestId（审计「记录请求」维度；后台调用方显式传入）。 */
+  requestId: string;
+  /** 发起人成员（审计操作者维度）；后台调用方可空。 */
+  membershipId?: string | null;
 }
 
 /** 解决挂起事项的请求（与契约 AssistantTaskInteractionResolveRequest 一致）。 */
@@ -127,6 +131,25 @@ export class InteractionService {
       reason: payload.reason,
       options: payload.options,
       expiresAt: created.expiresAt ? created.expiresAt.toISOString() : null,
+    });
+    // 申请段审计：与「决定 / 使用」两段对称，记录租户、操作者、请求、资源与元数据。
+    await transaction.auditLog.create({
+      data: {
+        tenantId: input.tenantId,
+        actorUserId: null,
+        actorMembershipId: input.membershipId ?? null,
+        action: 'TASK_INTERACTION_REQUESTED',
+        outcome: AuditOutcome.SUCCESS,
+        resourceType: 'ASSISTANT_TASK_INTERACTION',
+        resourceId: created.id,
+        requestId: input.requestId,
+        metadata: {
+          taskId: input.taskId,
+          interactionType: created.type,
+          stepId: created.stepId,
+          permissionCode: payload.permissionCode,
+        },
+      },
     });
     return created;
   }
@@ -335,6 +358,9 @@ export class InteractionService {
     interactionId: string;
     membershipId: string | null;
     requestId: string;
+    /** 使用发生的步骤与工具调用（审计「被用在哪里」）。 */
+    stepId?: string | null;
+    toolCallId?: string | null;
     now?: Date;
   }): Promise<boolean> {
     const now = input.now ?? new Date();
@@ -366,7 +392,11 @@ export class InteractionService {
           resourceType: 'ASSISTANT_TASK_INTERACTION',
           resourceId: input.interactionId,
           requestId: input.requestId,
-          metadata: { usedAt: now.toISOString() },
+          metadata: {
+            usedAt: now.toISOString(),
+            stepId: input.stepId ?? null,
+            toolCallId: input.toolCallId ?? null,
+          },
         },
       });
       return true;
