@@ -4,6 +4,7 @@ import { DocumentService } from '../../../document/document.service';
 import { AssistantMessageContentService } from '../../runtime/message-content.service';
 import { ToolRegistryService } from '../tool-registry';
 import type { ToolDefinition, ToolExecutionContext, ToolExecutionResult } from '../tool.types';
+import { ToolExecutionError } from '../tool.types';
 
 const VISIBILITY_VALUES = [DocumentVisibility.PRIVATE, DocumentVisibility.TENANT] as const;
 const MAX_INSTRUCTION_LENGTH = 8000;
@@ -109,6 +110,8 @@ export class GenerateDocumentTool implements OnModuleInit {
       requestId: context.requestId,
       conversationId: context.conversationId,
       turnId: context.turnId,
+      taskStepId: context.taskStepId ?? null,
+      taskId: context.taskId ?? null,
       toolCallId: context.toolCallId,
       executionOwner: context.executionOwner,
       executionToken: context.executionToken,
@@ -117,8 +120,17 @@ export class GenerateDocumentTool implements OnModuleInit {
       visibility: input.visibility as (typeof VISIBILITY_VALUES)[number],
       format: format.format,
     } as const;
-    const document = format.format === 'xlsx'
-      ? await this.documentService.createGeneratedSpreadsheet({
+    if (format.format === 'xlsx') {
+      // XLSX 依赖「本轮上传的表格」；任务步骤执行窗口没有轮次输入，
+      // 工具面已排除 generate_xlsx，这里兜底防御绕过（模型编造调用时拒绝）。
+      if (context.turnId === null) {
+        throw new ToolExecutionError(
+          'TURN_INPUT_REQUIRED',
+          'generate_xlsx requires an active turn with spreadsheet materials',
+          '生成表格需要先在当前消息中上传 Excel 或 CSV 文件。请告知用户：在对话中上传文件后重试。',
+        );
+      }
+      const document = await this.documentService.createGeneratedSpreadsheet({
         ...command,
         sourceMaterials: await this.messageContent.resolveTurnDocumentSourceMaterials(
           context.turnId,
@@ -129,11 +141,17 @@ export class GenerateDocumentTool implements OnModuleInit {
             requestId: context.requestId,
           },
         ),
-      })
-      : await this.documentService.createGeneratedDocument({
-        ...command,
-        format: format.format as Exclude<DocumentFormat, 'xlsx'>,
       });
+      return {
+        resourceType: 'DOCUMENT',
+        resourceId: document.documentId,
+        summary: format.summary(document.title, document.contentLength),
+      };
+    }
+    const document = await this.documentService.createGeneratedDocument({
+      ...command,
+      format: format.format as Exclude<DocumentFormat, 'xlsx'>,
+    });
     return {
       resourceType: 'DOCUMENT',
       resourceId: document.documentId,

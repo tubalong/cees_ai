@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CEES AI API
-  version: 0.48.0
+  version: 0.53.0
   description: 以本文件为唯一事实源的公开 API 契约。资源与操作按 docs/api 约定补充。
 
 servers:
@@ -823,6 +823,488 @@ paths:
                 $ref: '#/components/schemas/ErrorResponseEnvelope'
         '409':
           description: 轮次已结束，不能取消
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+  /assistant/tasks:
+    get:
+      summary: 查询当前成员发起的 AI 任务列表
+      description: |
+        按创建时间倒序返回当前成员发起的任务，支持按状态与会话过滤；仅返回本人发起的任务。
+        需具备 ai.task.read 权限（默认角色已包含）。
+      operationId: listAssistantTasks
+      tags: [Assistant Tasks]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          description: 按任务状态过滤；省略时返回全部状态
+          schema:
+            $ref: '#/components/schemas/AssistantTaskStatus'
+        - name: conversationId
+          in: query
+          required: false
+          description: 按发起会话过滤（对话内任务卡片的定位方式）
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          required: false
+          description: 每页数量，默认 20，最大 100
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: cursor
+          in: query
+          required: false
+          description: 分页游标，上一页返回的 nextCursor
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 任务列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssistantTaskListResponseEnvelope'
+        '400':
+          description: 请求字段校验失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '401':
+          description: 登录状态无效、已过期或缺少有效租户成员身份
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '403':
+          description: 缺少任务查看权限
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+  /assistant/tasks/{taskId}:
+    get:
+      summary: 查询任务详情
+      description: |
+        返回任务、当前最新计划版本（待确认时为草案）与运行时步骤；仅任务发起人可以访问。
+      operationId: getAssistantTask
+      tags: [Assistant Tasks]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          description: 任务 ID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: 任务详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssistantTaskDetailResponseEnvelope'
+        '400':
+          description: 请求字段校验失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '401':
+          description: 登录状态无效、已过期或缺少有效租户成员身份
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '403':
+          description: 缺少任务查看权限
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '404':
+          description: 任务不存在或不属于当前成员
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+  /assistant/tasks/{taskId}/events:
+    get:
+      summary: 以 SSE 重放并继续接收任务事件
+      description: |
+        从 afterSeq 之后按序重放任务事件并继续接收增量，直到任务进入终态且事件全部消费。
+        断线重连按 (taskId, seq) 去重补拉；事件 payload 只含展示字段，不含内部权限与敏感参数。
+      operationId: replayAssistantTaskEvents
+      tags: [Assistant Tasks]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          description: 任务 ID
+          schema:
+            type: string
+            format: uuid
+        - name: afterSeq
+          in: query
+          required: false
+          description: 只返回该序号之后的事件；默认 0（从头重放）
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        '200':
+          description: 任务事件流
+          content:
+            text/event-stream:
+              schema:
+                $ref: '#/components/schemas/AssistantTaskStreamEvent'
+        '400':
+          description: 请求字段校验失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '401':
+          description: 登录状态无效、已过期或缺少有效租户成员身份
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '403':
+          description: 缺少任务查看权限
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '404':
+          description: 任务不存在或不属于当前成员
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+  /assistant/tasks/{taskId}/confirm:
+    post:
+      summary: 确认或调整计划（派发前确认）
+      description: |
+        decision=start：携带全部关键待定项答复，确认计划生效并开始执行——确认前不派发任何步骤；
+        decision=revise：保留当前草案并记录调整意图，随后在对话中提出调整要求生成新草案。
+        幂等：重复提交返回当前状态而不是报错。
+      operationId: confirmAssistantTaskPlan
+      tags: [Assistant Tasks]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          description: 任务 ID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssistantTaskConfirmRequest'
+      responses:
+        '200':
+          description: 返回更新后的任务详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssistantTaskDetailResponseEnvelope'
+        '400':
+          description: 请求字段校验失败或关键待定项答复不完整
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '401':
+          description: 登录状态无效、已过期或缺少有效租户成员身份
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '403':
+          description: 缺少任务查看权限
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '404':
+          description: 任务不存在或不属于当前成员
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '409':
+          description: 任务不在待确认状态（或已进入终态）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+  /assistant/tasks/{taskId}/cancel:
+    post:
+      summary: 取消任务
+      description: |
+        取消是显式动作：任务进入 CANCELLED 终态并关闭未决挂起事项；已产生的正式业务数据不回滚。
+        幂等：重复提交返回当前状态而不是报错。
+      operationId: cancelAssistantTask
+      tags: [Assistant Tasks]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          description: 任务 ID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssistantTaskCancelRequest'
+      responses:
+        '200':
+          description: 返回更新后的任务详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssistantTaskDetailResponseEnvelope'
+        '400':
+          description: 请求字段校验失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '401':
+          description: 登录状态无效、已过期或缺少有效租户成员身份
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '403':
+          description: 缺少任务查看权限
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '404':
+          description: 任务不存在或不属于当前成员
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '409':
+          description: 任务已处于终态，不能取消
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+  /assistant/tasks/{taskId}/outputs:
+    get:
+      summary: 查询任务产出验收视图（产出清单与归档候选）
+      description: |
+        返回任务产出的可归档文档（跨计划版本聚合、按最近完成步骤去重）与可归档知识库候选；
+        已验收产出携带归档结果，未验收产出携带归档目标建议。归档建议由服务端生成：
+        有明确组织归属时为确定性默认（所属部门知识库）；无明确归属时基于产出主题生成推荐与理由。
+        候选集为当前成员具编辑（EDITOR）及以上权限的库，服务端硬过滤，绝不出现无权选项。
+        仅任务终态（COMPLETED / FAILED / CANCELLED）可验收，非终态返回 409。
+      operationId: getAssistantTaskOutputs
+      tags: [Assistant Tasks]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          description: 任务 ID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: 产出验收视图
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssistantTaskOutputsViewResponseEnvelope'
+        '400':
+          description: 请求字段校验失败
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '401':
+          description: 登录状态无效、已过期或缺少有效租户成员身份
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '403':
+          description: 缺少任务查看权限
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '404':
+          description: 任务不存在或不属于当前成员
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '409':
+          description: 任务尚未进入终态，产出验收不可用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+  /assistant/tasks/{taskId}/outputs/confirm:
+    post:
+      summary: 产出验收与归档确认（逐产出指定知识库）
+      description: |
+        确认产出内容并将其归档入知识库：逐产出携带知识库目标，服务端校验目标库编辑（EDITOR）
+        及以上权限后触发既有转存链路（同源重复转存追加版本，不重复归档），并逐条写 output_confirmed 事件。
+        幂等：重复提交已验收且归档位置一致的产出返回当前状态而不是报错；
+        已归档到其他知识库的产出提交时返回 409。仅任务终态（COMPLETED / FAILED / CANCELLED）可验收。
+      operationId: confirmAssistantTaskOutputs
+      tags: [Assistant Tasks]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          description: 任务 ID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssistantTaskOutputsConfirmRequest'
+      responses:
+        '200':
+          description: 返回更新后的产出验收视图
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssistantTaskOutputsViewResponseEnvelope'
+        '400':
+          description: 请求字段校验失败或产出不属于该任务
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '401':
+          description: 登录状态无效、已过期或缺少有效租户成员身份
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '403':
+          description: 缺少任务查看权限或目标知识库编辑权限不足
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '404':
+          description: 任务、产出或目标知识库不存在（含不属于当前成员）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '409':
+          description: 任务尚未进入终态，或产出已归档到其他知识库
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+
+  /assistant/task-interactions/{interactionId}/resolve:
+    post:
+      summary: 解决挂起事项（授权批准/拒绝、提问答复、裁决选项）
+      description: |
+        按交互类型提交解决内容：授权（approve / reject，可选范围）、提问（answer）、裁决（choose）。
+        解决动作幂等：重复提交按当前状态返回而不报错；任务进入终态后不可解决（由终态清理关闭）。
+      operationId: resolveAssistantTaskInteraction
+      tags: [Assistant Tasks]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: interactionId
+          in: path
+          required: true
+          description: 挂起事项 ID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssistantTaskInteractionResolveRequest'
+      responses:
+        '200':
+          description: 返回更新后的任务详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssistantTaskDetailResponseEnvelope'
+        '400':
+          description: 请求字段校验失败或解决内容与事项类型不符
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '401':
+          description: 登录状态无效、已过期或缺少有效租户成员身份
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '403':
+          description: 缺少任务查看权限
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '404':
+          description: 挂起事项不存在或不属于当前成员的任务
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponseEnvelope'
+        '409':
+          description: 任务已进入终态，挂起事项不可解决
           content:
             application/json:
               schema:
@@ -10791,6 +11273,848 @@ components:
         requestId:
           type: [string, 'null']
           description: 公开 API 请求追踪 ID
+
+    AssistantTaskStatus:
+      type: string
+      enum: [CREATED, PENDING_CONFIRM, RUNNING, WAITING_USER, COMPLETED, FAILED, CANCELLED]
+      description: |
+        任务状态：CREATED 计划生成中；PENDING_CONFIRM 等待用户确认计划（确认前不派发）；
+        RUNNING 执行中；WAITING_USER 存在挂起事项（其余步骤可继续）；
+        终态包括 COMPLETED / FAILED / CANCELLED。
+
+    AssistantTaskOriginType:
+      type: string
+      enum: [CONVERSATION, AGENT_CHAT, AUTO]
+      description: 任务来源：对话内发起 / 同事会话转交 / 自动触发（预留）
+
+    AssistantTask:
+      type: object
+      additionalProperties: false
+      required: [id, title, goal, status, originType, conversationId, planVersion, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: 任务 ID
+        title:
+          type: string
+          maxLength: 128
+          description: 任务简短标题
+        goal:
+          type: string
+          description: 任务目标（总管理解后的完整表述）
+        status:
+          $ref: '#/components/schemas/AssistantTaskStatus'
+        originType:
+          $ref: '#/components/schemas/AssistantTaskOriginType'
+        conversationId:
+          type: [string, 'null']
+          format: uuid
+          description: 发起会话；AUTO 来源（主动建议转任务）可为 null
+        planVersion:
+          type: integer
+          minimum: 0
+          description: 当前生效计划版本；计划确认前为 0
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: [string, 'null']
+          format: date-time
+          description: 进入终态的时间；未终态为 null
+        failedReason:
+          type: [string, 'null']
+          description: 失败原因摘要；非失败终态为 null
+
+    AssistantTaskPlanStep:
+      type: object
+      additionalProperties: false
+      required: [stepNo, stepKey, requirement, assigneeAgentId]
+      properties:
+        stepNo:
+          type: integer
+          minimum: 1
+        stepKey:
+          type: string
+          description: 计划内稳定标识（如 s1）
+        title:
+          type: string
+          maxLength: 64
+          description: 步骤简短名（如“收集销售数据”）
+        requirement:
+          type: string
+          description: 本步要求（做什么、完成标准、输出格式）
+        assigneeAgentId:
+          type: string
+          format: uuid
+          description: 执行同事 ID；必取自已授权的在职同事
+        assigneeName:
+          type: string
+          description: 执行同事名称（展示快照）
+        expectedOutput:
+          type: [string, 'null']
+          description: 预期产出描述
+        dependsOnStepKeys:
+          type: array
+          description: 前置步骤的 stepKey；空数组表示可立即开始
+          items: { type: string }
+        carriedFromStepKey:
+          type: [string, 'null']
+          description: 重排沿用的历史步骤 stepKey（该步骤产出直接沿用、不再执行）；无则为 null
+
+    AssistantTaskClarificationOption:
+      type: object
+      additionalProperties: false
+      required: [id, label]
+      properties:
+        id:
+          type: string
+          maxLength: 64
+        label:
+          type: string
+          maxLength: 128
+        description:
+          type: [string, 'null']
+
+    AssistantTaskClarification:
+      type: object
+      additionalProperties: false
+      required: [key, question, options]
+      properties:
+        key:
+          type: string
+          maxLength: 64
+          description: 待定项标识；确认答复按 key 提交
+        question:
+          type: string
+          maxLength: 500
+        options:
+          type: array
+          minItems: 2
+          maxItems: 6
+          items:
+            $ref: '#/components/schemas/AssistantTaskClarificationOption'
+        answer:
+          type: [string, 'null']
+          description: 用户答复（所选选项 id）；未答复为 null
+
+    AssistantTaskPlan:
+      type: object
+      additionalProperties: false
+      required: [version, createdBy, createdAt, steps, clarifications]
+      properties:
+        version:
+          type: integer
+          minimum: 1
+        createdBy:
+          type: string
+          enum: [USER, SYSTEM]
+          description: 计划确认来源：用户确认 / 系统自动采纳
+        confirmedAt:
+          type: [string, 'null']
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        steps:
+          type: array
+          description: 完整步骤清单（含执行同事与依赖，供确认卡片展示）
+          items:
+            $ref: '#/components/schemas/AssistantTaskPlanStep'
+        clarifications:
+          type: array
+          description: 关键待定项（问题 + 选项）；确认答复随确认提交并并入生效版本
+          items:
+            $ref: '#/components/schemas/AssistantTaskClarification'
+
+    AssistantTaskStep:
+      type: object
+      additionalProperties: false
+      required: [id, stepNo, stepKey, planVersion, status, attemptNo]
+      properties:
+        id:
+          type: string
+          format: uuid
+        stepNo:
+          type: integer
+          minimum: 1
+        stepKey:
+          type: string
+        planVersion:
+          type: integer
+          minimum: 1
+        status:
+          type: string
+          enum: [PENDING, READY, RUNNING, WAITING_USER, SUCCEEDED, FAILED, SKIPPED]
+        assigneeAgentId:
+          type: [string, 'null']
+          format: uuid
+        assigneeName:
+          type: [string, 'null']
+          description: 执行同事名称（实时解析）
+        summary:
+          type: [string, 'null']
+          description: 结果摘要（回流只存摘要与引用）
+        outputRefs:
+          type: array
+          maxItems: 20
+          default: []
+          items:
+            $ref: '#/components/schemas/ToolResultResourceReference'
+          description: 产出资产引用列表（不含签名 URL）；尚未回流时为空数组
+        attemptNo:
+          type: integer
+          minimum: 0
+        startedAt:
+          type: [string, 'null']
+          format: date-time
+        completedAt:
+          type: [string, 'null']
+          format: date-time
+
+    AssistantTaskDetail:
+      type: object
+      additionalProperties: false
+      required: [task, currentPlan, steps]
+      properties:
+        task:
+          $ref: '#/components/schemas/AssistantTask'
+        currentPlan:
+          oneOf:
+            - $ref: '#/components/schemas/AssistantTaskPlan'
+            - type: 'null'
+          description: 当前最新计划版本；PENDING_CONFIRM 阶段即待确认草案
+        steps:
+          type: array
+          description: 当前生效计划的运行时步骤；计划确认前为空数组
+          items:
+            $ref: '#/components/schemas/AssistantTaskStep'
+        interactions:
+          type: array
+          default: []
+          description: 挂起事项列表（含已解决历史，按创建时间升序；拍板视图按 status=PENDING 过滤）
+          items:
+            $ref: '#/components/schemas/AssistantTaskInteraction'
+
+    AssistantTaskListResult:
+      type: object
+      additionalProperties: false
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssistantTask'
+        nextCursor:
+          type: [string, 'null']
+          description: 下一页游标；没有更多数据时为 null
+
+    AssistantTaskListResponseEnvelope:
+      type: object
+      additionalProperties: false
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: '#/components/schemas/AssistantTaskListResult'
+        requestId:
+          type: [string, 'null']
+          description: 公开 API 请求追踪 ID
+
+    AssistantTaskDetailResponseEnvelope:
+      type: object
+      additionalProperties: false
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: '#/components/schemas/AssistantTaskDetail'
+        requestId:
+          type: [string, 'null']
+          description: 公开 API 请求追踪 ID
+
+    AssistantTaskConfirmRequest:
+      type: object
+      additionalProperties: false
+      required: [decision]
+      properties:
+        decision:
+          type: string
+          enum: [start, revise]
+          description: |
+            start 确认计划开始执行（确认后才派发步骤）；
+            revise 保留当前草案并记录调整意图（随后在对话中提出调整要求重新规划）。
+        answers:
+          type: array
+          maxItems: 20
+          description: 关键待定项答复；decision=start 时必须覆盖全部待定项
+          items:
+            type: object
+            additionalProperties: false
+            required: [key, value]
+            properties:
+              key:
+                type: string
+                maxLength: 64
+              value:
+                type: string
+                maxLength: 256
+                description: 所选选项 id
+
+    AssistantTaskCancelRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        reason:
+          type: [string, 'null']
+          maxLength: 500
+
+    AssistantTaskOutputArchive:
+      type: object
+      additionalProperties: false
+      required: [knowledgeBaseId, knowledgeDocumentId, visibilityScope, confirmedAt]
+      properties:
+        knowledgeBaseId:
+          type: string
+          format: uuid
+          description: 归档目标知识库
+        knowledgeDocumentId:
+          type: string
+          format: uuid
+          description: 知识库侧文档 ID（转存产物；同源重复转存追加版本）
+        visibilityScope:
+          $ref: '#/components/schemas/KnowledgeBaseVisibilityScope'
+          description: 归档库的可见范围（公司库全员可检索 / 部门库本部门 / 项目库项目成员 / 个人库仅本人）
+        confirmedAt:
+          type: string
+          format: date-time
+          description: 验收归档时间
+
+    AssistantTaskOutputSuggestion:
+      type: object
+      additionalProperties: false
+      required: [knowledgeBaseId, reason]
+      properties:
+        knowledgeBaseId:
+          type: string
+          format: uuid
+          description: 建议的归档目标知识库
+        reason:
+          type: string
+          maxLength: 500
+          description: 推荐理由（规则路径=组织归属；LLM 路径=模型基于产出主题给出）
+
+    AssistantTaskOutputArchiveOption:
+      type: object
+      additionalProperties: false
+      required: [knowledgeBaseId, name, visibilityScope]
+      properties:
+        knowledgeBaseId:
+          type: string
+          format: uuid
+        name:
+          type: string
+          maxLength: 128
+        visibilityScope:
+          $ref: '#/components/schemas/KnowledgeBaseVisibilityScope'
+
+    AssistantTaskOutput:
+      type: object
+      additionalProperties: false
+      required: [documentId, title, stepKey, confirmed, suggestions]
+      properties:
+        documentId:
+          type: string
+          format: uuid
+          description: 产出资产（AI 文档）；验收与归档的载体
+        title:
+          type: string
+          maxLength: 256
+          description: 产出标题（AI 生成文档标题）
+        stepKey:
+          type: string
+          description: 产出步骤的计划内稳定标识
+        stepTitle:
+          type: [string, 'null']
+          description: 产出步骤的简短名；计划未给出时为 null
+        confirmed:
+          type: boolean
+          description: 内容验收与归档确认是否已完成
+        archive:
+          oneOf:
+            - $ref: '#/components/schemas/AssistantTaskOutputArchive'
+            - type: 'null'
+          description: 已确认时的归档结果；未确认为 null
+        suggestions:
+          type: array
+          maxItems: 5
+          default: []
+          description: 归档目标建议（未确认时给出：规则路径为组织归属默认，LLM 路径基于产出主题）；已确认时为空数组
+          items:
+            $ref: '#/components/schemas/AssistantTaskOutputSuggestion'
+
+    AssistantTaskOutputsView:
+      type: object
+      additionalProperties: false
+      required: [taskId, status, outputs, archiveOptions]
+      properties:
+        taskId:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/AssistantTaskStatus'
+        outputs:
+          type: array
+          description: 任务产出的可归档文档（跨计划版本聚合、按最近完成步骤去重）；无产出时为空数组
+          items:
+            $ref: '#/components/schemas/AssistantTaskOutput'
+        archiveOptions:
+          type: array
+          description: 可归档知识库候选（当前成员具 EDITOR 及以上；服务端权限硬过滤，绝不出现无权库）
+          items:
+            $ref: '#/components/schemas/AssistantTaskOutputArchiveOption'
+
+    AssistantTaskOutputsViewResponseEnvelope:
+      type: object
+      additionalProperties: false
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          $ref: '#/components/schemas/AssistantTaskOutputsView'
+        requestId:
+          type: [string, 'null']
+          description: 公开 API 请求追踪 ID
+
+    AssistantTaskOutputsConfirmRequest:
+      type: object
+      additionalProperties: false
+      required: [outputs]
+      properties:
+        outputs:
+          type: array
+          minItems: 1
+          maxItems: 20
+          description: 逐产出的验收与归档提交；仅任务终态可提交
+          items:
+            type: object
+            additionalProperties: false
+            required: [documentId, knowledgeBaseId]
+            properties:
+              documentId:
+                type: string
+                format: uuid
+                description: 产出资产 ID（任务步骤的回流产出）
+              knowledgeBaseId:
+                type: string
+                format: uuid
+                description: 归档目标知识库；当前成员须具备编辑（EDITOR）及以上权限
+
+    AssistantTaskInteractionResolveRequest:
+      type: object
+      additionalProperties: false
+      required: [decision]
+      properties:
+        decision:
+          type: string
+          enum: [approve, reject, answer, choose]
+          description: |
+            解决动作：approve / reject 授权批准或拒绝（仅 AUTHORIZATION）；
+            answer 提问答复（仅 QUESTION）；choose 裁决选项（仅 DECISION）。
+        scope:
+          type: [string, 'null']
+          enum: [ONCE, TASK]
+          description: 临时授权范围（仅 decision=approve）；ONCE 仅本次（缺省）；TASK 本任务内允许多次使用
+        value:
+          type: [string, 'null']
+          maxLength: 2000
+          description: 所选候选 id 或答复文本（answer / choose 必填；approve / reject 忽略）
+
+    AssistantTaskInteraction:
+      type: object
+      additionalProperties: false
+      required: [id, taskId, type, status, summary, options, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        taskId:
+          type: string
+          format: uuid
+        stepId:
+          type: [string, 'null']
+          format: uuid
+          description: 触发的步骤；任务级事项为 null
+        stepKey:
+          type: [string, 'null']
+          description: 触发步骤的计划内稳定标识（展示用）；任务级事项为 null
+        type:
+          $ref: '#/components/schemas/AssistantTaskInteractionType'
+        status:
+          $ref: '#/components/schemas/AssistantTaskInteractionStatus'
+        summary:
+          type: string
+          maxLength: 1000
+          description: 展示级摘要：授权=要执行的动作与影响；提问=问题文本；裁决=待拍板的分岔说明
+        reason:
+          type: [string, 'null']
+          maxLength: 1000
+          description: 需要用户介入的原因：授权理由 / 提问背景 / 裁决背景
+        options:
+          type: array
+          maxItems: 10
+          description: 提问与裁决的候选项（用户可从中选择或提交自定义答复）；授权为空数组
+          items:
+            $ref: '#/components/schemas/AssistantTaskInteractionOption'
+        scope:
+          type: [string, 'null']
+          enum: [ONCE, TASK]
+          description: 临时授权范围；批准后填充（仅 AUTHORIZATION）
+        resolution:
+          type: [string, 'null']
+          maxLength: 2000
+          description: 用户解决内容（所选候选 id 或答复文本）；未解决为 null
+        resolvedAt:
+          type: [string, 'null']
+          format: date-time
+        expiresAt:
+          type: [string, 'null']
+          format: date-time
+          description: 超时失效时间；不限时为 null
+        createdAt:
+          type: string
+          format: date-time
+
+    AssistantTaskInteractionType:
+      type: string
+      enum: [AUTHORIZATION, QUESTION, DECISION]
+      description: 授权申请 / 主动问人 / 待用户裁决
+
+    AssistantTaskInteractionStatus:
+      type: string
+      enum: [PENDING, RESOLVED, REJECTED, EXPIRED, CANCELLED]
+      description: |
+        PENDING 待处理；RESOLVED 已处理（批准 / 答复 / 选择）；REJECTED 已拒绝；
+        EXPIRED 超时失效；CANCELLED 任务终态清理。
+
+    AssistantTaskInteractionOption:
+      type: object
+      additionalProperties: false
+      required: [id, label]
+      properties:
+        id:
+          type: string
+          maxLength: 64
+        label:
+          type: string
+          maxLength: 200
+        description:
+          type: [string, 'null']
+          maxLength: 500
+
+    AssistantTaskStreamEvent:
+      oneOf:
+        - $ref: '#/components/schemas/AssistantTaskCreatedEvent'
+        - $ref: '#/components/schemas/AssistantTaskPlanReadyEvent'
+        - $ref: '#/components/schemas/AssistantTaskPlanRevisionRequestedEvent'
+        - $ref: '#/components/schemas/AssistantTaskPlanConfirmedEvent'
+        - $ref: '#/components/schemas/AssistantTaskStepStartedEvent'
+        - $ref: '#/components/schemas/AssistantTaskStepProgressEvent'
+        - $ref: '#/components/schemas/AssistantTaskStepCompletedEvent'
+        - $ref: '#/components/schemas/AssistantTaskStepFailedEvent'
+        - $ref: '#/components/schemas/AssistantTaskStepSkippedEvent'
+        - $ref: '#/components/schemas/AssistantTaskInteractionRequestedEvent'
+        - $ref: '#/components/schemas/AssistantTaskInteractionResolvedEvent'
+        - $ref: '#/components/schemas/AssistantTaskOutputConfirmedEvent'
+        - $ref: '#/components/schemas/AssistantTaskCompletedEvent'
+        - $ref: '#/components/schemas/AssistantTaskFailedEvent'
+        - $ref: '#/components/schemas/AssistantTaskCancelledEvent'
+      discriminator:
+        propertyName: type
+        mapping:
+          task_created: '#/components/schemas/AssistantTaskCreatedEvent'
+          plan_ready: '#/components/schemas/AssistantTaskPlanReadyEvent'
+          plan_revision_requested: '#/components/schemas/AssistantTaskPlanRevisionRequestedEvent'
+          plan_confirmed: '#/components/schemas/AssistantTaskPlanConfirmedEvent'
+          step_started: '#/components/schemas/AssistantTaskStepStartedEvent'
+          step_progress: '#/components/schemas/AssistantTaskStepProgressEvent'
+          step_completed: '#/components/schemas/AssistantTaskStepCompletedEvent'
+          step_failed: '#/components/schemas/AssistantTaskStepFailedEvent'
+          step_skipped: '#/components/schemas/AssistantTaskStepSkippedEvent'
+          interaction_requested: '#/components/schemas/AssistantTaskInteractionRequestedEvent'
+          interaction_resolved: '#/components/schemas/AssistantTaskInteractionResolvedEvent'
+          output_confirmed: '#/components/schemas/AssistantTaskOutputConfirmedEvent'
+          task_completed: '#/components/schemas/AssistantTaskCompletedEvent'
+          task_failed: '#/components/schemas/AssistantTaskFailedEvent'
+          task_cancelled: '#/components/schemas/AssistantTaskCancelledEvent'
+
+    AssistantTaskCreatedEvent:
+      type: object
+      additionalProperties: false
+      required: [type, seq, status]
+      properties:
+        type: { type: string, const: task_created }
+        seq: { type: integer, minimum: 1, description: 任务内递增事件序号 }
+        status: { $ref: '#/components/schemas/AssistantTaskStatus' }
+
+    AssistantTaskPlanReadyEvent:
+      type: object
+      additionalProperties: false
+      required: [type, seq, version, steps, clarifications]
+      properties:
+        type: { type: string, const: plan_ready }
+        seq: { type: integer, minimum: 1 }
+        version: { type: integer, minimum: 1 }
+        steps:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssistantTaskPlanStep'
+        clarifications:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssistantTaskClarification'
+
+    AssistantTaskPlanRevisionRequestedEvent:
+      type: object
+      additionalProperties: false
+      required: [type, seq, version]
+      properties:
+        type: { type: string, const: plan_revision_requested }
+        seq: { type: integer, minimum: 1 }
+        version:
+          type: integer
+          minimum: 1
+          description: 请求调整时的当前计划版本（继续对话补充调整要求后将生成新版本草案）
+
+    AssistantTaskPlanConfirmedEvent:
+      type: object
+      additionalProperties: false
+      required: [type, seq, version, confirmedAt]
+      properties:
+        type: { type: string, const: plan_confirmed }
+        seq: { type: integer, minimum: 1 }
+        version: { type: integer, minimum: 1 }
+        confirmedAt: { type: string, format: date-time }
+
+    AssistantTaskStepStartedEvent:
+      type: object
+      additionalProperties: false
+      required: [type, seq, stepId, stepKey, stepNo]
+      properties:
+        type: { type: string, const: step_started }
+        seq: { type: integer, minimum: 1 }
+        stepId:
+          type: string
+          format: uuid
+          description: 运行时步骤 ID
+        stepKey:
+          type: string
+          description: 计划内稳定标识（如 s1）
+        stepNo:
+          type: integer
+          minimum: 1
+          description: 步骤序号（计划内递增）
+        title:
+          type: [string, 'null']
+          description: 步骤简短名；计划未给出时为 null
+        assigneeName:
+          type: [string, 'null']
+          description: 执行同事名称（实时解析）；档案缺失时为 null
+
+    AssistantTaskStepProgressEvent:
+      type: object
+      additionalProperties: false
+      required: [type, seq, stepId, stepKey, note]
+      properties:
+        type: { type: string, const: step_progress }
+        seq: { type: integer, minimum: 1 }
+        stepId:
+          type: string
+          format: uuid
+        stepKey:
+          type: string
+        note:
+          type: string
+          maxLength: 500
+          description: 进度说明（展示级），例如正在执行的动作
+
+    AssistantTaskStepCompletedEvent:
+      type: object
+      additionalProperties: false
+      required: [type, seq, stepId, stepKey, summary, outputRefs]
+      properties:
+        type: { type: string, const: step_completed }
+        seq: { type: integer, minimum: 1 }
+        stepId:
+          type: string
+          format: uuid
+        stepKey:
+          type: string
+        summary:
+          type: string
+          description: 步骤结果摘要（回流总管与展示）
+        outputRefs:
+          type: array
+          maxItems: 20
+          items:
+            $ref: '#/components/schemas/ToolResultResourceReference'
+          description: 步骤产出资产引用（不含签名 URL）；无产出时为空数组
+
+    AssistantTaskStepFailedEvent:
+      type: object
+      additionalProperties: false
+      required: [type, seq, stepId, stepKey]
+      properties:
+        type: { type: string, const: step_failed }
+        seq: { type: integer, minimum: 1 }
+        stepId:
+          type: string
+          format: uuid
+        stepKey:
+          type: string
+        reason:
+          type: [string, 'null']
+          description: 失败原因摘要（展示级）
+
+    AssistantTaskStepSkippedEvent:
+      type: object
+      additionalProperties: false
+      required: [type, seq, stepId, stepKey]
+      properties:
+        type: { type: string, const: step_skipped }
+        seq: { type: integer, minimum: 1 }
+        stepId:
+          type: string
+          format: uuid
+        stepKey:
+          type: string
+        reason:
+          type: [string, 'null']
+          description: 跳过原因摘要（展示级）
+
+    AssistantTaskInteractionRequestedEvent:
+      type: object
+      additionalProperties: false
+      required: [type, seq, interactionId, interactionType, summary, options]
+      properties:
+        type: { type: string, const: interaction_requested }
+        seq: { type: integer, minimum: 1 }
+        interactionId:
+          type: string
+          format: uuid
+          description: 挂起事项 ID（解决时使用）
+        interactionType:
+          $ref: '#/components/schemas/AssistantTaskInteractionType'
+        stepId:
+          type: [string, 'null']
+          format: uuid
+        stepKey:
+          type: [string, 'null']
+        summary:
+          type: string
+          maxLength: 1000
+          description: 展示级摘要（授权动作 / 问题 / 分岔说明）
+        reason:
+          type: [string, 'null']
+          maxLength: 1000
+        options:
+          type: array
+          maxItems: 10
+          items:
+            $ref: '#/components/schemas/AssistantTaskInteractionOption'
+        expiresAt:
+          type: [string, 'null']
+          format: date-time
+
+    AssistantTaskInteractionResolvedEvent:
+      type: object
+      additionalProperties: false
+      required: [type, seq, interactionId, interactionType, status, resolvedAt]
+      properties:
+        type: { type: string, const: interaction_resolved }
+        seq: { type: integer, minimum: 1 }
+        interactionId:
+          type: string
+          format: uuid
+        interactionType:
+          $ref: '#/components/schemas/AssistantTaskInteractionType'
+        stepId:
+          type: [string, 'null']
+          format: uuid
+        stepKey:
+          type: [string, 'null']
+        status:
+          type: string
+          enum: [RESOLVED, REJECTED, EXPIRED, CANCELLED]
+          description: 解决后状态：RESOLVED 已处理（批准/答复/选择）；REJECTED 已拒绝；EXPIRED 超时失效；CANCELLED 任务终态清理
+        value:
+          type: [string, 'null']
+          maxLength: 2000
+          description: 所选候选 id 或答复文本；拒绝与系统清理时为 null
+        scope:
+          type: [string, 'null']
+          enum: [ONCE, TASK]
+          description: 临时授权范围（仅授权批准）
+        resolvedAt:
+          type: string
+          format: date-time
+
+    AssistantTaskOutputConfirmedEvent:
+      type: object
+      additionalProperties: false
+      required: [type, seq, documentId, knowledgeBaseId, knowledgeDocumentId, visibilityScope]
+      properties:
+        type: { type: string, const: output_confirmed }
+        seq: { type: integer, minimum: 1 }
+        documentId:
+          type: string
+          format: uuid
+          description: 产出资产 ID（步骤回流的 AI 文档）
+        knowledgeBaseId:
+          type: string
+          format: uuid
+          description: 归档目标知识库
+        knowledgeDocumentId:
+          type: string
+          format: uuid
+          description: 知识库侧文档 ID（同源重复转存追加版本，不重复归档）
+        visibilityScope:
+          $ref: '#/components/schemas/KnowledgeBaseVisibilityScope'
+          description: 归档库的可见范围（公司库全员可检索 / 部门库本部门 / 项目库项目成员 / 个人库仅本人）
+
+    AssistantTaskCompletedEvent:
+      type: object
+      additionalProperties: false
+      required: [type, seq]
+      properties:
+        type: { type: string, const: task_completed }
+        seq: { type: integer, minimum: 1 }
+
+    AssistantTaskFailedEvent:
+      type: object
+      additionalProperties: false
+      required: [type, seq]
+      properties:
+        type: { type: string, const: task_failed }
+        seq: { type: integer, minimum: 1 }
+        reason: { type: [string, 'null'], description: 失败原因摘要（展示级） }
+
+    AssistantTaskCancelledEvent:
+      type: object
+      additionalProperties: false
+      required: [type, seq]
+      properties:
+        type: { type: string, const: task_cancelled }
+        seq: { type: integer, minimum: 1 }
 
     CreateTurnRequest:
       type: object

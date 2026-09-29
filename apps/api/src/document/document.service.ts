@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import {
+    AssistantTaskStepStatus,
     AuditOutcome,
     DocumentVisibility,
     DraftStatus,
@@ -49,7 +50,12 @@ interface GenerateResourceCommand {
     membershipId: string;
     requestId: string;
     conversationId: string;
-    turnId: string;
+    /** 轮次执行载体的轮次 ID；任务步骤内发起的调用为 null（见 taskStepId）。 */
+    turnId: string | null;
+    /** 任务步骤执行载体的步骤 ID；轮次内发起的调用为 null（见 turnId）。 */
+    taskStepId?: string | null;
+    /** 任务步骤执行载体所属的任务 ID；仅步骤载体填充（调用日志 metadata 记录用）。 */
+    taskId?: string | null;
     toolCallId: string;
     executionOwner: string;
     executionToken: string;
@@ -120,7 +126,10 @@ export interface InsertedDocumentImage {
 /** 工具执行权的最小断言字段：产生业务副作用前必须再次核对。 */
 interface ToolExecutionClaim {
     tenantId: string;
-    turnId: string;
+    /** 轮次执行载体的轮次 ID；任务步骤内发起的调用为 null（见 taskStepId）。 */
+    turnId: string | null;
+    /** 任务步骤执行载体的步骤 ID；轮次内发起的调用为 null（见 turnId）。 */
+    taskStepId?: string | null;
     toolCallId: string;
     executionOwner: string;
     executionToken: string;
@@ -231,13 +240,13 @@ export class DocumentService {
      * 本方法只被 generate_document 工具执行器调用，不暴露公开 HTTP 接口。
      */
     async createGeneratedDocument(command: GenerateDocumentCommand): Promise<GeneratedDocument> {
-        const existing = await this.findExecutedDocument(command.tenantId, command.turnId, command.toolCallId);
+        const existing = await this.findExecutedDocument(command);
         if (existing) return existing;
         await this.requireGenerationClaim(command);
 
         const reserved = await this.reserveGeneratedDocument(command);
         if (!reserved) {
-            const replay = await this.findExecutedDocument(command.tenantId, command.turnId, command.toolCallId);
+            const replay = await this.findExecutedDocument(command);
             if (replay) return replay;
             throw new Error(`文档工具调用 ${command.toolCallId} 已在执行或需要恢复，禁止并发重复生成`);
         }
@@ -265,6 +274,8 @@ export class DocumentService {
                 membershipId: command.membershipId,
                 conversationId: command.conversationId,
                 turnId: command.turnId,
+                ...(command.taskId ? { taskId: command.taskId } : {}),
+                ...(command.taskStepId ? { stepId: command.taskStepId } : {}),
                 toolCallId: command.toolCallId,
             });
 
@@ -282,17 +293,7 @@ export class DocumentService {
                     where: {
                         id: command.toolCallId,
                         tenantId: command.tenantId,
-                        turnId: command.turnId,
-                        status: ToolCallStatus.EXECUTING,
-                        executionToken: command.executionToken,
-                        leaseExpiresAt: { gt: now },
-                        turn: {
-                            is: {
-                                status: 'RUNNING',
-                                executionOwner: command.executionOwner,
-                                leaseExpiresAt: { gt: now },
-                            },
-                        },
+                        ...liveCarrierClaimWhere(command, now),
                     },
                     select: { id: true },
                 });
@@ -388,7 +389,7 @@ export class DocumentService {
                 model: upstream.execution.model,
             };
         } catch (error) {
-            const replay = await this.findExecutedDocument(command.tenantId, command.turnId, command.toolCallId).catch(() => null);
+            const replay = await this.findExecutedDocument(command).catch(() => null);
             if (replay) return replay;
             await this.recordGenerationFailure(command, error).catch(() => undefined);
             throw error;
@@ -400,7 +401,7 @@ export class DocumentService {
      * 同一 toolCallId 通过 ManagedDocument + AIActionDraft 回放，避免重试重复生成。
      */
     async createGeneratedSpreadsheet(command: GenerateSpreadsheetCommand): Promise<GeneratedDocument> {
-        const existing = await this.findExecutedDocument(command.tenantId, command.turnId, command.toolCallId);
+        const existing = await this.findExecutedDocument(command);
         if (existing) return existing;
         if (command.sourceMaterials.length === 0) {
             throw new BadRequestException({
@@ -411,7 +412,7 @@ export class DocumentService {
         await this.requireGenerationClaim(command);
         const reserved = await this.reserveGeneratedDocument(command);
         if (!reserved) {
-            const replay = await this.findExecutedDocument(command.tenantId, command.turnId, command.toolCallId);
+            const replay = await this.findExecutedDocument(command);
             if (replay) return replay;
             throw new Error(`表格工具调用 ${command.toolCallId} 已在执行或需要恢复，禁止并发重复生成`);
         }
@@ -431,6 +432,8 @@ export class DocumentService {
                 membershipId: command.membershipId,
                 conversationId: command.conversationId,
                 turnId: command.turnId,
+                ...(command.taskId ? { taskId: command.taskId } : {}),
+                ...(command.taskStepId ? { stepId: command.taskStepId } : {}),
                 toolCallId: command.toolCallId,
             });
             await this.requireGenerationClaim(command);
@@ -462,17 +465,7 @@ export class DocumentService {
                     where: {
                         id: command.toolCallId,
                         tenantId: command.tenantId,
-                        turnId: command.turnId,
-                        status: ToolCallStatus.EXECUTING,
-                        executionToken: command.executionToken,
-                        leaseExpiresAt: { gt: now },
-                        turn: {
-                            is: {
-                                status: 'RUNNING',
-                                executionOwner: command.executionOwner,
-                                leaseExpiresAt: { gt: now },
-                            },
-                        },
+                        ...liveCarrierClaimWhere(command, now),
                     },
                     select: { id: true },
                 });
@@ -565,7 +558,7 @@ export class DocumentService {
                 model: upstream.execution.model,
             };
         } catch (error) {
-            const replay = await this.findExecutedDocument(command.tenantId, command.turnId, command.toolCallId).catch(() => null);
+            const replay = await this.findExecutedDocument(command).catch(() => null);
             if (replay) return replay;
             await this.recordGenerationFailure(command, error).catch(() => undefined);
             throw error;
@@ -998,17 +991,7 @@ export class DocumentService {
             where: {
                 id: claim.toolCallId,
                 tenantId: claim.tenantId,
-                turnId: claim.turnId,
-                status: ToolCallStatus.EXECUTING,
-                executionToken: claim.executionToken,
-                leaseExpiresAt: { gt: now },
-                turn: {
-                    is: {
-                        status: 'RUNNING',
-                        executionOwner: claim.executionOwner,
-                        leaseExpiresAt: { gt: now },
-                    },
-                },
+                ...liveCarrierClaimWhere(claim, now),
             },
             select: { id: true },
         });
@@ -1085,24 +1068,28 @@ export class DocumentService {
 
     /** 幂等回放：ManagedDocument 的唯一生成工具引用是事实源。 */
     private async findExecutedDocument(
-        tenantId: string,
-        turnId: string,
-        toolCallId: string,
+        command: GenerateResourceCommand,
     ): Promise<GeneratedDocument | null> {
         const document = await this.prisma.managedDocument.findFirst({
             where: {
-                tenantId,
-                generatedByToolCallId: toolCallId,
-                generatedByToolCall: { is: { tenantId, turnId } },
+                tenantId: command.tenantId,
+                generatedByToolCallId: command.toolCallId,
+                generatedByToolCall: {
+                    is: {
+                        tenantId: command.tenantId,
+                        turnId: command.turnId,
+                        taskStepId: command.taskStepId ?? null,
+                    },
+                },
             },
             select: { id: true, title: true, content: true },
         });
         if (!document) return null;
         const draft = await this.prisma.aIActionDraft.findUnique({
-            where: { toolCallId },
+            where: { toolCallId: command.toolCallId },
             select: { tenantId: true, status: true, payload: true },
         });
-        if (!draft || draft.tenantId !== tenantId || draft.status !== DraftStatus.EXECUTED) return null;
+        if (!draft || draft.tenantId !== command.tenantId || draft.status !== DraftStatus.EXECUTED) return null;
 
         const payload = draft.payload as { provider?: string; model?: string };
         return {
@@ -1778,6 +1765,48 @@ function markdownToDocumentSpec(markdown: string, fallbackTitle: string): Docume
     flush();
 
     return { schema_version: '1.0', title, subtitle, sections, source_refs: [] };
+}
+
+/**
+ * 工具调用执行载体的租约校验条件：轮次（turnId）或任务步骤（taskStepId）二选一。
+ * 轮次载体沿用轮次租约；步骤载体校验步骤行的执行者、状态与租约有效期
+ * （与步骤运行器的执行租约同构，见技术文档 §7.1）。
+ */
+function liveCarrierClaimWhere(
+    carrier: {
+        turnId: string | null;
+        taskStepId?: string | null;
+        executionOwner: string;
+        executionToken: string;
+    },
+    now: Date,
+): Prisma.ToolCallWhereInput {
+    return {
+        turnId: carrier.turnId,
+        taskStepId: carrier.taskStepId ?? null,
+        status: ToolCallStatus.EXECUTING,
+        executionToken: carrier.executionToken,
+        leaseExpiresAt: { gt: now },
+        ...(carrier.turnId !== null
+            ? {
+                turn: {
+                    is: {
+                        status: 'RUNNING',
+                        executionOwner: carrier.executionOwner,
+                        leaseExpiresAt: { gt: now },
+                    },
+                },
+            }
+            : {
+                taskStep: {
+                    is: {
+                        status: AssistantTaskStepStatus.RUNNING,
+                        executionOwner: carrier.executionOwner,
+                        leaseExpiresAt: { gt: now },
+                    },
+                },
+            }),
+    };
 }
 
 function _parseMarkdownTable(lines: string[], startIndex: number): { block: DocumentBlock; nextIndex: number } {

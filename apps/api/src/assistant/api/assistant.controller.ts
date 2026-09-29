@@ -47,8 +47,18 @@ import {
 } from '../dto';
 import { TurnRunnerService } from '../runtime/turn-runner.service';
 import { RELATED_QUESTIONS_LINGER_MS } from '../runtime/turn-execution.config';
+import { attachCloseHandler, writeSse, type WriteSseOptions } from './sse.util';
 
 const IDEMPOTENCY_KEY_MAX_LENGTH = 128;
+
+/**
+ * 轮次事件流的写出选项：error 是终止事件；completed 之后可能还有
+ * related_questions，由订阅侧的宽限期（lingerMs）决定何时自然结束。
+ */
+const TURN_STREAM_OPTIONS: WriteSseOptions<PublicTurnStreamEvent> = {
+  terminateOn: (event) => event.type === 'error',
+  mapError: toAssistantHttpException,
+};
 
 @ApiTags('Conversation')
 @ApiBearerAuth()
@@ -148,7 +158,7 @@ export class AssistantController {
         },
         abortController.signal,
       );
-      await this.writeSse(response, events, abortController, onClose);
+      await writeSse(response, events, abortController, onClose, TURN_STREAM_OPTIONS);
     } catch (error) {
       response.removeListener('close', onClose);
       abortController.abort();
@@ -179,7 +189,7 @@ export class AssistantController {
         },
         abortController.signal,
       );
-      await this.writeSse(response, events, abortController, onClose);
+      await writeSse(response, events, abortController, onClose, TURN_STREAM_OPTIONS);
     } catch (error) {
       response.removeListener('close', onClose);
       abortController.abort();
@@ -196,45 +206,6 @@ export class AssistantController {
     @Param('turnId', new ParseUUIDPipe()) turnId: string,
   ): Promise<PublicTurn> {
     return this.turnRunner.cancelTurn(conversationId, turnId);
-  }
-
-  /**
-   * 写出 SSE 事件流。客户端断开（close）只终止推送循环，不触发取消；
-   * 上游执行由 TurnRunner 独立驱动，事件持久化后可通过重放接口补齐。
-   */
-  private async writeSse(
-    response: Response,
-    events: AsyncGenerator<PublicTurnStreamEvent>,
-    abortController: AbortController,
-    onClose: () => void,
-  ): Promise<void> {
-    try {
-      if (response.destroyed) return;
-      response.status(HttpStatus.OK);
-      response.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-      response.setHeader('Cache-Control', 'no-cache, no-transform');
-      response.setHeader('Connection', 'keep-alive');
-      response.setHeader('X-Accel-Buffering', 'no');
-      response.flushHeaders();
-
-      const generator = events[Symbol.asyncIterator]();
-      while (true) {
-        const step = await generator.next();
-        if (step.done || response.destroyed) break;
-        await writeSseEvent(response, step.value);
-        // error 是终止事件；completed 之后可能还有 related_questions，
-        // 由订阅侧的宽限期（lingerMs）决定何时自然结束。
-        if (step.value.type === 'error') break;
-      }
-      if (!response.writableEnded && !response.destroyed) response.end();
-    } catch (error) {
-      if (response.destroyed) return;
-      if (!response.headersSent) throw toAssistantHttpException(error);
-      if (!response.writableEnded) response.end();
-    } finally {
-      response.removeListener('close', onClose);
-      abortController.abort();
-    }
   }
 }
 
@@ -253,38 +224,4 @@ function normalizeIdempotencyKey(idempotencyKey: string | undefined): string {
     });
   }
   return normalized;
-}
-
-function attachCloseHandler(response: Response, abortController: AbortController): () => void {
-  const onClose = (): void => abortController.abort();
-  response.once('close', onClose);
-  return onClose;
-}
-
-async function writeSseEvent(response: Response, event: PublicTurnStreamEvent): Promise<void> {
-  const payload = `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`;
-  if (response.write(payload)) return;
-
-  await new Promise<void>((resolve, reject) => {
-    const handleDrain = (): void => {
-      cleanup();
-      resolve();
-    };
-    const handleClose = (): void => {
-      cleanup();
-      reject(new Error('SSE client disconnected'));
-    };
-    const handleError = (error: Error): void => {
-      cleanup();
-      reject(error);
-    };
-    const cleanup = (): void => {
-      response.removeListener('drain', handleDrain);
-      response.removeListener('close', handleClose);
-      response.removeListener('error', handleError);
-    };
-    response.once('drain', handleDrain);
-    response.once('close', handleClose);
-    response.once('error', handleError);
-  });
 }

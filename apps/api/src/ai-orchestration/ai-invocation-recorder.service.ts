@@ -31,6 +31,12 @@ export interface AiInvocationAttributes {
   instructionLength?: number;
   /** 推荐问题生成返回的问题条数指标。 */
   questionCount?: number;
+  /**
+   * 任务步骤执行载体的任务 ID；步骤窗口的模型调用以 metadata 记录（不新增列，技术文档 §2.3）。
+   */
+  taskId?: string;
+  /** 任务步骤执行载体的步骤 ID；同上。 */
+  stepId?: string;
   outcome?: 'completed' | 'error' | 'cancelled';
   errorCode?: string;
 }

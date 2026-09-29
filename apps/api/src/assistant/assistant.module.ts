@@ -13,6 +13,8 @@ import { WebSearchModule } from '../web-search/web-search.module';
 import { AssistantController } from './api/assistant.controller';
 import { AssistantActionDraftController } from './api/assistant-action-draft.controller';
 import { AssistantConnectorController } from './api/assistant-connector.controller';
+import { AssistantTaskInteractionsController } from './api/assistant-task-interactions.controller';
+import { AssistantTasksController } from './api/assistant-tasks.controller';
 import { DingTalkConnectorPlannerService } from './connectors/dingtalk-connector-planner.service';
 import { ConnectorRoutingService } from './connectors/connector-routing.service';
 import { TencentMeetingConnectorPlannerService } from './connectors/tencent-meeting-connector-planner.service';
@@ -22,6 +24,19 @@ import { GitHubOAuthBrokerService } from './connectors/github-oauth-broker.servi
 import { ConversationService } from './conversation/conversation.service';
 import { EventService } from './conversation/event.service';
 import { AssistantActionDraftService } from './drafts/assistant-action-draft.service';
+import { LlmDeciderService } from './orchestration/decider/llm-decider';
+import { orchestrationDeciderProvider } from './orchestration/decider/orchestration-decider.factory';
+import { RuleDeciderService } from './orchestration/decider/rule-decider';
+import { FailureHandlingService } from './orchestration/failure-handling.service';
+import { InteractionService } from './orchestration/interaction.service';
+import { OrchestrationToolsService } from './orchestration/orchestration-tools.service';
+import { PlanService } from './orchestration/plan.service';
+import { StepRunnerService } from './orchestration/step-runner.service';
+import { StepStateService } from './orchestration/step-state.service';
+import { TaskEventService } from './orchestration/task-event.service';
+import { TaskOutputsService } from './orchestration/task-outputs.service';
+import { TaskRunnerService } from './orchestration/task-runner.service';
+import { TaskService } from './orchestration/task.service';
 import { ContextBuilderService } from './runtime/context-builder.service';
 import { IntentCapabilityService } from './runtime/intent-capability.service';
 import { TurnRunnerService } from './runtime/turn-runner.service';
@@ -34,8 +49,10 @@ import { GenerateDocumentTool } from './tools/executors/generate-document.tool';
 import { GenerateImageTool } from './tools/executors/generate-image.tool';
 import { CreateDepartmentTool } from './tools/executors/create-department.tool';
 import { CreateKnowledgeBaseTool } from './tools/executors/create-knowledge-base.tool';
+import { CreateOrchestrationTaskTool } from './tools/executors/create-orchestration-task.tool';
 import { CreateProjectTool } from './tools/executors/create-project.tool';
 import { CreateTaskTool } from './tools/executors/create-task.tool';
+import { ReviseOrchestrationTaskTool } from './tools/executors/revise-orchestration-task.tool';
 import { KnowledgeSearchTool } from './tools/executors/knowledge-search.tool';
 import { ListDepartmentsTool } from './tools/executors/list-departments.tool';
 import { ListKnowledgeBasesTool } from './tools/executors/list-knowledge-bases.tool';
@@ -60,7 +77,7 @@ import { AssignTaskTool } from './tools/executors/assign-task.tool';
  */
 @Module({
   imports: [AiOrchestrationModule, DocumentModule, FinanceModule, ImageModule, KnowledgeModule, OrganizationModule, ProjectModule, StorageModule, TaskModule, UserMemoryModule, WebSearchModule],
-  controllers: [AssistantActionDraftController, AssistantController, AssistantConnectorController],
+  controllers: [AssistantActionDraftController, AssistantController, AssistantConnectorController, AssistantTaskInteractionsController, AssistantTasksController],
   providers: [
     ConversationService,
     ConnectorRoutingService,
@@ -79,9 +96,24 @@ import { AssignTaskTool } from './tools/executors/assign-task.tool';
     AssistantActionDraftService,
     TurnRunnerService,
     TurnRecoveryService,
+    TaskEventService,
+    PlanService,
+    InteractionService,
+    RuleDeciderService,
+    LlmDeciderService,
+    orchestrationDeciderProvider,
+    FailureHandlingService,
+    TaskService,
+    TaskOutputsService,
+    StepStateService,
+    StepRunnerService,
+    TaskRunnerService,
+    OrchestrationToolsService,
     CreateDepartmentTool,
+    CreateOrchestrationTaskTool,
     CreateProjectTool,
     CreateTaskTool,
+    ReviseOrchestrationTaskTool,
     GenerateDocumentTool,
     GenerateImageTool,
     CreateKnowledgeBaseTool,

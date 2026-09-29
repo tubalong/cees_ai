@@ -415,6 +415,93 @@ enum ToolCallStatus {
   RECOVERY_REQUIRED
 }
 
+/// AI 同事定义状态：草稿未上岗 / 启用 / 归档（归档后历史执行记录保留）。
+enum AssistantAgentStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
+/// AI 任务状态机；由 NestJS 编排层驱动（ai-orchestration-technical.md §3.1）。
+enum AssistantTaskStatus {
+  /// 计划生成中：任务行已落库，等待总管产出计划草案。
+  CREATED
+  /// 派发前确认：展示步骤清单与待澄清项；确认前不派发任何步骤。
+  PENDING_CONFIRM
+  RUNNING
+  /// 存在挂起事项等待用户介入；实际调度以步骤级状态为准。
+  WAITING_USER
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+/// 任务来源：总管对话中发起 / 与同事会话中发起 / 主动建议转任务。
+enum AssistantTaskOriginType {
+  CONVERSATION
+  AGENT_CHAT
+  AUTO
+}
+
+/// 计划版本的产生方：用户「调整要求」后重新规划采纳 / 总管或系统生成。
+enum AssistantTaskPlanCreatedBy {
+  USER
+  SYSTEM
+}
+
+/// 步骤状态；单步骤串行，租约保证同一时刻只有一个执行尝试。
+enum AssistantTaskStepStatus {
+  /// 依赖未满足。
+  PENDING
+  READY
+  RUNNING
+  WAITING_USER
+  SUCCEEDED
+  FAILED
+  SKIPPED
+}
+
+/// 任务事件类型；与任务事件流一一对应（技术文档 §4.2）。
+enum AssistantTaskEventType {
+  TASK_CREATED
+  PLAN_READY
+  PLAN_REVISION_REQUESTED
+  PLAN_CONFIRMED
+  STEP_STARTED
+  STEP_PROGRESS
+  STEP_COMPLETED
+  STEP_FAILED
+  STEP_SKIPPED
+  INTERACTION_REQUESTED
+  INTERACTION_RESOLVED
+  OUTPUT_CONFIRMED
+  TASK_COMPLETED
+  TASK_FAILED
+  TASK_CANCELLED
+}
+
+/// 用户介入事项类型：授权申请 / 提问 / 裁决。
+enum AssistantTaskInteractionType {
+  AUTHORIZATION
+  QUESTION
+  DECISION
+}
+
+/// 介入事项状态；解决动作幂等（PENDING → RESOLVED 条件更新）。
+enum AssistantTaskInteractionStatus {
+  PENDING
+  RESOLVED
+  REJECTED
+  EXPIRED
+  CANCELLED
+}
+
+/// 临时授权范围：仅本次有效 / 本任务内有效。
+enum AssistantTaskInteractionScope {
+  ONCE
+  TASK
+}
+
 /// AI 图片从预留资源到可访问资源的持久化状态。
 enum ManagedImageStatus {
   PENDING
@@ -2192,6 +2279,8 @@ model Conversation {
   visibility        ConversationVisibility @default(PRIVATE)
   /// 会话默认对话执行模式；发起轮次未显式指定时使用。
   mode              String                 @default("standard")
+  /// 对话对象（AI 同事）；null = 总管。一条会话固定一个对话对象。
+  agentId           String?                @map("agent_id") @db.Uuid
   lastTurnAt        DateTime?              @map("last_turn_at")
   /// 下一个轮次序号；事务内原子递增，避免 count+1 并发竞态。
   nextTurnSeq       Int                    @default(1) @map("next_turn_seq")
@@ -2329,13 +2418,19 @@ model AssistantEvent {
 }
 
 /// 模型提出的工具调用：批准结论、执行结果与正式资源引用；回填 TOOL 消息时使用本表 ID。
+/// 执行载体二选一：轮次（turnId）或任务步骤（taskStepId）——步骤执行窗口与用户会话隔离，
+/// 但复用同一张工具调用事实表（批准链、幂等、审计口径一致）。
 model ToolCall {
   id                   String         @id @default(uuid()) @db.Uuid
   tenantId             String         @map("tenant_id") @db.Uuid
   conversationId       String         @map("conversation_id") @db.Uuid
-  turnId               String         @map("turn_id") @db.Uuid
-  turn                 AssistantTurn  @relation(fields: [turnId], references: [id], onDelete: Cascade)
-  /// 轮次内工具调用序号，从 1 开始。
+  /// 轮次执行载体的轮次 ID；任务步骤内发起的调用为 null（见 taskStepId）。
+  turnId               String?        @map("turn_id") @db.Uuid
+  turn                 AssistantTurn? @relation(fields: [turnId], references: [id], onDelete: Cascade)
+  /// 任务步骤执行载体的步骤 ID；轮次内发起的调用为 null（见 turnId）。
+  taskStepId           String?        @map("task_step_id") @db.Uuid
+  taskStep             AssistantTaskStep? @relation(fields: [taskStepId], references: [id], onDelete: Cascade)
+  /// 执行载体内工具调用序号（轮次内 / 步骤内），从 1 开始。
   seq                  Int
   /// 发起该工具调用的模型调用序号；同一模型调用内的多个工具共享该值。
   modelStep            Int            @default(1) @map("model_step")
@@ -2369,6 +2464,8 @@ model ToolCall {
 
   @@unique([turnId, seq])
   @@unique([turnId, modelStep, upstreamCallId])
+  @@unique([taskStepId, seq])
+  @@unique([taskStepId, modelStep, upstreamCallId])
   @@index([tenantId, createdAt])
   @@index([status, leaseExpiresAt])
   @@map("tool_calls")
@@ -2445,6 +2542,211 @@ model AssistantActionDraft {
   @@index([tenantId, conversationId, status])
   @@index([status, expiresAt])
   @@map("assistant_action_drafts")
+}
+
+/// AI 同事定义（岗位说明书）：职能定位、执行指令、三级权限与工具面、可见范围与预算。
+/// 编排派发与前台对话共用同一份定义；运行时权限收敛为「发起人权限 ∩ 同事上限」。
+model AssistantAgent {
+  id           String               @id @default(uuid()) @db.Uuid
+  tenantId     String               @map("tenant_id") @db.Uuid
+  name         String
+  /// 职责定位（档案页副标题），如「数据分析与报表」。
+  title        String               @default("")
+  icon         String?
+  description  String               @default("") @db.Text
+  /// 执行指令：工作方式、输出标准；前台对话与编排派发书均注入。
+  instructions String               @default("") @db.Text
+  /// 三级权限清单（自决 / 需签字 / 禁止），固定模式校验。
+  permissions  Json                 @default("{}")
+  /// 可用工具与动作清单（与权限清单联动）。
+  toolPolicy   Json                 @default("{}")
+  /// 可调度 / 可对话的角色范围。
+  visibility   Json                 @default("{}")
+  /// 单次执行与单任务预算上限（调用次数、token 上限）。
+  budget       Json                 @default("{}")
+  status       AssistantAgentStatus @default(DRAFT)
+  createdAt    DateTime             @default(now()) @map("created_at")
+  updatedAt    DateTime             @updatedAt @map("updated_at")
+  createdBy    String?              @map("created_by") @db.Uuid
+  updatedBy    String?              @map("updated_by") @db.Uuid
+  deletedAt    DateTime?            @map("deleted_at")
+  version      Int                  @default(1)
+
+  @@index([tenantId, status, deletedAt])
+  @@map("assistant_agents")
+}
+
+/// AI 任务主体：一次「总管编排多位 AI 同事」的完整工作，可断线、跨终端恢复。
+/// 状态机与租约见技术文档 §3；事件序号由 nextEventSeq 原子分配（沿用轮次模式）。
+model AssistantTask {
+  id             String                  @id @default(uuid()) @db.Uuid
+  tenantId       String                  @map("tenant_id") @db.Uuid
+  /// 发起会话；AUTO 来源（主动建议转任务）可为空。
+  conversationId String?                 @map("conversation_id") @db.Uuid
+  /// 发起人；列表与详情仅发起本人可见（按 membershipId 过滤）。
+  userId         String                  @map("user_id") @db.Uuid
+  membershipId   String                  @map("membership_id") @db.Uuid
+  title          String
+  /// 目标原文（总管理解后的完整表述），组装派发书时使用。
+  goal           String                  @db.Text
+  originType     AssistantTaskOriginType @default(CONVERSATION) @map("origin_type")
+  status         AssistantTaskStatus     @default(CREATED)
+  /// 当前生效计划版本号；0 = 尚无计划（CREATED 阶段）。
+  planVersion    Int                     @default(0) @map("plan_version")
+  /// 任务事件序号原子分配（同 AssistantTurn.nextEventSeq 模式）。
+  nextEventSeq   Int                     @default(1) @map("next_event_seq")
+  /// 创建幂等：工具调用 ID 按会话去重；requestHash 防止同键不同内容重放。
+  idempotencyKey String                  @map("idempotency_key")
+  requestHash    String                  @map("request_hash")
+  executionOwner String?                 @map("execution_owner")
+  leaseExpiresAt DateTime?               @map("lease_expires_at")
+  heartbeatAt    DateTime?               @map("heartbeat_at")
+  failedReason   String?                 @map("failed_reason") @db.Text
+  createdAt      DateTime                @default(now()) @map("created_at")
+  updatedAt      DateTime                @updatedAt @map("updated_at")
+  completedAt    DateTime?               @map("completed_at")
+
+  plans        AssistantTaskPlan[]
+  steps        AssistantTaskStep[]
+  events       AssistantTaskEvent[]
+  interactions AssistantTaskInteraction[]
+
+  @@unique([conversationId, idempotencyKey])
+  @@index([tenantId, membershipId, createdAt])
+  @@index([status, leaseExpiresAt])
+  @@map("assistant_tasks")
+}
+
+/// 计划版本（append-only）：重编排与「调整要求」产生新版本，历史保留可审计。
+model AssistantTaskPlan {
+  id             String                     @id @default(uuid()) @db.Uuid
+  tenantId       String                     @map("tenant_id") @db.Uuid
+  taskId         String                     @map("task_id") @db.Uuid
+  task           AssistantTask              @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  version        Int
+  /// 计划快照：每步的标题、要求、执行同事、输入引用与预期产出。
+  steps          Json
+  /// PENDING_CONFIRM 阶段的关键待定项（问题 + 选项 + 答复）；无待定项时为 null。
+  clarifications Json?                      @map("clarifications")
+  /// 版本产生方：USER = 用户调整要求后重新采纳；SYSTEM = 总管/系统生成。
+  createdBy      AssistantTaskPlanCreatedBy @default(SYSTEM) @map("created_by")
+  /// 重排幂等键：同一次「调整计划」工具调用重放不重复生成版本；非重排版本为 null。
+  revisionKey    String?                    @map("revision_key")
+  confirmedAt    DateTime?                  @map("confirmed_at")
+  createdAt      DateTime                   @default(now()) @map("created_at")
+
+  @@unique([taskId, version])
+  @@unique([taskId, revisionKey])
+  @@map("assistant_task_plans")
+}
+
+/// 运行时步骤：当前计划版本的展开（物化），状态机见技术文档 §3.2。
+model AssistantTaskStep {
+  id              String                  @id @default(uuid()) @db.Uuid
+  tenantId        String                  @map("tenant_id") @db.Uuid
+  taskId          String                  @map("task_id") @db.Uuid
+  task            AssistantTask           @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  planVersion     Int                     @map("plan_version")
+  /// 计划内稳定标识（如 step-1）；重编排后追踪同一步骤的锚点。
+  stepKey         String                  @map("step_key")
+  /// 展示与排序序号（计划内递增）。
+  stepNo          Int                     @map("step_no")
+  assigneeAgentId String                  @map("assignee_agent_id") @db.Uuid
+  /// 派发书快照（本步要求、依赖产出引用、工具面与预算）；派发时写入。
+  brief           Json?
+  /// 前置 stepKey 列表；空数组表示无依赖。
+  dependsOn       Json                    @default("[]") @map("depends_on")
+  status          AssistantTaskStepStatus @default(PENDING)
+  /// 重试计数；超上限走「重排 / 跳过 / 升级」阶梯。
+  attemptNo       Int                     @default(0) @map("attempt_no")
+  /// 自动重试的「不早于」时间（失败退避）；为空表示立即可派发。
+  retryAfterAt    DateTime?               @map("retry_after_at")
+  /// 结果摘要（回流总管与展示）。
+  summary         String?                 @db.Text
+  /// 产出资产引用列表（不含签名 URL）。
+  outputRefs      Json?                   @map("output_refs")
+  executionOwner  String?                 @map("execution_owner")
+  leaseExpiresAt  DateTime?               @map("lease_expires_at")
+  heartbeatAt     DateTime?               @map("heartbeat_at")
+  /// 步内工具调用序号原子分配（同 AssistantTurn.nextToolCallSeq 模式）。
+  nextToolCallSeq Int                     @default(1) @map("next_tool_call_seq")
+  error           Json?
+  startedAt       DateTime?               @map("started_at")
+  completedAt     DateTime?               @map("completed_at")
+  createdAt       DateTime                @default(now()) @map("created_at")
+  updatedAt       DateTime                @updatedAt @map("updated_at")
+
+  messages  AssistantTaskStepMessage[]
+  toolCalls ToolCall[]
+
+  @@unique([taskId, planVersion, stepKey])
+  @@index([status, leaseExpiresAt])
+  @@map("assistant_task_steps")
+}
+
+/// 步骤执行窗口消息（随步骤生灭）：不进入用户会话、不参与主会话压缩，按保留策略清理。
+model AssistantTaskStepMessage {
+  id          String                @id @default(uuid()) @db.Uuid
+  tenantId    String                @map("tenant_id") @db.Uuid
+  stepId      String                @map("step_id") @db.Uuid
+  step        AssistantTaskStep     @relation(fields: [stepId], references: [id], onDelete: Cascade)
+  /// 步骤窗口内递增序号，从 1 开始。
+  seq         Int
+  role        ConversationMessageRole
+  content     String                @db.Text
+  /// 关联的工具调用 ID；工具结果消息回填时使用。
+  toolCallRef String?               @map("tool_call_ref") @db.Uuid
+  createdAt   DateTime              @default(now()) @map("created_at")
+
+  @@unique([stepId, seq])
+  @@map("assistant_task_step_messages")
+}
+
+/// 任务事件（展示与重放）：断线重连按 (taskId, seq) 重放，与轮次事件同构；
+/// 不写入对话消息流，避免任务过程进入主会话 LLM 上下文。
+model AssistantTaskEvent {
+  id        String                 @id @default(uuid()) @db.Uuid
+  tenantId  String                 @map("tenant_id") @db.Uuid
+  taskId    String                 @map("task_id") @db.Uuid
+  task      AssistantTask          @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  /// 任务内递增事件序号，从 1 开始。
+  seq       Int
+  type      AssistantTaskEventType
+  payload   Json
+  createdAt DateTime               @default(now()) @map("created_at")
+
+  @@unique([taskId, seq])
+  @@map("assistant_task_events")
+}
+
+/// 用户介入事项（挂起/恢复的统一载体）：授权 / 提问 / 裁决三类共用管道。
+model AssistantTaskInteraction {
+  id                     String                         @id @default(uuid()) @db.Uuid
+  tenantId               String                         @map("tenant_id") @db.Uuid
+  taskId                 String                         @map("task_id") @db.Uuid
+  task                   AssistantTask                  @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  /// 触发的步骤；任务级事项（如计划澄清）可为空。
+  stepId                 String?                        @map("step_id") @db.Uuid
+  type                   AssistantTaskInteractionType
+  /// 按 type 固定模式：授权 = 权限项与理由；提问 = 问题与候选；裁决 = 分岔方案。
+  payload                Json
+  status                 AssistantTaskInteractionStatus @default(PENDING)
+  /// 用户侧解决内容（批准范围 / 答复 / 选项），按 type 固定模式。
+  resolution             Json?
+  resolvedByMembershipId String?                        @map("resolved_by_membership_id") @db.Uuid
+  resolvedAt             DateTime?                      @map("resolved_at")
+  /// 超时失效时间；到期由任务运行器按策略过期。
+  expiresAt              DateTime?                      @map("expires_at")
+  /// 授权范围；仅 type = AUTHORIZATION 时使用。
+  scope                  AssistantTaskInteractionScope?
+  /// 授权被实际使用的时间；「本任务内」多次使用逐次写审计事件。
+  usedAt                 DateTime?                      @map("used_at")
+  createdAt              DateTime                       @default(now()) @map("created_at")
+  updatedAt              DateTime                       @updatedAt @map("updated_at")
+
+  @@index([taskId, status])
+  @@index([status, expiresAt])
+  @@map("assistant_task_interactions")
 }
 
 /// NestJS 发起 AI 调用后写入的模型执行指标；不保存对话正文、消息或摘要。

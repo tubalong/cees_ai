@@ -34,6 +34,7 @@ import type {
   PageAssistantContextInput,
   GenerationOptionsInput,
 } from './assistant.types';
+import type { PublicTaskStatus } from './orchestration/orchestration.types';
 
 export class ConnectorContextDto implements ConnectorContextInput {
   @ApiProperty({ enum: ['DINGTALK', 'TENCENT_MEETING', 'WECOM', 'GITHUB', 'LOCAL_SYSTEM'] })
@@ -553,6 +554,149 @@ export class CreateTurnRequestDto {
 export class ReplayTurnEventsQueryDto {
   @ApiPropertyOptional({
     description: '已收到的最后事件序号；省略时从首个事件开始重放',
+    minimum: 0,
+    default: 0,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  afterSeq = 0;
+}
+
+export class TaskAnswerDto {
+  @ApiProperty({ description: '待定项 key', maxLength: 64 })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(64)
+  key!: string;
+
+  @ApiProperty({ description: '所选选项 id', maxLength: 256 })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(256)
+  value!: string;
+}
+
+export class ListAssistantTasksQueryDto {
+  @ApiPropertyOptional({
+    description: '按任务状态过滤；省略时返回全部状态',
+    enum: ['CREATED', 'PENDING_CONFIRM', 'RUNNING', 'WAITING_USER', 'COMPLETED', 'FAILED', 'CANCELLED'],
+  })
+  @IsOptional()
+  @IsIn(['CREATED', 'PENDING_CONFIRM', 'RUNNING', 'WAITING_USER', 'COMPLETED', 'FAILED', 'CANCELLED'])
+  status?: PublicTaskStatus;
+
+  @ApiPropertyOptional({
+    description: '按发起会话过滤（对话内任务卡片的定位方式）',
+    format: 'uuid',
+  })
+  @IsOptional()
+  @IsUUID()
+  conversationId?: string;
+
+  @ApiPropertyOptional({ description: '每页数量，默认 20，最大 100', minimum: 1, maximum: 100, default: 20 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  limit = 20;
+
+  @ApiPropertyOptional({ description: '分页游标，上一页返回的 nextCursor', maxLength: 256 })
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(256)
+  cursor?: string;
+}
+
+export class ConfirmAssistantTaskPlanRequestDto {
+  @ApiProperty({
+    description: 'start 确认计划开始执行（确认后才派发步骤）；revise 保留当前草案并记录调整意图',
+    enum: ['start', 'revise'],
+  })
+  @IsIn(['start', 'revise'])
+  decision!: 'start' | 'revise';
+
+  @ApiPropertyOptional({
+    description: '关键待定项答复；decision=start 时必须覆盖全部待定项',
+    type: [TaskAnswerDto],
+    maxItems: 20,
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @Type(() => TaskAnswerDto)
+  @ValidateNested({ each: true })
+  answers?: TaskAnswerDto[];
+}
+
+export class CancelAssistantTaskRequestDto {
+  @ApiPropertyOptional({ description: '取消原因（可选）', nullable: true, maxLength: 500 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  reason?: string | null;
+}
+
+export class TaskOutputArchiveItemDto {
+  @ApiProperty({ description: '产出资产 ID（任务步骤的回流产出）', format: 'uuid' })
+  @IsUUID()
+  documentId!: string;
+
+  @ApiProperty({ description: '归档目标知识库；当前成员须具备编辑（EDITOR）及以上权限', format: 'uuid' })
+  @IsUUID()
+  knowledgeBaseId!: string;
+}
+
+export class ConfirmAssistantTaskOutputsRequestDto {
+  @ApiProperty({
+    description: '逐产出的验收与归档提交；仅任务终态可提交',
+    type: [TaskOutputArchiveItemDto],
+    minItems: 1,
+    maxItems: 20,
+  })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(20)
+  @Type(() => TaskOutputArchiveItemDto)
+  @ValidateNested({ each: true })
+  outputs!: TaskOutputArchiveItemDto[];
+}
+
+export class ResolveTaskInteractionRequestDto {
+  @ApiProperty({
+    description: '解决动作：approve / reject 授权批准或拒绝（仅 AUTHORIZATION）；answer 提问答复（仅 QUESTION）；choose 裁决选项（仅 DECISION）',
+    enum: ['approve', 'reject', 'answer', 'choose'],
+  })
+  @IsIn(['approve', 'reject', 'answer', 'choose'])
+  decision!: 'approve' | 'reject' | 'answer' | 'choose';
+
+  @ApiPropertyOptional({
+    description: '临时授权范围（仅 decision=approve）；ONCE 仅本次（缺省），TASK 本任务内允许多次使用',
+    enum: ['ONCE', 'TASK'],
+    nullable: true,
+  })
+  @IsOptional()
+  @IsIn(['ONCE', 'TASK'])
+  scope?: 'ONCE' | 'TASK' | null;
+
+  @ApiPropertyOptional({
+    description: '所选候选 id 或答复文本（answer / choose 必填；approve / reject 忽略）',
+    nullable: true,
+    maxLength: 2000,
+  })
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(2000)
+  value?: string | null;
+}
+
+export class ReplayTaskEventsQueryDto {
+  @ApiPropertyOptional({
+    description: '只返回该序号之后的事件；默认 0（从头重放）',
     minimum: 0,
     default: 0,
   })

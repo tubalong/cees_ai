@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CEES AI Service Internal API
-  version: 0.8.0
+  version: 0.8.2
   description: |
     Internal infrastructure API used only by trusted CEES services.
     Desktop, mobile, and third-party clients must call the NestJS public API instead.
@@ -1186,7 +1186,7 @@ components:
             "persistent"。
     ModelRole:
       type: string
-      enum: [default, structured, reasoning, rag, orchestrator]
+      enum: [default, structured, reasoning, rag, orchestrator, orchestration_decision, archive_suggestion]
     MessageRole:
       type: string
       enum: [system, user, assistant]

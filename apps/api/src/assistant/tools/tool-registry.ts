@@ -38,8 +38,15 @@ export class ToolRegistryService {
 
   /** 给模型前的第一点检查：只暴露当前权限允许的工具定义。 */
   listAllowed(permissions: string[]): ChatToolDefinition[] {
+    return this.listAllowedDefinitions(permissions).map(toChatToolDefinition);
+  }
+
+  /**
+   * 权限过滤后的完整工具定义；步骤执行器在此基础上剔除显式排除项后组装
+   * 工具面（WRITE 工具保留，调用时经授权链二次把关），因此保留一份未转换的视图。
+   */
+  listAllowedDefinitions(permissions: string[]): ToolDefinition[] {
     return [...this.tools.values()]
-      .filter((tool) => tool.requiredPermissions.every((code) => permissions.includes(code)))
-      .map(toChatToolDefinition);
+      .filter((tool) => tool.requiredPermissions.every((code) => permissions.includes(code)));
   }
 }

@@ -145,6 +145,8 @@ structured = ["primary", "backup-qwen"]
 reasoning = ["primary", "backup-qwen"]
 rag = ["primary", "backup-qwen"]
 orchestrator = ["primary", "backup-qwen", "vision-primary", "vision-backup"]
+orchestration_decision = ["primary", "backup-qwen"]
+archive_suggestion = ["primary", "backup-qwen"]
 
 [extraction]
 max_bytes = 10485760
