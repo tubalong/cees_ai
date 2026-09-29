@@ -24,12 +24,14 @@ import {
 
 export const GITHUB_MCP_ENDPOINT = 'https://api.githubcopilot.com/mcp/';
 export const GITHUB_MCP_TOOLSETS = 'context,issues,pull_requests,repos,users,actions,notifications';
+export const GITHUB_REQUIRED_OAUTH_SCOPE = 'repo read:org read:user user:email notifications offline_access';
 const GITHUB_OAUTH_CALLBACK_PATH = '/oauth/github/callback';
 const MAX_TOOLS = 256;
 const MAX_CALLS = 3;
 const MAX_CONTEXT_BYTES = 56 * 1024;
 const MAX_TOOL_SCHEMA_BYTES = 32 * 1024;
 const CONNECT_TIMEOUT_MS = 30_000;
+const AUTHORIZATION_TIMEOUT_MS = 5 * 60 * 1000;
 const TOOL_TIMEOUT_MS = 120_000;
 const TOKEN_STORE_FILE = 'connectors/github/oauth.secure';
 const TOKEN_STORE_KEY = 'github.oauth.tokens';
@@ -79,7 +81,11 @@ export function configureGitHubConnector(userDataPath: string): void {
 export async function getGitHubConnectorStatus(): Promise<GitHubConnectorStatus> {
     const checkedAt = new Date().toISOString();
     if (authorizationInProgress) return authRequiredStatus(checkedAt, 'AUTHORIZING');
-    if (!await hasStoredTokens()) return authRequiredStatus(checkedAt, 'UNAUTHORIZED');
+    const storedTokens = await readStoredTokens();
+    if (!storedTokens) return authRequiredStatus(checkedAt, 'UNAUTHORIZED');
+    if (!hasRequiredGitHubOAuthScope(storedTokens.scope)) {
+        return authRequiredStatus(checkedAt, 'UNAUTHORIZED', 'GITHUB_SCOPE_REQUIRED', '当前 GitHub 授权不包含私有仓库所需的 repo 权限，请重新连接 GitHub');
+    }
     try {
         const tools = await discoverGitHubTools();
         const identity = await readStoredIdentity();
@@ -98,13 +104,22 @@ export async function connectGitHubConnector(options: unknown = undefined): Prom
     if (authorizationInProgress) return authRequiredStatus(new Date().toISOString(), 'AUTHORIZING');
     authorizationInProgress = true;
     toolCache = undefined;
-    const callback = await createLoopbackOAuthCallback(GITHUB_OAUTH_CALLBACK_PATH, getMcpTimeout());
+    const callback = await createLoopbackOAuthCallback(GITHUB_OAUTH_CALLBACK_PATH, AUTHORIZATION_TIMEOUT_MS);
     try {
         const codeVerifier = createCodeVerifier();
         const authorizationUrl = buildGitHubAuthorizationUrl(input, callback.redirectUrl, callback.state, codeVerifier);
         await shell.openExternal(authorizationUrl.toString());
         const authorizationCode = await callback.code;
         const tokens = await exchangeGitHubAuthorizationCode(input, authorizationCode, codeVerifier, callback.redirectUrl);
+        if (!hasRequiredGitHubOAuthScope(tokens.scope)) {
+            await clearStoredCredentials();
+            return authRequiredStatus(
+                new Date().toISOString(),
+                'UNAUTHORIZED',
+                'GITHUB_SCOPE_REQUIRED',
+                'GitHub 授权未包含私有仓库所需的 repo 权限，请在授权页面重新确认后再连接',
+            );
+        }
         await saveStoredTokens(tokens);
         await saveStoredClientId(input.clientId);
         const connected = await openAuthenticatedClient();
@@ -230,13 +245,13 @@ export function sanitizeGitHubResult(value: unknown): Record<string, unknown> {
 async function openAuthenticatedClient(): Promise<ConnectedGitHubClient> {
     const clientId = await readStoredClientId();
     if (!clientId) throw new Error('GitHub OAuth Client ID 尚未初始化，请重新连接 GitHub');
-    if (!await hasStoredTokens()) throw new UnauthorizedError('GitHub 尚未授权');
+    if (!await readStoredTokens()) throw new UnauthorizedError('GitHub 尚未授权');
     const provider = new RemoteMcpOAuthProvider({
         clientId,
         redirectUrl: buildLoopbackRedirectUrl(GITHUB_OAUTH_CALLBACK_PATH),
         expectedState: '',
         clientName: 'CEES AI Desktop',
-        scope: 'repo read:org read:user user:email notifications offline_access',
+        scope: GITHUB_REQUIRED_OAUTH_SCOPE,
         interactive: false,
         isAuthorizationUrlAllowed: isAllowedGitHubAuthorizationUrl,
         allowedResource: allowGitHubResourceUrl,
@@ -245,7 +260,7 @@ async function openAuthenticatedClient(): Promise<ConnectedGitHubClient> {
         invalidateTokens: clearStoredCredentials,
     });
     const { client, transport } = createGitHubMcpClient(provider);
-    await client.connect(transport, { timeout: getMcpTimeout() });
+    await client.connect(transport, { timeout: CONNECT_TIMEOUT_MS });
     return { client, close: () => client.close() };
 }
 
@@ -305,12 +320,12 @@ function requireMcpDefinition(): RemoteMcpConnectorDefinition {
     return mcpDefinition;
 }
 
-function getMcpTimeout(): number {
-    return Math.max(CONNECT_TIMEOUT_MS, requireMcpDefinition().timeout);
-}
-
 async function saveStoredTokens(tokens: OAuthTokens): Promise<void> {
-    await requireTokenStore().set(TOKEN_STORE_KEY, JSON.stringify(tokens));
+    const existing = await readStoredTokens();
+    const storedTokens = tokens.scope || !existing?.scope
+        ? tokens
+        : { ...tokens, scope: existing.scope };
+    await requireTokenStore().set(TOKEN_STORE_KEY, JSON.stringify(storedTokens));
 }
 
 function isAllowedGitHubAuthorizationUrl(url: URL): boolean {
@@ -327,8 +342,10 @@ function allowGitHubResourceUrl(resource: string | URL): URL {
     return new URL(GITHUB_MCP_ENDPOINT);
 }
 
-async function hasStoredTokens(): Promise<boolean> {
-    return Boolean((await readStoredTokens())?.access_token);
+export function hasRequiredGitHubOAuthScope(scope: string | null | undefined): boolean {
+    if (typeof scope !== 'string') return false;
+    const scopes = new Set(scope.split(/[\s,]+/).map((item) => item.trim().toLowerCase()).filter(Boolean));
+    return scopes.has('repo');
 }
 
 async function readStoredTokens(): Promise<OAuthTokens | undefined> {
@@ -359,8 +376,9 @@ function parseConnectOptions(value: unknown): GitHubConnectorConnectOptions {
         || typeof value.clientId !== 'string'
         || !value.clientId.trim()
         || typeof value.authorizationEndpoint !== 'string'
-        || typeof value.scope !== 'string') {
-        throw new Error('GitHub OAuth 配置无效，请重新读取测试环境配置');
+        || typeof value.scope !== 'string'
+        || !hasRequiredGitHubOAuthScope(value.scope)) {
+        throw new Error('GitHub OAuth 配置无效，请重新读取部署配置');
     }
     return {
         apiAccessToken: value.apiAccessToken,
@@ -472,11 +490,16 @@ function readyStatus(checkedAt: string, toolCount: number, authorizedLogin: stri
     };
 }
 
-function authRequiredStatus(checkedAt: string, authorizationState: 'UNAUTHORIZED' | 'AUTHORIZING'): GitHubConnectorStatus {
+function authRequiredStatus(
+    checkedAt: string,
+    authorizationState: 'UNAUTHORIZED' | 'AUTHORIZING',
+    issueCode = authorizationState === 'AUTHORIZING' ? 'GITHUB_AUTHORIZING' : 'GITHUB_AUTH_REQUIRED',
+    error: string | null = null,
+): GitHubConnectorStatus {
     return {
         state: 'AUTH_REQUIRED', installed: true, authenticated: false, version: 'remote', checkedAt,
-        issueCode: authorizationState === 'AUTHORIZING' ? 'GITHUB_AUTHORIZING' : 'GITHUB_AUTH_REQUIRED',
-        recoveryAction: 'AUTHORIZE', error: null,
+        issueCode,
+        recoveryAction: 'AUTHORIZE', error,
         source: 'REMOTE_MCP', authorizationState, authorizedLogin: null, toolCount: 0,
         enabledToolsets: GITHUB_MCP_TOOLSETS.split(','),
     };
