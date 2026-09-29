@@ -57,12 +57,14 @@ Desktop: dws schema --all --compact --format json
   -> 转成不含 CLI 路径和凭据的完整工具目录
 API: POST /assistant/connectors/dingtalk/plan
   -> 目录超过 ai-service 单轮 32 工具限制时，先从完整目录动态选出最多 32 个候选
-  -> 再由 AI 选择具体工具 ID 和结构化参数，不执行 dws
+  -> 再由 AI 选择候选工具别名和结构化参数，不执行 dws
 Desktop: 重新读取具体 leaf Schema
   -> 再次校验只读安全属性、工具身份和参数白名单
   -> execFile 执行固定 CLI 路径
   -> JSON 结果脱敏并作为 connectorContexts 发起正式对话轮次
 ```
+
+候选下发给模型时统一改名为 `dingtalk_tool_<序号>`，复合工具名（如 `cees.my_attendance_records`）和内部 `dws_read_*` ID 写在工具描述里，规划结果再映射回真实工具。这不是可选优化：ai-service 的模型工具名不允许点号且最长 128 字符，描述最长 2048 字符，直接下发复合工具名或超长描述会被请求校验拦成 422，整轮规划失败。
 
 因此，能力范围以用户电脑上当前受管 DWS 版本的 Schema 为准，而不是由 CEES 写死产品清单。模型永远不能返回 shell、原始 argv 或任意命令路径。
 

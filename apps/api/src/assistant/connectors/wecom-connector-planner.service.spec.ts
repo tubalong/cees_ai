@@ -3,6 +3,7 @@ import type { ToolTurnStreamEvent } from '@cees/ai-service-client';
 import type { AiServiceGateway } from '../../ai-orchestration/ai-service-gateway.service';
 import type { TenantContext } from '../../tenant/tenant-context';
 import type { WeComConnectorToolInput } from '../assistant.types';
+import { MODEL_TOOL_DESCRIPTION_MAX_LENGTH, MODEL_TOOL_NAME_PATTERN } from './model-tool-definition';
 import { WeComConnectorPlannerService } from './wecom-connector-planner.service';
 
 describe('WeComConnectorPlannerService', () => {
@@ -71,6 +72,23 @@ describe('WeComConnectorPlannerService', () => {
   it('拒绝重复工具 ID', async () => {
     const service = createService(jest.fn());
     await expect(service.plan('查询企业微信', [tools[0]!, { ...tools[0]! }])).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('模型工具定义满足 ai-service 契约的名称与描述上限', async () => {
+    const longTool: WeComConnectorToolInput = { ...tools[0]!, description: '企业微信日程说明'.repeat(400) };
+    const streamToolTurn = jest.fn().mockResolvedValueOnce(stream([
+      { type: 'completed', latency_ms: 1, finish_reason: 'stop' },
+    ]));
+    const service = createService(streamToolTurn);
+
+    await expect(service.plan('查询企业微信', [longTool])).resolves.toEqual({ calls: [] });
+    const definitions = streamToolTurn.mock.calls[0]![0].tools as Array<{ name: string; description: string }>;
+    expect(definitions).toHaveLength(1);
+    definitions.forEach((definition, index) => {
+      expect(definition.name).toBe(`wecom_tool_${index + 1}`);
+      expect(definition.name).toMatch(MODEL_TOOL_NAME_PATTERN);
+      expect(definition.description.length).toBeLessThanOrEqual(MODEL_TOOL_DESCRIPTION_MAX_LENGTH);
+    });
   });
 
   it('工具超过 32 个时先选择候选再规划调用', async () => {

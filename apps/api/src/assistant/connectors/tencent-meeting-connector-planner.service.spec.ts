@@ -3,6 +3,7 @@ import type { ToolTurnStreamEvent } from '@cees/ai-service-client';
 import type { AiServiceGateway } from '../../ai-orchestration/ai-service-gateway.service';
 import type { TenantContext } from '../../tenant/tenant-context';
 import type { TencentMeetingConnectorToolInput } from '../assistant.types';
+import { MODEL_TOOL_DESCRIPTION_MAX_LENGTH, MODEL_TOOL_NAME_PATTERN } from './model-tool-definition';
 import { TencentMeetingConnectorPlannerService } from './tencent-meeting-connector-planner.service';
 
 describe('TencentMeetingConnectorPlannerService', () => {
@@ -41,7 +42,7 @@ describe('TencentMeetingConnectorPlannerService', () => {
 
   it('只返回动态目录内的腾讯会议工具调用', async () => {
     const streamToolTurn = jest.fn(async () => stream([
-      { type: 'tool_calls', tool_calls: [{ id: 'call-1', name: 'meeting.list', arguments: { start_time: '2026-09-23' } }] },
+      { type: 'tool_calls', tool_calls: [{ id: 'call-1', name: 'tencent_meeting_tool_1', arguments: { start_time: '2026-09-23' } }] },
       { type: 'completed', latency_ms: 1, finish_reason: 'tool_calls' },
     ]));
     const service = createService(streamToolTurn);
@@ -52,8 +53,32 @@ describe('TencentMeetingConnectorPlannerService', () => {
     expect(streamToolTurn).toHaveBeenCalledWith(expect.objectContaining({
       tenant_id: context.tenantId,
       user_id: context.userId,
-      tools: expect.arrayContaining([expect.objectContaining({ name: 'meeting.list' })]),
+      tools: expect.arrayContaining([
+        expect.objectContaining({ name: 'tencent_meeting_tool_1', description: expect.stringContaining('meeting.list') }),
+      ]),
     }), expect.objectContaining({ membershipId: context.membershipId }));
+  });
+
+  it('模型工具定义满足 ai-service 契约的名称与描述上限', async () => {
+    const longTool: TencentMeetingConnectorToolInput = {
+      ...tools[0]!,
+      toolId: 'record.list',
+      name: '查询会议录制',
+      description: '腾讯会议录制说明'.repeat(400),
+    };
+    const streamToolTurn = jest.fn().mockResolvedValueOnce(stream([
+      { type: 'completed', latency_ms: 1, finish_reason: 'stop' },
+    ]));
+    const service = createService(streamToolTurn);
+
+    await expect(service.plan('查我今天的腾讯会议', [longTool, ...tools])).resolves.toEqual({ calls: [] });
+    const definitions = streamToolTurn.mock.calls[0]![0].tools as Array<{ name: string; description: string }>;
+    expect(definitions).toHaveLength(3);
+    definitions.forEach((definition, index) => {
+      expect(definition.name).toBe(`tencent_meeting_tool_${index + 1}`);
+      expect(definition.name).toMatch(MODEL_TOOL_NAME_PATTERN);
+      expect(definition.description.length).toBeLessThanOrEqual(MODEL_TOOL_DESCRIPTION_MAX_LENGTH);
+    });
   });
 
   it('拒绝目录外工具和风险确认标记不一致', async () => {
@@ -86,7 +111,7 @@ describe('TencentMeetingConnectorPlannerService', () => {
         { type: 'completed', latency_ms: 1, finish_reason: 'tool_calls' },
       ]))
       .mockResolvedValueOnce(stream([
-        { type: 'tool_calls', tool_calls: [{ id: 'call-1', name: selected.toolId, arguments: {} }] },
+        { type: 'tool_calls', tool_calls: [{ id: 'call-1', name: 'tencent_meeting_tool_1', arguments: {} }] },
         { type: 'completed', latency_ms: 1, finish_reason: 'tool_calls' },
       ]));
     const service = createService(streamToolTurn);
@@ -96,7 +121,9 @@ describe('TencentMeetingConnectorPlannerService', () => {
     });
     expect(streamToolTurn).toHaveBeenCalledTimes(2);
     expect(streamToolTurn.mock.calls[0]![0].tools).toHaveLength(1);
-    expect(streamToolTurn.mock.calls[1]![0].tools).toEqual([expect.objectContaining({ name: selected.toolId })]);
+    expect(streamToolTurn.mock.calls[1]![0].tools).toEqual([
+      expect.objectContaining({ name: 'tencent_meeting_tool_1', description: expect.stringContaining(selected.toolId) }),
+    ]);
   });
 
   it('上游事件流未完成时拒绝返回不完整计划', async () => {

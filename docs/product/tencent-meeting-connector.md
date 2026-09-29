@@ -53,13 +53,15 @@ CEES 不要求用户填写 SDK ID、Secret、Corp ID 或个人 Token，也不在
 1. Desktop 检查 CLI 已安装且 `auth status` 为已登录。
 2. Desktop 对固定允许列表中的命令执行 `--help`，从官方参数定义生成工具 Schema 并缓存。
 3. Desktop 将用户问题和受限工具目录提交给 `POST /assistant/connectors/tencent-meeting/plan`。
-4. API 只允许模型返回目录内工具和参数，最多三条调用。
+4. API 只允许模型返回目录内工具和参数，最多三条调用；下发前把带点号的命令 ID（如 `meeting.list`）映射成 `tencent_meeting_tool_<序号>` 模型工具名，真实命令 ID 与风险标记写在描述里，返回时再映射回内部 ID。
 5. Desktop 对 `WRITE`、`DESTRUCTIVE` 和未知风险操作展示精确参数并要求确认。
 6. Desktop 将结构化参数转换为 CLI flag，禁止模型指定可执行文件、Shell、环境变量、网络地址或额外参数。
 7. CLI 使用 JSON 输出执行官方能力；只读查询默认启用 `--compact`。
 8. Desktop 移除 Token、Secret、Cookie、Authorization、Credential、Password 等字段并限制上下文字节数。
 
 当前仍是单轮批量规划，后一条命令不能引用前一条命令的实时返回值。需要“先找人再邀请”之类依赖链的操作应拆成多轮，或后续引入受控工具循环。
+
+模型工具名必须匹配 ai-service 的 `^[A-Za-z][A-Za-z0-9_-]*$`（不允许点号），描述不超过 2048 字符。腾讯会议允许列表里的命令 ID 全部含点号，因此规划器统一走共享的模型工具定义构造器生成别名、截断描述并回映射。此前版本直接把 `meeting.list` 作为模型工具名下发，会被 ai-service 请求校验拦成 422，导致任意腾讯会议对话查询失败。
 
 ## 5. 当前暴露能力
 

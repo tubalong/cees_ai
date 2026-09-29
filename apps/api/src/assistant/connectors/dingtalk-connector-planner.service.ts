@@ -7,6 +7,7 @@ import type {
   DingTalkConnectorPlannedCall,
   DingTalkConnectorToolInput,
 } from '../assistant.types';
+import { buildConnectorModelToolDefinitions } from './model-tool-definition';
 
 const MAX_TOOL_CATALOG_BYTES = 2 * 1024 * 1024;
 const MAX_PLANNED_CALLS = 3;
@@ -47,14 +48,13 @@ export class DingTalkConnectorPlannerService {
 
     const selectedIds = await this.selectTools(query, tools, context);
     if (selectedIds.length === 0) return { calls: [] };
-    const definitions: ChatToolDefinition[] = selectedIds.map((toolId) => {
+    const { definitions, modelToolMap } = buildConnectorModelToolDefinitions('dingtalk', selectedIds.map((toolId) => {
       const tool = toolMap.get(toolId)!;
       return {
-        name: tool.toolId,
-        description: `[DingTalk DWS: ${tool.name}] ${tool.description}`.slice(0, 2200),
-        parameters: tool.parameters,
+        tool,
+        description: `[DingTalk DWS read-only tool=${tool.toolId}] ${tool.name}: ${tool.description}`,
       };
-    });
+    }));
     const calls = await this.requestCalls({
       query,
       definitions,
@@ -63,13 +63,13 @@ export class DingTalkConnectorPlannerService {
         'You plan read-only DingTalk DWS queries for a desktop connector.',
         'Call tools only when the user needs current DingTalk data available through the supplied tools.',
         'Prefer CEES composite tools and DWS shortcut tools that resolve the current user or recursively collect complete data.',
-        'For personal attendance or punch-record questions, prefer cees.my_attendance_records. Its time fields are already normalized; never recalculate timestamps or treat workDate as a clock time.',
+        'For personal attendance or punch-record questions, prefer the CEES personal attendance tool named cees.my_attendance_records when it is present. Its time fields are already normalized; never recalculate timestamps or treat workDate as a clock time.',
         'When the user asks whether personal attendance data can be queried, use a matching no-argument personal attendance tool to verify instead of answering from assumptions.',
         'Do not answer the user, do not invent unavailable tools or arguments, and never request write operations.',
         `Return at most ${MAX_PLANNED_CALLS} tool calls. Return no tool calls when required arguments are missing.`,
       ].join(' '),
     });
-    return { calls: deduplicateCalls(calls.slice(0, MAX_PLANNED_CALLS).map((call) => validatePlannedCall(call, toolMap))) };
+    return { calls: deduplicateCalls(calls.slice(0, MAX_PLANNED_CALLS).map((call) => validatePlannedCall(call, modelToolMap))) };
   }
 
   private async selectTools(
@@ -207,11 +207,12 @@ function validateTool(tool: DingTalkConnectorToolInput, existing: Map<string, Di
 
 function validatePlannedCall(
   call: ToolCall,
-  tools: Map<string, DingTalkConnectorToolInput>,
+  modelTools: Map<string, DingTalkConnectorToolInput>,
 ): DingTalkConnectorPlannedCall {
-  if (!tools.has(call.name)) throw new BadGatewayException('模型返回了目录外的钉钉 DWS 工具');
+  const tool = modelTools.get(call.name);
+  if (!tool) throw new BadGatewayException('模型返回了目录外的钉钉 DWS 工具');
   if (!isRecord(call.arguments)) throw new BadGatewayException('模型返回了无效的钉钉 DWS 工具参数');
-  return { toolId: call.name, arguments: call.arguments };
+  return { toolId: tool.toolId, arguments: call.arguments };
 }
 
 function deduplicateCalls(calls: DingTalkConnectorPlannedCall[]): DingTalkConnectorPlannedCall[] {
