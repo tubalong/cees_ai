@@ -176,6 +176,103 @@ function Assert-EnvironmentKeys {
     }
 }
 
+function Get-EnvironmentKeyOrder {
+    <#
+    .SYNOPSIS
+    Returns the ordered list of KEY names declared in a dotenv file, ignoring blanks and comments.
+    #>
+    param([Parameter(Mandatory)][string]$Path)
+
+    $content = [System.IO.File]::ReadAllText($Path).Replace("`r`n", "`n").Replace("`r", "`n")
+    $keys = [System.Collections.Generic.List[string]]::new()
+
+    foreach ($line in ($content -split "`n")) {
+        $trimmed = $line.Trim()
+        if ([string]::IsNullOrEmpty($trimmed) -or $trimmed.StartsWith('#')) {
+            continue
+        }
+        if ($trimmed -match '^([A-Za-z_][A-Za-z0-9_]*)\s*=') {
+            $keys.Add($Matches[1])
+        }
+    }
+
+    return $keys.ToArray()
+}
+
+function Get-ModelConfigEntryOrder {
+    <#
+    .SYNOPSIS
+    Returns the ordered list of TOML sections and section keys, as "<section>.<key>" plus "[<section>]".
+    #>
+    param([Parameter(Mandatory)][string]$Path)
+
+    $content = [System.IO.File]::ReadAllText($Path).Replace("`r`n", "`n").Replace("`r", "`n")
+    $entries = [System.Collections.Generic.List[string]]::new()
+    $section = '<root>'
+
+    foreach ($line in ($content -split "`n")) {
+        $trimmed = $line.Trim()
+        if ([string]::IsNullOrEmpty($trimmed) -or $trimmed.StartsWith('#')) {
+            continue
+        }
+        if ($trimmed -match '^\[([^\]]+)\]$') {
+            $section = $Matches[1].Trim()
+            $entries.Add("[$section]")
+            continue
+        }
+        if ($trimmed -match '^([A-Za-z_][A-Za-z0-9_]*)\s*=') {
+            $entries.Add("$section.$($Matches[1])")
+        }
+    }
+
+    return $entries.ToArray()
+}
+
+function Assert-ConfigurationParity {
+    <#
+    .SYNOPSIS
+    Fails when a local runtime configuration drifts from its committed example file.
+
+    .DESCRIPTION
+    Local runtime files (.env.staging, models.staging.toml, ...) are not committed, so nothing else
+    in the pipeline can notice when they fall behind the example file that documents them. Comparing
+    entry sets and their order here turns that silent drift into a packaging error.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$ExamplePath,
+        [Parameter(Mandatory)][string]$Description,
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Entries,
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$ExampleEntries
+    )
+
+    $name = [System.IO.Path]::GetFileName($Path)
+    $exampleName = [System.IO.Path]::GetFileName($ExamplePath)
+
+    if ($ExampleEntries.Count -eq 0) {
+        throw "$Description example $exampleName declares no entries; refusing to validate $name against it."
+    }
+
+    $missing = @($ExampleEntries | Where-Object { $_ -notin $Entries })
+    $extra = @($Entries | Where-Object { $_ -notin $ExampleEntries })
+    if ($missing.Count -gt 0 -or $extra.Count -gt 0) {
+        $details = @()
+        if ($missing.Count -gt 0) {
+            $details += "missing: $($missing -join ', ')"
+        }
+        if ($extra.Count -gt 0) {
+            $details += "extra: $($extra -join ', ')"
+        }
+        throw "$Description $name does not match $exampleName ($($details -join '; ')). Update both files together and keep the same entry order."
+    }
+
+    $entryOrder = @($Entries | Where-Object { $_ -in $ExampleEntries })
+    $exampleOrder = @($ExampleEntries | Where-Object { $_ -in $Entries })
+    if (($entryOrder -join '|') -ne ($exampleOrder -join '|')) {
+        throw "$Description $name orders its entries differently from $exampleName. Keep both files in the same order."
+    }
+}
+
 function Get-ManifestSourceLabel {
     param(
         [Parameter(Mandatory)][string]$Path,
@@ -334,6 +431,31 @@ Assert-EnvironmentKeys -Path $resolvedEnvironmentFile -Keys @(
     'SEED_PLATFORM_ADMIN_PASSWORD',
     'SEED_PLATFORM_ADMIN_DISPLAY_NAME'
 )
+
+if ($environmentSource -ne 'example') {
+    $resolvedEnvironmentExample = Resolve-InputFile -Path $environmentExamplePath -RepositoryRoot $repositoryRoot -Description 'Environment example file'
+    $environmentParityArguments = @{
+        Path           = $resolvedEnvironmentFile
+        ExamplePath    = $resolvedEnvironmentExample
+        Description    = 'Environment file'
+        Entries        = @(Get-EnvironmentKeyOrder -Path $resolvedEnvironmentFile)
+        ExampleEntries = @(Get-EnvironmentKeyOrder -Path $resolvedEnvironmentExample)
+    }
+    Assert-ConfigurationParity @environmentParityArguments
+}
+
+if ($modelConfigSource -ne 'example') {
+    $resolvedModelConfigExample = Resolve-InputFile -Path $modelExamplePath -RepositoryRoot $repositoryRoot -Description 'Model configuration example file'
+    $modelParityArguments = @{
+        Path           = $resolvedModelConfigFile
+        ExamplePath    = $resolvedModelConfigExample
+        Description    = 'Model configuration file'
+        Entries        = @(Get-ModelConfigEntryOrder -Path $resolvedModelConfigFile)
+        ExampleEntries = @(Get-ModelConfigEntryOrder -Path $resolvedModelConfigExample)
+    }
+    Assert-ConfigurationParity @modelParityArguments
+}
+
 $environmentSourceLabel = Get-ManifestSourceLabel -Path $resolvedEnvironmentFile -RepositoryRoot $repositoryRoot
 $modelConfigSourceLabel = Get-ManifestSourceLabel -Path $resolvedModelConfigFile -RepositoryRoot $repositoryRoot
 
