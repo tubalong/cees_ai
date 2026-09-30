@@ -492,6 +492,18 @@ export class TurnRunnerService implements OnModuleDestroy {
       );
       if (input.signal.aborted) return;
 
+      const conversationImageGuidance = input.allowedTools.some(
+        (tool) => tool.name === 'insert_document_image',
+      )
+        ? await this.messageContent.describeConversationImageReferences(conversation.id, {
+          tenantId: conversation.tenantId,
+          userId: input.userId,
+          membershipId: input.membershipId,
+          requestId: input.requestId,
+        })
+        : null;
+      if (input.signal.aborted) return;
+
       const request: ToolTurnRequest = {
         request_id: input.requestId,
         tenant_id: conversation.tenantId,
@@ -499,7 +511,12 @@ export class TurnRunnerService implements OnModuleDestroy {
         conversation_id: conversation.id,
         mode: input.mode === 'ultra' ? 'ultra' : 'standard',
         instructions: combineAssistantInstructions(
-          joinGuidance(buildCapabilityGuidance(input.capabilities), taskGuidance, terminalTaskGuidance),
+          joinGuidance(
+            buildCapabilityGuidance(input.capabilities),
+            taskGuidance,
+            terminalTaskGuidance,
+            conversationImageGuidance,
+          ),
           input.assistantContext,
           input.generationOptions,
           input.connectorRoutingHint,
@@ -681,8 +698,8 @@ export class TurnRunnerService implements OnModuleDestroy {
       '当前会话有以下任务正在调整计划（与本轮用户消息无关时不要调用调整工具）：',
       ...notes,
       `调整计划时调用 ${REVISE_ORCHESTRATION_TASK_TOOL}：给出调整后的完整步骤（全量替换），`
-        + '沿用已完成的步骤须填写其 carried_from_step_key（仅限清单中给出的可沿用步骤）；'
-        + '新草案由用户在任务卡片再次确认后才会执行，不要声称任务已继续执行。',
+      + '沿用已完成的步骤须填写其 carried_from_step_key（仅限清单中给出的可沿用步骤）；'
+      + '新草案由用户在任务卡片再次确认后才会执行，不要声称任务已继续执行。',
     ].join('\n');
   }
 
@@ -800,7 +817,7 @@ export class TurnRunnerService implements OnModuleDestroy {
         '当前会话最近有任务已结束（仅当用户提及相关话题时参考，不要主动重复汇报）：',
         ...notes,
         '任务执行细节以任务卡片与系统汇报消息为准，不要编造进度或产出；'
-          + '用户询问产出去向时，说明可在任务卡片中验收并按提示归档到知识库。',
+        + '用户询问产出去向时，说明可在任务卡片中验收并按提示归档到知识库。',
       ].join('\n');
     } catch (error) {
       this.logger.warn(`failed to build terminal task guidance: ${String(error)}`);

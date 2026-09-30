@@ -39,7 +39,10 @@ interface ResolvedImage {
   mimeType: AssistantImageMimeType;
   sizeBytes: number;
   objectKey: string;
+  originalName: string;
 }
+
+const MAX_CONVERSATION_IMAGE_REFERENCES = 20;
 
 /**
  * 本轮可被工具引用的图片：只暴露稳定的文件 ID 与对象键。
@@ -51,6 +54,12 @@ export interface TurnImageReference {
   /** COS 对象键；调用方可据此签发短期下载 URL。 */
   objectKey: string;
   mimeType: AssistantImageMimeType;
+}
+
+export interface ConversationImageReference extends TurnImageReference {
+  source: 'UPLOAD' | 'GENERATED';
+  label: string;
+  createdAt: Date;
 }
 
 /**
@@ -221,6 +230,103 @@ export class AssistantMessageContentService {
     return references;
   }
 
+  /**
+   * 列出当前会话最近可复用的图片，供跨轮次插图使用。
+   *
+   * 用户上传图片必须来自当前会话且归属当前用户；生成图片必须由当前会话的工具调用
+   * 产生、归属当前成员且资源未删除。返回稳定 FileObject ID，不返回短期签名 URL。
+   */
+  async resolveConversationImageReferences(
+    conversationId: string,
+    identity: MessageContentIdentity,
+  ): Promise<ConversationImageReference[]> {
+    const messages = await this.prisma.conversationMessage.findMany({
+      where: {
+        tenantId: identity.tenantId,
+        conversationId,
+        role: ConversationMessageRole.USER,
+      },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      select: { imageFileIds: true, createdAt: true },
+    });
+    const uploadedAt = new Map<string, Date>();
+    for (const message of messages) {
+      for (const fileId of normalizeFileIds(message.imageFileIds)) {
+        uploadedAt.set(fileId, message.createdAt);
+      }
+    }
+
+    const references = new Map<string, ConversationImageReference>();
+    const uploadedIds = [...uploadedAt.keys()];
+    if (uploadedIds.length > 0) {
+      const uploaded = await this.resolveImages(uploadedIds, identity);
+      for (const image of uploaded) {
+        references.set(image.id, {
+          fileId: image.id,
+          objectKey: image.objectKey,
+          mimeType: image.mimeType,
+          source: 'UPLOAD',
+          label: image.originalName,
+          createdAt: uploadedAt.get(image.id) ?? new Date(0),
+        });
+      }
+    }
+
+    const generated = await this.prisma.managedImage.findMany({
+      where: {
+        tenantId: identity.tenantId,
+        deletedAt: null,
+        status: ManagedImageStatus.READY,
+        fileObjectId: { not: null },
+        resource: { is: { ownerMembershipId: identity.membershipId, deletedAt: null } },
+        toolCall: { is: { tenantId: identity.tenantId, conversationId } },
+      },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      select: {
+        fileObjectId: true,
+        objectKey: true,
+        contentType: true,
+        prompt: true,
+        createdAt: true,
+      },
+    });
+    for (const image of generated) {
+      if (!image.fileObjectId || !image.contentType) continue;
+      const mimeType = normalizeImageMimeType(image.contentType);
+      if (!isSupportedImageMimeType(mimeType)) continue;
+      references.set(image.fileObjectId, {
+        fileId: image.fileObjectId,
+        objectKey: image.objectKey,
+        mimeType,
+        source: 'GENERATED',
+        label: truncateReferenceLabel(image.prompt, 'AI 生成图片'),
+        createdAt: image.createdAt,
+      });
+    }
+
+    return [...references.values()]
+      .sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime())
+      .slice(-MAX_CONVERSATION_IMAGE_REFERENCES);
+  }
+
+  /** 给模型的会话图片目录；ID 只用于工具参数，不允许出现在用户可见回答中。 */
+  async describeConversationImageReferences(
+    conversationId: string,
+    identity: MessageContentIdentity,
+  ): Promise<string | null> {
+    const references = await this.resolveConversationImageReferences(conversationId, identity);
+    if (references.length === 0) return null;
+    return [
+      '当前会话可供 insert_document_image 引用的图片（按时间从旧到新）：',
+      ...references.map((image, index) => (
+        `- image_index=${index + 1} image_file_id=${image.fileId} `
+        + `来源=${image.source === 'GENERATED' ? 'AI生成' : '用户上传'} 描述=${image.label}`
+      )),
+      '插入历史图片时优先传 image_file_id 精确选择；也可传 image_index。省略两者时使用最近一张。',
+      'image_file_id 是内部资源标识，只能用于工具调用，绝不能展示给用户。',
+    ].join('\n');
+  }
+
   /** 从会话事实源重建本轮文档附件，供需要原始内容的工具在重试/恢复后继续使用。 */
   async resolveTurnDocumentSourceMaterials(
     turnId: string,
@@ -367,6 +473,7 @@ export class AssistantMessageContentService {
         mimeType: true,
         sizeBytes: true,
         objectKey: true,
+        originalName: true,
         createdBy: true,
         managedImages: {
           select: {
@@ -421,10 +528,17 @@ export class AssistantMessageContentService {
         mimeType: mimeType as AssistantImageMimeType,
         sizeBytes,
         objectKey: file.objectKey,
+        originalName: file.originalName,
       });
     }
     return resolved;
   }
+}
+
+function truncateReferenceLabel(value: string | null | undefined, fallback: string): string {
+  const normalized = value?.replace(/\s+/g, ' ').trim();
+  if (!normalized) return fallback;
+  return normalized.length > 120 ? `${normalized.slice(0, 119)}…` : normalized;
 }
 
 function normalizeFileIds(fileIds: readonly string[] | undefined): string[] {

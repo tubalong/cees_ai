@@ -14,7 +14,7 @@ Assistant 是 NestJS 提供的服务端会话与 AI 编排入口。NestJS 负责
 
 - `generate_image`：调用图片模型，上传生成结果到 COS，并登记 `FileObject`、`Resource(IMAGE)`、`ManagedImage`、`AIActionDraft` 和审计记录。
 - `generate_docx` / `generate_pdf` / `generate_pptx`：调用文档模型生成结构化 `DocumentSpec`，渲染为对应格式并落 COS，登记 `Resource(DOCUMENT)`、`ManagedDocument`、`FileObject`、`AIActionDraft` 和审计记录；需 `ai.document.generate` 权限。
-- `insert_document_image`：把本轮对话中已有的一张图片（用户上传附件或本轮船次生成的图片）插入到本会话内某份 AI 生成文档的指定章节末尾；只读 `DocumentSpec` 并在章节 `blocks` 尾部追加 `ImageBlock`，按原格式原位重渲染同一文档，正文不被改写。需 `ai.document.generate` 权限。
+- `insert_document_image`：把当前会话中已有的一张图片（用户上传附件或当前/历史轮次生成的图片）插入到本会话内某份 AI 生成文档的指定章节末尾；可用 `image_file_id` 精确引用会话图片，或用 `image_index` 选择图片。只读 `DocumentSpec` 并在章节 `blocks` 尾部追加 `ImageBlock`，按原格式原位重渲染同一文档，正文不被改写。需 `ai.document.generate` 权限。
 - `web_search`：调用 Tavily 搜索公开互联网资料，通过 `tool_result.sources` 返回可引用的网页来源，不产生正式业务资源。需要 `ai.web.search` 权限，当前仅默认授予租户管理员角色，其他角色由管理员在 RBAC 中显式授予。
 
 额度预占/结算和人工审批流本次暂不实现。工具调用目前是 NestJS 的程序化批准（工具存在、权限和参数校验），不是等待人工点击的审批单。

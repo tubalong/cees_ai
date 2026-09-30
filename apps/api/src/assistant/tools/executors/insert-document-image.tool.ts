@@ -13,8 +13,8 @@ const MAX_CAPTION_LENGTH = 300;
 const MAX_TITLE_LENGTH = 200;
 
 /**
- * insert_document_image 工具执行器：把本轮对话里已有的一张图片，插入到本会话内
- * 某份「AI 生成文档」的指定章节末尾。它只做参数校验、把本轮图片解析为稳定引用，
+ * insert_document_image 工具执行器：把当前会话里已有的一张图片，插入到本会话内
+ * 某份「AI 生成文档」的指定章节末尾。它只做参数校验、把会话图片解析为稳定引用，
  * 再调用 DocumentService 完成落库；正文与既有块完全不被改写。权限、循环、批准
  * 与额度由 ToolRegistry/ToolPolicy 统一处理，禁止在执行器内重复实现。
  */
@@ -35,8 +35,9 @@ export class InsertDocumentImageTool implements OnModuleInit {
         version: '1.0.0',
         displayName: '在文档章节插入图片',
         description:
-            '把本条消息中已有的图片插入到本会话某份已生成文档的指定章节末尾，正文保持不变。'
-            + '图片来自用户本轮上传的附件或本轮船次刚生成的图片；不适用于新建文档。'
+            '把当前会话中已有的图片插入到本会话某份已生成文档的指定章节末尾，正文保持不变。'
+            + '图片可以来自当前或历史轮次的用户上传附件，也可以是当前会话早前生成的图片；不适用于新建文档。'
+            + '系统会在 instructions 中提供当前会话可用图片清单；优先用 image_file_id 精确引用。'
             + '省略 section_title 时插入到最后一节末尾。',
         parameters: {
             type: 'object',
@@ -52,7 +53,11 @@ export class InsertDocumentImageTool implements OnModuleInit {
                 image_index: {
                     type: 'integer',
                     minimum: 1,
-                    description: '使用本轮第几张图片（从 1 开始）；省略时使用本轮最后一张图片',
+                    description: '使用会话图片清单中的第几张图片（从 1 开始）；省略时使用会话最近一张图片',
+                },
+                image_file_id: {
+                    type: 'string',
+                    description: '会话图片清单中的稳定图片文件 ID；与 image_index 二选一，优先使用该参数精确选择',
                 },
                 document_title: {
                     type: 'string',
@@ -72,18 +77,18 @@ export class InsertDocumentImageTool implements OnModuleInit {
         context: ToolExecutionContext,
         input: Record<string, unknown>,
     ): Promise<ToolExecutionResult> {
-        // 本工具依赖「本轮上传或生成的图片」；任务步骤执行窗口没有轮次输入，
+        // 本工具依赖当前会话中的图片；任务步骤执行窗口没有轮次输入，
         // 工具面已排除 WRITE 工具，这里兜底防御绕过（模型编造调用时拒绝）。
         if (context.turnId === null) {
             throw new ToolExecutionError(
                 'TURN_INPUT_REQUIRED',
                 'insert_document_image requires an active turn with image references',
-                '插入图片需要基于当前消息中的图片。请告知用户：在对话中上传或生成图片后重试。',
+                '插入图片需要基于当前会话中的图片。请告知用户：在对话中上传或生成图片后重试。',
             );
         }
         const imageObjectKey = await this.resolveImageObjectKey(
             context,
-            context.turnId,
+            input.image_file_id as string | undefined,
             input.image_index as number | undefined,
         );
         const result = await this.documentService.insertDocumentImage({
@@ -110,20 +115,27 @@ export class InsertDocumentImageTool implements OnModuleInit {
         };
     }
 
-    /** 把模型给出的 1-based 图片序号解析为本轮图片的稳定对象键。 */
+    /** 把模型给出的稳定文件 ID 或 1-based 会话图片序号解析为对象键。 */
     private async resolveImageObjectKey(
         context: ToolExecutionContext,
-        turnId: string,
+        imageFileId: string | undefined,
         imageIndex: number | undefined,
     ): Promise<string> {
-        const references = await this.messageContent.resolveTurnImageReferences(turnId, {
+        const references = await this.messageContent.resolveConversationImageReferences(context.conversationId, {
             tenantId: context.tenantId,
             userId: context.userId,
             membershipId: context.membershipId,
             requestId: context.requestId,
         });
         if (references.length === 0) {
-            throw new Error('本条消息没有可供插入的图片，请先上传图片或先生成一张图片');
+            throw new Error('当前会话没有可供插入的图片，请先上传图片或生成一张图片');
+        }
+        if (imageFileId) {
+            const selected = references.find((reference) => reference.fileId === imageFileId);
+            if (!selected) {
+                throw new Error('image_file_id 不属于当前会话或图片已不可用');
+            }
+            return selected.objectKey;
         }
         const index = imageIndex ?? references.length;
         if (index < 1 || index > references.length) {
@@ -169,6 +181,16 @@ function validateInsertDocumentImageArguments(input: unknown): Record<string, un
             throw new Error('image_index 必须是不小于 1 的整数');
         }
         parsed.image_index = value;
+    }
+
+    if (raw.image_file_id !== undefined && raw.image_file_id !== null) {
+        if (typeof raw.image_file_id !== 'string' || raw.image_file_id.trim().length === 0) {
+            throw new Error('image_file_id 必须是非空字符串');
+        }
+        parsed.image_file_id = raw.image_file_id.trim();
+    }
+    if (parsed.image_index !== undefined && parsed.image_file_id !== undefined) {
+        throw new Error('image_file_id 与 image_index 只能提供一个');
     }
 
     return parsed;

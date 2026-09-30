@@ -10,12 +10,20 @@ const FILE_ID = '30000000-0000-4000-8000-000000000003';
 interface Harness {
     service: AssistantMessageContentService;
     findMany: jest.Mock;
+    conversationMessageFindMany: jest.Mock;
+    managedImageFindMany: jest.Mock;
     extractFile: jest.Mock;
 }
 
 function createHarness(): Harness {
     const findMany = jest.fn();
-    const prisma = { fileObject: { findMany } } as unknown as PrismaService;
+    const conversationMessageFindMany = jest.fn();
+    const managedImageFindMany = jest.fn();
+    const prisma = {
+        fileObject: { findMany },
+        conversationMessage: { findMany: conversationMessageFindMany },
+        managedImage: { findMany: managedImageFindMany },
+    } as unknown as PrismaService;
     const storage = { createDownloadUrl: jest.fn(async () => 'https://example.test/file') };
     const extractFile = jest.fn(async () => ({ parts: [{ type: 'text', text: '手册正文' }] }));
     const service = new AssistantMessageContentService(
@@ -27,7 +35,7 @@ function createHarness(): Harness {
     // 该模块通过 STORAGE_* 令牌注入，构造器参数顺序与令牌无关，这里只做类型占位说明。
     void STORAGE_PROVIDER;
     void STORAGE_SETTINGS;
-    return { service, findMany, extractFile };
+    return { service, findMany, conversationMessageFindMany, managedImageFindMany, extractFile };
 }
 
 const identity = { tenantId: TENANT_ID, userId: USER_ID, membershipId: 'm-1', requestId: 'r-1' };
@@ -102,5 +110,75 @@ describe('AssistantMessageContentService.toModelParts', () => {
         } finally {
             globalThis.fetch = originalFetch;
         }
+    });
+});
+
+describe('AssistantMessageContentService.resolveConversationImageReferences', () => {
+    it('combines historical uploads and generated images for the same conversation', async () => {
+        const harness = createHarness();
+        const uploadCreatedAt = new Date('2026-09-29T01:00:00Z');
+        const generatedCreatedAt = new Date('2026-09-29T02:00:00Z');
+        harness.conversationMessageFindMany.mockResolvedValue([{
+            imageFileIds: [FILE_ID],
+            createdAt: uploadCreatedAt,
+        }]);
+        harness.findMany.mockResolvedValue([{
+            id: FILE_ID,
+            mimeType: 'image/png',
+            sizeBytes: 8,
+            objectKey: 'uploads/team.png',
+            originalName: '团队协作.png',
+            createdBy: USER_ID,
+            managedImages: [],
+        }]);
+        harness.managedImageFindMany.mockResolvedValue([{
+            fileObjectId: '40000000-0000-4000-8000-000000000004',
+            objectKey: 'generated/team.png',
+            contentType: 'image/png',
+            prompt: '清晨的团队协作插画',
+            createdAt: generatedCreatedAt,
+        }]);
+
+        const references = await harness.service.resolveConversationImageReferences('conversation-1', identity);
+
+        expect(references.map((reference) => reference.fileId)).toEqual([
+            FILE_ID,
+            '40000000-0000-4000-8000-000000000004',
+        ]);
+        expect(references[0]).toEqual(expect.objectContaining({ source: 'UPLOAD', label: '团队协作.png' }));
+        expect(references[1]).toEqual(expect.objectContaining({ source: 'GENERATED', label: '清晨的团队协作插画' }));
+        expect(harness.managedImageFindMany).toHaveBeenCalledWith(expect.objectContaining({
+            where: expect.objectContaining({
+                tenantId: TENANT_ID,
+                resource: { is: { ownerMembershipId: identity.membershipId, deletedAt: null } },
+                toolCall: { is: { tenantId: TENANT_ID, conversationId: 'conversation-1' } },
+            }),
+        }));
+    });
+
+    it('returns a model-safe image directory without exposing signed URLs', async () => {
+        const harness = createHarness();
+        harness.conversationMessageFindMany.mockResolvedValue([{
+            imageFileIds: [FILE_ID],
+            createdAt: new Date('2026-09-29T01:00:00Z'),
+        }]);
+        harness.findMany.mockResolvedValue([{
+            id: FILE_ID,
+            mimeType: 'image/png',
+            sizeBytes: 8,
+            objectKey: 'uploads/team.png',
+            originalName: '团队协作.png',
+            createdBy: USER_ID,
+            managedImages: [],
+        }]);
+        harness.managedImageFindMany.mockResolvedValue([]);
+
+        const description = await harness.service.describeConversationImageReferences('conversation-1', identity);
+
+        expect(description).toContain(`image_file_id=${FILE_ID}`);
+        expect(description).toContain('image_index=1');
+        expect(description).toContain('绝不能展示给用户');
+        expect(description).not.toContain('https://');
+        expect(description).not.toContain('uploads/team.png');
     });
 });
