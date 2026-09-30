@@ -13,7 +13,7 @@
 - OAuth Token 和 RefreshToken 由官方 CLI 使用 AES-256-GCM 加密，不进入 Renderer、CEES API、数据库或模型上下文；
 - CLI 配置与数据通过 `TMEET_CLI_CONFIG_DIR`、`TMEET_CLI_DATA_DIR` 隔离在 Electron `userData/connectors/tencent-meeting`；
 - Desktop 从固定允许列表读取已安装 CLI 的 `--help`，生成与当前版本对齐的参数 Schema；
-- API 只根据用户问题和 Desktop 提交的命令目录生成最多三条无副作用调用计划；
+- API 只根据用户问题和 Desktop 提交的命令目录生成最多五条无副作用调用计划；
 - Desktop 执行前重新校验工具、参数和风险，所有写入或破坏性操作必须确认；
 - 执行结果脱敏、限长后以 `TENCENT_MEETING` 上下文注入本轮对话；
 - 不建设腾讯会议列表或会议详情等平行业务页面。
@@ -53,13 +53,13 @@ CEES 不要求用户填写 SDK ID、Secret、Corp ID 或个人 Token，也不在
 1. Desktop 检查 CLI 已安装且 `auth status` 为已登录。
 2. Desktop 对固定允许列表中的命令执行 `--help`，从官方参数定义生成工具 Schema 并缓存。
 3. Desktop 将用户问题和受限工具目录提交给 `POST /assistant/connectors/tencent-meeting/plan`。
-4. API 只允许模型返回目录内工具和参数，最多三条调用；下发前把带点号的命令 ID（如 `meeting.list`）映射成 `tencent_meeting_tool_<序号>` 模型工具名，真实命令 ID 与风险标记写在描述里，返回时再映射回内部 ID。
+4. API 只允许模型返回目录内工具和参数，最多五条调用；下发前把带点号的命令 ID（如 `meeting.list`）映射成 `tencent_meeting_tool_<序号>` 模型工具名，真实命令 ID 与风险标记写在描述里，返回时再映射回内部 ID。
 5. Desktop 对 `WRITE`、`DESTRUCTIVE` 和未知风险操作展示精确参数并要求确认。
 6. Desktop 将结构化参数转换为 CLI flag，禁止模型指定可执行文件、Shell、环境变量、网络地址或额外参数。
 7. CLI 使用 JSON 输出执行官方能力；只读查询默认启用 `--compact`。
 8. Desktop 移除 Token、Secret、Cookie、Authorization、Credential、Password 等字段并限制上下文字节数。
 
-当前采用受控两轮接力（契约 `0.47.0`）：`规划 → 确认 → 执行` 最多两轮，第二轮只回喂最近 3 条脱敏摘要（工具 ID、参数摘要、结果摘要、状态），两轮合计调用仍 ≤ 3 次，且每一轮执行前各自确认。因此「先查会议 ID 再取消/更新」这类依赖链可以在一次对话里完成。需要三次以上调用、或目标无法由上一轮结果唯一确定的链路仍应拆成多轮。
+当前采用受控两轮接力（契约 `0.47.0`）：`规划 → 确认 → 执行` 最多两轮，第二轮只回喂最近 5 条脱敏摘要（工具 ID、参数摘要、结果摘要、状态），两轮合计调用仍 ≤ 5 次，且每一轮执行前各自确认。因此「先查会议 ID 再取消/更新」这类依赖链可以在一次对话里完成。需要五次以上调用、或目标无法由上一轮结果唯一确定的链路仍应拆成多轮。
 
 规划请求由服务端注入**租户时区的当前时间参考**（`Current local time is YYYY-MM-DDTHH:mm:ss±hh:mm (timezone <IANA>)`），并要求模型把「今天 / 本周 / 这个月」这类相对表达换算成具体日期后再填参数；时区取 `Tenant.timezone`，缺失或非法时回退平台默认 `Asia/Shanghai`，不依赖服务器本地时区。此前规划指令里引用了并不存在的 `convert_timestamp` 工具，模型只能凭记忆猜年份和月份，历史会议查询窗口因此被算到错误月份（同一账号在不同轮次得到 0 条 / 1 条等互相矛盾的结果）。该指令已删除，相对日期一律以注入的当前时间为唯一参考点。
 

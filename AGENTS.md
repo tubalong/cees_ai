@@ -52,6 +52,9 @@
 ## 7. 密钥与安全
 
 - Secret 只来自环境变量或平台 Secrets；`.env` 不入库，示例值一律 `change_me`。
+- 环境配置以入库的 `*.example` 为唯一基准：`.env.example`、`.env.staging.example`、`.env.production.example`、`infra/database/.env.{staging,production}.example`、`apps/ai-service/config/models.{staging,production}.example.toml`。
+- 新增、改名或删除配置项时，必须在同一变更中同步全部对应文件，使不提交的实际文件（`.env`、`.env.staging`、`.env.production`、`infra/database/.env.*`、`apps/ai-service/config/models.{staging,production}.toml`）与基准保持一致的键集合、顺序与注释风格；实际文件缺少的新项以 `change_me` 占位，枚举、数值与结构类字段照 example 填写。
+- `scripts/package-server-bundle.ps1` 打包时会校验实际文件与其 example 的键集合与顺序，不一致直接失败；该检查只覆盖应用服务器的 env 与模型配置，其余组合仍需人工同步。
 - AI 服务只接收 NestJS 传入的内部可信上下文；生产环境校验内部 Token 或请求签名。
 - 审计事件记录租户、操作者、请求、资源和扩展元数据。
 

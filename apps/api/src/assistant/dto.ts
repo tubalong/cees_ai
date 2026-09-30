@@ -97,6 +97,19 @@ export class ConnectorPreviousStepDto implements ConnectorPreviousStepInput {
   status!: 'SUCCESS' | 'FAILED' | 'REJECTED';
 }
 
+/** 最近一轮对话摘要，路由与四个连接器规划共用；只用于消解代词与省略表达，不作为业务事实。 */
+export class ConnectorRoutingRecentMessageDto implements ConnectorRoutingRecentMessageInput {
+  @ApiProperty({ enum: ['user', 'assistant'] })
+  @IsIn(['user', 'assistant'])
+  role!: 'user' | 'assistant';
+
+  @ApiProperty({ minLength: 1, maxLength: 2000 })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(2000)
+  content!: string;
+}
+
 export class DingTalkConnectorToolDto implements DingTalkConnectorToolInput {
   @ApiProperty({ maxLength: 80, pattern: '^dws_read_[a-f0-9]{16}$' })
   @IsString()
@@ -136,13 +149,21 @@ export class PlanDingTalkConnectorRequestDto {
   @ValidateNested({ each: true })
   tools!: DingTalkConnectorToolDto[];
 
-  @ApiPropertyOptional({ type: [ConnectorPreviousStepDto], maxItems: 3 })
+  @ApiPropertyOptional({ type: [ConnectorPreviousStepDto], maxItems: 5 })
   @IsOptional()
   @IsArray()
-  @ArrayMaxSize(3)
+  @ArrayMaxSize(5)
   @Type(() => ConnectorPreviousStepDto)
   @ValidateNested({ each: true })
   previousSteps?: ConnectorPreviousStepDto[];
+
+  @ApiPropertyOptional({ type: [ConnectorRoutingRecentMessageDto], maxItems: 6, description: '同一会话最近若干轮对话，仅用于消解代词与省略式追问；缺省表示没有上下文' })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(6)
+  @Type(() => ConnectorRoutingRecentMessageDto)
+  @ValidateNested({ each: true })
+  recentMessages?: ConnectorRoutingRecentMessageDto[];
 }
 
 export class TencentMeetingConnectorToolDto implements TencentMeetingConnectorToolInput {
@@ -192,13 +213,21 @@ export class PlanTencentMeetingConnectorRequestDto {
   @ValidateNested({ each: true })
   tools!: TencentMeetingConnectorToolDto[];
 
-  @ApiPropertyOptional({ type: [ConnectorPreviousStepDto], maxItems: 3 })
+  @ApiPropertyOptional({ type: [ConnectorPreviousStepDto], maxItems: 5 })
   @IsOptional()
   @IsArray()
-  @ArrayMaxSize(3)
+  @ArrayMaxSize(5)
   @Type(() => ConnectorPreviousStepDto)
   @ValidateNested({ each: true })
   previousSteps?: ConnectorPreviousStepDto[];
+
+  @ApiPropertyOptional({ type: [ConnectorRoutingRecentMessageDto], maxItems: 6, description: '同一会话最近若干轮对话，仅用于消解代词与省略式追问；缺省表示没有上下文' })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(6)
+  @Type(() => ConnectorRoutingRecentMessageDto)
+  @ValidateNested({ each: true })
+  recentMessages?: ConnectorRoutingRecentMessageDto[];
 }
 
 export class WeComConnectorToolDto implements WeComConnectorToolInput {
@@ -248,13 +277,21 @@ export class PlanWeComConnectorRequestDto {
   @ValidateNested({ each: true })
   tools!: WeComConnectorToolDto[];
 
-  @ApiPropertyOptional({ type: [ConnectorPreviousStepDto], maxItems: 3 })
+  @ApiPropertyOptional({ type: [ConnectorPreviousStepDto], maxItems: 5 })
   @IsOptional()
   @IsArray()
-  @ArrayMaxSize(3)
+  @ArrayMaxSize(5)
   @Type(() => ConnectorPreviousStepDto)
   @ValidateNested({ each: true })
   previousSteps?: ConnectorPreviousStepDto[];
+
+  @ApiPropertyOptional({ type: [ConnectorRoutingRecentMessageDto], maxItems: 6, description: '同一会话最近若干轮对话，仅用于消解代词与省略式追问；缺省表示没有上下文' })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(6)
+  @Type(() => ConnectorRoutingRecentMessageDto)
+  @ValidateNested({ each: true })
+  recentMessages?: ConnectorRoutingRecentMessageDto[];
 }
 
 export class GitHubOAuthExchangeRequestDto {
@@ -323,13 +360,21 @@ export class PlanGitHubConnectorRequestDto {
   @ValidateNested({ each: true })
   tools!: GitHubConnectorToolDto[];
 
-  @ApiPropertyOptional({ type: [ConnectorPreviousStepDto], maxItems: 3 })
+  @ApiPropertyOptional({ type: [ConnectorPreviousStepDto], maxItems: 5 })
   @IsOptional()
   @IsArray()
-  @ArrayMaxSize(3)
+  @ArrayMaxSize(5)
   @Type(() => ConnectorPreviousStepDto)
   @ValidateNested({ each: true })
   previousSteps?: ConnectorPreviousStepDto[];
+
+  @ApiPropertyOptional({ type: [ConnectorRoutingRecentMessageDto], maxItems: 6, description: '同一会话最近若干轮对话，仅用于消解代词与省略式追问；缺省表示没有上下文' })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(6)
+  @Type(() => ConnectorRoutingRecentMessageDto)
+  @ValidateNested({ each: true })
+  recentMessages?: ConnectorRoutingRecentMessageDto[];
 }
 
 export class ConnectorRoutingCandidateDto implements ConnectorRoutingCandidateInput {
@@ -368,18 +413,6 @@ export class ConnectorRoutingCandidateDto implements ConnectorRoutingCandidateIn
   @Min(0)
   @Max(5000)
   toolCount?: number;
-}
-
-export class ConnectorRoutingRecentMessageDto implements ConnectorRoutingRecentMessageInput {
-  @ApiProperty({ enum: ['user', 'assistant'] })
-  @IsIn(['user', 'assistant'])
-  role!: 'user' | 'assistant';
-
-  @ApiProperty({ minLength: 1, maxLength: 2000 })
-  @IsString()
-  @MinLength(1)
-  @MaxLength(2000)
-  content!: string;
 }
 
 export class RouteConnectorRequestDto {
@@ -516,13 +549,13 @@ export class CreateTurnRequestDto {
   fileIds?: string[];
 
   @ApiPropertyOptional({
-    description: 'Desktop 从本地已授权连接器读取的本轮只读上下文；服务端仅用于回答，不作为业务写入和权限依据',
+    description: 'Desktop 从本地已授权连接器读取的本轮只读上下文；服务端仅用于回答，不作为业务写入和权限依据。上限 7 = 连接器计划调用（最多 5）+ 本机操作结果（1）+ 本机能力声明（1）',
     type: [ConnectorContextDto],
-    maxItems: 5,
+    maxItems: 7,
   })
   @IsOptional()
   @IsArray()
-  @ArrayMaxSize(5)
+  @ArrayMaxSize(7)
   @Type(() => ConnectorContextDto)
   @ValidateNested({ each: true })
   connectorContexts?: ConnectorContextDto[];

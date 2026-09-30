@@ -27,7 +27,8 @@ export const GITHUB_MCP_TOOLSETS = 'context,issues,pull_requests,repos,users,act
 export const GITHUB_REQUIRED_OAUTH_SCOPE = 'repo read:org read:user user:email notifications offline_access';
 const GITHUB_OAUTH_CALLBACK_PATH = '/oauth/github/callback';
 const MAX_TOOLS = 256;
-const MAX_CALLS = 3;
+/** 单轮计划调用上限，与契约 plan 结果与 Desktop 单轮预算一致。 */
+const MAX_CALLS = 5;
 const MAX_CONTEXT_BYTES = 56 * 1024;
 const MAX_TOOL_SCHEMA_BYTES = 32 * 1024;
 const CONNECT_TIMEOUT_MS = 30_000;
@@ -162,7 +163,7 @@ export async function discoverGitHubTools(): Promise<GitHubConnectorTool[]> {
 
 export async function executeGitHubCalls(calls: GitHubConnectorPlannedCall[]): Promise<GitHubConnectorContext[]> {
     if (!Array.isArray(calls) || calls.length === 0 || calls.length > MAX_CALLS) {
-        throw new Error('GitHub 连接器每次必须执行一至三个工具调用');
+        throw new Error('GitHub 连接器每次必须执行一至五个工具调用');
     }
     const tools = await discoverGitHubTools();
     const toolMap = new Map(tools.map((tool) => [tool.toolId, tool]));
@@ -178,15 +179,15 @@ export async function executeGitHubCalls(calls: GitHubConnectorPlannedCall[]): P
                 name: call.toolId,
                 arguments: call.arguments,
             }, undefined, { timeout: TOOL_TIMEOUT_MS, maxTotalTimeout: TOOL_TIMEOUT_MS });
-            if ('isError' in result && result.isError === true) {
-                throw new Error(extractGitHubToolError(result));
-            }
+            const toolFailure = parseGitHubToolFailure(result);
             contexts.push({
                 provider: 'GITHUB',
                 toolId: tool.toolId,
                 toolName: tool.name,
                 fetchedAt: new Date().toISOString(),
-                data: limitContext(sanitizeValue(result, 0)),
+                data: toolFailure
+                    ? buildGitHubFailureContext(toolFailure)
+                    : limitContext(sanitizeValue(result, 0)),
                 riskLevel: tool.riskLevel,
                 confirmed: call.confirmed === true,
             });
@@ -244,10 +245,46 @@ export function sanitizeGitHubResult(value: unknown): Record<string, unknown> {
     return limitContext(sanitizeValue(value, 0));
 }
 
+export interface GitHubToolFailure {
+    message: string;
+    permissionRequired: boolean;
+}
+
+export function parseGitHubToolFailure(result: unknown): GitHubToolFailure | null {
+    if (!isRecord(result)) return null;
+    const text = extractTextContent(result).trim();
+    if (result.isError !== true && !looksLikeGitHubFailure(text)) return null;
+    const message = text || 'GitHub MCP 返回了未包含数据的错误结果';
+    return {
+        message: message.slice(0, 1200),
+        permissionRequired: looksLikeGitHubPermissionFailure(message),
+    };
+}
+
+export function buildGitHubFailureContext(failure: GitHubToolFailure): Record<string, unknown> {
+    return {
+        complete: false,
+        permissionRequired: failure.permissionRequired,
+        dataAvailable: false,
+        error: {
+            category: failure.permissionRequired ? 'permission' : 'mcp',
+            message: failure.message,
+            hint: failure.permissionRequired
+                ? '请确认 GitHub OAuth 已包含 repo 权限，且当前账号对目标私有仓库具有访问权限；不要把本结果解释为仓库为空'
+                : 'GitHub MCP 查询未成功返回数据；不要把本结果解释为目标没有数据',
+        },
+        warnings: ['GitHub MCP 查询失败，结果不是空数据'],
+    };
+}
+
 async function openAuthenticatedClient(): Promise<ConnectedGitHubClient> {
     const clientId = await readStoredClientId();
     if (!clientId) throw new Error('GitHub OAuth Client ID 尚未初始化，请重新连接 GitHub');
-    if (!await readStoredTokens()) throw new UnauthorizedError('GitHub 尚未授权');
+    const tokens = await readStoredTokens();
+    if (!tokens) throw new UnauthorizedError('GitHub 尚未授权');
+    if (!hasRequiredGitHubOAuthScope(tokens.scope)) {
+        throw new Error('GITHUB_SCOPE_REQUIRED：当前 GitHub OAuth 不包含 repo 权限，无法查询私有仓库，请重新连接 GitHub');
+    }
     const provider = new RemoteMcpOAuthProvider({
         clientId,
         redirectUrl: buildLoopbackRedirectUrl(GITHUB_OAUTH_CALLBACK_PATH),
@@ -554,9 +591,12 @@ function limitContext(value: unknown): Record<string, unknown> {
     };
 }
 
-function extractGitHubToolError(result: Record<string, unknown>): string {
-    const text = extractTextContent(result);
-    return text ? `GitHub MCP 操作失败：${text.slice(0, 500)}` : 'GitHub MCP 操作失败';
+function looksLikeGitHubFailure(value: string): boolean {
+    return /(?:error|failed|failure|forbidden|unauthorized|permission|not found|not accessible|access denied|private repository|requires? authentication|resource not accessible)/i.test(value);
+}
+
+function looksLikeGitHubPermissionFailure(value: string): boolean {
+    return /(?:forbidden|unauthorized|permission|access denied|not accessible|private repository|requires? authentication|resource not accessible|insufficient scope|must have)/i.test(value);
 }
 
 function extractTextContent(result: unknown): string {

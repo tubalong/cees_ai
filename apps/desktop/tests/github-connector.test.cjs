@@ -10,6 +10,8 @@ const {
     normalizeGitHubTool,
     sanitizeGitHubResult,
     hasRequiredGitHubOAuthScope,
+    parseGitHubToolFailure,
+    buildGitHubFailureContext,
 } = require('../dist-electron/connectors/github/github.connector.js');
 const { GITHUB_CONNECTOR_MANIFEST } = require('../dist-electron/connectors/github/github.manifest.js');
 
@@ -50,6 +52,32 @@ test('GitHub 结果移除敏感字段和二进制内容', () => {
     assert.equal(serialized.includes('secret'), false);
     assert.equal(serialized.includes('base64'), false);
     assert.equal(result.content, 'safe');
+});
+
+test('GitHub MCP 权限错误不会被当成空数据', () => {
+    const failure = parseGitHubToolFailure({
+        isError: true,
+        content: [{ type: 'text', text: 'Resource not accessible by integration: private repository' }],
+    });
+    assert.deepEqual(failure, {
+        message: 'Resource not accessible by integration: private repository',
+        permissionRequired: true,
+    });
+    assert.deepEqual(buildGitHubFailureContext(failure), {
+        complete: false,
+        permissionRequired: true,
+        dataAvailable: false,
+        error: {
+            category: 'permission',
+            message: 'Resource not accessible by integration: private repository',
+            hint: '请确认 GitHub OAuth 已包含 repo 权限，且当前账号对目标私有仓库具有访问权限；不要把本结果解释为仓库为空',
+        },
+        warnings: ['GitHub MCP 查询失败，结果不是空数据'],
+    });
+    assert.equal(parseGitHubToolFailure({
+        isError: false,
+        content: [{ type: 'text', text: 'repository has 3 issues' }],
+    }), null);
 });
 
 test('GitHub Adapter 委托标准生命周期', async () => {

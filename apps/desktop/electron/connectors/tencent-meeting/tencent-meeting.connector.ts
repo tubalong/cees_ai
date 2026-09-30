@@ -49,10 +49,25 @@ export const TENCENT_MEETING_PACKAGE_SHA256 = '51d0cbb69d8400e29e73e88a5e1a0a3b6
 const MAX_ARCHIVE_BYTES = 24 * 1024 * 1024;
 const MAX_BINARY_BYTES = 16 * 1024 * 1024;
 const MAX_CONTEXT_BYTES = 56 * 1024;
-const MAX_CALLS = 3;
+/** 单轮计划调用上限，与契约 plan 结果与 Desktop 单轮预算一致。 */
+const MAX_CALLS = 5;
+const MAX_PAGINATION_PAGES = 20;
 const AUTHORIZATION_TIMEOUT_MS = 330_000;
 const TOOL_DISCOVERY_CONCURRENCY = 6;
 const SENSITIVE_KEY_PATTERN = /(?:token|secret|cookie|authorization|credential|password|(?:^|_)pwd(?:$|_))/i;
+const TENCENT_MEETING_PAGE_SIZE_LIMITS: Record<string, number> = {
+    'meeting.list': 20,
+    'meeting.list-ended': 30,
+    'meeting.search': 30,
+    'meeting.invitees-list': 30,
+    'record.list': 30,
+    'record.address': 30,
+    'record.search': 30,
+    'report.participants': 100,
+    'report.waiting-room-log': 100,
+    'minutes.search': 50,
+    'minutes.get': 30,
+};
 
 const RELEASES: Record<string, TencentMeetingRelease> = {
     'win32-x64': {
@@ -221,7 +236,7 @@ export async function executeTencentMeetingCalls(
     calls: TencentMeetingConnectorPlannedCall[],
 ): Promise<TencentMeetingConnectorContext[]> {
     if (!Array.isArray(calls) || calls.length === 0 || calls.length > MAX_CALLS) {
-        throw new Error('腾讯会议连接器每次必须执行一至三个工具调用');
+        throw new Error('腾讯会议连接器每次必须执行一至五个工具调用');
     }
     await requireAuthorized();
     const tools = await discoverTencentMeetingTools();
@@ -232,7 +247,7 @@ export async function executeTencentMeetingCalls(
         if (!tool) throw new Error(`腾讯会议 CLI 工具不存在：${call.toolId}`);
         assertTencentMeetingCallAllowed(tool, call);
         const args = buildTencentMeetingCliArguments(tool, call.arguments);
-        const payload = await runTencentMeetingJson(args, 90_000);
+        const payload = await runTencentMeetingPaginatedJson(tool.toolId, args, 90_000);
         const data = normalizeTencentMeetingCliResult(payload);
         if (Buffer.byteLength(JSON.stringify(data), 'utf8') > MAX_CONTEXT_BYTES) {
             throw new Error(`腾讯会议工具 ${tool.name} 返回内容过大，请缩小查询范围`);
@@ -345,6 +360,141 @@ export function normalizeTencentMeetingCliResult(value: unknown): Record<string,
     if (isRecord(value)) return sanitizeRecord(value);
     if (Array.isArray(value)) return sanitizeRecord({ items: value });
     return sanitizeRecord({ result: value });
+}
+
+export function isTencentMeetingPaginatedTool(toolId: string): boolean {
+    return Object.prototype.hasOwnProperty.call(TENCENT_MEETING_PAGE_SIZE_LIMITS, toolId);
+}
+
+export function extractTencentMeetingNextPageToken(value: unknown): string | null {
+    if (Array.isArray(value)) {
+        for (const item of value) {
+            const token = extractTencentMeetingNextPageToken(item);
+            if (token) return token;
+        }
+        return null;
+    }
+    if (!isRecord(value)) return null;
+    for (const key of ['next_page_token', 'nextPageToken']) {
+        const token = value[key];
+        if (typeof token === 'string' && token.trim()) return token.trim();
+    }
+    for (const nested of Object.values(value)) {
+        const token = extractTencentMeetingNextPageToken(nested);
+        if (token) return token;
+    }
+    return null;
+}
+
+export function hasTencentMeetingMorePages(value: unknown): boolean {
+    if (Array.isArray(value)) return value.some(hasTencentMeetingMorePages);
+    if (!isRecord(value)) return false;
+    for (const key of ['has_more', 'hasMore']) if (value[key] === true) return true;
+    return Object.values(value).some(hasTencentMeetingMorePages);
+}
+
+export function mergeTencentMeetingPages(values: readonly unknown[]): unknown {
+    if (values.length === 0) return {};
+    let merged = values[0];
+    for (const value of values.slice(1)) merged = mergeTencentMeetingPageValue(merged, value);
+    return merged;
+}
+
+export interface TencentMeetingPaginationCompleteness {
+    complete: boolean;
+    pagesFetched: number;
+    hasMore: boolean;
+    nextPageToken: string | null;
+    warnings: string[];
+}
+
+async function runTencentMeetingPaginatedJson(
+    toolId: string,
+    args: string[],
+    timeoutMs: number,
+): Promise<unknown> {
+    if (!isTencentMeetingPaginatedTool(toolId)) return runTencentMeetingJson(args, timeoutMs);
+    const pageSize = TENCENT_MEETING_PAGE_SIZE_LIMITS[toolId]!;
+    const pages: unknown[] = [];
+    const seenTokens = new Set<string>();
+    let pageToken: string | null = extractPageTokenArgument(args);
+    let hasMore = false;
+    let complete = true;
+    let warning: string | null = null;
+
+    for (let page = 0; page < MAX_PAGINATION_PAGES; page += 1) {
+        const pageArgs = withTencentMeetingPaginationArguments(args, pageSize, pageToken);
+        const payload = await runTencentMeetingJson(pageArgs, timeoutMs);
+        pages.push(payload);
+        const nextToken = extractTencentMeetingNextPageToken(payload);
+        hasMore = hasTencentMeetingMorePages(payload) || Boolean(nextToken);
+        if (!nextToken) {
+            if (hasMore) {
+                complete = false;
+                warning = '腾讯会议返回 has_more=true 但没有返回下一页游标，结果可能不完整';
+            }
+            pageToken = null;
+            break;
+        }
+        if (seenTokens.has(nextToken)) {
+            complete = false;
+            warning = '腾讯会议返回了重复的分页游标，已停止继续请求';
+            pageToken = nextToken;
+            break;
+        }
+        seenTokens.add(nextToken);
+        pageToken = nextToken;
+    }
+    if (pages.length >= MAX_PAGINATION_PAGES && pageToken) {
+        complete = false;
+        hasMore = true;
+        warning = `腾讯会议分页超过 ${MAX_PAGINATION_PAGES} 页，结果未完全展开`;
+    }
+
+    const merged = mergeTencentMeetingPages(pages);
+    const completeness: TencentMeetingPaginationCompleteness = {
+        complete,
+        pagesFetched: pages.length,
+        hasMore,
+        nextPageToken: complete ? null : pageToken,
+        warnings: warning ? [warning] : [],
+    };
+    if (isRecord(merged)) return { ...merged, completeness };
+    return { items: merged, completeness };
+}
+
+function withTencentMeetingPaginationArguments(args: string[], pageSize: number, pageToken: string | null): string[] {
+    const filtered: string[] = [];
+    for (let index = 0; index < args.length; index += 1) {
+        const argument = args[index]!;
+        if (argument === '--page-size' || argument === '--page-token') {
+            index += 1;
+            continue;
+        }
+        if (argument.startsWith('--page-size=') || argument.startsWith('--page-token=')) continue;
+        filtered.push(argument);
+    }
+    filtered.push('--page-size', String(pageSize));
+    if (pageToken) filtered.push('--page-token', pageToken);
+    return filtered;
+}
+
+function extractPageTokenArgument(args: string[]): string | null {
+    for (let index = 0; index < args.length; index += 1) {
+        if (args[index] === '--page-token') return args[index + 1] || null;
+        if (args[index]?.startsWith('--page-token=')) return args[index]!.slice('--page-token='.length) || null;
+    }
+    return null;
+}
+
+function mergeTencentMeetingPageValue(left: unknown, right: unknown): unknown {
+    if (Array.isArray(left) && Array.isArray(right)) return [...left, ...right];
+    if (!isRecord(left) || !isRecord(right)) return right;
+    const merged: Record<string, unknown> = { ...left };
+    for (const [key, value] of Object.entries(right)) {
+        merged[key] = key in merged ? mergeTencentMeetingPageValue(merged[key], value) : value;
+    }
+    return merged;
 }
 
 export function extractTencentMeetingBinaryArchive(archive: Buffer, expectedEntry: string): Buffer {

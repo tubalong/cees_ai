@@ -12,7 +12,7 @@
 - 已落地 GitHub 官方远程 MCP、OAuth PKCE、官方 MCP SDK、动态工具目录、API 无副作用规划和 Desktop 确认执行；
 - 已落地连接器语义路由：Desktop 只上报一级能力摘要（`ConnectorManifest.capabilitySummary` / `routingExamples`），由 `POST /assistant/connectors/route` 决定本轮激活哪些连接器，不接收工具目录与凭据；
 - 已落地连接器调用分级审计：上下文随轮次上报客户端自报的 `ConnectorContext.riskLevel` / `confirmed`，服务端对写/破坏性调用逐条写 `CONNECTOR_WRITE_OPERATION`、对只读调用默认每轮聚合一条 `CONNECTOR_READ_OPERATION`（租户可用 `connectorReadAuditEnabled` 改为逐条）；审计只保留字段白名单摘要，不记录调用参数、本地路径或凭据；
-- 已落地受控多步接力：Desktop 在同一条用户消息里最多编排两轮「规划 → 确认 → 执行」，第二轮只回喂最近 3 条脱敏摘要（`{ toolId, argumentsDigest, resultDigest, status }`，单条 ≤ 2000 字）作为**不可信上下文**，两轮合计调用 ≤ 3 次；规划模型通过 `<命名空间>_follow_up` 控制工具提示是否需要下一轮，缺失或非法一律不进入第二轮；
+- 已落地受控多步接力：Desktop 在同一条用户消息里最多编排两轮「规划 → 确认 → 执行」，第二轮只回喂最近 5 条脱敏摘要（`{ toolId, argumentsDigest, resultDigest, status }`，单条 ≤ 2000 字）作为**不可信上下文**，两轮合计调用 ≤ 5 次；规划模型通过 `<命名空间>_follow_up` 控制工具提示是否需要下一轮，缺失或非法一律不进入第二轮；
 - 已删除腾讯会议旧服务端 OAuth、Token 托管、固定工具网关和数据表。
 
 ## 2. 目标
@@ -159,7 +159,9 @@ GitHub Manifest 使用 `REMOTE_MCP`、`DESKTOP`、`OAUTH`，不自动安装第�
 6. 写入和破坏性操作先确认，再由持有凭据的 Desktop 执行；
 7. 结果脱敏、限长后作为 `ConnectorContext` 注入会话。
 
-工具超过模型单次可接受数量时，规划器先做候选选择，再规划实际调用。腾讯会议最多接收 128 个目录项，GitHub 和企业微信最多接收 256 个目录项；ai-service 单次最多接收 32 个模型工具，其中 1 个留给「是否需要下一轮」控制工具，因此各规划器最多选择 31 个真实候选并返回三条调用。
+工具超过模型单次可接受数量时，规划器先做候选选择，再规划实际调用。腾讯会议最多接收 128 个目录项，GitHub 和企业微信最多接收 256 个目录项；ai-service 单次最多接收 32 个模型工具，其中 1 个留给「是否需要下一轮」控制工具，因此各规划器最多选择 31 个真实候选并返回五条调用。
+
+连接器查询结果中的 `complete`、`hasMore`、`nextPageToken`、`permissionRequired`、`dataAvailable` 和 `warnings` 由 Desktop 负责生成、由 API 原样保留在 `data` 内并向模型声明统一语义：不完整结果不能被回答为完整历史，无权限或调用失败不能被回答为“没有数据”，只有明确 `complete=true` 的空列表才表示当前查询范围确实为空。
 
 规划器不能把连接器内部 toolId 直接当作模型工具名。ai-service 的 `ChatToolDefinition` 只接受匹配 `^[A-Za-z][A-Za-z0-9_-]*$` 且不超过 128 字符的 `name`，`description` 上限 2048 字符；腾讯会议官方 CLI 的 `meeting.list`、企业微信的 `calendar.schedules.list` 这类带点号的 ID 不满足该约束，会直接被 ai-service 请求校验拦成 422，整轮规划失败。因此各规划器统一通过 `buildConnectorModelToolDefinitions` 生成 `<命名空间>_tool_<序号>` 形式的模型工具名，把内部 toolId 与风险标记写进描述，超长描述按契约上限截断，并在规划结果里用模型名回映射成连接器内部 toolId。
 
@@ -167,7 +169,7 @@ GitHub 目录超过候选上限时，规划器固定保留 `search_repositories`
 
 语义路由已落地：Desktop 只上报一级能力摘要，由 `POST /assistant/connectors/route` 决定本轮激活哪些连接器，被命中的连接器再走上面的二级规划；用户点名连接器或从连接器卡片进入对话时直接硬命中，不调用路由。契约见 [连接器语义路由 API](../api/assistant-connector-routing-api.md)。
 
-受控多步接力与连接器调用分级审计亦已落地（契约 `0.47.0` / `0.45.0`）：循环、轮数上限（2）、调用上限（合计 ≤ 3）与摘要构造都在 Desktop 的 `Workspace.tsx`，服务端只负责把摘要当不可信数据注入规划指令，并按分级写审计。设计、落地偏差与验收口径见 [连接器语义路由、多步接力与调用审计](connector-routing-and-iteration.md)。
+受控多步接力与连接器调用分级审计亦已落地（契约 `0.47.0` / `0.45.0`）：循环、轮数上限（2）、调用上限（合计 ≤ 5）与摘要构造都在 Desktop 的 `Workspace.tsx`，服务端只负责把摘要当不可信数据注入规划指令，并按分级写审计。设计、落地偏差与验收口径见 [连接器语义路由、多步接力与调用审计](connector-routing-and-iteration.md)。
 
 ## 8. 安全边界
 

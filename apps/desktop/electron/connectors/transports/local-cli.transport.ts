@@ -187,18 +187,56 @@ export function parseLocalCliJsonOutput(output: string, outputLabel = '本地 CL
                 continue;
             }
         }
-        const jsonStarts = [trimmed.indexOf('{'), trimmed.indexOf('[')]
-            .filter((index) => index >= 0)
-            .sort((left, right) => left - right);
-        for (const jsonStart of jsonStarts) {
-            try {
-                return JSON.parse(trimmed.slice(jsonStart)) as unknown;
-            } catch {
-                continue;
-            }
-        }
+        const embedded = extractEmbeddedJsonValues(trimmed);
+        if (embedded.length > 0) return embedded[embedded.length - 1]!.value;
         throw new Error(`${outputLabel} 返回了无法解析的 JSON 数据`);
     }
+}
+
+function extractEmbeddedJsonValues(output: string): Array<{ start: number; end: number; value: unknown }> {
+    const values: Array<{ start: number; end: number; value: unknown }> = [];
+    for (let start = 0; start < output.length; start += 1) {
+        if (output[start] !== '{' && output[start] !== '[') continue;
+        const end = findJsonValueEnd(output, start);
+        if (end === null) continue;
+        try {
+            values.push({ start, end, value: JSON.parse(output.slice(start, end)) as unknown });
+        } catch {
+            continue;
+        }
+    }
+    values.sort((left, right) => left.end - right.end || right.start - left.start);
+    return values;
+}
+
+function findJsonValueEnd(output: string, start: number): number | null {
+    const opening = output[start];
+    const closing = opening === '{' ? '}' : opening === '[' ? ']' : null;
+    if (!closing) return null;
+    const stack = [closing];
+    let inString = false;
+    let escaped = false;
+    for (let index = start + 1; index < output.length; index += 1) {
+        const character = output[index];
+        if (inString) {
+            if (escaped) escaped = false;
+            else if (character === '\\') escaped = true;
+            else if (character === '"') inString = false;
+            continue;
+        }
+        if (character === '"') {
+            inString = true;
+            continue;
+        }
+        if (character === '{') stack.push('}');
+        else if (character === '[') stack.push(']');
+        else if (character === '}' || character === ']') {
+            if (stack[stack.length - 1] !== character) return null;
+            stack.pop();
+            if (stack.length === 0) return index + 1;
+        }
+    }
+    return null;
 }
 
 function validateArguments(args: string[]): string[] {

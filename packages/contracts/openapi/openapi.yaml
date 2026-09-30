@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: CEES AI API
-  version: 0.54.0
+  version: 0.55.0
   description: 以本文件为唯一事实源的公开 API 契约。资源与操作按 docs/api 约定补充。
 
 servers:
@@ -11217,7 +11217,7 @@ components:
             format: uuid
         connectorContexts:
           type: array
-          maxItems: 3
+          maxItems: 7
           default: []
           description: 用户消息在该轮提交的已脱敏连接器上下文；其他角色固定为空数组。用于恢复连接器授权提示等确定性交互，不作为 CEES 权限或业务事实依据
           items:
@@ -12199,11 +12199,11 @@ components:
             不落库、不作为业务写入或权限依据，也不属于 ConnectorContext 事实通道。
         connectorContexts:
           type: array
-          maxItems: 5
+          maxItems: 7
           description: >-
             Desktop 从用户已授权的本地连接器或本机工具读取的本轮只读上下文；
             不会作为业务事实或写操作权限依据。
-            上限 5 = 连接器计划调用（最多 3）+ 本机操作结果（1）+ 本机能力声明（1）。
+            上限 7 = 连接器计划调用（最多 5）+ 本机操作结果（1）+ 本机能力声明（1）。
           items:
             $ref: '#/components/schemas/ConnectorContext'
 
@@ -12326,12 +12326,20 @@ components:
             $ref: '#/components/schemas/TencentMeetingConnectorTool'
         previousSteps:
           type: array
-          maxItems: 3
+          maxItems: 5
           description: >-
             同一次用户请求内此前已执行的连接器步骤摘要（脱敏、不可信）；缺省或为空表示第一轮
             规划。Desktop 只在第一轮返回 followUpMayBeNeeded 时进入第二轮。
           items:
             $ref: '#/components/schemas/ConnectorPreviousStep'
+        recentMessages:
+          type: array
+          maxItems: 6
+          description: >-
+            同一会话最近若干轮对话（脱敏、不可信），仅用于消解代词与省略式追问
+            （例如「那这个月的呢」「还有呢」）；缺省或为空表示没有可用的会话上下文。
+          items:
+            $ref: '#/components/schemas/ConnectorRoutingRecentMessage'
 
     TencentMeetingConnectorPlannedCall:
       type: object
@@ -12354,7 +12362,7 @@ components:
       properties:
         calls:
           type: array
-          maxItems: 3
+          maxItems: 5
           items:
             $ref: '#/components/schemas/TencentMeetingConnectorPlannedCall'
         followUpMayBeNeeded:
@@ -12428,12 +12436,20 @@ components:
             $ref: '#/components/schemas/WeComConnectorTool'
         previousSteps:
           type: array
-          maxItems: 3
+          maxItems: 5
           description: >-
             同一次用户请求内此前已执行的连接器步骤摘要（脱敏、不可信）；缺省或为空表示第一轮
             规划。Desktop 只在第一轮返回 followUpMayBeNeeded 时进入第二轮。
           items:
             $ref: '#/components/schemas/ConnectorPreviousStep'
+        recentMessages:
+          type: array
+          maxItems: 6
+          description: >-
+            同一会话最近若干轮对话（脱敏、不可信），仅用于消解代词与省略式追问
+            （例如「那这个月的呢」「还有呢」）；缺省或为空表示没有可用的会话上下文。
+          items:
+            $ref: '#/components/schemas/ConnectorRoutingRecentMessage'
 
     WeComConnectorPlannedCall:
       type: object
@@ -12456,7 +12472,7 @@ components:
       properties:
         calls:
           type: array
-          maxItems: 3
+          maxItems: 5
           items:
             $ref: '#/components/schemas/WeComConnectorPlannedCall'
         followUpMayBeNeeded:
@@ -12613,12 +12629,20 @@ components:
             $ref: '#/components/schemas/GitHubConnectorTool'
         previousSteps:
           type: array
-          maxItems: 3
+          maxItems: 5
           description: >-
             同一次用户请求内此前已执行的连接器步骤摘要（脱敏、不可信）；缺省或为空表示第一轮
             规划。Desktop 只在第一轮返回 followUpMayBeNeeded 时进入第二轮。
           items:
             $ref: '#/components/schemas/ConnectorPreviousStep'
+        recentMessages:
+          type: array
+          maxItems: 6
+          description: >-
+            同一会话最近若干轮对话（脱敏、不可信），仅用于消解代词与省略式追问
+            （例如「那这个月的呢」「还有呢」）；缺省或为空表示没有可用的会话上下文。
+          items:
+            $ref: '#/components/schemas/ConnectorRoutingRecentMessage'
 
     GitHubConnectorPlannedCall:
       type: object
@@ -12641,7 +12665,7 @@ components:
       properties:
         calls:
           type: array
-          maxItems: 3
+          maxItems: 5
           items:
             $ref: '#/components/schemas/GitHubConnectorPlannedCall'
         followUpMayBeNeeded:
@@ -12739,6 +12763,8 @@ components:
     ConnectorRoutingRecentMessage:
       type: object
       additionalProperties: false
+      description: >-
+        最近一轮对话摘要。路由与四个连接器 plan 请求共用；只用于消解代词与省略表达，不作为业务事实或授权。
       required: [role, content]
       properties:
         role:
@@ -12764,10 +12790,35 @@ components:
           type: [string, 'null']
           maxLength: 500
           description: 目标不唯一时的反问提示；非空时 Desktop 不得规划或执行任何连接器调用
+        clarificationOptions:
+          type: array
+          maxItems: 8
+          description: clarification 非空时可供用户选择的候选连接器；Desktop 选择后才可重新发起本轮规划
+          items:
+            $ref: '#/components/schemas/ConnectorRoutingOption'
         reason:
           type: string
           maxLength: 500
           description: 路由依据的简短说明，用于审计与排障，不展示为业务事实
+
+    ConnectorRoutingOption:
+      type: object
+      additionalProperties: false
+      required: [provider, displayName, state, capabilitySummary]
+      properties:
+        provider:
+          $ref: '#/components/schemas/ConnectorRoutingProvider'
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 80
+        state:
+          type: string
+          enum: [NOT_INSTALLED, AUTH_REQUIRED, PROFILE_REQUIRED, READY, ERROR]
+        capabilitySummary:
+          type: string
+          minLength: 1
+          maxLength: 300
 
     ConnectorRoutingResponseEnvelope:
       type: object
@@ -12825,12 +12876,20 @@ components:
             $ref: '#/components/schemas/DingTalkConnectorTool'
         previousSteps:
           type: array
-          maxItems: 3
+          maxItems: 5
           description: >-
             同一次用户请求内此前已执行的连接器步骤摘要（脱敏、不可信）；缺省或为空表示第一轮
             规划。Desktop 只在第一轮返回 followUpMayBeNeeded 时进入第二轮。
           items:
             $ref: '#/components/schemas/ConnectorPreviousStep'
+        recentMessages:
+          type: array
+          maxItems: 6
+          description: >-
+            同一会话最近若干轮对话（脱敏、不可信），仅用于消解代词与省略式追问
+            （例如「那这个月的呢」「还有呢」）；缺省或为空表示没有可用的会话上下文。
+          items:
+            $ref: '#/components/schemas/ConnectorRoutingRecentMessage'
 
     DingTalkConnectorPlannedCall:
       type: object
@@ -12853,7 +12912,7 @@ components:
       properties:
         calls:
           type: array
-          maxItems: 3
+          maxItems: 5
           items:
             $ref: '#/components/schemas/DingTalkConnectorPlannedCall'
         followUpMayBeNeeded:

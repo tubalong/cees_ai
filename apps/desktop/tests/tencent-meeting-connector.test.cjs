@@ -14,6 +14,10 @@ const {
     buildTencentMeetingCliArguments,
     classifyTencentMeetingToolRisk,
     extractTencentMeetingBinaryArchive,
+    extractTencentMeetingNextPageToken,
+    hasTencentMeetingMorePages,
+    isTencentMeetingPaginatedTool,
+    mergeTencentMeetingPages,
     normalizeTencentMeetingCliResult,
     parseTencentMeetingAuthStatus,
     parseTencentMeetingCommandHelp,
@@ -130,6 +134,28 @@ test('腾讯会议 CLI 结果移除凭据字段', () => {
         meeting_id: 'meeting-1', access_token: 'secret', nested: { password: 'hidden', pwd: 'hidden-too', title: '周会' },
     }), {
         meeting_id: 'meeting-1', nested: { title: '周会' },
+    });
+});
+
+test('腾讯会议分页结果识别游标并合并列表数据', () => {
+    assert.equal(isTencentMeetingPaginatedTool('meeting.list-ended'), true);
+    assert.equal(isTencentMeetingPaginatedTool('meeting.get'), false);
+    const first = {
+        data: { meeting_info_list: [{ meeting_id: 'm-1' }] },
+        next_page_token: 'token-2',
+        has_more: true,
+    };
+    const second = {
+        data: { meeting_info_list: [{ meeting_id: 'm-2' }] },
+        next_page_token: '',
+        has_more: false,
+    };
+    assert.equal(extractTencentMeetingNextPageToken(first), 'token-2');
+    assert.equal(hasTencentMeetingMorePages(first), true);
+    assert.deepEqual(mergeTencentMeetingPages([first, second]), {
+        data: { meeting_info_list: [{ meeting_id: 'm-1' }, { meeting_id: 'm-2' }] },
+        next_page_token: '',
+        has_more: false,
     });
 });
 

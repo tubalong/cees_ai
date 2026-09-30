@@ -4,6 +4,7 @@
 > Owner：B（`apps/desktop/src/app/**` 与 `apps/api/src/assistant/**` 的唯一 owner）
 > 关联文档：
 > - [Desktop 连接器运行时](connector-runtime.md)：连接器生命周期、凭据位置、动态工具与规划边界
+> - [连接器真实查询联调验收](connector-real-query-validation.md)：真实账号查询用例、完整性状态与失败判定
 > - [钉钉 DWS/MCP 连接器](../product/dingtalk-mcp-connector.md)、[腾讯会议连接器](../product/tencent-meeting-connector.md)、[企业微信 CLI 连接器](../product/wecom-cli-connector.md)、[GitHub 官方远程 MCP 连接器](../product/github-remote-mcp-connector.md)
 > - [AI 助手业务写操作](../product/assistant-business-tools.md)、[通用 Tool Calling](ai-tool-calling.md)
 
@@ -19,16 +20,16 @@
 
 本文把这三件事定义成可独立交付的三期，并明确不做的事：**不把连接器搬进 `apps/api`，不让 API 接触凭据，不让模型指定可执行文件、网络目标或 Header**。
 
-差距一已按本文实现，接口契约见 [连接器语义路由 API](../api/assistant-connector-routing-api.md)；差距三已按 §5 实现，契约见 [API 与契约约定](../api/README.md) 的 `0.45.0` 条目；差距二已按 §4 实现（`0.47.0`），落地细节与示例偏差见 §4.6。逐项状态见 §9 状态表。
+差距一已按本文实现，接口契约见 [连接器语义路由 API](../api/assistant-connector-routing-api.md)；阶段一补充了会话级连接器开关和结构化平台选择；差距三已按 §5 实现，契约见 [API 与契约约定](../api/README.md) 的 `0.45.0` 条目；差距二已按 §4 实现（`0.47.0`），落地细节与示例偏差见 §4.6。逐项状态见 §9 状态表。
 
 ## 2. 现状核查
 
 | 能力 | 现状 | 证据 |
 | --- | --- | --- |
-| 连接器触发 | 已落地语义路由：点名（正则识别）或 `preferredConnector` / `forcedConnector` 直接硬命中，其余问题由 `POST /assistant/connectors/route` 只凭一级能力摘要决定激活哪些连接器；正则不再是主判据 | `apps/desktop/src/app/Workspace.tsx` 的 `detectNamedConnectors` / `collectConnectorRoutingCandidates`、`apps/api/src/assistant/connectors/connector-routing.service.ts` |
+| 连接器触发 | 已落地语义路由：点名（正则识别）或 `preferredConnector` / `forcedConnector` 直接硬命中，其余问题由 `POST /assistant/connectors/route` 只凭当前会话已启用且处于 `READY` 的一级能力摘要决定激活哪些连接器；存在平台歧义时返回全部候选，由用户点击选择，禁止 AI 自行猜测 | `apps/desktop/src/app/Workspace.tsx` 的 `detectNamedConnectors` / `collectConnectorRoutingCandidates`、`apps/api/src/assistant/connectors/connector-routing.service.ts` |
 | 工具目录下发 | **批量下发**：Desktop 现场发现工具后整份（含参数 Schema、`riskLevel`、`requiresConfirmation`）交给 API；目录 > 32 时先跑一次选择器 | `apps/api/src/assistant/connectors/*-planner.service.ts`、`apps/api/src/assistant/dto.ts` |
 | 规划/执行边界 | 已落地：`/assistant/connectors/<provider>/plan` 只规划，不持有凭据、不执行 | `apps/api/src/assistant/api/assistant-connector.controller.ts` |
-| 单轮调用上限 | 每个连接器每次最多 3 个调用；同一轮连接器上下文合计 ≤ 3 条 | `apps/desktop/electron/connectors/*/*.connector.ts` 的 `MAX_CALLS`、`Workspace.tsx` 的 `connectorContexts.length > 3` 校验 |
+| 单轮调用上限 | 每个连接器每次最多 5 个调用；同一轮连接器上下文合计 ≤ 5 条 | `apps/desktop/electron/connectors/*/*.connector.ts` 的 `MAX_CALLS`、`Workspace.tsx` 的 `connectorContexts.length > MAX_CONNECTOR_CALLS_PER_TURN`（=5）校验 |
 | 结果注入 | 已落地：随 USER 消息持久化，下一轮以 `<cees_connector_context>` 系统块注入 | `apps/api/src/assistant/runtime/context-builder.service.ts`（约 :400） |
 | 结果限长与脱敏 | 已落地：每连接器 ≤ 56 KiB，剥离 token/secret/cookie/authorization/credential/password/private_key 等键 | 各 `*.connector.ts` 的 `MAX_CONTEXT_BYTES` 与 `sanitizeValue` |
 | 依赖链 | **不支持**：规划期无执行结果，后一条命令不能引用前一条的实时返回值 | [腾讯会议连接器](../product/tencent-meeting-connector.md) §4；腾讯会议因此不开放 `contact` 独立查询 |
@@ -63,7 +64,7 @@ Renderer -> 仅对被激活的 provider 调 POST /assistant/connectors/<provider
 - `capabilitySummary` 每个连接器 ≤ 300 字，`routingExamples` ≤ 5 条短句；四个连接器合计控制在 2 KB 量级，可常驻。
 - 路由复用现有「工具式结构化选择」模式（`select_connectors` 工具 + 白名单校验），**不解析自由文本**，避免模型输出格式漂移。
 - 用户明确点名 provider、或从连接器卡片进入（`preferredConnector` / `forcedConnector`）时**直接硬命中，不调路由**。此时正则只承担「识别点名」这一件事，使未就绪的连接器仍能给出「请先安装并授权」的确定性引导。
-- `clarification` 非空时，Desktop 不调用任何连接器，把该提示作为新的可选请求字段 `connectorRoutingHint`（≤ 1000 字）注入本轮，让模型自然反问。**不复用 `ConnectorContext`**，避免把路由提示混进事实通道与审计白名单。
+- `clarification` 非空且返回 `clarificationOptions` 时，Desktop 不调用任何连接器，展示候选平台；用户选择后通过 `forcedConnector` 重新规划。没有结构化候选时才保留 `connectorRoutingHint` 兼容路径。**不复用 `ConnectorContext`**，避免把路由提示混进事实通道与审计白名单。
 - 省略式追问（「那这个月的呢」）必须能接回上一轮话题，因此请求额外携带最近 6 轮对话与上一轮尝试过的 provider；`previousProviders` 是客户端自报，服务端先与就绪候选集求交后才作为提示（见 §11）。
 
 ### 3.3 改动点
@@ -117,14 +118,14 @@ Renderer -> 仅对被激活的 provider 调 POST /assistant/connectors/<provider
 ### 4.2 方案
 
 ```text
-第 1 轮：plan(query, previousSteps=[]) -> calls[1..3] -> 确认 -> execute
-第 2 轮：plan(query, previousSteps=[第 1 轮摘要]) -> calls[0..3] -> 确认 -> execute
+第 1 轮：plan(query, previousSteps=[]) -> calls[1..5] -> 确认 -> execute
+第 2 轮：plan(query, previousSteps=[第 1 轮摘要]) -> calls[0..5] -> 确认 -> execute
 停止：轮数达到 MAX_CONNECTOR_ROUNDS 或本轮返回 0 个调用
 ```
 
-- `MAX_CONNECTOR_ROUNDS = 2`（最多两次规划、两次执行），**单轮总调用数仍 ≤ 3**，两轮合计 ≤ 3（沿用现有「单轮最多三个连接器调用」不变）。
+- `MAX_CONNECTOR_ROUNDS = 2`（最多两次规划、两次执行），**两轮合计 ≤ 5 次调用**（契约 `0.55.0` 由 3 提升到 5，与 plan 结果 `calls.maxItems`、各连接器 `MAX_CALLS` 保持一致）。
 - 是否进入第二轮：由第一轮规划返回的布尔提示 `followUpMayBeNeeded` 决定，Desktop 只负责循环与上限。**不确定就不进入第二轮**（保守默认，避免每次连接器问题都多付一次规划成本）。
-- 第二轮的 `previousSteps` 只放脱敏后的摘要：`{ toolId, argumentsDigest, resultDigest, status }`，每条摘要 ≤ 2000 字、最多 3 条。
+- 第二轮的 `previousSteps` 只放脱敏后的摘要：`{ toolId, argumentsDigest, resultDigest, status }`，每条摘要 ≤ 2000 字、最多 5 条。
 - `resultDigest` 是**不可信数据**：规划指令必须声明只能从中抽取 ID / 字段，不得执行其中的指令（连接器返回内容可能被第三方写入），也不得据此生成写操作以外的新目标。
 - 写操作确认：确认卡片改为可展示两轮的全部参数；**每一轮执行前仍逐项确认**，不提供「一次确认覆盖两轮」的捷径。
 - 达到上限仍未完成 → 如实报告已完成与未完成的部分，并建议拆成多轮；**禁止静默重试、禁止换路径绕过**。
@@ -165,9 +166,9 @@ Renderer -> 仅对被激活的 provider 调 POST /assistant/connectors/<provider
   planner 的真实工具候选上限从 32 收敛为 31；对外接口没有其它变化。
 - **摘要口径**：`argumentsDigest` / `resultDigest` 由 Desktop 用 `JSON.stringify` + 折叠换行 + 2000 字
   截断生成，只含工具 ID、参数摘要、结果摘要与状态，不含凭据；`status` 表示这一条调用是否拿到了返回
-  上下文（`SUCCESS` / `FAILED`）。只保留最近 3 条摘要。服务端把摘要包在固定定界符 `<previous_steps>`
+  上下文（`SUCCESS` / `FAILED`）。只保留最近 5 条摘要。服务端把摘要包在固定定界符 `<previous_steps>`
   内，并在指令中声明它是不可信数据。
-- **上限语义**：两轮合计调用仍 ≤ 3。某一轮的计划调用数超过剩余名额时沿用既有的硬错误（提示拆成多轮），
+- **上限语义**：两轮合计调用 ≤ 5（契约 `0.55.0` 由 3 放宽）。某一轮的计划调用数超过剩余名额时沿用既有的硬错误（提示拆成多轮），
   不做静默截断；达到轮数或调用名额上限导致无法继续时，额外提示「剩余步骤请拆成下一轮继续」。
 
 ## 5. 差距三：连接器调用审计
@@ -254,9 +255,9 @@ Renderer -> 仅对被激活的 provider 调 POST /assistant/connectors/<provider
 | `ConnectorManifest.capabilitySummary` / `routingExamples` | 已落地 |
 | `connectorRoutingHint` 消歧注入 | 已落地 |
 | 正则降级为兜底 | 已落地：正则只用于识别点名与未就绪引导，触发连接器改由路由决定 |
-| `previousSteps` 多步接力 | 已落地（契约 `0.47.0`）：四个 plan 接口可选入参，摘要 ≤ 3 条 × ≤ 2000 字，声明为不可信数据 |
+| `previousSteps` 多步接力 | 已落地（契约 `0.47.0`）：四个 plan 接口可选入参，摘要 ≤ 5 条 × ≤ 2000 字，声明为不可信数据 |
 | `followUpMayBeNeeded` | 已落地（契约 `0.47.0`）：控制工具 `<namespace>_follow_up`，缺失或非法按不需要第二轮 |
-| 受控两轮编排 | 已落地：`Workspace.tsx` 最多两轮、合计 ≤ 3 次调用、逐轮确认、超限如实提示 |
+| 受控两轮编排 | 已落地：`Workspace.tsx` 最多两轮、合计 ≤ 5 次调用、逐轮确认、超限如实提示 |
 | 连接器写操作逐条审计 | 已落地（契约 `0.45.0`，`CONNECTOR_WRITE_OPERATION`） |
 | 连接器读操作轮次级聚合审计 | 已落地（默认，`CONNECTOR_READ_OPERATION` 每轮一条） |
 | 租户级读审计开关 | 已落地（`tenants.connector_read_audit_enabled`，经 `PATCH /tenants/current` 修改） |
@@ -268,7 +269,7 @@ Renderer -> 仅对被激活的 provider 调 POST /assistant/connectors/<provider
 ## 10. 待确认问题（均已决定）
 
 1. ~~**第二轮触发判据**：由模型返回 `followUpMayBeNeeded` 提示，还是由 Desktop 按「意图含写操作或多连接器」的确定性规则判断？~~ **已决定**：由模型通过控制工具返回 `followUpMayBeNeeded` 提示（更贴合语义），但 Desktop 只把它当作「可以进入第二轮」的许可，判据、轮数与上限都在客户端；提示缺失或非法一律不进入第二轮。
-2. ~~**两轮的总调用上限**：保持合计 ≤ 3，还是放宽到每轮 ≤ 3（合计最多 6）？~~ **已决定**：保持合计 ≤ 3，沿用既有「单轮最多三个连接器调用」不变；放宽会同时放大确认次数与上下文体积。
+2. ~~**两轮的总调用上限**：保持合计 ≤ 3，还是放宽到每轮 ≤ 3（合计最多 6）？~~ **已决定（`0.47.0`）**：保持合计 ≤ 3。**后续修订（`0.55.0`）**：跨天/跨对象查询经常触顶，实际体验要求更大的单轮预算，因此放宽到合计 ≤ 5；仍保留硬上限与「超限提示拆成多轮」，不做静默截断。
 3. ~~**路由成本**：每个未点名品牌的问题都会多一次路由模型调用。是否只在「已连接连接器 ≥ 2」时才启用路由，单连接器直接命中？~~ **已决定**：就绪连接器 ≤ 1 时不调用模型，直接返回确定性结果（无就绪连接器返回空，单就绪连接器直接命中）；≥ 2 时才做一次路由模型调用，且未点名的问题才需要它。
 4. ~~**读操作审计默认值**：默认关闭是否足够？~~ **已决定**：默认即写入一条轮次级聚合审计（`CONNECTOR_READ_OPERATION`），开关 `connectorReadAuditEnabled` 只决定是否进一步逐条。因此「默认关闭」不会让只读调用完全无痕；开启后按次留痕，代价是审计量级上升。
 5. ~~**审计保留策略**：连接器审计量级远高于现有业务审计，`audit_logs` 是否需要保留期与归档策略（当前未见相关约定）。~~ **已决定**：采用分级保留——连接器只读逐条审计保留 `90` 天后物理删除，其余租户审计保留 `3` 年后迁入 `audit_logs_archive`，`platform_audit_logs` 永久保留。执行入口是既有后台任务（Redis 锁内串行），配置项、索引取舍与失败语义见 [审计日志保留策略](audit-log-retention.md)（契约 `0.48.0`）。
@@ -295,7 +296,7 @@ Renderer -> 仅对被激活的 provider 调 POST /assistant/connectors/<provider
 
 ### 11.3 不变量
 
-上下文与时钟都只是**提示**，不改变任何既有约束：路由仍只决定「试哪个连接器」，`clarification` 非空时仍不调用任何连接器；`previousProviders` 不放大权限；单轮仍 ≤3 次连接器调用、≤3 条连接器上下文；连接器仍不写入 CEES 业务数据，凭据不出本机。
+上下文与时钟都只是**提示**，不改变任何既有约束：路由仍只决定「试哪个连接器」，`clarification` 非空时仍不调用任何连接器；`previousProviders` 不放大权限；单轮仍 ≤5 次连接器调用、≤5 条连接器上下文；连接器仍不写入 CEES 业务数据，凭据不出本机。
 
 ### 11.4 验证
 
@@ -305,4 +306,40 @@ Renderer -> 仅对被激活的 provider 调 POST /assistant/connectors/<provider
 
 ### 11.5 待跟进
 
-- 腾讯会议 `meeting.list-ended` 的分页行为尚未独立验证。时钟修复后若仍出现「已结束会议条数偏少」，需按分页字段单独排查，不在本次改动范围内。
+- Desktop 执行层已对腾讯会议支持游标分页的列表命令自动续页，并在达到分页上限、游标重复或服务端返回矛盾分页信息时标记 `complete=false`，不能把截断结果表述为完整数据。
+- Desktop 执行层已对钉钉动态只读工具识别 `next_cursor`、`next_page_token`、`has_more` 等嵌套分页字段；具备游标参数的工具自动续页，考勤标准化也会检查 `data/result` 内的分页元数据。
+- GitHub MCP 的 `isError`、权限拒绝和资源不可访问结果会转换为 `complete=false` 的结构化失败上下文，明确区分「查询失败/无权限」与「查询成功但确实没有数据」。
+
+## 12. 缺陷修复：规划器对话上下文与单轮调用预算（契约 `0.55.0`）
+
+> 状态：**已落地**。触发问题是同一会话里的省略式追问（「我要整个月的」）在**规划阶段**规划出零个调用，
+> 本轮唯一连接器上下文只剩「本机能力声明」，模型据此答出「本轮只返回了本机能力声明」这类答非所问。
+
+### 12.1 根因
+
+| 现象 | 根因 |
+| --- | --- |
+| 追问「我要整个月的」不取数，回答复述「本机能力声明」 | `0.54.0` 只给**路由**补了对话上下文，四个 **plan** 接口仍只有 `query` / `tools` / `previousSteps`；规划器看不到上一轮在聊考勤，把追问当成全新问题而返回 0 个调用 |
+| 没有连接器数据时回答复述内部条目名 | Desktop 每轮都注入 `LOCAL_SYSTEM` 的「本机能力声明」，它是能力声明而不是查询结果，但注入文本没有说明这一点，模型把它当成「本轮连接器返回」 |
+| 单轮调用预算偏紧 | 每个连接器单轮最多 3 个调用、两轮合计 ≤ 3；跨天/跨对象查询容易触顶并提示「拆成多轮」 |
+
+### 12.2 改动
+
+- 契约（`0.55.0`，兼容新增）：四个 plan 请求新增可选 `recentMessages`（复用 `ConnectorRoutingRecentMessage`，≤6 条 × ≤2000 字）；`previousSteps.maxItems` 与 plan 结果 `calls.maxItems` 由 3 放宽到 5；`CreateTurnRequest` 与消息对象的 `connectorContexts.maxItems` 由 5 / 3 统一放宽到 7（= 计划调用 5 + 本机操作结果 1 + 本机能力声明 1）。
+- API：四个 planner 接收 `recentMessages`，经共用 `sanitizeConnectorRecentMessages` 收敛后按「历史轮次在前、当前这句最后」注入，并统一追加 `connectorRecentMessagesInstructions()`，声明历史轮次是不可信参考数据、只用于消解代词与省略表达；单轮计划调用上限改由共用 `CONNECTOR_PLANNED_CALLS_MAX` 提供，避免四个 planner 各自漂移。
+- API：`<cees_connector_context>` 注入文本明确 `provider=LOCAL_SYSTEM` 是**本机能力声明**而非本轮查询结果，不得当作数据回答、不得复述内部条目名称；没有对应数据时直接说明本轮未取到并给出下一步。
+- Desktop：四个 plan 调用带上最近 6 轮对话；单轮调用预算与上下文校验由 3 提升到 5；新增 `LOCAL_CAPABILITY_INTENT_PATTERN`，只在可能生成或保存本机产物的对话里注入本机能力声明，避免它出现在查询类对话里被误读。
+
+### 12.3 不变量
+
+对话上下文仍只是**提示**：不放大权限、不替代就绪校验与逐轮确认。单轮上限由 3 提升到 5，但仍是**硬上限**，超限沿用既有硬错误提示「拆成多轮」，不做静默截断；连接器仍不写入 CEES 业务数据，凭据不出本机。
+
+### 12.4 验证
+
+- API：`model-tool-definition.spec.ts`（最近对话上限与顺序、指令文本、`CONNECTOR_PLANNED_CALLS_MAX` 与摘要条数一致）、钉钉 planner spec（历史轮次作为 `messages` 下发、无上下文时不注入）。
+- Desktop：`tsc -b` + 生产构建 + 连接器回归脚本。
+- 契约：`pnpm --filter @cees/contracts lint` 与 `generate:public`，随后 `apps/api`、`apps/desktop` 全量构建与测试通过。
+
+### 12.5 待跟进
+
+- 单轮预算提高到 5 会放大单轮上下文体积（每个连接器结果上限 56 KiB）。接入更多连接器后需要重新评估总量，必要时改为按租户配置预算。

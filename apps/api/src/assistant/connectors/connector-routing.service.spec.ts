@@ -129,7 +129,29 @@ describe('ConnectorRoutingService', () => {
     await expect(service.route('帮我看看今天的记录', connectors)).resolves.toEqual({
       providers: [],
       clarification: '你想查钉钉考勤还是腾讯会议？',
+      clarificationOptions: connectors.map(({ provider, displayName, state, capabilitySummary }) => ({ provider, displayName, state, capabilitySummary })),
       reason: '目标不唯一',
+    });
+  });
+
+  it('模型只返回一个 provider 但仍然澄清时展示全部候选连接器', async () => {
+    const streamToolTurn = jest.fn(async () => stream([
+      {
+        type: 'tool_calls',
+        tool_calls: [{
+          id: 'call-1',
+          name: 'select_connectors',
+          arguments: { providers: ['DINGTALK'], clarification: '请选择要查询的平台', reason: '目标不唯一' },
+        }],
+      },
+      { type: 'completed', latency_ms: 1, finish_reason: 'tool_calls' },
+    ]));
+    const service = createService(streamToolTurn);
+
+    await expect(service.route('帮我查历史会议记录', connectors)).resolves.toMatchObject({
+      providers: [],
+      clarification: '请选择要查询的平台',
+      clarificationOptions: connectors.map(({ provider, displayName, state, capabilitySummary }) => ({ provider, displayName, state, capabilitySummary })),
     });
   });
 

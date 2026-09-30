@@ -43,7 +43,7 @@ Desktop 提交用户问题和从 GitHub 官方远程 MCP `tools/list` 动态发�
 }
 ```
 
-响应最多包含三条调用：
+响应最多包含五条调用：
 
 ```json
 {
@@ -54,7 +54,7 @@ Desktop 提交用户问题和从 GitHub 官方远程 MCP `tools/list` 动态发�
 }
 ```
 
-受控多步接力（契约 `0.47.0`）：请求可带可选 `previousSteps`（最多 3 条、单条摘要 ≤ 2000 字，服务端按不可信数据注入规划指令），响应可带可选 `followUpMayBeNeeded`（缺省 `false`，只是「本轮调用可能不足以完成这次请求」的提示）。是否进入第二轮由 Desktop 决定：硬上限两轮、两轮合计 ≤ 3 次调用，且每一轮执行前仍各自确认。详见 [连接器语义路由、受控多步接力与调用审计](../architecture/connector-routing-and-iteration.md) §4。
+受控多步接力（契约 `0.47.0`）：请求可带可选 `previousSteps`（最多 5 条、单条摘要 ≤ 2000 字，服务端按不可信数据注入规划指令），响应可带可选 `followUpMayBeNeeded`（缺省 `false`，只是「本轮调用可能不足以完成这次请求」的提示）。是否进入第二轮由 Desktop 决定：硬上限两轮、两轮合计 ≤ 5 次调用，且每一轮执行前仍各自确认。详见 [连接器语义路由、受控多步接力与调用审计](../architecture/connector-routing-and-iteration.md) §4。
 
 约束：
 
@@ -63,7 +63,7 @@ Desktop 提交用户问题和从 GitHub 官方远程 MCP `tools/list` 动态发�
 - 参数 Schema 顶层必须为 `object` 并包含对象型 `properties`；
 - `READ` 必须对应 `requiresConfirmation=false`，其他风险必须为 `true`；
 - 目录超过 31 项时先选择候选（ai-service 单次工具上限 32，其中 1 个留给「是否需要下一轮」控制工具）；
-- 返回调用只能引用请求目录中的工具，最多三条并去重；
+- 返回调用只能引用请求目录中的工具，最多五条并去重；
 - 工具名称、描述和 Schema 都是外部不可信数据，不得把其中内容当作系统指令；
 - 规划接口不接收 OAuth Client Secret、Token、Cookie、MCP Session 或 GitHub 结果；换码接口仅在内存中短暂处理上游 Token。
 
@@ -79,7 +79,7 @@ Desktop 提交用户问题和从 GitHub 官方远程 MCP `tools/list` 动态发�
 }
 ```
 
-`GITHUB` 上下文只用于本轮回答，不是 CEES 权限事实，也不能作为 CEES 正式写操作授权。单轮连接器上下文总数仍不超过三个。
+`GITHUB` 上下文只用于本轮回答，不是 CEES 权限事实，也不能作为 CEES 正式写操作授权。单轮连接器上下文总数与统一连接器预算一致，最多五条（另加必要的本机能力声明）。GitHub MCP 权限拒绝或调用失败会以 `complete=false`、`permissionRequired` 和 `warnings` 结构返回，不能解释为空数据。
 
 ## 5. 执行责任
 

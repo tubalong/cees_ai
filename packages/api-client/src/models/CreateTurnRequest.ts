@@ -34,7 +34,7 @@ export type CreateTurnRequest = {
      */
     connectorRoutingHint?: string | null;
     /**
-     * Desktop 从用户已授权的本地连接器或本机工具读取的本轮只读上下文； 不会作为业务事实或写操作权限依据。 上限 5 = 连接器计划调用（最多 3）+ 本机操作结果（1）+ 本机能力声明（1）。
+     * Desktop 从用户已授权的本地连接器或本机工具读取的本轮只读上下文； 不会作为业务事实或写操作权限依据。 上限 7 = 连接器计划调用（最多 5）+ 本机操作结果（1）+ 本机能力声明（1）。
      */
     connectorContexts?: Array<ConnectorContext>;
 };

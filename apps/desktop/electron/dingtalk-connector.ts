@@ -36,7 +36,9 @@ const MAX_CONTEXT_BYTES = 56 * 1024;
 const MAX_VISIBLE_ORGANIZATION_CONTEXT_BYTES = 40 * 1024;
 const MAX_VISIBLE_ORGANIZATION_DEPARTMENT_BYTES = 16 * 1024;
 const MAX_TOOL_COUNT = 1500;
-const MAX_CALLS = 3;
+const MAX_PAGINATION_PAGES = 20;
+/** 单轮计划调用上限，与契约 plan 结果与 Desktop 单轮预算一致。 */
+const MAX_CALLS = 5;
 const TOOL_ID_PATTERN = /^dws_read_[a-f0-9]{16}$/;
 const UNSAFE_PARAMETER_PATTERN = /(?:token|secret|cookie|authorization|credential|password|app[-_]?key|app[-_]?secret)/i;
 /**
@@ -592,7 +594,7 @@ export async function executeDingTalkReadCalls(calls: DingTalkConnectorPlannedCa
         // 考勤记录要先拿到真正的 JSON 才能做确定性换算，因此不走文本兜底；
         // 其余只读工具在 DWS 返回纯文本时保留原文，避免把「查询成功但无数据」变成解析失败。
         const isAttendanceRecord = ATTENDANCE_RECORD_TOOL_NAMES.has(current.name);
-        const payload = isAttendanceRecord ? await runDwsJson(args, 60_000) : await runDwsJsonOrText(args, 60_000);
+        const payload = isAttendanceRecord ? await runDwsJson(args, 60_000) : await runDingTalkReadQuery(current, args);
         const data = isAttendanceRecord ? normalizeDingTalkAttendanceContext(payload) : sanitizeConnectorData(payload);
         contexts.push(connectorContext(current, data));
     }
@@ -612,6 +614,152 @@ function connectorContext(tool: DiscoveredDwsTool, data: Record<string, unknown>
         // DWS 只暴露 effect=read 且 confirmation=not_required 的工具，因此固定为只读。
         riskLevel: 'READ',
     };
+}
+
+async function runDingTalkReadQuery(tool: DiscoveredDwsTool, args: string[]): Promise<unknown> {
+    const pagination = findDingTalkPaginationParameters(tool.rawParameters);
+    if (!pagination.tokenParameter) return addDingTalkCompleteness(await runDwsJsonOrText(args, 60_000), 1, null, null);
+    const pages: unknown[] = [];
+    const seenTokens = new Set<string>();
+    let nextToken = extractDingTalkArgumentToken(args, pagination.tokenParameter);
+    let complete = true;
+    let warning: string | null = null;
+
+    for (let page = 0; page < MAX_PAGINATION_PAGES; page += 1) {
+        const pageArgs = withDingTalkPaginationToken(args, pagination.tokenParameter, nextToken);
+        const payload = await runDwsJsonOrText(pageArgs, 60_000);
+        pages.push(payload);
+        const discoveredToken = extractDingTalkNextPageToken(payload);
+        const hasMore = hasDingTalkMorePages(payload);
+        if (!discoveredToken) {
+            if (hasMore) {
+                complete = false;
+                warning = '钉钉返回 has_more=true 但没有返回下一页游标，结果可能不完整';
+            }
+            nextToken = null;
+            break;
+        }
+        if (seenTokens.has(discoveredToken)) {
+            complete = false;
+            warning = '钉钉返回了重复的分页游标，已停止继续请求';
+            nextToken = discoveredToken;
+            break;
+        }
+        seenTokens.add(discoveredToken);
+        nextToken = discoveredToken;
+    }
+    if (pages.length >= MAX_PAGINATION_PAGES && nextToken) {
+        complete = false;
+        warning = `钉钉分页超过 ${MAX_PAGINATION_PAGES} 页，结果未完全展开`;
+    }
+    const merged = mergeDingTalkPages(pages);
+    return addDingTalkCompleteness(merged, pages.length, nextToken, warning);
+}
+
+function addDingTalkCompleteness(
+    payload: unknown,
+    pagesFetched: number,
+    nextToken: string | null,
+    warning: string | null,
+): unknown {
+    if (!isRecord(payload)) return payload;
+    const existingCompleteness = isRecord(payload.completeness) ? payload.completeness : {};
+    const complete = existingCompleteness.complete !== false
+        && !hasDingTalkMorePages(payload)
+        && extractDingTalkNextPageToken(payload) === null
+        && !nextToken;
+    const existingWarnings = Array.isArray(existingCompleteness.warnings)
+        ? existingCompleteness.warnings.filter((value): value is string => typeof value === 'string')
+        : [];
+    return {
+        ...payload,
+        completeness: {
+            ...existingCompleteness,
+            complete,
+            pagesFetched,
+            hasMore: !complete || Boolean(nextToken),
+            nextPageToken: complete ? null : nextToken,
+            warnings: [...existingWarnings, ...(warning ? [warning] : [])],
+        },
+    };
+}
+
+export function extractDingTalkNextPageToken(value: unknown): string | null {
+    if (Array.isArray(value)) {
+        for (const item of value) {
+            const token = extractDingTalkNextPageToken(item);
+            if (token) return token;
+        }
+        return null;
+    }
+    if (!isRecord(value)) return null;
+    for (const key of ['next_cursor', 'nextCursor', 'next_page_token', 'nextPageToken', 'next_token', 'nextToken']) {
+        const token = value[key];
+        if (typeof token === 'string' && token.trim()) return token.trim();
+    }
+    for (const nested of Object.values(value)) {
+        const token = extractDingTalkNextPageToken(nested);
+        if (token) return token;
+    }
+    return null;
+}
+
+export function hasDingTalkMorePages(value: unknown): boolean {
+    if (Array.isArray(value)) return value.some(hasDingTalkMorePages);
+    if (!isRecord(value)) return false;
+    for (const key of ['has_more', 'hasMore', 'more']) if (value[key] === true) return true;
+    for (const key of ['endpoint_exhausted', 'endpointExhausted']) if (value[key] === false) return true;
+    return Object.values(value).some(hasDingTalkMorePages);
+}
+
+export function mergeDingTalkPages(values: readonly unknown[]): unknown {
+    if (values.length === 0) return {};
+    let merged = values[0];
+    for (const value of values.slice(1)) merged = mergeDingTalkPageValue(merged, value);
+    return merged;
+}
+
+function findDingTalkPaginationParameters(parameters: Record<string, DwsParameter>): {
+    tokenParameter: string | null;
+} {
+    const tokenParameter = Object.keys(parameters).find((name) => [
+        'page_token', 'pageToken', 'next_page_token', 'nextPageToken', 'cursor', 'page_cursor', 'pageCursor',
+    ].includes(name));
+    return { tokenParameter: tokenParameter ?? null };
+}
+
+function withDingTalkPaginationToken(args: string[], parameter: string, token: string | null): string[] {
+    const flag = `--${parameter.replace(/[A-Z]/g, (value) => `_${value.toLowerCase()}`)}`;
+    const result: string[] = [];
+    for (let index = 0; index < args.length; index += 1) {
+        if (args[index] === flag) {
+            index += 1;
+            continue;
+        }
+        if (args[index]?.startsWith(`${flag}=`)) continue;
+        result.push(args[index]!);
+    }
+    if (token) result.push(flag, token);
+    return result;
+}
+
+function extractDingTalkArgumentToken(args: string[], parameter: string): string | null {
+    const flag = `--${parameter.replace(/[A-Z]/g, (value) => `_${value.toLowerCase()}`)}`;
+    for (let index = 0; index < args.length; index += 1) {
+        if (args[index] === flag) return args[index + 1] || null;
+        if (args[index]?.startsWith(`${flag}=`)) return args[index]!.slice(flag.length + 1) || null;
+    }
+    return null;
+}
+
+function mergeDingTalkPageValue(left: unknown, right: unknown): unknown {
+    if (Array.isArray(left) && Array.isArray(right)) return [...left, ...right];
+    if (!isRecord(left) || !isRecord(right)) return right;
+    const merged: Record<string, unknown> = { ...left };
+    for (const [key, value] of Object.entries(right)) {
+        merged[key] = key in merged ? mergeDingTalkPageValue(merged[key], value) : value;
+    }
+    return merged;
 }
 
 export function parseDingTalkReadTools(payload: unknown): DiscoveredDwsTool[] {
@@ -843,8 +991,7 @@ function attendanceReportedCount(payload: unknown): number | null {
 }
 
 function attendanceResultComplete(payload: unknown): boolean {
-    if (!isRecord(payload) || !isRecord(payload.meta) || !isRecord(payload.meta.pagination)) return true;
-    return payload.meta.pagination.endpoint_exhausted !== false;
+    return !hasDingTalkMorePages(payload) && extractDingTalkNextPageToken(payload) === null;
 }
 
 function firstRecordField(record: Record<string, unknown>, names: string[]): { name: string; value: unknown } | null {

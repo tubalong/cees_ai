@@ -13,7 +13,8 @@ const MAX_ARCHIVE_BYTES = 20 * 1024 * 1024;
 const MAX_BINARY_BYTES = 24 * 1024 * 1024;
 const MAX_CONTEXT_BYTES = 56 * 1024;
 const MAX_TOOL_COUNT = 256;
-const MAX_CALLS = 3;
+/** 单轮计划调用上限，与契约 plan 结果与 Desktop 单轮预算一致。 */
+const MAX_CALLS = 5;
 const MAX_TOOL_SCHEMA_BYTES = 16 * 1024;
 const AUTHORIZATION_TIMEOUT_MS = 5 * 60 * 1000;
 const QR_CODE_WAIT_MS = 15_000;
@@ -202,7 +203,7 @@ export async function discoverWeComTools(): Promise<WeComConnectorTool[]> {
 
 export async function executeWeComCalls(calls: WeComConnectorPlannedCall[]): Promise<WeComConnectorContext[]> {
     if (!Array.isArray(calls) || calls.length === 0 || calls.length > MAX_CALLS) {
-        throw new Error('企业微信连接器每次必须执行一至三个工具调用');
+        throw new Error('企业微信连接器每次必须执行一至五个工具调用');
     }
     await requireAuthorized();
     const tools = await discoverWeComTools();

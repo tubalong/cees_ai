@@ -112,7 +112,6 @@ describe('AssistantMessageContentService.toModelParts', () => {
         }
     });
 });
-
 describe('AssistantMessageContentService.resolveConversationImageReferences', () => {
     it('combines historical uploads and generated images for the same conversation', async () => {
         const harness = createHarness();
