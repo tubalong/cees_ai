@@ -114,6 +114,9 @@ max_retries = 1
 # deterministic provider is built in and needs no declaration. The first
 # enabled profile becomes the default when requests omit embedding_profile.
 # Keep it disabled until EMBEDDING_API_KEY is configured.
+# `dimension` is sent to the upstream as the OpenAI `dimensions` parameter, so
+# MRL-truncating models may declare less than their native dimension, while a
+# self-hosted service that ignores the parameter must declare the native one.
 [embedding_profiles.primary]
 enabled = false
 provider = "openai_compatible"
