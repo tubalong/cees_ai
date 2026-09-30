@@ -8,6 +8,8 @@
 
 公开契约 `0.55.0` 把同一份**对话上下文**补到四个规划端点：`<provider>/plan` 请求可选新增 `recentMessages`（复用 `ConnectorRoutingRecentMessage`，≤6 条 × ≤2000 字），并把单轮计划调用上限（`previousSteps.maxItems` 与 plan 结果 `calls.maxItems`）由 3 放宽到 5、`connectorContexts.maxItems` 由 5 放宽到 7。原因与验收见 [连接器语义路由、受控多步接力与调用审计](../architecture/connector-routing-and-iteration.md) §12。
 
+阶段一在同一兼容响应中新增可选 `clarificationOptions`。当 `clarification` 非空且存在多个就绪候选时，Desktop 必须展示这些候选供用户选择；只有用户选择后，客户端才能以 `forcedConnector` 重新发起本轮规划。该字段不改变授权范围，也不代表已执行任何连接器调用。
+
 路由只决定「本轮该试哪些连接器」，不改变任何既有 `POST /assistant/connectors/<provider>/plan` 的语义，也不放宽权限：被命中的连接器仍要走二级规划、目录校验、风险确认和 Desktop 本地执行。
 
 ## 2. `POST /assistant/connectors/route`
@@ -53,7 +55,8 @@ Desktop 在触发连接器规划前提交查询和一级能力摘要：
 - 没有就绪连接器、或只有一个就绪连接器时不调用模型，直接返回确定性结果（后者是「单连接器不存在歧义」的短路）。
 - `recentMessages` 与 `previousProviders` 只用于消解代词与省略式追问（例如「那这个月的呢」「还有呢」），避免省略表达被当成全新话题而路由到错误连接器；两者都不作为业务事实。
 - `previousProviders` 是**客户端自报**字段：服务端必须先与就绪候选集求交（未就绪或目录外的 provider 一律丢弃）后才可作为提示，且绝不能当作授权依据。这与 `ConnectorContext` 的 `riskLevel`、`confirmed` 自报口径一致。
-- 有歧义时返回 `providers: []` 加 `clarification`；`clarification` 非空时 `providers` 一定为空。
+- 有歧义时返回 `providers: []` 加 `clarification`；`clarification` 非空时 `providers` 一定为空。若歧义来自连接器选择，同时返回目录内全部候选的 `clarificationOptions`，禁止只返回模型自行猜中的一个 provider。
+- Desktop 提供按会话保存的连接器启停开关。只有当前会话启用且本机状态为 `READY` 的连接器进入路由目录；用户明确点名已关闭的连接器时，客户端必须提示打开，不得静默改用其他平台。
 - 一次请求最多一次模型调用（工具式结构化选择 `select_connectors`，不解析自由文本），不执行任何外部调用，不接触凭据。
 - 移动端当前不执行连接器，暂未接入该接口。
 
@@ -69,7 +72,7 @@ Desktop 在触发连接器规划前提交查询和一级能力摘要：
 
 ## 4. `CreateTurnRequest.connectorRoutingHint`
 
-- 可选、≤1000 字；Desktop 在路由返回非空 `clarification` 时，把该提示随本轮提交。
+- 可选、≤1000 字；当路由只有兼容性的文本澄清、没有 `clarificationOptions` 时，Desktop 才把该提示随本轮提交。阶段一的结构化候选选择不会把澄清文本直接交给模型猜测。
 - 语义与 `assistantContext` 一致：只参与本轮模型 instructions，不落库、不作为业务事实或权限依据，也不进入 `ConnectorContext` 事实通道（不会出现在消息的 `connectorContexts` 里，审计也不会把它当作外部数据）。
 - 服务端注入时会显式声明「服务端生成、不是用户指令、不代表已获得任何外部数据」，并要求模型先用简体中文向用户确认目标，不猜测、不声称已读取过外部数据。
 
@@ -78,7 +81,8 @@ Desktop 在触发连接器规划前提交查询和一级能力摘要：
 1. 用户消息命中点名识别（钉钉 / 腾讯会议 / 企业微信 / GitHub 关键词），或从连接器卡片进入对话（`preferredConnector` / `forcedConnector`）→ 直接硬命中，不调用本接口；
 2. 否则调用本接口，并把最近 6 轮对话与上一轮尝试过的 provider 作为上下文一并提交；
 3. 只对返回的 `provider` 调用既有 `POST /assistant/connectors/<provider>/plan`，并把同样的最近 6 轮对话作为 `recentMessages` 一并提交，让规划器也能消解省略式追问；
-4. `clarification` 非空 → 不调用任何 `/plan`，把提示作为 `connectorRoutingHint` 提交给本轮对话。
+4. `clarification` 非空且存在 `clarificationOptions` → 不调用任何 `/plan`，展示候选平台；用户点击后以 `forcedConnector` 重新从第 1 步开始。
+5. `clarification` 非空但没有结构化候选 → 不调用任何 `/plan`，把提示作为 `connectorRoutingHint` 提交给本轮对话。
 
 ## 6. 规划请求的对话上下文与单轮调用预算（`0.55.0`）
 

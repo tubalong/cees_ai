@@ -1781,9 +1781,17 @@ export interface ConnectorRoutingCandidate {
     toolCount?: number;
 }
 
+export interface ConnectorRoutingOption {
+    provider: ConnectorRoutingProvider;
+    displayName: string;
+    state: ConnectorRoutingCandidate['state'];
+    capabilitySummary: string;
+}
+
 export interface ConnectorRoutingResult {
     providers: ConnectorRoutingProvider[];
     clarification: string | null;
+    clarificationOptions?: ConnectorRoutingOption[];
     reason: string;
 }
 
@@ -1795,7 +1803,7 @@ export interface ConnectorRoutingRecentMessage {
 
 /**
  * 连接器语义路由：只决定本轮该试哪些连接器，不执行任何外部调用、不接收凭据。
- * clarification 非空时不得再调用任何连接器规划或执行接口，只把提示交给本轮对话让模型反问。
+ * clarification 非空时不得调用连接器；有 clarificationOptions 时由用户选择后重新规划。
  * recentMessages 与 previousProviders 只用于消解「那这个月的呢」这类省略式追问；
  * previousProviders 是客户端自报的提示（服务端会先与就绪候选集求交），不构成任何授权。
  */
