@@ -397,8 +397,8 @@ export class DocumentService {
     }
 
     /**
-     * 基于本轮上传表格的确定性提取文本生成一个新的 XLSX。原文件永不覆盖；
-     * 同一 toolCallId 通过 ManagedDocument + AIActionDraft 回放，避免重试重复生成。
+     * 基于本轮上传表格（或同一会话内复用的表格源）的确定性提取文本生成一个新的 XLSX。
+     * 原文件永不覆盖；同一 toolCallId 通过 ManagedDocument + AIActionDraft 回放，避免重试重复生成。
      */
     async createGeneratedSpreadsheet(command: GenerateSpreadsheetCommand): Promise<GeneratedDocument> {
         const existing = await this.findExecutedDocument(command);
@@ -406,7 +406,9 @@ export class DocumentService {
         if (command.sourceMaterials.length === 0) {
             throw new BadRequestException({
                 code: 'SPREADSHEET_SOURCE_REQUIRED',
-                message: '请先在当前消息中上传需要修改的 Excel 或 CSV 文件',
+                // 调用方已先尝试复用当前会话内上传/生成过的表格；走到这里说明确实没有任何表格源，
+                // 所以文案要指向「文件」而不是某一条消息，避免用户被引导去重传已有文件。
+                message: '没有找到可修改的表格：请上传或引用一份 Excel 或 CSV 文件后重试',
             });
         }
         await this.requireGenerationClaim(command);
@@ -945,8 +947,9 @@ export class DocumentService {
     }
 
     /**
-     * 把 spec 中的 `cos://{objectKey}` 稳定引用替换为当场签发的短期下载 URL。
-     * 返回深拷贝，不改动传入对象；同一对象键在一次渲染内只签发一次。
+     * 把 spec 中的 `cos://{objectKey}` 稳定引用替换为内联 data URL。
+     * 返回深拷贝，不改动传入对象；同一对象键在一次渲染内只读取一次，
+     * 避免内部渲染服务必须能够访问私有 COS 域名。
      */
     private async signSpecImageReferences<T>(spec: T): Promise<T> {
         const cloned: unknown = JSON.parse(JSON.stringify(spec));
@@ -967,7 +970,9 @@ export class DocumentService {
                 if (objectKey === null) continue;
                 let url = signed.get(objectKey);
                 if (url === undefined) {
-                    url = await this.storage.createDownloadUrl(objectKey);
+                    const object = await this.storage.readObject(objectKey);
+                    const contentType = object.contentType?.split(';', 1)[0]?.trim() || 'application/octet-stream';
+                    url = `data:${contentType};base64,${object.body.toString('base64')}`;
                     signed.set(objectKey, url);
                 }
                 record[key] = url;
@@ -1128,7 +1133,7 @@ export class DocumentService {
             request_id: context.requestId,
             tenant_id: context.tenantId,
             user_id: context.userId,
-            document: document.documentSpec as unknown as DocumentSpec,
+            document: await this.signSpecImageReferences(document.documentSpec as unknown as DocumentSpec),
             document_options: {
                 title: resolveDocumentTitle(document),
                 locale: 'zh-CN',
@@ -1181,7 +1186,7 @@ export class DocumentService {
             request_id: context.requestId,
             tenant_id: context.tenantId,
             user_id: context.userId,
-            document: document.documentSpec as unknown as DocumentSpec,
+            document: await this.signSpecImageReferences(document.documentSpec as unknown as DocumentSpec),
             document_options: {
                 title: resolveDocumentTitle(document),
                 locale: 'zh-CN',
@@ -1230,7 +1235,9 @@ export class DocumentService {
             });
         }
 
-        const pptx = documentSpecToPptxSpec(document.documentSpec as unknown as DocumentSpec);
+        const pptx = documentSpecToPptxSpec(
+            await this.signSpecImageReferences(document.documentSpec as unknown as DocumentSpec),
+        );
         const request: RenderPptxRequest = {
             request_id: context.requestId,
             tenant_id: context.tenantId,
@@ -1266,11 +1273,8 @@ export class DocumentService {
         return { filename: resolveDocumentTitle(document), bytes };
     }
 
-    /**
-     * 下载生成时落盘的正式文件（DOCX/PDF/PPTX）：读取 fileObject 对象键，
-     * 签发短期下载 URL。与 export 不同，不重新渲染、不调用 LLM，直接交付已落盘字节。
-     */
-    async getDocumentFileDownload(documentId: string): Promise<{ filename: string; url: string }> {
+    /** 已授权文件通过 API 交付，避免客户端跨域读取 COS 重定向响应。 */
+    async getDocumentFileDownload(documentId: string): Promise<{ filename: string; bytes: Buffer; mimeType: string }> {
         const roleIds = await this.resourceAccess.resolveCurrentRoleIds();
         const document = await this.findAccessibleDocument(documentId, 'document.read', roleIds);
         if (!document.fileObject) {
@@ -1279,10 +1283,13 @@ export class DocumentService {
                 message: '该文档没有落盘的生成文件（可能由人工创建）',
             });
         }
-        const url = await this.storage.createDownloadUrl(document.fileObject.objectKey);
+        const object = await this.storage.readObject(document.fileObject.objectKey);
         return {
-            filename: `${resolveDocumentTitle(document)}.${extensionOfMimeType(document.fileObject.mimeType)}`,
-            url,
+            // 与 export* 一致：只回标题，扩展名由控制器按 MIME 判定；
+            // 若这里带上扩展名，控制器再拼一次就会出现「名称.xlsx.xlsx」。
+            filename: resolveDocumentTitle(document),
+            bytes: object.body,
+            mimeType: document.fileObject.mimeType,
         };
     }
 
@@ -1465,8 +1472,8 @@ function resolveDocumentTitle(document: { title: string; documentSpec: Prisma.Js
     return sanitizeFilenameSegment(document.title) || sanitizeFilenameSegment(specTitle) || 'document';
 }
 
-/** 由生成文件 MIME 类型推断下载扩展名。 */
-function extensionOfMimeType(mimeType: string): string {
+/** 由生成文件 MIME 类型推断下载扩展名；控制器与内部交付共同使用。 */
+export function extensionOfMimeType(mimeType: string): string {
     switch (mimeType) {
         case 'application/pdf':
             return 'pdf';

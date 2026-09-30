@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import base64
 from io import BytesIO
+from zipfile import ZipFile
 
 import pytest
 from docx import Document as WordDocument
+from PIL import Image
 
 from app.api.generated.models import DocumentOptions, DocumentSpec
 from app.core.errors import AIServiceError
@@ -104,3 +107,30 @@ def test_content_disposition_has_ascii_fallback_and_utf8_filename() -> None:
 
     assert 'filename="document.docx"' in header
     assert "filename*=UTF-8''%E9%A1%B9%E7%9B%AE%E6%96%B9%E6%A1%88.docx" in header
+
+
+def test_embeds_inline_image_bytes_in_docx_media() -> None:
+    image_stream = BytesIO()
+    Image.new("RGB", (24, 16), "green").save(image_stream, format="PNG")
+    image_bytes = image_stream.getvalue()
+    payload = document_data()
+    payload["sections"][0]["blocks"].append({
+        "type": "image",
+        "url": "data:image/png;base64," + base64.b64encode(image_bytes).decode("ascii"),
+        "alt": "Team collaboration",
+        "caption": "Team collaboration",
+    })
+
+    rendered = DocxRenderer().render(
+        DocumentSpec.model_validate(payload),
+        render_options(include_toc=False),
+        request_id="req-render-image",
+    )
+
+    with ZipFile(BytesIO(rendered.content)) as archive:
+        media = [name for name in archive.namelist() if name.startswith("word/media/")]
+        assert len(media) == 1
+        assert archive.read(media[0]) == image_bytes
+    document = WordDocument(BytesIO(rendered.content))
+    assert len(document.inline_shapes) == 1
+    assert not any("[" in paragraph.text for paragraph in document.paragraphs)

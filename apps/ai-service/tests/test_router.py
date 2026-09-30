@@ -48,6 +48,79 @@ async def test_falls_back_only_after_transient_failure() -> None:
 
 
 @pytest.mark.asyncio
+async def test_falls_back_when_primary_provider_quota_is_exhausted() -> None:
+    primary_profile = profile()
+    backup_profile = profile()
+    primary = StubProvider(
+        primary_profile,
+        [ProviderPermanentError("insufficient balance", status_code=402)],
+    )
+    backup = StubProvider(backup_profile, [result("ok")])
+    providers = {"primary": primary, "backup": backup}
+    router = LLMRouter(
+        catalog(
+            {"primary": primary_profile, "backup": backup_profile},
+            {ModelRole.default: ["primary", "backup"]},
+        ),
+        lambda name, _profile: providers[name],
+    )
+
+    routed = await router.invoke(
+        request_id="req-quota-1",
+        tenant_id="tenant-1",
+        user_id="user-1",
+        messages=[ChatMessage(role="user", content="hello")],
+        output_mode=OutputMode.text,
+        role=ModelRole.default,
+        profile_override=None,
+        temperature=None,
+        max_output_tokens=None,
+    )
+
+    assert routed.profile_name == "backup"
+    assert routed.fallback_count == 1
+    assert len(primary.calls) == len(backup.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_tool_stream_falls_back_when_primary_provider_quota_is_exhausted() -> None:
+    primary_profile = profile(capabilities={ModelCapability.chat, ModelCapability.tool_calling})
+    backup_profile = profile(capabilities={ModelCapability.chat, ModelCapability.tool_calling})
+    primary = StubProvider(
+        primary_profile,
+        [],
+        tool_stream_outcomes=[[ProviderPermanentError("insufficient balance", status_code=402)]],
+    )
+    backup = StubProvider(
+        backup_profile,
+        [],
+        tool_stream_outcomes=[[ProviderStreamChunk(text="ok")]],
+    )
+    providers = {"primary": primary, "backup": backup}
+    router = LLMRouter(
+        catalog(
+            {"primary": primary_profile, "backup": backup_profile},
+            {ModelRole.orchestrator: ["primary", "backup"]},
+        ),
+        lambda name, _profile: providers[name],
+    )
+
+    routed = await router.start_tool_stream(
+        request_id="req-quota-tool-1",
+        tenant_id="tenant-1",
+        user_id="user-1",
+        messages=[ChatMessage(role="user", content="insert the image")],
+        tools=({"name": "insert_document_image", "description": "Insert image", "parameters": {}},),
+    )
+    chunks = [chunk async for chunk in routed.chunks]
+
+    assert routed.profile_name == "backup"
+    assert routed.fallback_count == 1
+    assert [chunk.text for chunk in chunks] == ["ok"]
+    assert len(primary.tool_stream_calls) == len(backup.tool_stream_calls) == 1
+
+
+@pytest.mark.asyncio
 async def test_explicit_profile_does_not_fall_back() -> None:
     primary_profile = profile()
     backup_profile = profile()

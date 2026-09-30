@@ -148,6 +148,31 @@ export class DocumentService {
         });
     }
     /**
+     * 下载授权范围内文档的已生成文件
+     * 复用 document.read 权限和资源范围校验，直接返回存储中的文件字节， 不重新渲染、不跳转到 COS；媒体类型取自关联文件元数据。
+     * @returns binary 已落盘的生成文件
+     * @throws ApiError
+     */
+    public static documentDownloadFile({
+        documentId,
+    }: {
+        documentId: string,
+    }): CancelablePromise<Blob> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/documents/{documentId}/file',
+            path: {
+                'documentId': documentId,
+            },
+            errors: {
+                400: `文档未关联已生成文件（DOCUMENT_FILE_UNAVAILABLE）`,
+                401: `登录状态无效或已过期`,
+                403: `缺少 document.read 权限`,
+                404: `文档不存在或不在授权范围内`,
+            },
+        });
+    }
+    /**
      * 导出授权范围内文档为 DOCX
      * 由生成时落库的结构化 DocumentSpec 经 ai-service 确定性渲染为 DOCX 文件， 不调用 LLM；复用 document.read 权限，导出是文档资源的另一种交付视图而非独立资源。
      * @returns binary DOCX 文档文件

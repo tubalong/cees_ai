@@ -1058,6 +1058,7 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
         options: ConnectorRoutingOption[];
     }>();
     const initialConversationLoadStarted = useRef(false);
+    const previousLocationKey = useRef(location.key);
     /**
      * 待确认写操作。放在页面级而不是消息上：
      * - 同一个「新建部门」往往需要多步（部门 → 项目 → 任务），模型会一次产出多个草稿，
@@ -1191,6 +1192,14 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
             })
             .catch((error) => { message.error(toUserErrorMessage(error, t('加载会话失败'))); });
     }, []);
+    useEffect(() => {
+        if (previousLocationKey.current === location.key) return;
+        previousLocationKey.current = location.key;
+        if (navigationState?.createNewConversation !== true) return;
+        void createAndActivateConversation()
+            .catch((error) => message.error(toUserErrorMessage(error, t('创建会话失败'))))
+            .finally(() => navigate(location.pathname, { replace: true, state: null }));
+    }, [location.key]);
     useEffect(() => {
         const connector = window.cees?.connectors?.dingtalk;
         if (!connector) return;
@@ -2231,6 +2240,10 @@ export default function Workspace({ authContext, onSessionExpired, onProfileUpda
     const membersQuery = useQuery({ queryKey: ['tenant-members'], queryFn: () => listTenantMembers() });
     const documentsQuery = useQuery({ queryKey: ['documents'], queryFn: () => listDocuments() });
     const unreadQuery = useQuery({ queryKey: ['notifications-unread'], queryFn: () => getUnreadNotificationCount(), enabled: authContext.permissions.includes('notification.read'), refetchInterval: 60_000 });
+
+    useEffect(() => window.cees?.onTrayNewConversation?.(() => {
+        navigate('/assistant', { state: { createNewConversation: true } });
+    }), [navigate]);
 
     useEffect(() => {
         if ((membersQuery.error || documentsQuery.error) && !hasStoredSession()) onSessionExpired();

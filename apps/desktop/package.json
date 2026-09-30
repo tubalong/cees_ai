@@ -6,8 +6,9 @@
     "scripts": {
         "dev": "tsc -p electron/tsconfig.json && concurrently -k \"vite\" \"wait-on http://localhost:5173 && electron .\"",
         "build": "tsc -b && vite build && tsc -p electron/tsconfig.json",
+        "icons": "node scripts/generate-icons.cjs",
         "test:dws": "tsc -p electron/tsconfig.json && node --test tests/dingtalk-dws.test.cjs tests/dingtalk-connector.test.cjs tests/connector-runtime.test.cjs tests/local-cli-transport.test.cjs tests/http-api-transport.test.cjs tests/remote-mcp-transport.test.cjs tests/remote-mcp-host.test.cjs tests/tencent-meeting-connector.test.cjs tests/wecom-connector.test.cjs tests/github-connector.test.cjs tests/local-disk-scanner.test.cjs tests/local-cleanup-manager.test.cjs tests/local-file-saver.test.cjs",
-        "dist:win": "pnpm build && electron-builder --win nsis zip --x64",
+        "dist:win": "pnpm icons && pnpm build && electron-builder --win nsis zip --x64",
         "dist:mac": "pnpm build && electron-builder --mac dmg zip"
     },
     "build": {
@@ -26,6 +27,14 @@
         "artifactName": "CEES-AI-${version}-${arch}.${ext}",
         "win": {
             "executableName": "CEES-AI",
+            "icon": "build/icons/cees.ico",
+            "signtoolOptions": {
+                "certificateSha1": "7D2CDB58F3E8FEA8FA60A508E54F703CC591341E",
+                "signingHashAlgorithms": [
+                    "sha256"
+                ],
+                "rfc3161TimeStampServer": "https://timestamp.digicert.com"
+            },
             "target": [
                 "nsis",
                 "zip"
@@ -67,6 +76,7 @@
         "concurrently": "^9.1.2",
         "electron": "^44.3.0",
         "electron-builder": "^26.15.3",
+        "sharp": "^0.35.5",
         "typescript": "^5.7.2",
         "vite": "^6.0.7",
         "wait-on": "^8.0.1"

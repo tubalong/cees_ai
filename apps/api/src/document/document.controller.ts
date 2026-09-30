@@ -11,7 +11,6 @@ import {
     Patch,
     Post,
     Query,
-    Redirect,
     StreamableFile,
     UseGuards,
     UseInterceptors,
@@ -21,7 +20,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PermissionGuard, RequirePermissions } from '../rbac/permission.guard';
 import { TenantContextInterceptor } from '../tenant/tenant-context.interceptor';
 import { TenantGuard } from '../tenant/tenant.guard';
-import { DocumentService } from './document.service';
+import { DocumentService, extensionOfMimeType } from './document.service';
 import { DocumentListResult, DocumentResult } from './document.types';
 import {
     CreateDocumentDto,
@@ -147,19 +146,18 @@ export class DocumentController {
         });
     }
 
-    /**
-     * 下载生成时落盘的正式文件（DOCX/PDF/PPTX）：重定向到 COS 短期签名 URL。
-     * 复用 document.read 权限，直接交付已落盘字节，不重新渲染。
-     */
+    /** 下载已落盘文件，复用 document.read 权限且不重新渲染。 */
     @Get(':documentId/file')
     @RequirePermissions('document.read')
-    @Redirect()
-    @ApiOkResponse({ description: '已落盘生成文件的下载地址' })
+    @ApiOkResponse({ description: '已落盘生成文件' })
     async downloadDocumentFile(
         @Param('documentId', new ParseUUIDPipe()) documentId: string,
-    ): Promise<{ url: string }> {
-        const { url } = await this.documentService.getDocumentFileDownload(documentId);
-        return { url };
+    ): Promise<StreamableFile> {
+        const { filename, bytes, mimeType } = await this.documentService.getDocumentFileDownload(documentId);
+        return new StreamableFile(bytes, {
+            type: mimeType,
+            disposition: attachmentDisposition(filename, extensionOfMimeType(mimeType)),
+        });
     }
 
     @Patch(':documentId')

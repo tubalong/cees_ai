@@ -46,7 +46,7 @@ const FORMATS: Record<DocumentFormat, FormatDescriptor> = {
     format: 'xlsx',
     name: 'generate_xlsx',
     displayName: '生成 XLSX 表格',
-    description: '根据本轮上传的 Excel/CSV 与用户修改指令生成一份新的 XLSX 文件；不会覆盖原文件。',
+    description: '根据当前消息或当前会话中最近可用的表格（上传的 Excel/CSV 或此前生成的 XLSX）按用户修改指令生成一份新的 XLSX 文件；不会覆盖原文件。',
     summary: (title, length) => `XLSX 表格已生成：《${title}》（预览共 ${length} 字）`,
   },
 };
@@ -121,18 +121,8 @@ export class GenerateDocumentTool implements OnModuleInit {
       format: format.format,
     } as const;
     if (format.format === 'xlsx') {
-      // XLSX 依赖「本轮上传的表格」；任务步骤执行窗口没有轮次输入，
-      // 工具面已排除 generate_xlsx，这里兜底防御绕过（模型编造调用时拒绝）。
-      if (context.turnId === null) {
-        throw new ToolExecutionError(
-          'TURN_INPUT_REQUIRED',
-          'generate_xlsx requires an active turn with spreadsheet materials',
-          '生成表格需要先在当前消息中上传 Excel 或 CSV 文件。请告知用户：在对话中上传文件后重试。',
-        );
-      }
-      const document = await this.documentService.createGeneratedSpreadsheet({
-        ...command,
-        sourceMaterials: await this.messageContent.resolveTurnDocumentSourceMaterials(
+      const sourceMaterials = context.turnId
+        ? await this.messageContent.resolveTurnDocumentSourceMaterials(
           context.turnId,
           {
             tenantId: context.tenantId,
@@ -140,7 +130,22 @@ export class GenerateDocumentTool implements OnModuleInit {
             membershipId: context.membershipId,
             requestId: context.requestId,
           },
-        ),
+        )
+        : [];
+      const historicalMaterials = sourceMaterials.length > 0 || !context.conversationId
+        ? []
+        : await this.messageContent.resolveConversationDocumentSourceMaterials(
+          context.conversationId,
+          {
+            tenantId: context.tenantId,
+            userId: context.userId,
+            membershipId: context.membershipId,
+            requestId: context.requestId,
+          },
+        );
+      const document = await this.documentService.createGeneratedSpreadsheet({
+        ...command,
+        sourceMaterials: sourceMaterials.length > 0 ? sourceMaterials : historicalMaterials,
       });
       return {
         resourceType: 'DOCUMENT',

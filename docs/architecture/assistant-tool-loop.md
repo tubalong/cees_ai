@@ -392,13 +392,13 @@ POST   /conversations/{conversationId}/turns/{turnId}/cancel              取消
 
 ## 17. 文档插图工具（insert_document_image，2026-09-18）
 
-新增 `insert_document_image` 写工具，把本轮对话中已有的一张图片（用户本轮上传的附件，或本轮船次 `generate_image` 生成的图片）插入到本会话内某份「AI 生成文档」的指定章节末尾。它不新建文档、不重写正文：只读取目标文档已落库的 `DocumentSpec`，定位目标章节后在 `blocks` 尾部追加一个 `ImageBlock`，再按原格式重渲染并原地更新同一 `ManagedDocument`。
+新增 `insert_document_image` 写工具，把当前会话中已有的一张图片（用户上传的附件，或当前/历史轮次 `generate_image` 生成的图片）插入到本会话内某份「AI 生成文档」的指定章节末尾。它不新建文档、不重写正文：只读取目标文档已落库的 `DocumentSpec`，定位目标章节后在 `blocks` 尾部追加一个 `ImageBlock`，再按原格式重渲染并原地更新同一 `ManagedDocument`。
 
 ### 17.1 参数与语义
 
 - `section_title`（可选）：目标章节标题；省略时命中最后一节；命中不到直接拒绝（`DOCUMENT_SECTION_NOT_FOUND`），不静默插错位置。定位采用「精确 → 归一化（忽略空白与序号标点）→ 包含」三级匹配。
 - `caption`（可选）：图注。
-- `image_index`（可选，1-based）：使用本轮第几张图片；省略时用最后一张。图片清单由 `AssistantMessageContentService.resolveTurnImageReferences(turnId)` 从会话事实源重建（附件在前、本轮船次生成图片在后），进程重启或轮次重试后依然可重建。
+- `image_file_id`（可选）：优先使用会话图片清单中的稳定文件 ID 精确引用；`image_index`（可选，1-based）用于选择清单中的图片，省略时用会话最近一张。图片清单由 `AssistantMessageContentService.resolveConversationImageReferences(conversationId)` 从会话事实源重建，进程重启或轮次重试后依然可重建，并限制在当前租户、成员和会话范围内。
 - `document_title`（可选）：本会话存在多份生成文档时消歧；省略时取最近生成的一份。
 - 权限码复用 `ai.document.generate`，`riskLevel: WRITE`，不新增权限与迁移。
 

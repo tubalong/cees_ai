@@ -29,9 +29,14 @@
    路径 `/internal/v1/documents/compose-spreadsheet`、`/render-xlsx`。
 2. **ai-service**：`app/documents/spreadsheet_composer.py`（一次 LLM 调用 + JSON schema 约束）+ `xlsx_renderer.py`
    （`xlsxwriter`，确定性渲染，不调 LLM、不产生 Token 成本）；沿用现有 `normalize` / `validation` 风格做清洗与上限校验。
-3. **NestJS**：`generate_xlsx` 从当前 `turnId` 重建附件内容，调用 composer/renderer，写入
-   `ManagedDocument.spreadsheetSpec`、`FileObject`、`AIActionDraft` 与审计；同一 `toolCallId` 幂等。
+3. **NestJS**：`generate_xlsx` 先按当前 `turnId` 重建附件内容；当前轮没有附件时回退到**同一会话内最近一次
+   可用的表格源**——优先用户上传的 Excel/CSV，其次此前生成的 XLSX（按文件记录关联到同一 `conversationId`
+   的 `ToolCall` 定位，且只按 XLSX MIME 匹配，避免被后续生成的 DOCX/PDF 顶掉）；再调用 composer/renderer，
+   写入 `ManagedDocument.spreadsheetSpec`、`FileObject`、`AIActionDraft` 与审计；同一 `toolCallId` 幂等。
+   步骤载体不保证对应真实会话，因此 `generate_xlsx` 仍在步骤工具面之外。
 4. **客户端**：桌面与 Flutter 均识别 `generate_xlsx`，通过 `/documents/{id}/file` 下载已落盘文件；
+   该端点由 API 直接交付已落盘字节（`200` + 文件本体），**不下发 COS 签名 URL**——客户端跨域读取跳转响应
+   在私有 COS 域名下不可靠，曾表现为「下载失败」；文件名由 MIME 推导扩展名，避免出现重复扩展名；
    Flutter 使用上传会话直传，不把大文件放进 SSE 请求体。
 6. **上限（必须做）**：≤ 5 个工作表、≤ 2000 行、≤ 60 列、单元格文本 ≤ 500 字符；
    超限直接拒绝并回报模型，**不允许静默截断**（静默截断会让用户以为数据完整）。

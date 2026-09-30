@@ -39,6 +39,15 @@ export function describeAssistantError(error: unknown): PublicAssistantError {
     };
   }
 
+  if (error.code === 'LLM_PROVIDER_QUOTA_EXHAUSTED') {
+    return {
+      code: error.code,
+      message: '当前主备模型账号均因余额不足或额度耗尽而不可用，请补充模型额度后重试。',
+      retryable: false,
+      status: HttpStatus.SERVICE_UNAVAILABLE,
+    };
+  }
+
   if (error.code === 'LLM_TOOL_ARGUMENTS_INVALID') {
     // 模型输出的工具参数不完整，最常见原因是被输出上限截断（例如试图把长文档
     // 内联进工具参数）。给用户可执行的下一步，而不是笼统的「AI 请求失败」。

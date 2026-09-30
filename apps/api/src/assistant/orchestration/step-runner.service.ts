@@ -62,7 +62,8 @@ const MAX_STEP_INSTRUCTIONS_CHARS = 32_000;
 const MAX_DEPENDENCY_SUMMARY_CHARS = 600;
 /**
  * 工具面排除清单（授权链之外的双保险）：
- * - generate_xlsx 依赖「本轮上传的表格」，步骤窗口没有轮次输入；
+ * - generate_xlsx 的表格源绑定在会话上，而任务步骤载体不保证对应真实会话
+ *   （`carrierConversationId` 可能退化为任务 ID），无法稳定复用历史表格；
  * - create_orchestration_task 禁止步骤内嵌套建任务。
  */
 const STEP_EXCLUDED_TOOLS: ReadonlySet<string> = new Set([

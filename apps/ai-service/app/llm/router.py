@@ -103,6 +103,7 @@ class LLMRouter:
         )
         started = time.perf_counter()
         last_transient_error: ProviderTransientError | None = None
+        last_quota_error: AIServiceError | None = None
 
         for index, profile_name in enumerate(candidates):
             profile = self.catalog.profiles[profile_name]
@@ -173,6 +174,26 @@ class LLMRouter:
                     request_id=request_id,
                 ) from exc
             except ProviderPermanentError as exc:
+                if exc.status_code == 402 and profile_override is None:
+                    last_quota_error = _permanent_rejection_error(
+                        action="invocation",
+                        exc=exc,
+                        request_id=request_id,
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        profile_name=profile_name,
+                        profile=profile,
+                        attempt=index + 1,
+                    )
+                    logger.warning(
+                        "llm provider quota exhausted; trying next profile",
+                        extra={
+                            "request_id": request_id,
+                            "profile": profile_name,
+                            "fallback_count": index,
+                        },
+                    )
+                    continue
                 raise _permanent_rejection_error(
                     action="invocation",
                     exc=exc,
@@ -184,6 +205,8 @@ class LLMRouter:
                     attempt=index + 1,
                 ) from exc
 
+        if last_quota_error is not None:
+            raise last_quota_error
         raise AIServiceError(
             "LLM_UNAVAILABLE",
             "No configured LLM profile completed the invocation",
@@ -214,6 +237,7 @@ class LLMRouter:
         )
         started_at = time.perf_counter()
         last_transient_error: ProviderTransientError | None = None
+        last_quota_error: AIServiceError | None = None
 
         for index, profile_name in enumerate(candidates):
             profile = self.catalog.profiles[profile_name]
@@ -269,6 +293,26 @@ class LLMRouter:
                 if profile_override is not None:
                     break
             except ProviderPermanentError as exc:
+                if exc.status_code == 402 and profile_override is None:
+                    last_quota_error = _permanent_rejection_error(
+                        action="streaming invocation",
+                        exc=exc,
+                        request_id=request_id,
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        profile_name=profile_name,
+                        profile=profile,
+                        attempt=index + 1,
+                    )
+                    logger.warning(
+                        "llm provider quota exhausted; trying next profile",
+                        extra={
+                            "request_id": request_id,
+                            "profile": profile_name,
+                            "fallback_count": index,
+                        },
+                    )
+                    continue
                 raise _permanent_rejection_error(
                     action="streaming invocation",
                     exc=exc,
@@ -280,6 +324,8 @@ class LLMRouter:
                     attempt=index + 1,
                 ) from exc
 
+        if last_quota_error is not None:
+            raise last_quota_error
         raise AIServiceError(
             "LLM_UNAVAILABLE",
             "No configured LLM profile started the invocation stream",
@@ -317,6 +363,7 @@ class LLMRouter:
         )
         started = time.perf_counter()
         last_transient_error: ProviderTransientError | None = None
+        last_quota_error: AIServiceError | None = None
 
         for index, profile_name in enumerate(candidates):
             profile = self.catalog.profiles[profile_name]
@@ -378,6 +425,26 @@ class LLMRouter:
                     request_id=request_id,
                 ) from exc
             except ProviderPermanentError as exc:
+                if exc.status_code == 402 and profile_override is None:
+                    last_quota_error = _permanent_rejection_error(
+                        action="tool invocation",
+                        exc=exc,
+                        request_id=request_id,
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        profile_name=profile_name,
+                        profile=profile,
+                        attempt=index + 1,
+                    )
+                    logger.warning(
+                        "llm provider quota exhausted; trying next profile",
+                        extra={
+                            "request_id": request_id,
+                            "profile": profile_name,
+                            "fallback_count": index,
+                        },
+                    )
+                    continue
                 raise _permanent_rejection_error(
                     action="tool invocation",
                     exc=exc,
@@ -389,6 +456,8 @@ class LLMRouter:
                     attempt=index + 1,
                 ) from exc
 
+        if last_quota_error is not None:
+            raise last_quota_error
         raise AIServiceError(
             "LLM_UNAVAILABLE",
             "No configured LLM profile completed the tool invocation",
@@ -426,6 +495,7 @@ class LLMRouter:
         )
         started_at = time.perf_counter()
         last_transient_error: ProviderTransientError | None = None
+        last_quota_error: AIServiceError | None = None
 
         for index, profile_name in enumerate(candidates):
             profile = self.catalog.profiles[profile_name]
@@ -479,6 +549,26 @@ class LLMRouter:
                 if profile_override is not None:
                     break
             except ProviderPermanentError as exc:
+                if exc.status_code == 402 and profile_override is None:
+                    last_quota_error = _permanent_rejection_error(
+                        action="tool streaming invocation",
+                        exc=exc,
+                        request_id=request_id,
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        profile_name=profile_name,
+                        profile=profile,
+                        attempt=index + 1,
+                    )
+                    logger.warning(
+                        "llm provider quota exhausted; trying next profile",
+                        extra={
+                            "request_id": request_id,
+                            "profile": profile_name,
+                            "fallback_count": index,
+                        },
+                    )
+                    continue
                 raise _permanent_rejection_error(
                     action="tool streaming invocation",
                     exc=exc,
@@ -490,6 +580,8 @@ class LLMRouter:
                     attempt=index + 1,
                 ) from exc
 
+        if last_quota_error is not None:
+            raise last_quota_error
         raise AIServiceError(
             "LLM_UNAVAILABLE",
             "No configured LLM profile started the tool invocation stream",

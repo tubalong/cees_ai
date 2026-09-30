@@ -22,6 +22,19 @@ describe('CosObjectKeyFactory', () => {
             fileId: '22222222-2222-4222-8222-222222222222',
         })).toThrow(TypeError);
     });
+
+    it('builds the documented XLSX generated-document path', () => {
+        const factory = new CosObjectKeyFactory(config('cees/local'));
+
+        expect(factory.buildGeneratedDocumentKey({
+            tenantId: '11111111-1111-4111-8111-111111111111',
+            toolCallId: '22222222-2222-4222-8222-222222222222',
+            format: 'xlsx',
+        })).toBe(
+            'cees/local/tenants/11111111-1111-4111-8111-111111111111/generated-documents/'
+            + '22222222-2222-4222-8222-222222222222/xlsx',
+        );
+    });
 });
 
 function config(objectPrefix: StorageSettings['objectPrefix']): StorageSettings {

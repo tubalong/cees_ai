@@ -51,6 +51,7 @@ declare global {
             };
             /** 仅 macOS 提供：全屏状态变化订阅（返回取消订阅函数）。 */
             onFullScreenChanged?: (listener: (fullScreen: boolean) => void) => () => void;
+            onTrayNewConversation?: (listener: () => void) => () => void;
             dingtalkDws?: {
                 status: () => Promise<DingTalkConnectorStatus>;
                 login: () => Promise<DingTalkConnectorStatus>;

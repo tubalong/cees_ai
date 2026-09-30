@@ -10,6 +10,7 @@ import {
     StorageProviderError,
     StorageSettings,
     StoredObjectMetadata,
+    ReadObjectResult,
 } from './storage.types';
 
 const UUID_SOURCE = '[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
@@ -133,6 +134,33 @@ export class TencentCosStorageProvider implements StorageProvider {
         }
     }
 
+    /** 服务端读取私有对象，供内部文档渲染转换为内联 data URL。 */
+    async readObject(objectKey: string): Promise<ReadObjectResult> {
+        this.assertObjectKeyInEnvironment(objectKey);
+        try {
+            const result = await new Promise<COS.GetObjectResult>((resolve, reject) => {
+                this.cos.getObject({
+                    Bucket: this.config.bucket,
+                    Region: this.config.region,
+                    Key: objectKey,
+                }, (error, data) => {
+                    if (error) reject(error);
+                    else resolve(data);
+                });
+            });
+            const body = Buffer.isBuffer(result.Body) ? result.Body : Buffer.from(result.Body ?? '');
+            if (body.length === 0) throw new Error('COS returned an empty object');
+            return {
+                body,
+                contentType: header(result.headers, 'content-type'),
+            };
+        } catch (error) {
+            if (isNotFound(error)) throw new StorageObjectNotFoundError();
+            if (error instanceof StorageProviderError) throw error;
+            throw new StorageProviderError('Unable to read Tencent COS object', { cause: error });
+        }
+    }
+
     /** 从配置的私有 Bucket 中删除一个由服务端选定的精确对象键。 */
     async deleteObject(objectKey: string): Promise<void> {
         this.assertObjectKeyInEnvironment(objectKey);
@@ -187,7 +215,7 @@ export class TencentCosStorageProvider implements StorageProvider {
         }
     }
 
-    /** 服务端直传允许常规原文件键或与 ToolCall 绑定的生成图片键。 */
+    /** 服务端直传允许原文件键，以及与 ToolCall 绑定的生成图片和文档键。 */
     private assertServerWritableObjectKey(objectKey: string): void {
         this.assertObjectKeyInEnvironment(objectKey);
         const prefix = escapeRegExp(this.config.objectPrefix);
@@ -199,7 +227,15 @@ export class TencentCosStorageProvider implements StorageProvider {
             `^${prefix}/tenants/${UUID_SOURCE}/generated-images/${UUID_SOURCE}/source$`,
             'i',
         );
-        if (!sourceKeyPattern.test(objectKey) && !generatedImagePattern.test(objectKey)) {
+        const generatedDocumentPattern = new RegExp(
+            `^${prefix}/tenants/${UUID_SOURCE}/generated-documents/${UUID_SOURCE}/(?:docx|pdf|pptx|xlsx)$`,
+            'i',
+        );
+        if (
+            !sourceKeyPattern.test(objectKey)
+            && !generatedImagePattern.test(objectKey)
+            && !generatedDocumentPattern.test(objectKey)
+        ) {
             throw new TypeError('COS server upload object key is outside the documented writable paths');
         }
     }

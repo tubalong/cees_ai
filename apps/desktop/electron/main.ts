@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, session, shell, type MenuItemConstructorOptions } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, session, shell, Tray, type MenuItemConstructorOptions } from 'electron';
 import path from 'node:path';
 import {
     ConnectorHost,
@@ -29,6 +29,43 @@ connectorRegistry.register(tencentMeetingConnector);
 connectorRegistry.register(weComConnector);
 connectorRegistry.register(githubConnector);
 const connectorHost = new ConnectorHost(connectorRegistry, publishConnectorStatus);
+let mainWindow: BrowserWindow | undefined;
+let tray: Tray | undefined;
+let isQuitting = false;
+
+function focusMainWindow(): void {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+        createWindow();
+        return;
+    }
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+}
+
+function installTray(): void {
+    if (tray) return;
+    const iconPath = app.isPackaged
+        ? path.join(__dirname, '../dist/assests/cees-tray.png')
+        : path.join(app.getAppPath(), 'public/assests/cees-tray.png');
+    tray = new Tray(nativeImage.createFromPath(iconPath));
+    tray.setToolTip('CEES AI');
+    tray.setContextMenu(Menu.buildFromTemplate([
+        { label: '打开 CEES', click: focusMainWindow },
+        {
+            label: '新对话',
+            click: () => {
+                focusMainWindow();
+                const sendNewConversation = (): void => mainWindow?.webContents.send('cees:tray-new-conversation');
+                if (mainWindow?.webContents.isLoading()) mainWindow.webContents.once('did-finish-load', sendNewConversation);
+                else sendNewConversation();
+            },
+        },
+        { type: 'separator' },
+        { label: '退出 CEES', click: () => { isQuitting = true; tray?.destroy(); tray = undefined; app.quit(); } },
+    ]));
+    tray.on('double-click', focusMainWindow);
+}
 
 function getDingTalkConnector(): DingTalkConnectorAdapter {
     return dingtalkConnector;
@@ -100,7 +137,7 @@ function installContextMenu(window: BrowserWindow): void {
     });
 }
 
-function createWindow(): void {
+function createWindow(): BrowserWindow {
     const isMac = process.platform === 'darwin';
     const window = new BrowserWindow({
         width: 1440,
@@ -128,6 +165,7 @@ function createWindow(): void {
             webviewTag: true,
         },
     });
+    mainWindow = window;
     installContextMenu(window);
     // 导航锁定 + webview 策略：外链交系统浏览器，webview 强制无 node 集成。
     installNavigationLock(window);
@@ -155,169 +193,185 @@ function createWindow(): void {
     } else {
         void window.loadFile(path.join(__dirname, '../dist/index.html'));
     }
+    window.on('close', (event) => {
+        if (!isQuitting && process.platform !== 'darwin') {
+            event.preventDefault();
+            window.hide();
+        }
+    });
+    window.on('closed', () => {
+        if (mainWindow === window) mainWindow = undefined;
+    });
+    return window;
 }
 
-app.whenReady().then(async () => {
-    const dingtalkConnector = getDingTalkConnector();
-    const userDataPath = app.getPath('userData');
-    dingtalkConnector.configure(userDataPath);
-    tencentMeetingConnector.configure(userDataPath);
-    weComConnector.configure(userDataPath);
-    githubConnector.configure(userDataPath);
-    // 安全基线：IPC 来源校验必须最先安装，保证后续注册的所有通道都受保护。
-    installIpcSenderGuard();
-    installContentSecurityPolicy(session.defaultSession);
-    const tokenStore = new SecureTokenStore(userDataPath);
-    const cleanupManager = new CleanupManager(path.join(userDataPath, 'local-agent'));
-    await cleanupManager.initialize();
-    // macOS 保留系统菜单（⇆Q / ⇆C 等）；Windows / Linux 置空——判断内聚在 installApplicationMenu。
-    installApplicationMenu();
-    ipcMain.handle('cees:secure-store-get-all', () => tokenStore.getAll());
-    ipcMain.handle('cees:secure-store-set', (_event, key: unknown, value: unknown) => {
-        if (typeof key !== 'string' || typeof value !== 'string') throw new Error('安全存储参数无效');
-        return tokenStore.set(key, value);
-    });
-    ipcMain.handle('cees:secure-store-remove', (_event, key: unknown) => {
-        if (typeof key !== 'string') throw new Error('安全存储参数无效');
-        return tokenStore.remove(key);
-    });
-    ipcMain.on('cees:open-devtools', (event) => {
-        BrowserWindow.fromWebContents(event.sender)?.webContents.openDevTools({ mode: 'detach', activate: true });
-    });
-    ipcMain.handle('cees:open-external', async (_event, value: unknown) => {
-        if (typeof value !== 'string') throw new Error('外部链接无效');
-        const url = new URL(value);
-        if (url.protocol !== 'https:') throw new Error('仅允许打开 HTTPS 外部链接');
-        await shell.openExternal(url.toString());
-        return true;
-    });
-    ipcMain.handle('cees:local-disk-scan-volumes', () => scanVolumes());
-    ipcMain.handle('cees:local-disk-choose-and-scan-directory', async () => {
-        const result = await dialog.showOpenDialog({
-            title: '选择要扫描的目录',
-            properties: ['openDirectory', 'dontAddToRecent'],
+if (!app.requestSingleInstanceLock()) {
+    app.quit();
+} else {
+    app.on('second-instance', () => focusMainWindow());
+    app.whenReady().then(async () => {
+        const dingtalkConnector = getDingTalkConnector();
+        const userDataPath = app.getPath('userData');
+        dingtalkConnector.configure(userDataPath);
+        tencentMeetingConnector.configure(userDataPath);
+        weComConnector.configure(userDataPath);
+        githubConnector.configure(userDataPath);
+        // 安全基线：IPC 来源校验必须最先安装，保证后续注册的所有通道都受保护。
+        installIpcSenderGuard();
+        installContentSecurityPolicy(session.defaultSession);
+        const tokenStore = new SecureTokenStore(userDataPath);
+        const cleanupManager = new CleanupManager(path.join(userDataPath, 'local-agent'));
+        await cleanupManager.initialize();
+        // macOS 保留系统菜单（⇆Q / ⇆C 等）；Windows / Linux 置空——判断内聚在 installApplicationMenu。
+        installApplicationMenu();
+        ipcMain.handle('cees:secure-store-get-all', () => tokenStore.getAll());
+        ipcMain.handle('cees:secure-store-set', (_event, key: unknown, value: unknown) => {
+            if (typeof key !== 'string' || typeof value !== 'string') throw new Error('安全存储参数无效');
+            return tokenStore.set(key, value);
         });
-        if (result.canceled || result.filePaths.length !== 1) return null;
-        return scanDirectorySize(result.filePaths[0]);
-    });
-    ipcMain.handle('cees:local-cleanup-choose-and-quarantine', async (_event, selectionKind: unknown) => {
-        if (selectionKind !== 'files' && selectionKind !== 'directory') throw new Error('清理选择类型无效');
-        const result = await dialog.showOpenDialog({
-            title: selectionKind === 'directory' ? '选择要隔离的目录' : '选择要隔离的文件',
-            properties: selectionKind === 'directory'
-                ? ['openDirectory', 'dontAddToRecent']
-                : ['openFile', 'multiSelections', 'dontAddToRecent'],
+        ipcMain.handle('cees:secure-store-remove', (_event, key: unknown) => {
+            if (typeof key !== 'string') throw new Error('安全存储参数无效');
+            return tokenStore.remove(key);
         });
-        if (result.canceled || result.filePaths.length === 0) return null;
-        const plan = await cleanupManager.createPlan(result.filePaths);
-        const confirmed = await confirmCleanupPlan(plan, '隔离所选内容', '所选内容会移动到 CEES 隔离区，可稍后恢复。');
-        if (!confirmed) return plan;
-        return cleanupManager.quarantine(plan.id, plan.manifestHash);
-    });
-    ipcMain.handle('cees:local-cleanup-restore-latest', async () => {
-        const job = (await cleanupManager.listJobs()).find((item) =>
-            ['QUARANTINED', 'PARTIAL', 'RECOVERY_REQUIRED'].includes(item.status)
-            && item.items.some((entry) => entry.status === 'QUARANTINED'));
-        if (!job) return null;
-        const confirmed = await confirmCleanupPlan(job, '恢复最近的隔离任务', '恢复不会覆盖原路径已有内容；冲突项目会跳过。');
-        return confirmed ? cleanupManager.restore(job.id) : job;
-    });
-    ipcMain.handle('cees:local-cleanup-clean-latest', async () => {
-        const job = (await cleanupManager.listJobs()).find((item) =>
-            ['QUARANTINED', 'PARTIAL', 'RECOVERY_REQUIRED'].includes(item.status)
-            && item.items.some((entry) => entry.status === 'QUARANTINED'));
-        if (!job) return null;
-        const confirmed = await confirmCleanupPlan(job, '永久清理隔离区内容', '该操作不可恢复。只会删除已在 CEES 隔离区中的副本。', true);
-        return confirmed ? cleanupManager.cleanup(job.id) : job;
-    });
-    /**
-     * 生成产物另存为。目标路径只能由这里的系统保存对话框产生：
-     * 渲染层只提供建议文件名、扩展名与字节，永远不能指定写入位置。
-     */
-    ipcMain.handle('cees:local-save-generated-file', async (_event, request: unknown) => {
-        if (!request || typeof request !== 'object') throw new Error('保存参数无效');
-        const input = request as { suggestedName?: unknown; extension?: unknown; bytes?: unknown };
-        const extension = assertSavableExtension(input.extension);
-        const bytes = toUint8Array(input.bytes);
-        const result = await dialog.showSaveDialog({
-            title: '保存到本地',
-            defaultPath: buildSuggestedFileName(input.suggestedName, extension),
-            // 覆盖确认交给系统对话框：原生、显式、用户可见，不重复弹窗。
-            properties: ['createDirectory', 'showOverwriteConfirmation'],
+        ipcMain.on('cees:open-devtools', (event) => {
+            BrowserWindow.fromWebContents(event.sender)?.webContents.openDevTools({ mode: 'detach', activate: true });
         });
-        if (result.canceled || !result.filePath) {
-            return { saved: false, canceled: true, displayName: '', sizeBytes: 0 };
-        }
-        return writeSelectedFile(result.filePath, bytes);
+        ipcMain.handle('cees:open-external', async (_event, value: unknown) => {
+            if (typeof value !== 'string') throw new Error('外部链接无效');
+            const url = new URL(value);
+            if (url.protocol !== 'https:') throw new Error('仅允许打开 HTTPS 外部链接');
+            await shell.openExternal(url.toString());
+            return true;
+        });
+        ipcMain.handle('cees:local-disk-scan-volumes', () => scanVolumes());
+        ipcMain.handle('cees:local-disk-choose-and-scan-directory', async () => {
+            const result = await dialog.showOpenDialog({
+                title: '选择要扫描的目录',
+                properties: ['openDirectory', 'dontAddToRecent'],
+            });
+            if (result.canceled || result.filePaths.length !== 1) return null;
+            return scanDirectorySize(result.filePaths[0]);
+        });
+        ipcMain.handle('cees:local-cleanup-choose-and-quarantine', async (_event, selectionKind: unknown) => {
+            if (selectionKind !== 'files' && selectionKind !== 'directory') throw new Error('清理选择类型无效');
+            const result = await dialog.showOpenDialog({
+                title: selectionKind === 'directory' ? '选择要隔离的目录' : '选择要隔离的文件',
+                properties: selectionKind === 'directory'
+                    ? ['openDirectory', 'dontAddToRecent']
+                    : ['openFile', 'multiSelections', 'dontAddToRecent'],
+            });
+            if (result.canceled || result.filePaths.length === 0) return null;
+            const plan = await cleanupManager.createPlan(result.filePaths);
+            const confirmed = await confirmCleanupPlan(plan, '隔离所选内容', '所选内容会移动到 CEES 隔离区，可稍后恢复。');
+            if (!confirmed) return plan;
+            return cleanupManager.quarantine(plan.id, plan.manifestHash);
+        });
+        ipcMain.handle('cees:local-cleanup-restore-latest', async () => {
+            const job = (await cleanupManager.listJobs()).find((item) =>
+                ['QUARANTINED', 'PARTIAL', 'RECOVERY_REQUIRED'].includes(item.status)
+                && item.items.some((entry) => entry.status === 'QUARANTINED'));
+            if (!job) return null;
+            const confirmed = await confirmCleanupPlan(job, '恢复最近的隔离任务', '恢复不会覆盖原路径已有内容；冲突项目会跳过。');
+            return confirmed ? cleanupManager.restore(job.id) : job;
+        });
+        ipcMain.handle('cees:local-cleanup-clean-latest', async () => {
+            const job = (await cleanupManager.listJobs()).find((item) =>
+                ['QUARANTINED', 'PARTIAL', 'RECOVERY_REQUIRED'].includes(item.status)
+                && item.items.some((entry) => entry.status === 'QUARANTINED'));
+            if (!job) return null;
+            const confirmed = await confirmCleanupPlan(job, '永久清理隔离区内容', '该操作不可恢复。只会删除已在 CEES 隔离区中的副本。', true);
+            return confirmed ? cleanupManager.cleanup(job.id) : job;
+        });
+        /**
+         * 生成产物另存为。目标路径只能由这里的系统保存对话框产生：
+         * 渲染层只提供建议文件名、扩展名与字节，永远不能指定写入位置。
+         */
+        ipcMain.handle('cees:local-save-generated-file', async (_event, request: unknown) => {
+            if (!request || typeof request !== 'object') throw new Error('保存参数无效');
+            const input = request as { suggestedName?: unknown; extension?: unknown; bytes?: unknown };
+            const extension = assertSavableExtension(input.extension);
+            const bytes = toUint8Array(input.bytes);
+            const result = await dialog.showSaveDialog({
+                title: '保存到本地',
+                defaultPath: buildSuggestedFileName(input.suggestedName, extension),
+                // 覆盖确认交给系统对话框：原生、显式、用户可见，不重复弹窗。
+                properties: ['createDirectory', 'showOverwriteConfirmation'],
+            });
+            if (result.canceled || !result.filePath) {
+                return { saved: false, canceled: true, displayName: '', sizeBytes: 0 };
+            }
+            return writeSelectedFile(result.filePath, bytes);
+        });
+        ipcMain.handle('cees:connector-list', () => connectorHost.list());
+        ipcMain.handle('cees:connector-status', (_event, connectorId: unknown) =>
+            connectorHost.status(assertConnectorId(connectorId)));
+        ipcMain.handle('cees:connector-connect', (_event, connectorId: unknown, options: unknown) =>
+            connectorHost.connect(assertConnectorId(connectorId), options));
+        ipcMain.handle('cees:connector-disconnect', (_event, connectorId: unknown) =>
+            connectorHost.disconnect(assertConnectorId(connectorId)));
+        ipcMain.handle('cees:connector-tools', (_event, connectorId: unknown) =>
+            connectorHost.tools(assertConnectorId(connectorId)));
+        ipcMain.handle('cees:connector-execute', (_event, connectorId: unknown, calls: unknown) =>
+            connectorHost.execute(assertConnectorId(connectorId), calls));
+        ipcMain.handle('cees:dingtalk-dws-status', () => connectorHost.status('dingtalk'));
+        ipcMain.handle('cees:dingtalk-dws-login', async () => {
+            const status = await dingtalkConnector.login();
+            dingtalkConnector.resetTools();
+            connectorHost.publishStatus('dingtalk', status);
+            return status;
+        });
+        ipcMain.handle('cees:dingtalk-dws-select-profile', async (_event, profile: unknown) => {
+            if (typeof profile !== 'string') throw new Error('钉钉组织账号选择无效');
+            const status = await dingtalkConnector.selectProfile(profile);
+            dingtalkConnector.resetTools();
+            connectorHost.publishStatus('dingtalk', status);
+            return status;
+        });
+        ipcMain.handle('cees:dingtalk-dws-fetch-organization', async () => {
+            try {
+                return await dingtalkConnector.fetchOrganization();
+            } catch (error) {
+                await connectorHost.status('dingtalk');
+                throw error;
+            }
+        });
+        ipcMain.handle('cees:dingtalk-connector-status', () => connectorHost.status('dingtalk'));
+        ipcMain.handle('cees:dingtalk-connector-connect', () => connectorHost.connect('dingtalk'));
+        ipcMain.handle('cees:dingtalk-connector-disconnect', () => connectorHost.disconnect('dingtalk'));
+        ipcMain.handle('cees:dingtalk-connector-tools', () => connectorHost.tools('dingtalk'));
+        ipcMain.handle('cees:dingtalk-connector-execute', (_event, calls: unknown) =>
+            connectorHost.execute('dingtalk', calls));
+        ipcMain.handle('cees:dingtalk-connector-release', () => dingtalkConnector.getRelease());
+        ipcMain.handle('cees:dingtalk-connector-update-check', () => dingtalkConnector.checkForUpdates());
+        ipcMain.handle('cees:dingtalk-connector-upgrade', async (_event, targetVersion: unknown) => {
+            if (targetVersion !== undefined && typeof targetVersion !== 'string') throw new Error('DWS 目标版本无效');
+            try {
+                const result = await dingtalkConnector.upgrade(targetVersion);
+                connectorHost.publishStatus('dingtalk', result.status);
+                return result.release;
+            } catch (error) {
+                await connectorHost.status('dingtalk');
+                throw error;
+            }
+        });
+        ipcMain.handle('cees:dingtalk-connector-rollback', async () => {
+            try {
+                const result = await dingtalkConnector.rollback();
+                connectorHost.publishStatus('dingtalk', result.status);
+                return result.release;
+            } catch (error) {
+                await connectorHost.status('dingtalk');
+                throw error;
+            }
+        });
+        createWindow();
+        installTray();
+        // macOS：窗口关闭后不退出应用，点击 Dock 图标需要重新创建窗口。
+        app.on('activate', () => {
+            if (BrowserWindow.getAllWindows().length === 0) createWindow();
+        });
     });
-    ipcMain.handle('cees:connector-list', () => connectorHost.list());
-    ipcMain.handle('cees:connector-status', (_event, connectorId: unknown) =>
-        connectorHost.status(assertConnectorId(connectorId)));
-    ipcMain.handle('cees:connector-connect', (_event, connectorId: unknown, options: unknown) =>
-        connectorHost.connect(assertConnectorId(connectorId), options));
-    ipcMain.handle('cees:connector-disconnect', (_event, connectorId: unknown) =>
-        connectorHost.disconnect(assertConnectorId(connectorId)));
-    ipcMain.handle('cees:connector-tools', (_event, connectorId: unknown) =>
-        connectorHost.tools(assertConnectorId(connectorId)));
-    ipcMain.handle('cees:connector-execute', (_event, connectorId: unknown, calls: unknown) =>
-        connectorHost.execute(assertConnectorId(connectorId), calls));
-    ipcMain.handle('cees:dingtalk-dws-status', () => connectorHost.status('dingtalk'));
-    ipcMain.handle('cees:dingtalk-dws-login', async () => {
-        const status = await dingtalkConnector.login();
-        dingtalkConnector.resetTools();
-        connectorHost.publishStatus('dingtalk', status);
-        return status;
-    });
-    ipcMain.handle('cees:dingtalk-dws-select-profile', async (_event, profile: unknown) => {
-        if (typeof profile !== 'string') throw new Error('钉钉组织账号选择无效');
-        const status = await dingtalkConnector.selectProfile(profile);
-        dingtalkConnector.resetTools();
-        connectorHost.publishStatus('dingtalk', status);
-        return status;
-    });
-    ipcMain.handle('cees:dingtalk-dws-fetch-organization', async () => {
-        try {
-            return await dingtalkConnector.fetchOrganization();
-        } catch (error) {
-            await connectorHost.status('dingtalk');
-            throw error;
-        }
-    });
-    ipcMain.handle('cees:dingtalk-connector-status', () => connectorHost.status('dingtalk'));
-    ipcMain.handle('cees:dingtalk-connector-connect', () => connectorHost.connect('dingtalk'));
-    ipcMain.handle('cees:dingtalk-connector-disconnect', () => connectorHost.disconnect('dingtalk'));
-    ipcMain.handle('cees:dingtalk-connector-tools', () => connectorHost.tools('dingtalk'));
-    ipcMain.handle('cees:dingtalk-connector-execute', (_event, calls: unknown) =>
-        connectorHost.execute('dingtalk', calls));
-    ipcMain.handle('cees:dingtalk-connector-release', () => dingtalkConnector.getRelease());
-    ipcMain.handle('cees:dingtalk-connector-update-check', () => dingtalkConnector.checkForUpdates());
-    ipcMain.handle('cees:dingtalk-connector-upgrade', async (_event, targetVersion: unknown) => {
-        if (targetVersion !== undefined && typeof targetVersion !== 'string') throw new Error('DWS 目标版本无效');
-        try {
-            const result = await dingtalkConnector.upgrade(targetVersion);
-            connectorHost.publishStatus('dingtalk', result.status);
-            return result.release;
-        } catch (error) {
-            await connectorHost.status('dingtalk');
-            throw error;
-        }
-    });
-    ipcMain.handle('cees:dingtalk-connector-rollback', async () => {
-        try {
-            const result = await dingtalkConnector.rollback();
-            connectorHost.publishStatus('dingtalk', result.status);
-            return result.release;
-        } catch (error) {
-            await connectorHost.status('dingtalk');
-            throw error;
-        }
-    });
-    createWindow();
-    // macOS：窗口关闭后不退出应用，点击 Dock 图标需要重新创建窗口。
-    app.on('activate', () => {
-        if (BrowserWindow.getAllWindows().length === 0) createWindow();
-    });
-});
+}
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 
 function assertConnectorId(value: unknown): string {

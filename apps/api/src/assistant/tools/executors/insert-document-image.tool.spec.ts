@@ -1,5 +1,5 @@
 import { DocumentService } from '../../../document/document.service';
-import { AssistantMessageContentService, TurnImageReference } from '../../runtime/message-content.service';
+import { AssistantMessageContentService, ConversationImageReference } from '../../runtime/message-content.service';
 import { ToolRegistryService } from '../tool-registry';
 import type { ToolExecutionContext } from '../tool.types';
 import { InsertDocumentImageTool } from './insert-document-image.tool';
@@ -7,7 +7,7 @@ import { InsertDocumentImageTool } from './insert-document-image.tool';
 describe('InsertDocumentImageTool', () => {
     let registry: ToolRegistryService;
     let documentService: jest.Mocked<Pick<DocumentService, 'insertDocumentImage'>>;
-    let messageContent: jest.Mocked<Pick<AssistantMessageContentService, 'resolveTurnImageReferences'>>;
+    let messageContent: jest.Mocked<Pick<AssistantMessageContentService, 'resolveConversationImageReferences'>>;
 
     const context: ToolExecutionContext = {
         tenantId: '10000000-0000-0000-0000-000000000001',
@@ -27,7 +27,7 @@ describe('InsertDocumentImageTool', () => {
     beforeEach(() => {
         registry = new ToolRegistryService();
         documentService = { insertDocumentImage: jest.fn() };
-        messageContent = { resolveTurnImageReferences: jest.fn() };
+        messageContent = { resolveConversationImageReferences: jest.fn() };
         const tool = new InsertDocumentImageTool(
             registry,
             documentService as unknown as DocumentService,
@@ -55,6 +55,7 @@ describe('InsertDocumentImageTool', () => {
         expect(() => definition?.validate({ caption: 'x'.repeat(301) })).toThrow('caption 不能超过 300 字符');
         expect(() => definition?.validate({ image_index: 0 })).toThrow('image_index 必须是不小于 1 的整数');
         expect(() => definition?.validate({ image_index: 1.5 })).toThrow('image_index 必须是不小于 1 的整数');
+        expect(() => definition?.validate({ image_file_id: 'file-1', image_index: 1 })).toThrow('只能提供一个');
         expect(definition?.validate({ section_title: ' 下周计划 ', caption: ' 架构图 ', image_index: 2 })).toEqual({
             section_title: '下周计划',
             caption: '架构图',
@@ -63,11 +64,11 @@ describe('InsertDocumentImageTool', () => {
     });
 
     it('resolves the requested image and inserts it without rewriting body text', async () => {
-        const references: TurnImageReference[] = [
-            { fileId: 'file-1', objectKey: 'cees/local/a.png', mimeType: 'image/png' },
-            { fileId: 'file-2', objectKey: 'cees/local/b.png', mimeType: 'image/png' },
+        const references: ConversationImageReference[] = [
+            { fileId: 'file-1', objectKey: 'cees/local/a.png', mimeType: 'image/png', source: 'UPLOAD', label: 'a.png', createdAt: new Date('2026-09-29T01:00:00Z') },
+            { fileId: 'file-2', objectKey: 'cees/local/b.png', mimeType: 'image/png', source: 'GENERATED', label: '团队协作插画', createdAt: new Date('2026-09-29T02:00:00Z') },
         ];
-        messageContent.resolveTurnImageReferences.mockResolvedValue(references);
+        messageContent.resolveConversationImageReferences.mockResolvedValue(references);
         documentService.insertDocumentImage.mockResolvedValue({
             documentId: 'doc-1',
             title: '项目周报',
@@ -77,9 +78,9 @@ describe('InsertDocumentImageTool', () => {
         });
         const definition = registry.get('insert_document_image');
 
-        const result = await definition!.execute(context, { section_title: '下周计划', caption: '架构图', image_index: 2 });
+        const result = await definition!.execute(context, { section_title: '下周计划', caption: '架构图', image_file_id: 'file-2' });
 
-        expect(messageContent.resolveTurnImageReferences).toHaveBeenCalledWith('turn-id', expect.objectContaining({
+        expect(messageContent.resolveConversationImageReferences).toHaveBeenCalledWith(context.conversationId, expect.objectContaining({
             tenantId: context.tenantId,
             userId: context.userId,
             membershipId: context.membershipId,
@@ -103,10 +104,10 @@ describe('InsertDocumentImageTool', () => {
         expect(result.summary).not.toContain('cees/local/b.png');
     });
 
-    it('defaults to the last image of the turn when image_index is omitted', async () => {
-        messageContent.resolveTurnImageReferences.mockResolvedValue([
-            { fileId: 'file-1', objectKey: 'cees/local/a.png', mimeType: 'image/png' },
-            { fileId: 'file-2', objectKey: 'cees/local/b.png', mimeType: 'image/png' },
+    it('defaults to the latest image of the conversation when selection is omitted', async () => {
+        messageContent.resolveConversationImageReferences.mockResolvedValue([
+            { fileId: 'file-1', objectKey: 'cees/local/a.png', mimeType: 'image/png', source: 'UPLOAD', label: 'a.png', createdAt: new Date('2026-09-29T01:00:00Z') },
+            { fileId: 'file-2', objectKey: 'cees/local/b.png', mimeType: 'image/png', source: 'GENERATED', label: '团队协作插画', createdAt: new Date('2026-09-29T02:00:00Z') },
         ]);
         documentService.insertDocumentImage.mockResolvedValue({
             documentId: 'doc-1',
@@ -124,17 +125,17 @@ describe('InsertDocumentImageTool', () => {
         }));
     });
 
-    it('rejects when the turn has no usable image', async () => {
-        messageContent.resolveTurnImageReferences.mockResolvedValue([]);
+    it('rejects when the conversation has no usable image', async () => {
+        messageContent.resolveConversationImageReferences.mockResolvedValue([]);
         const definition = registry.get('insert_document_image');
 
-        await expect(definition!.execute(context, {})).rejects.toThrow('本条消息没有可供插入的图片');
+        await expect(definition!.execute(context, {})).rejects.toThrow('当前会话没有可供插入的图片');
         expect(documentService.insertDocumentImage).not.toHaveBeenCalled();
     });
 
     it('rejects an out-of-range image_index', async () => {
-        messageContent.resolveTurnImageReferences.mockResolvedValue([
-            { fileId: 'file-1', objectKey: 'cees/local/a.png', mimeType: 'image/png' },
+        messageContent.resolveConversationImageReferences.mockResolvedValue([
+            { fileId: 'file-1', objectKey: 'cees/local/a.png', mimeType: 'image/png', source: 'UPLOAD', label: 'a.png', createdAt: new Date('2026-09-29T01:00:00Z') },
         ]);
         const definition = registry.get('insert_document_image');
 

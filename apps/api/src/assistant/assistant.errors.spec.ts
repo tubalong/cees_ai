@@ -3,6 +3,22 @@ import { AiServiceInvocationError } from '../ai-orchestration/ai-service-gateway
 import { describeAssistantError } from './assistant.errors';
 
 describe('describeAssistantError', () => {
+    it('maps exhausted provider quota to a concise Chinese service message', () => {
+        const described = describeAssistantError(
+            new AiServiceInvocationError(
+                'LLM_PROVIDER_QUOTA_EXHAUSTED',
+                'Insufficient Balance (provider=deepseek, api_key_env=PRIMARY_LLM_API_KEY)',
+                false,
+                503,
+            ),
+        );
+
+        expect(described.status).toBe(HttpStatus.SERVICE_UNAVAILABLE);
+        expect(described.retryable).toBe(false);
+        expect(described.message).toContain('主备模型账号');
+        expect(described.message).not.toContain('PRIMARY_LLM_API_KEY');
+    });
+
     it('maps truncated tool arguments to an actionable Chinese message', () => {
         // 模型把长文档内联进工具参数时会被输出上限截断，用户需要知道下一步怎么做，
         // 而不是只看到「AI 请求失败」。
