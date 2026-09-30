@@ -3038,6 +3038,65 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponseEnvelope"
 
+  /documents/{documentId}/file:
+    parameters:
+      - name: documentId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      summary: 下载授权范围内文档的已生成文件
+      description: >-
+        复用 document.read 权限和资源范围校验，直接返回存储中的文件字节，
+        不重新渲染、不跳转到 COS；媒体类型取自关联文件元数据。
+      operationId: documentDownloadFile
+      tags: [Document]
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 已落盘的生成文件
+          headers:
+            Content-Disposition:
+              description: 附件文件名，含 ASCII 回退与 RFC 5987 UTF-8 文件名；扩展名按媒体类型追加
+              schema:
+                type: string
+          content:
+            application/vnd.openxmlformats-officedocument.wordprocessingml.document:
+              schema: { type: string, format: binary }
+            application/pdf:
+              schema: { type: string, format: binary }
+            application/vnd.openxmlformats-officedocument.presentationml.presentation:
+              schema: { type: string, format: binary }
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema: { type: string, format: binary }
+        "400":
+          description: 文档未关联已生成文件（DOCUMENT_FILE_UNAVAILABLE）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "401":
+          description: 登录状态无效或已过期
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "403":
+          description: 缺少 document.read 权限
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+        "404":
+          description: 文档不存在或不在授权范围内
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseEnvelope"
+
   /documents/{documentId}/export:
     parameters:
       - name: documentId

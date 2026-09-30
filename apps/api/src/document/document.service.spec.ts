@@ -341,8 +341,10 @@ describe('DocumentService', () => {
 
         const result = await service.getDocumentFileDownload(DOCUMENT_ID);
 
-        expect(result.filename).toBe('导出格式自检.pdf');
-        expect(result.url).toBe('https://cos.example.com/signed');
+        // 扩展名由控制器按 MIME 追加，服务只回标题；否则会出现「名称.pdf.pdf」。
+        expect(result.filename).toBe('导出格式自检');
+        expect(result.mimeType).toBe('application/pdf');
+        expect(result.bytes).toEqual(Buffer.from('image-bytes'));
     });
 
     it('uses the modern editorial template for PDF exports by default', async () => {
@@ -586,6 +588,7 @@ const MEMBERSHIP_ID = '50000000-0000-0000-0000-000000000001';
 const ROLE_ID = '20000000-0000-0000-0000-000000000001';
 const DOCUMENT_ID = '70000000-0000-0000-0000-000000000001';
 const SECOND_DOCUMENT_ID = '70000000-0000-0000-0000-000000000002';
+const TOOL_CALL_ID = '80000000-0000-4000-8000-000000000001';
 const NOW = new Date('2026-09-07T00:00:00.000Z');
 
 function createService(prisma: Record<string, any>, access: Record<string, any>, gateway: Record<string, any> = { composeDocument: jest.fn() }): DocumentService {
@@ -609,6 +612,7 @@ function createService(prisma: Record<string, any>, access: Record<string, any>,
     const storage = {
         putObject: jest.fn().mockResolvedValue({ sizeBytes: 10, contentType: 'application/pdf', etag: 'etag' }),
         createDownloadUrl: jest.fn().mockResolvedValue('https://cos.example.com/signed'),
+        readObject: jest.fn().mockResolvedValue({ body: Buffer.from('image-bytes'), contentType: 'image/png' }),
         deleteObject: jest.fn().mockResolvedValue(undefined),
     };
     const storageSettings = {

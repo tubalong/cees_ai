@@ -53,6 +53,11 @@ contextBridge.exposeInMainWorld('cees', {
         ipcRenderer.on('cees:window-fullscreen-changed', handler);
         return () => ipcRenderer.removeListener('cees:window-fullscreen-changed', handler);
     },
+    onTrayNewConversation: (listener: () => void): (() => void) => {
+        const handler = (): void => listener();
+        ipcRenderer.on('cees:tray-new-conversation', handler);
+        return () => ipcRenderer.removeListener('cees:tray-new-conversation', handler);
+    },
     dingtalkDws: {
         status: (): Promise<DingTalkDwsStatus> => ipcRenderer.invoke('cees:dingtalk-dws-status'),
         login: (): Promise<DingTalkDwsStatus> => ipcRenderer.invoke('cees:dingtalk-dws-login'),

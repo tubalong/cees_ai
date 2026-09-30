@@ -358,6 +358,105 @@ export class AssistantMessageContentService {
     return materials;
   }
 
+  /** 当前轮没有附件时，回退到同一会话中最近一次可访问的表格附件。 */
+  async resolveConversationDocumentSourceMaterials(
+    conversationId: string,
+    identity: MessageContentIdentity,
+  ): Promise<DocumentSourceMaterial[]> {
+    const messages = await this.prisma.conversationMessage.findMany({
+      where: {
+        tenantId: identity.tenantId,
+        conversationId,
+        role: ConversationMessageRole.USER,
+      },
+      orderBy: { createdAt: 'desc' },
+      select: { documentFileIds: true },
+    });
+    const fileIds = normalizeFileIds(messages.flatMap((message) => message.documentFileIds ?? []));
+    if (fileIds.length === 0) {
+      return this.resolveConversationGeneratedSpreadsheetSourceMaterials(conversationId, identity);
+    }
+    const files = await this.prisma.fileObject.findMany({
+      where: {
+        tenantId: identity.tenantId,
+        id: { in: fileIds },
+        deletedAt: null,
+        purpose: FilePurpose.ATTACHMENT,
+        createdBy: identity.userId,
+      },
+      select: { id: true, originalName: true, mimeType: true },
+    });
+    const spreadsheetIds = new Set(files
+      .filter((file) => isSpreadsheetFile(file.originalName, file.mimeType))
+      .map((file) => file.id));
+    const names = new Map(files.map((file) => [file.id, file.originalName]));
+    for (const fileId of fileIds) {
+      if (!spreadsheetIds.has(fileId)) continue;
+      const parts = await this.resolveDocumentParts([fileId], identity);
+      const content = parts
+        .filter((part): part is Extract<MessageContentPart, { type: 'text' }> => part.type === 'text')
+        .map((part) => part.text)
+        .join('\n');
+      if (content.trim()) {
+        return [{ id: fileId, title: names.get(fileId) ?? 'uploaded-spreadsheet', content }];
+      }
+    }
+    return this.resolveConversationGeneratedSpreadsheetSourceMaterials(conversationId, identity);
+  }
+
+  /**
+   * 当前会话没有可用上传附件时，复用最近一次已生成的 XLSX 作为下一次修改的源。
+   *
+   * 必须按 XLSX 媒体类型筛选：同一会话可能先出表格、后又生成 DOCX/PDF，
+   * 若只取「最近一次生成文档」，会被非表格文档顶掉并再次要求用户重新上传。
+   */
+  private async resolveConversationGeneratedSpreadsheetSourceMaterials(
+    conversationId: string,
+    identity: MessageContentIdentity,
+  ): Promise<DocumentSourceMaterial[]> {
+    const document = await this.prisma.managedDocument.findFirst({
+      where: {
+        tenantId: identity.tenantId,
+        deletedAt: null,
+        generatedByToolCall: {
+          is: { tenantId: identity.tenantId, conversationId },
+        },
+        fileObject: {
+          is: {
+            deletedAt: null,
+            purpose: FilePurpose.GENERATED_DOCUMENT,
+            mimeType: XLSX_MIME_TYPE,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        title: true,
+        fileObject: {
+          select: { id: true, originalName: true, mimeType: true, objectKey: true },
+        },
+      },
+    });
+    if (!document?.fileObject) return [];
+
+    const object = await this.storage.readObject(document.fileObject.objectKey);
+    const extracted = await this.gateway.extractFile({
+      request_id: identity.requestId,
+      tenant_id: identity.tenantId,
+      user_id: identity.userId,
+      filename: document.fileObject.originalName || `${document.title}.xlsx`,
+      content_type: document.fileObject.mimeType || object.contentType || XLSX_MIME_TYPE,
+      data_base64: object.body.toString('base64'),
+    });
+    const content = extracted.parts
+      .filter((part): part is Extract<MessageContentPart, { type: 'text' }> => part.type === 'text')
+      .map((part) => part.text)
+      .join('\n');
+    return content.trim()
+      ? [{ id: document.fileObject.id, title: document.fileObject.originalName || document.title, content }]
+      : [];
+  }
+
   /** 抽取文档/文本文件内容为可注入对话上下文的文本 parts。 */
   async resolveDocumentParts(
     fileIds: readonly string[],
@@ -533,6 +632,15 @@ export class AssistantMessageContentService {
     }
     return resolved;
   }
+}
+
+const XLSX_MIME_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+function isSpreadsheetFile(originalName: string, mimeType: string): boolean {
+  return /\.(?:xlsx|xls|csv)$/i.test(originalName)
+    || mimeType === 'text/csv'
+    || mimeType === 'application/vnd.ms-excel'
+    || mimeType === XLSX_MIME_TYPE;
 }
 
 function truncateReferenceLabel(value: string | null | undefined, fallback: string): string {

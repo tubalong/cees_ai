@@ -1,7 +1,7 @@
 import { toUserErrorMessage } from './user-error';
 
-// export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000/api/';
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://192.168.5.29:3000/api/';
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000/api/';
+// export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://192.168.5.29:3000/api/';
 // export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://132.232.159.186:3000/api/';
 // http://192.168.5.29:3000/api/
 // http://132.232.159.186:3000/api/
@@ -696,6 +696,7 @@ export async function exportDocument(
         throw new Error(body?.message?.toString() || body?.error?.message || '导出失败');
     }
     const blob = await response.blob();
+    if (blob.size === 0) throw new Error('服务端返回的文件为空，请重新生成后再下载');
     const filename = resolveDownloadFilename(response.headers.get('Content-Disposition'), format, preferredName);
     const blobUrl = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
@@ -720,10 +721,13 @@ export async function downloadGeneratedDocumentFile(
         const body = await response.json().catch(() => null) as ApiErrorBody | null;
         throw new Error(body?.message?.toString() || body?.error?.message || '文件下载失败');
     }
-    const blobUrl = URL.createObjectURL(await response.blob());
+    const blob = await response.blob();
+    // 只有 2xx 还不够：网关错误页或提前断流会返回 0 字节，直接锚点落盘会生成一个打不开的空文件。
+    if (blob.size === 0) throw new Error('服务端返回的文件为空，请重新生成后再下载');
+    const blobUrl = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = blobUrl;
-    anchor.download = `${preferredName}.${extension}`;
+    anchor.download = resolveDownloadFilename(response.headers.get('Content-Disposition'), extension, preferredName);
     anchor.click();
     URL.revokeObjectURL(blobUrl);
 }
@@ -746,7 +750,10 @@ export async function fetchGeneratedDocumentBytes(documentId: string): Promise<U
         const body = await response.json().catch(() => null) as ApiErrorBody | null;
         throw new Error(body?.message?.toString() || body?.error?.message || '读取文件内容失败');
     }
-    return new Uint8Array(await response.arrayBuffer());
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    // 空字节交给系统保存对话框只会得到一个 0 字节文件，用户以为保存成功但打不开。
+    if (bytes.byteLength === 0) throw new Error('服务端返回的文件为空，请重新生成后再保存');
+    return bytes;
 }
 
 /**
@@ -757,7 +764,7 @@ export async function fetchGeneratedDocumentBytes(documentId: string): Promise<U
 export function resolveDownloadFilename(disposition: string | null, format: string, preferredName?: string): string {
     const fromHeader = filenameFromDisposition(disposition, format);
     const preferred = preferredName ? sanitizeDownloadName(preferredName) : '';
-    if (preferred && isGenericDownloadName(fromHeader, format)) return `${preferred}.${format}`;
+    if (preferred && isGenericDownloadName(fromHeader, format)) return preferred.toLowerCase().endsWith(`.${format.toLowerCase()}`) ? preferred : `${preferred}.${format}`;
     return fromHeader;
 }
 

@@ -36,6 +36,11 @@ export interface StoredObjectMetadata {
     etag: string | null;
 }
 
+export interface ReadObjectResult {
+    body: Buffer;
+    contentType: string | null;
+}
+
 /**
  * 供业务模块调用的对象存储抽象。COS 长期凭据只能封装在具体 Provider 内部，
  * 任何实现都不得把 SecretId 或 SecretKey 返回给 API 调用方。
@@ -52,6 +57,9 @@ export interface StorageProvider {
 
     /** 在上层完成业务授权后，为私有对象签发短时下载 URL。 */
     createDownloadUrl(objectKey: string, ttlSeconds?: number): Promise<string>;
+
+    /** 在服务端读取一个已授权对象，用于内部渲染等不应依赖外网回源的流程。 */
+    readObject(objectKey: string): Promise<ReadObjectResult>;
 
     /** 永久删除一个明确对象；调用前必须由上层完成租户和业务授权。 */
     deleteObject(objectKey: string): Promise<void>;

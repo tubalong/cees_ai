@@ -7,12 +7,15 @@ import { GenerateDocumentTool } from './generate-document.tool';
 describe('GenerateDocumentTool', () => {
     let registry: ToolRegistryService;
     let documentService: jest.Mocked<Pick<DocumentService, 'createGeneratedDocument' | 'createGeneratedSpreadsheet'>>;
-    let messageContent: jest.Mocked<Pick<AssistantMessageContentService, 'resolveTurnDocumentSourceMaterials'>>;
+    let messageContent: jest.Mocked<Pick<AssistantMessageContentService, 'resolveTurnDocumentSourceMaterials' | 'resolveConversationDocumentSourceMaterials'>>;
 
     beforeEach(() => {
         registry = new ToolRegistryService();
         documentService = { createGeneratedDocument: jest.fn(), createGeneratedSpreadsheet: jest.fn() };
-        messageContent = { resolveTurnDocumentSourceMaterials: jest.fn().mockResolvedValue([]) };
+        messageContent = {
+            resolveTurnDocumentSourceMaterials: jest.fn().mockResolvedValue([]),
+            resolveConversationDocumentSourceMaterials: jest.fn().mockResolvedValue([]),
+        };
         const tool = new GenerateDocumentTool(
             registry,
             documentService as unknown as DocumentService,
@@ -128,5 +131,29 @@ describe('GenerateDocumentTool', () => {
         }));
         expect(result).toEqual(expect.objectContaining({ resourceType: 'DOCUMENT', resourceId: 'sheet-1' }));
         expect(result.summary).toContain('XLSX 表格已生成');
+    });
+
+    it('reuses the latest spreadsheet from the conversation when the current turn has no attachment', async () => {
+        const definition = registry.get('generate_xlsx');
+        messageContent.resolveConversationDocumentSourceMaterials.mockResolvedValue([
+            { id: 'generated-file-1', title: '收入调整表.xlsx', content: '工作表：收入调整表\n项目,金额\n华东,110' },
+        ]);
+        documentService.createGeneratedSpreadsheet.mockResolvedValue({
+            documentId: 'sheet-2', title: '收入二次调整表', contentLength: 52, provider: 'openai_compatible', model: 'sheet-model',
+        });
+
+        await definition!.execute({
+            tenantId: 't-1', userId: 'u-1', membershipId: 'm-1', requestId: 'r-1',
+            conversationId: 'c-1', turnId: 'turn-2', toolCallId: 'tc-2',
+            executionOwner: 'api:test', executionToken: 'execution-token-2',
+            permissions: ['ai.document.generate'], knowledgeBaseEnabled: false, webSearchEnabled: false,
+        }, { instruction: '再把金额提高 5%', visibility: 'PRIVATE' });
+
+        expect(messageContent.resolveConversationDocumentSourceMaterials).toHaveBeenCalledWith(
+            'c-1', expect.objectContaining({ tenantId: 't-1', userId: 'u-1' }),
+        );
+        expect(documentService.createGeneratedSpreadsheet).toHaveBeenCalledWith(expect.objectContaining({
+            sourceMaterials: [expect.objectContaining({ title: '收入调整表.xlsx' })],
+        }));
     });
 });

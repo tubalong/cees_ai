@@ -12,19 +12,26 @@ interface Harness {
     findMany: jest.Mock;
     conversationMessageFindMany: jest.Mock;
     managedImageFindMany: jest.Mock;
+    managedDocumentFindFirst: jest.Mock;
     extractFile: jest.Mock;
+    readObject: jest.Mock;
 }
 
 function createHarness(): Harness {
     const findMany = jest.fn();
     const conversationMessageFindMany = jest.fn();
     const managedImageFindMany = jest.fn();
+    const managedDocumentFindFirst = jest.fn();
     const prisma = {
         fileObject: { findMany },
         conversationMessage: { findMany: conversationMessageFindMany },
         managedImage: { findMany: managedImageFindMany },
+        managedDocument: { findFirst: managedDocumentFindFirst },
     } as unknown as PrismaService;
-    const storage = { createDownloadUrl: jest.fn(async () => 'https://example.test/file') };
+    const storage = {
+        createDownloadUrl: jest.fn(async () => 'https://example.test/file'),
+        readObject: jest.fn(async () => ({ body: Buffer.from('xlsx-bytes'), contentType: null })),
+    };
     const extractFile = jest.fn(async () => ({ parts: [{ type: 'text', text: '手册正文' }] }));
     const service = new AssistantMessageContentService(
         prisma,
@@ -35,7 +42,7 @@ function createHarness(): Harness {
     // 该模块通过 STORAGE_* 令牌注入，构造器参数顺序与令牌无关，这里只做类型占位说明。
     void STORAGE_PROVIDER;
     void STORAGE_SETTINGS;
-    return { service, findMany, conversationMessageFindMany, managedImageFindMany, extractFile };
+    return { service, findMany, conversationMessageFindMany, managedImageFindMany, managedDocumentFindFirst, extractFile, readObject: storage.readObject };
 }
 
 const identity = { tenantId: TENANT_ID, userId: USER_ID, membershipId: 'm-1', requestId: 'r-1' };
@@ -179,5 +186,71 @@ describe('AssistantMessageContentService.resolveConversationImageReferences', ()
         expect(description).toContain('绝不能展示给用户');
         expect(description).not.toContain('https://');
         expect(description).not.toContain('uploads/team.png');
+    });
+});
+
+describe('AssistantMessageContentService.resolveConversationDocumentSourceMaterials', () => {
+    it('reuses a spreadsheet attachment from an earlier turn instead of asking the user to upload again', async () => {
+        const harness = createHarness();
+        harness.conversationMessageFindMany.mockResolvedValue([{ documentFileIds: [FILE_ID] }]);
+        harness.findMany.mockResolvedValue([{
+            id: FILE_ID,
+            originalName: '收入台账.xlsx',
+            mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            objectKey: 'key/ledger.xlsx',
+            createdBy: USER_ID,
+        }]);
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = jest.fn(async () => ({
+            ok: true,
+            arrayBuffer: async () => new ArrayBuffer(8),
+        })) as unknown as typeof fetch;
+
+        try {
+            const materials = await harness.service.resolveConversationDocumentSourceMaterials('conversation-1', identity);
+
+            expect(materials).toEqual([expect.objectContaining({ id: FILE_ID, title: '收入台账.xlsx' })]);
+            expect(harness.managedDocumentFindFirst).not.toHaveBeenCalled();
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+    });
+
+    it('falls back to the last generated XLSX and only matches XLSX files', async () => {
+        const harness = createHarness();
+        // 会话里最近的消息只带 DOCX：不是表格，不应被当成表格源材料。
+        harness.conversationMessageFindMany.mockResolvedValue([{ documentFileIds: [FILE_ID] }]);
+        harness.findMany.mockResolvedValue([{
+            id: FILE_ID,
+            originalName: '会议纪要.docx',
+            mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        }]);
+        harness.managedDocumentFindFirst.mockResolvedValue({
+            title: '收入调整表',
+            fileObject: {
+                id: '40000000-0000-4000-8000-000000000004',
+                originalName: 'generated-sheet.xlsx',
+                mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                objectKey: 'generated/sheet.xlsx',
+            },
+        });
+
+        const materials = await harness.service.resolveConversationDocumentSourceMaterials('conversation-1', identity);
+
+        expect(materials).toHaveLength(1);
+        expect(materials[0]).toEqual(expect.objectContaining({ title: 'generated-sheet.xlsx' }));
+        // 只取 XLSX：否则会话里后生成的 DOCX/PDF 会顶掉表格，用户又被要求重新上传。
+        expect(harness.managedDocumentFindFirst).toHaveBeenCalledWith(expect.objectContaining({
+            where: expect.objectContaining({
+                tenantId: TENANT_ID,
+                generatedByToolCall: { is: { tenantId: TENANT_ID, conversationId: 'conversation-1' } },
+                fileObject: {
+                    is: expect.objectContaining({
+                        purpose: FilePurpose.GENERATED_DOCUMENT,
+                        mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                    }),
+                },
+            }),
+        }));
     });
 });

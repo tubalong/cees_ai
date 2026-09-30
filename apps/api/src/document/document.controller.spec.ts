@@ -70,11 +70,22 @@ describe('DocumentController export filenames', () => {
         expect(file.getHeaders().length).toBe(bytes.length);
     });
 
-    it('redirects to the signed URL when the document has a persisted generated file', async () => {
+    it('streams the persisted generated file with its own media type and title', async () => {
+        // 下载曾返回 COS 签名 URL 让客户端跳转，跨域响应不可读时前端只能报「下载失败」；
+        // 现在由 API 直接交付已落盘字节，这里锁定该行为。
+        const bytes = Buffer.from('PK\u0003\u0004');
         const harness = createHarness({ filename: THEME_TITLE, bytes: Buffer.from('docx') });
-        harness.service.getDocumentFileDownload.mockResolvedValue({ filename: `${THEME_TITLE}.pdf`, url: 'https://cos.example/signed' });
+        harness.service.getDocumentFileDownload.mockResolvedValue({
+            filename: THEME_TITLE,
+            bytes,
+            mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        });
 
-        await expect(harness.controller.downloadDocumentFile(DOCUMENT_ID)).resolves.toEqual({ url: 'https://cos.example/signed' });
+        const file = await harness.controller.downloadDocumentFile(DOCUMENT_ID);
+
+        expect(file.getHeaders().type).toBe('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        expect(file.getHeaders().length).toBe(bytes.length);
+        expect(decodeRfc5987(file.getHeaders().disposition)).toBe(`${THEME_TITLE}.xlsx`);
     });
 });
 
@@ -83,7 +94,11 @@ function createHarness(exportResult: { filename: string; bytes: Buffer }) {
         exportDocumentDocx: jest.fn().mockResolvedValue(exportResult),
         exportDocumentPdf: jest.fn().mockResolvedValue(exportResult),
         exportDocumentPptx: jest.fn().mockResolvedValue(exportResult),
-        getDocumentFileDownload: jest.fn().mockResolvedValue({ filename: `${exportResult.filename}.pdf`, url: 'https://cos.example/signed' }),
+        getDocumentFileDownload: jest.fn().mockResolvedValue({
+            filename: exportResult.filename,
+            bytes: exportResult.bytes,
+            mimeType: 'application/pdf',
+        }),
     };
     return {
         service,
