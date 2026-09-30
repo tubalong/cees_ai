@@ -252,6 +252,8 @@ describe('ContextBuilderService buildToolTurnMessages', () => {
         });
         expect((request.messages[0]?.content as Array<{ text?: string }>)[1]?.text).toContain(JSON.stringify(connectorContexts));
         expect((request.messages[0]?.content as Array<{ text?: string }>)[1]?.text).toContain('不得重新解释数字时间戳');
+        expect((request.messages[0]?.content as Array<{ text?: string }>)[1]?.text).toContain('complete=false、hasMore=true 或 nextPageToken 非空表示结果不完整');
+        expect((request.messages[0]?.content as Array<{ text?: string }>)[1]?.text).toContain('只有 complete=true 且返回列表为空时，才能说“在本次查询范围内没有数据”');
     });
 });
 

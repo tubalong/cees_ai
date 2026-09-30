@@ -4,6 +4,7 @@
 > Owner：B（`apps/desktop/src/app/**` 与 `apps/api/src/assistant/**` 的唯一 owner）
 > 关联文档：
 > - [Desktop 连接器运行时](connector-runtime.md)：连接器生命周期、凭据位置、动态工具与规划边界
+> - [连接器真实查询联调验收](connector-real-query-validation.md)：真实账号查询用例、完整性状态与失败判定
 > - [钉钉 DWS/MCP 连接器](../product/dingtalk-mcp-connector.md)、[腾讯会议连接器](../product/tencent-meeting-connector.md)、[企业微信 CLI 连接器](../product/wecom-cli-connector.md)、[GitHub 官方远程 MCP 连接器](../product/github-remote-mcp-connector.md)
 > - [AI 助手业务写操作](../product/assistant-business-tools.md)、[通用 Tool Calling](ai-tool-calling.md)
 
