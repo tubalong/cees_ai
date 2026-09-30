@@ -2939,3 +2939,107 @@
     font-size: 10px;
     white-space: nowrap;
 }
+
+.connector-control-popover {
+    width: 260px;
+}
+
+.connector-control-description {
+    margin-bottom: 8px;
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 1.5;
+}
+
+.connector-control-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 0;
+    border-top: 1px solid var(--line);
+}
+
+.connector-control-row>div {
+    min-width: 0;
+}
+
+.connector-control-row strong,
+.connector-control-row small {
+    display: block;
+}
+
+.connector-control-row strong {
+    color: var(--ink);
+    font-size: 12px;
+}
+
+.connector-control-row small {
+    margin-top: 2px;
+    color: var(--muted);
+    font-size: 10px;
+}
+
+.connector-control-empty {
+    color: var(--muted);
+    font-size: 11px;
+}
+
+.connector-selection-panel {
+    margin: 0 0 10px;
+    padding: 12px;
+    border: 1px solid rgba(var(--primary-rgb), .22);
+    border-radius: 10px;
+    background: var(--primary-soft);
+}
+
+.connector-selection-panel>strong {
+    display: block;
+    color: var(--ink);
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.connector-selection-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.connector-selection-options button {
+    min-width: 150px;
+    padding: 8px 10px;
+    text-align: left;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--ink);
+    cursor: pointer;
+}
+
+.connector-selection-options button:hover {
+    border-color: rgba(var(--primary-rgb), .45);
+    box-shadow: 0 2px 8px rgba(15, 23, 42, .08);
+}
+
+.connector-selection-options span,
+.connector-selection-options small {
+    display: block;
+}
+
+.connector-selection-options span {
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.connector-selection-options small {
+    display: -webkit-box;
+    margin-top: 3px;
+    overflow: hidden;
+    color: var(--muted);
+    font-size: 10px;
+    line-height: 1.4;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+}

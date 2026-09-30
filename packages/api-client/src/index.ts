@@ -141,6 +141,7 @@ export type { CompleteProjectRequest } from './models/CompleteProjectRequest';
 export { ConnectorContext } from './models/ConnectorContext';
 export { ConnectorPreviousStep } from './models/ConnectorPreviousStep';
 export { ConnectorRoutingCandidate } from './models/ConnectorRoutingCandidate';
+export { ConnectorRoutingOption } from './models/ConnectorRoutingOption';
 export { ConnectorRoutingProvider } from './models/ConnectorRoutingProvider';
 export { ConnectorRoutingRecentMessage } from './models/ConnectorRoutingRecentMessage';
 export type { ConnectorRoutingRequest } from './models/ConnectorRoutingRequest';

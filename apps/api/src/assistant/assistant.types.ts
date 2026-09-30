@@ -122,6 +122,13 @@ export interface ConnectorRoutingCandidateInput {
   toolCount?: number;
 }
 
+export interface ConnectorRoutingOption {
+  provider: ConnectorRoutingProvider;
+  displayName: string;
+  state: ConnectorRoutingState;
+  capabilitySummary: string;
+}
+
 /** 最近一轮对话摘要，只用于消解代词与省略表达，不作为业务事实。 */
 export interface ConnectorRoutingRecentMessageInput {
   role: 'user' | 'assistant';
@@ -140,6 +147,7 @@ export interface ConnectorRoutingContextInput {
 export interface ConnectorRoutingResult {
   providers: ConnectorRoutingProvider[];
   clarification: string | null;
+  clarificationOptions?: ConnectorRoutingOption[];
   reason: string;
 }
 

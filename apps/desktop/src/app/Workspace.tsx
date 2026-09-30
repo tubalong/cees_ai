@@ -6,7 +6,7 @@ import {
     CalendarOutlined, ProfileOutlined,
     TeamOutlined, UserOutlined,
 } from '@ant-design/icons';
-import { App as AntdApp, Alert, Avatar, Badge, Button, Empty, Image as AntImage, Input, Modal, Select, Spin, Tag, Tooltip, Dropdown } from 'antd';
+import { App as AntdApp, Alert, Avatar, Badge, Button, Empty, Image as AntImage, Input, Modal, Popover, Select, Spin, Switch, Tag, Tooltip, Dropdown } from 'antd';
 import { useQuery } from '@tanstack/react-query';
 // import { ArrowLeft, ArrowRight, BookOpen, Download, ExternalLink, Eye, FileImage, FileText as FileTextIcon, Globe2, ImagePlus, Pencil, RotateCw, Send, Trash2, Upload, X } from 'lucide-react';
 import { ArrowLeft, ArrowRight, Blocks, BookOpen, ChevronLeft, ChevronRight, Download, ExternalLink, Eye, FileImage, FileText as FileTextIcon, Globe2, History, ImagePlus, LayoutDashboard, Pencil, RotateCw, Save, Send, Sparkles, Trash2, Upload, X } from 'lucide-react';
@@ -19,7 +19,7 @@ import {
     getUnreadNotificationCount, hasStoredSession, listConversations, listDocuments, listTenantMembers, logout,
     createKnowledgeDocument, deleteKnowledgeDocument, listWritableKnowledgeBases,
     type Conversation, type ConversationMessage, type DashboardOverview, type DashboardTodoItem, type DashboardUpcomingMeeting, type GenerationOptions, type ImageAccess, type PageAssistantContext,
-    type ConnectorContext, type ConnectorPreviousStep, type ConnectorRoutingCandidate, type ConnectorRoutingProvider, type GitHubConnectorTool, type TencentMeetingConnectorTool, type TurnStreamEvent, type WeComConnectorTool,
+    type ConnectorContext, type ConnectorPreviousStep, type ConnectorRoutingCandidate, type ConnectorRoutingOption, type ConnectorRoutingProvider, type GitHubConnectorTool, type TencentMeetingConnectorTool, type TurnStreamEvent, type WeComConnectorTool,
     type KnowledgeBaseSummary, type KnowledgeSourceType,
     type ManagedDocumentSummary, type MeResult, type TenantMember,
 } from '../core/api';
@@ -884,6 +884,22 @@ const ROUTING_CONNECTOR_ID_BY_PROVIDER: Record<ConnectorRoutingProvider, Routing
     GITHUB: 'github',
 };
 
+const CONNECTOR_SESSION_STORAGE_PREFIX = 'cees.chat.connectors';
+
+function connectorSessionStorageKey(conversationId: string): string {
+    return `${CONNECTOR_SESSION_STORAGE_PREFIX}.${conversationId}`;
+}
+
+function connectorStateLabel(state: DesktopConnectorStatus['state']): string {
+    return ({
+        NOT_INSTALLED: '未安装',
+        AUTH_REQUIRED: '待授权',
+        PROFILE_REQUIRED: '待选择组织',
+        READY: '已连接',
+        ERROR: '异常',
+    } as Record<DesktopConnectorStatus['state'], string>)[state];
+}
+
 /**
  * 用户明确点名连接器时直接硬命中，不调用语义路由。正则在这里只用于识别「点名」：
  * 未就绪的连接器必须仍然给出「请先安装并授权」的确定性引导，而不是被静默跳过。
@@ -900,14 +916,18 @@ function detectNamedConnectors(content: string): Set<RoutingConnectorId> {
 /** 一级目录：只上报清单里的能力摘要与典型问法加上本机读到的就绪状态，不读取工具目录。 */
 async function collectConnectorRoutingCandidates(
     connectors: NonNullable<NonNullable<Window['cees']>['connectors']>,
+    enabledConnectorIds?: ReadonlySet<RoutingConnectorId>,
 ): Promise<ConnectorRoutingCandidate[]> {
     const manifests = await connectors.list();
     const candidates: ConnectorRoutingCandidate[] = [];
     for (const manifest of manifests) {
         const provider = ROUTING_PROVIDER_BY_CONNECTOR_ID[manifest.id as RoutingConnectorId];
         if (!provider) continue;
+        const connectorId = manifest.id as RoutingConnectorId;
+        if (enabledConnectorIds && !enabledConnectorIds.has(connectorId)) continue;
         try {
             const status = await connectors.status(manifest.id);
+            if (status.state !== 'READY') continue;
             candidates.push({
                 provider,
                 displayName: manifest.name,
@@ -1027,6 +1047,16 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
     const [renameValue, setRenameValue] = useState('');
     const [dingtalkConnected, setDingtalkConnected] = useState(false);
     const [preferredConnector, setPreferredConnector] = useState<'dingtalk' | 'tencent-meeting' | 'wecom' | 'github'>();
+    const [connectorManifests, setConnectorManifests] = useState<DesktopConnectorManifest[]>([]);
+    const [connectorStatuses, setConnectorStatuses] = useState<Record<string, DesktopConnectorStatus>>({});
+    const [connectorSelectionLoaded, setConnectorSelectionLoaded] = useState(false);
+    const [enabledConnectorIds, setEnabledConnectorIds] = useState<Set<RoutingConnectorId>>(new Set());
+    const connectorSelectionKey = useRef<string>();
+    const [pendingConnectorSelection, setPendingConnectorSelection] = useState<{
+        query: string;
+        question: string;
+        options: ConnectorRoutingOption[];
+    }>();
     const initialConversationLoadStarted = useRef(false);
     /**
      * 待确认写操作。放在页面级而不是消息上：
@@ -1122,6 +1152,7 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
         const conversation = await createConversation();
         setConversations((items) => [conversation, ...items.filter((item) => item.id !== conversation.id)]);
         setActiveConversationId(conversation.id);
+        setPendingConnectorSelection(undefined);
         setMessages([]);
         lastRoutedProviders.current = [];
         setPreviewDocument(undefined);
@@ -1168,6 +1199,63 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
             .catch(() => setDingtalkConnected(false));
         return connector.onStatusChanged((status) => setDingtalkConnected(status.state === 'READY'));
     }, []);
+    useEffect(() => {
+        const connectors = window.cees?.connectors;
+        if (!connectors) {
+            setConnectorSelectionLoaded(true);
+            return;
+        }
+        let disposed = false;
+        const refresh = async (): Promise<void> => {
+            try {
+                const manifests = await connectors.list();
+                const entries = await Promise.all(manifests.map(async (manifest) => {
+                    try {
+                        return [manifest.id, await connectors.status(manifest.id)] as const;
+                    } catch {
+                        return [manifest.id, { state: 'ERROR' } as DesktopConnectorStatus] as const;
+                    }
+                }));
+                if (disposed) return;
+                setConnectorManifests(manifests as DesktopConnectorManifest[]);
+                setConnectorStatuses(Object.fromEntries(entries));
+                setConnectorSelectionLoaded(true);
+            } catch {
+                if (!disposed) setConnectorSelectionLoaded(true);
+            }
+        };
+        void refresh();
+        const unsubscribe = connectors.onStatusChanged((event) => {
+            setConnectorStatuses((current) => ({ ...current, [event.connectorId]: event.status as DesktopConnectorStatus }));
+        });
+        return () => {
+            disposed = true;
+            unsubscribe?.();
+        };
+    }, []);
+    useEffect(() => {
+        if (!connectorSelectionLoaded) return;
+        const readyIds = connectorManifests
+            .filter((manifest) => connectorStatuses[manifest.id]?.state === 'READY' && ROUTING_PROVIDER_BY_CONNECTOR_ID[manifest.id as RoutingConnectorId])
+            .map((manifest) => manifest.id as RoutingConnectorId);
+        const readySet = new Set(readyIds);
+        let storedIds: string[] | undefined;
+        if (activeConversationId) {
+            try {
+                const parsed = JSON.parse(localStorage.getItem(connectorSessionStorageKey(activeConversationId)) ?? 'null');
+                if (Array.isArray(parsed)) storedIds = parsed.filter((value): value is string => typeof value === 'string');
+            } catch {
+                storedIds = undefined;
+            }
+        }
+        const selectionKey = activeConversationId ?? 'new';
+        if (connectorSelectionKey.current === selectionKey) {
+            setEnabledConnectorIds((current) => new Set([...current].filter((id) => readySet.has(id))));
+        } else {
+            connectorSelectionKey.current = selectionKey;
+            setEnabledConnectorIds(new Set<RoutingConnectorId>((storedIds ?? readyIds).filter((id): id is RoutingConnectorId => readySet.has(id as RoutingConnectorId))));
+        }
+    }, [activeConversationId, connectorManifests, connectorSelectionLoaded, connectorStatuses]);
     useEffect(() => () => abortController.current?.abort(), []);
     // 进入对话页即拉取待确认草稿：草稿是服务端事实源，刷新或重开后
     // 之前未处理的写操作仍然应该出现在抽屉里等着用户决策。
@@ -1228,6 +1316,7 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
             const latest = await getConversation(conversation.id);
             await deleteConversation(conversation.id, latest.conversation.version);
             localStorage.removeItem(`${DELETED_CITATIONS_KEY}.${conversation.id}`);
+            localStorage.removeItem(connectorSessionStorageKey(conversation.id));
             setConversations((items) => items.filter((item) => item.id !== conversation.id));
             if (activeConversationId === conversation.id) {
                 setActiveConversationId(undefined);
@@ -1260,6 +1349,7 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
         setPreviewDocument(undefined);
         setImageGenerating(false);
         setActiveConversationId(conversation.id);
+        setPendingConnectorSelection(undefined);
         lastRoutedProviders.current = [];
         const detail = await getConversation(conversation.id);
         if (selectionVersion !== conversationSelectionVersion.current) return;
@@ -1309,7 +1399,16 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
         if (!activeConversationId && conversations[0]) void selectConversation(conversations[0]);
     }, [historyOnly, conversations, activeConversationId]);
 
-    const sendMessage = async (overrideContent?: string, forcedConnector?: 'wecom' | 'github', capabilityOverride?: { webSearch: boolean; knowledgeSearch: boolean }, assistantContext?: PageAssistantContext): Promise<void> => {
+    const setConversationConnectorEnabled = (connectorId: RoutingConnectorId, enabled: boolean): void => {
+        setEnabledConnectorIds((current) => {
+            const next = new Set(current);
+            if (enabled) next.add(connectorId); else next.delete(connectorId);
+            if (activeConversationId) localStorage.setItem(connectorSessionStorageKey(activeConversationId), JSON.stringify([...next]));
+            return next;
+        });
+    };
+
+    const sendMessage = async (overrideContent?: string, forcedConnector?: RoutingConnectorId, capabilityOverride?: { webSearch: boolean; knowledgeSearch: boolean }, assistantContext?: PageAssistantContext): Promise<void> => {
         const isRetry = typeof overrideContent === 'string';
         const text = (overrideContent ?? input).trim();
         const turnAttachment = isRetry ? undefined : attachment;
@@ -1402,23 +1501,41 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
             // 最近几轮对话同时用于语义路由与四个连接器规划：省略式追问（例如「那这个月的呢」）
             // 只有带上上下文才能解析，否则规划器会把追问当成全新话题，规划出零个调用。
             const planningRecentMessages = recentRoutingMessages(messages);
-            const pinnedConnectors = detectNamedConnectors(content);
-            if (preferredConnector) pinnedConnectors.add(preferredConnector);
-            if (forcedConnector) pinnedConnectors.add(forcedConnector);
+            const namedConnectors = detectNamedConnectors(content);
+            const blockedNamedConnectors = [...namedConnectors].filter((connectorId) => connectorSelectionLoaded && connectorStatuses[connectorId]?.state === 'READY' && !enabledConnectorIds.has(connectorId));
+            if (blockedNamedConnectors.length > 0) {
+                const names = blockedNamedConnectors.map((connectorId) => connectorManifests.find((manifest) => manifest.id === connectorId)?.name ?? connectorId).join('、');
+                throw new Error(`当前对话未启用${names}，请先在输入框下方打开对应连接器`);
+            }
+            const pinnedConnectors = namedConnectors;
+            if (preferredConnector && (!connectorSelectionLoaded || enabledConnectorIds.has(preferredConnector))) pinnedConnectors.add(preferredConnector);
+            if (forcedConnector) {
+                if (connectorSelectionLoaded && !enabledConnectorIds.has(forcedConnector)) {
+                    setConversationConnectorEnabled(forcedConnector, true);
+                }
+                pinnedConnectors.add(forcedConnector);
+            }
             const activeConnectors = new Set<RoutingConnectorId>(pinnedConnectors);
             let connectorRoutingHint: string | null = null;
             if (pinnedConnectors.size === 0 && window.cees?.connectors) {
                 try {
+                    const candidates = await collectConnectorRoutingCandidates(window.cees.connectors, enabledConnectorIds);
+                    if (candidates.length > 0) {
                     const routing = await routeAssistantConnector(
                         content,
-                        await collectConnectorRoutingCandidates(window.cees.connectors),
+                        candidates,
                         {
                             previousProviders: lastRoutedProviders.current,
                             recentMessages: planningRecentMessages,
                         },
                     );
+                    if (routing.clarification && routing.clarificationOptions?.length) {
+                        setPendingConnectorSelection({ query: content, question: routing.clarification, options: routing.clarificationOptions });
+                        return;
+                    }
                     routing.providers.forEach((provider) => activeConnectors.add(ROUTING_CONNECTOR_ID_BY_PROVIDER[provider]));
                     connectorRoutingHint = routing.clarification;
+                    }
                 } catch {
                     connectorRoutingHint = null;
                 }
@@ -1585,6 +1702,11 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
             pendingQuestionFocus.current = userMessage.id;
             setMessages((items) => [...items, userMessage]);
             const conversationId = activeConversationId ?? (await createConversation()).id;
+            if (!activeConversationId) {
+                const initialConnectorSelection = new Set(enabledConnectorIds);
+                if (forcedConnector) initialConnectorSelection.add(forcedConnector);
+                localStorage.setItem(connectorSessionStorageKey(conversationId), JSON.stringify([...initialConnectorSelection]));
+            }
             setActiveConversationId(conversationId);
             if (!conversations.some((item) => item.id === conversationId)) setConversations((items) => [{ id: conversationId, title: '', mode, visibility: 'PRIVATE', version: 1, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }, ...items]);
             // 会话标题由服务端在首轮完成后写入（setTitleFromFirstUserMessage）。
@@ -1711,7 +1833,7 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
     }, [activeConversationId, sending]);
 
     const questions = messages.filter((item) => item.role === 'user');
-    const activeChat = messages.length > 0 || sending;
+    const activeChat = messages.length > 0 || sending || !!pendingConnectorSelection;
     const showLanding = landing && !activeChat && !navigationState?.forceChat;
     const returnToLanding = (): void => {
         requestVersion.current += 1;
@@ -1719,6 +1841,7 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
         setSending(false);
         setActiveTurn(undefined);
         setActiveConversationId(undefined);
+        setPendingConnectorSelection(undefined);
         setMessages([]);
         lastRoutedProviders.current = [];
         setPreviewDocument(undefined);
@@ -1733,6 +1856,20 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
         }
         return undefined;
     };
+
+    const connectorControlContent = <div className="connector-control-popover">
+        <div className="connector-control-description">仅影响当前对话，不会连接或解绑账号</div>
+        {connectorManifests.filter((manifest) => ROUTING_PROVIDER_BY_CONNECTOR_ID[manifest.id as RoutingConnectorId]).map((manifest) => {
+            const connectorId = manifest.id as RoutingConnectorId;
+            const status = connectorStatuses[manifest.id];
+            const ready = status?.state === 'READY';
+            return <div className="connector-control-row" key={manifest.id}>
+                <div><strong>{manifest.name}</strong><small>{status ? connectorStateLabel(status.state) : '读取中'}</small></div>
+                <Switch size="small" checked={ready && enabledConnectorIds.has(connectorId)} disabled={!ready || sending} onChange={(checked) => setConversationConnectorEnabled(connectorId, checked)} />
+            </div>;
+        })}
+        {!connectorManifests.length && <span className="connector-control-empty">当前环境没有可用连接器</span>}
+    </div>;
 
     return <div className={`assistant-layout ${activeChat ? 'is-active-chat' : ''} ${historyVisible && !showLanding ? 'has-history' : ''} ${showLanding ? 'is-landing' : ''} ${previewDocument ? 'has-preview' : ''}`}>
         {!showLanding && historyVisible && <aside className="conversation-list">
@@ -1831,6 +1968,19 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
                     <span className="generation-options-label">文档风格</span>
                     {([['editorial-modern', '现代图文', 'teal'], ['business-standard', '稳重商务', 'violet'], ['executive-dark', '深色高管', 'dark'], ['product-story', '产品叙事', 'rose'], ['academic-clean', '研究报告', 'blue'], ['minimal-mono', '极简黑白', 'mono']] as const).map(([value, label, tone]) => <button type="button" className={`document-template-swatch tone-${tone} ${generationOptions.template === value ? 'is-selected' : ''}`} key={value} onClick={() => setGenerationOptions({ ...generationOptions, template: value })}><span /><small>{label}</small></button>)}
                 </div>}
+                {pendingConnectorSelection && <div className="connector-selection-panel">
+                    <strong>{pendingConnectorSelection.question}</strong>
+                    <div className="connector-selection-options">
+                        {pendingConnectorSelection.options.map((option) => <button type="button" key={option.provider} onClick={() => {
+                            const selection = pendingConnectorSelection;
+                            const connectorId = ROUTING_CONNECTOR_ID_BY_PROVIDER[option.provider as ConnectorRoutingProvider];
+                            setPendingConnectorSelection(undefined);
+                            void sendMessage(selection.query, connectorId);
+                        }}>
+                            <span>{option.displayName}</span><small>{option.capabilitySummary}</small>
+                        </button>)}
+                    </div>
+                </div>}
                 <div className="message-composer">
                     <div className="message-editor">
                         {selectedPrompt && <Tag closable onClose={() => { setSelectedPrompt(undefined); setGenerationOptions(undefined); }}>{t(selectedPrompt)}</Tag>}
@@ -1841,6 +1991,9 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
                             <input ref={fileInput} type="file" hidden accept="image/*,.pdf,.doc,.docx,.txt,.md,.xlsx,.xls,.csv" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; if (!file || sending || uploadingAttachment) return; setUploadingAttachment(true); void uploadAttachmentFile(file).then((id) => setAttachment({ name: file.name, id, isImage: file.type.startsWith('image/') })).catch((error) => message.error(toUserErrorMessage(error, '附件上传失败'))).finally(() => setUploadingAttachment(false)); }} />
                             <Button type="text" className={`composer-option ${networkSearch ? 'is-selected' : ''}`} icon={<Globe2 size={15} />} onClick={() => setNetworkSearch((value) => { preferences.setWebSearchPreference(!value); return !value; })}>联网搜索</Button>
                             <Button type="text" className={`composer-option ${knowledgeBase ? 'is-selected' : ''}`} icon={<BookOpen size={15} />} onClick={() => setKnowledgeBase((value) => { preferences.setKnowledgeSearchPreference(!value); return !value; })}>知识库</Button>
+                            <Popover title="本轮连接器" content={connectorControlContent} trigger="click" placement="topLeft">
+                                <Button type="text" className={`composer-option ${enabledConnectorIds.size ? 'is-selected' : ''}`} icon={<Blocks size={15} />}>连接器{enabledConnectorIds.size ? ` (${enabledConnectorIds.size})` : ''}</Button>
+                            </Popover>
                             {dingtalkConnected ? <Tag color="success">{t('钉钉已连接')}</Tag> : null}
                             <Select className="composer-mode" size="small" value={mode} onChange={setMode} options={[{ label: '快速模式', value: 'standard' }, { label: '深度模式', value: 'ultra' }]} />
                             <Button type="primary" className="composer-send" icon={<Send size={16} />} loading={sending || uploadingAttachment} disabled={uploadingAttachment} onClick={(event) => { event.preventDefault(); event.stopPropagation(); void sendMessage(); }}>{uploadingAttachment ? '上传中' : '发送'}</Button>

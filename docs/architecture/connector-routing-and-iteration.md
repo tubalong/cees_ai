@@ -19,13 +19,13 @@
 
 本文把这三件事定义成可独立交付的三期，并明确不做的事：**不把连接器搬进 `apps/api`，不让 API 接触凭据，不让模型指定可执行文件、网络目标或 Header**。
 
-差距一已按本文实现，接口契约见 [连接器语义路由 API](../api/assistant-connector-routing-api.md)；差距三已按 §5 实现，契约见 [API 与契约约定](../api/README.md) 的 `0.45.0` 条目；差距二已按 §4 实现（`0.47.0`），落地细节与示例偏差见 §4.6。逐项状态见 §9 状态表。
+差距一已按本文实现，接口契约见 [连接器语义路由 API](../api/assistant-connector-routing-api.md)；阶段一补充了会话级连接器开关和结构化平台选择；差距三已按 §5 实现，契约见 [API 与契约约定](../api/README.md) 的 `0.45.0` 条目；差距二已按 §4 实现（`0.47.0`），落地细节与示例偏差见 §4.6。逐项状态见 §9 状态表。
 
 ## 2. 现状核查
 
 | 能力 | 现状 | 证据 |
 | --- | --- | --- |
-| 连接器触发 | 已落地语义路由：点名（正则识别）或 `preferredConnector` / `forcedConnector` 直接硬命中，其余问题由 `POST /assistant/connectors/route` 只凭一级能力摘要决定激活哪些连接器；正则不再是主判据 | `apps/desktop/src/app/Workspace.tsx` 的 `detectNamedConnectors` / `collectConnectorRoutingCandidates`、`apps/api/src/assistant/connectors/connector-routing.service.ts` |
+| 连接器触发 | 已落地语义路由：点名（正则识别）或 `preferredConnector` / `forcedConnector` 直接硬命中，其余问题由 `POST /assistant/connectors/route` 只凭当前会话已启用且处于 `READY` 的一级能力摘要决定激活哪些连接器；存在平台歧义时返回全部候选，由用户点击选择，禁止 AI 自行猜测 | `apps/desktop/src/app/Workspace.tsx` 的 `detectNamedConnectors` / `collectConnectorRoutingCandidates`、`apps/api/src/assistant/connectors/connector-routing.service.ts` |
 | 工具目录下发 | **批量下发**：Desktop 现场发现工具后整份（含参数 Schema、`riskLevel`、`requiresConfirmation`）交给 API；目录 > 32 时先跑一次选择器 | `apps/api/src/assistant/connectors/*-planner.service.ts`、`apps/api/src/assistant/dto.ts` |
 | 规划/执行边界 | 已落地：`/assistant/connectors/<provider>/plan` 只规划，不持有凭据、不执行 | `apps/api/src/assistant/api/assistant-connector.controller.ts` |
 | 单轮调用上限 | 每个连接器每次最多 5 个调用；同一轮连接器上下文合计 ≤ 5 条 | `apps/desktop/electron/connectors/*/*.connector.ts` 的 `MAX_CALLS`、`Workspace.tsx` 的 `connectorContexts.length > MAX_CONNECTOR_CALLS_PER_TURN`（=5）校验 |
@@ -63,7 +63,7 @@ Renderer -> 仅对被激活的 provider 调 POST /assistant/connectors/<provider
 - `capabilitySummary` 每个连接器 ≤ 300 字，`routingExamples` ≤ 5 条短句；四个连接器合计控制在 2 KB 量级，可常驻。
 - 路由复用现有「工具式结构化选择」模式（`select_connectors` 工具 + 白名单校验），**不解析自由文本**，避免模型输出格式漂移。
 - 用户明确点名 provider、或从连接器卡片进入（`preferredConnector` / `forcedConnector`）时**直接硬命中，不调路由**。此时正则只承担「识别点名」这一件事，使未就绪的连接器仍能给出「请先安装并授权」的确定性引导。
-- `clarification` 非空时，Desktop 不调用任何连接器，把该提示作为新的可选请求字段 `connectorRoutingHint`（≤ 1000 字）注入本轮，让模型自然反问。**不复用 `ConnectorContext`**，避免把路由提示混进事实通道与审计白名单。
+- `clarification` 非空且返回 `clarificationOptions` 时，Desktop 不调用任何连接器，展示候选平台；用户选择后通过 `forcedConnector` 重新规划。没有结构化候选时才保留 `connectorRoutingHint` 兼容路径。**不复用 `ConnectorContext`**，避免把路由提示混进事实通道与审计白名单。
 - 省略式追问（「那这个月的呢」）必须能接回上一轮话题，因此请求额外携带最近 6 轮对话与上一轮尝试过的 provider；`previousProviders` 是客户端自报，服务端先与就绪候选集求交后才作为提示（见 §11）。
 
 ### 3.3 改动点
