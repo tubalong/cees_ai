@@ -8,6 +8,9 @@ const {
     buildDingTalkReadToolCatalog,
     buildVisibleOrganizationContextData,
     compareDwsVersions,
+    extractDingTalkNextPageToken,
+    hasDingTalkMorePages,
+    mergeDingTalkPages,
     normalizeDingTalkAttendanceContext,
     normalizeDwsVersion,
     parseDingTalkUpgradeCheck,
@@ -205,6 +208,38 @@ test('考勤记录存在但实际打卡时间无效时拒绝生成上下文', ()
         records: [{ id: 1, workDate: '2026-09-01', userCheckTime: 178822308900 }],
     }, 'Asia/Shanghai'), /实际打卡时间无效/);
     assert.throws(() => normalizeDingTalkAttendanceContext({ success: true }, 'Asia/Shanghai'), /缺少 records 数组/);
+});
+
+test('钉钉分页信息可从 data/result 嵌套结构识别', () => {
+    const payload = {
+        data: {
+            records: [{ id: 1 }, { id: 2 }],
+            meta: { pagination: { has_more: true, next_cursor: 'cursor-2' } },
+        },
+    };
+    assert.equal(extractDingTalkNextPageToken(payload), 'cursor-2');
+    assert.equal(hasDingTalkMorePages(payload), true);
+    assert.deepEqual(mergeDingTalkPages([
+        { data: { records: [{ id: 1 }], meta: { pagination: { next_cursor: 'cursor-2' } } } },
+        { data: { records: [{ id: 2 }], meta: { pagination: { next_cursor: '' } } } },
+    ]), {
+        data: {
+            records: [{ id: 1 }, { id: 2 }],
+            meta: { pagination: { next_cursor: '' } },
+        },
+    });
+});
+
+test('嵌套分页未耗尽时考勤上下文明确标记不完整', () => {
+    const normalized = normalizeDingTalkAttendanceContext({
+        data: {
+            count: 1,
+            records: [{ id: 1, workDate: '2026-09-01', userCheckTime: 1788223089000 }],
+            meta: { pagination: { endpoint_exhausted: false, next_cursor: 'cursor-2' } },
+        },
+    }, 'Asia/Shanghai');
+    assert.equal(normalized.complete, false);
+    assert.match(normalized.warnings[0], /后续分页/);
 });
 
 test('完整组织上下文按字节预算截断并标记不完整', () => {

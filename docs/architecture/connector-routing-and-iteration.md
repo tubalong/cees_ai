@@ -305,7 +305,9 @@ Renderer -> 仅对被激活的 provider 调 POST /assistant/connectors/<provider
 
 ### 11.5 待跟进
 
-- 腾讯会议 `meeting.list-ended` 的分页行为尚未独立验证。时钟修复后若仍出现「已结束会议条数偏少」，需按分页字段单独排查，不在本次改动范围内。
+- Desktop 执行层已对腾讯会议支持游标分页的列表命令自动续页，并在达到分页上限、游标重复或服务端返回矛盾分页信息时标记 `complete=false`，不能把截断结果表述为完整数据。
+- Desktop 执行层已对钉钉动态只读工具识别 `next_cursor`、`next_page_token`、`has_more` 等嵌套分页字段；具备游标参数的工具自动续页，考勤标准化也会检查 `data/result` 内的分页元数据。
+- GitHub MCP 的 `isError`、权限拒绝和资源不可访问结果会转换为 `complete=false` 的结构化失败上下文，明确区分「查询失败/无权限」与「查询成功但确实没有数据」。
 
 ## 12. 缺陷修复：规划器对话上下文与单轮调用预算（契约 `0.55.0`）
 

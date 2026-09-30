@@ -203,7 +203,7 @@ export async function discoverWeComTools(): Promise<WeComConnectorTool[]> {
 
 export async function executeWeComCalls(calls: WeComConnectorPlannedCall[]): Promise<WeComConnectorContext[]> {
     if (!Array.isArray(calls) || calls.length === 0 || calls.length > MAX_CALLS) {
-        throw new Error('企业微信连接器每次必须执行一至三个工具调用');
+        throw new Error('企业微信连接器每次必须执行一至五个工具调用');
     }
     await requireAuthorized();
     const tools = await discoverWeComTools();

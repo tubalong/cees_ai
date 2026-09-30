@@ -43,7 +43,7 @@ Desktop 提交用户问题和从 GitHub 官方远程 MCP `tools/list` 动态发�
 }
 ```
 
-响应最多包含三条调用：
+响应最多包含五条调用：
 
 ```json
 {
@@ -79,7 +79,7 @@ Desktop 提交用户问题和从 GitHub 官方远程 MCP `tools/list` 动态发�
 }
 ```
 
-`GITHUB` 上下文只用于本轮回答，不是 CEES 权限事实，也不能作为 CEES 正式写操作授权。单轮连接器上下文总数仍不超过三个。
+`GITHUB` 上下文只用于本轮回答，不是 CEES 权限事实，也不能作为 CEES 正式写操作授权。单轮连接器上下文总数与统一连接器预算一致，最多五条（另加必要的本机能力声明）。GitHub MCP 权限拒绝或调用失败会以 `complete=false`、`permissionRequired` 和 `warnings` 结构返回，不能解释为空数据。
 
 ## 5. 执行责任
 

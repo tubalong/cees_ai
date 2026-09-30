@@ -31,7 +31,7 @@ test('LocalCliTransport 使用固定命令和参数数组且禁用 shell', async
 });
 
 test('LocalCliTransport 解析标准 JSON 和带前置日志的 JSON', async () => {
-    const outputs = ['{"ready":true}', 'loading...\n{"ready":true}'];
+    const outputs = ['{"ready":true}', 'loading...\n{"ready":true}', '{"ready":true}\ndone', 'loading...\n{"ready":true}\ndone'];
     const transport = new LocalCliTransport({
         resolveExecutable: () => ({ command: 'vendor-cli' }),
         executeFile: async () => ({ stdout: outputs.shift(), stderr: '' }),
@@ -39,7 +39,13 @@ test('LocalCliTransport 解析标准 JSON 和带前置日志的 JSON', async () 
 
     assert.deepEqual(await transport.executeJson([], { timeoutMs: 1000, outputLabel: '测试 CLI' }), { ready: true });
     assert.deepEqual(await transport.executeJson([], { timeoutMs: 1000, outputLabel: '测试 CLI' }), { ready: true });
+    assert.deepEqual(await transport.executeJson([], { timeoutMs: 1000, outputLabel: '测试 CLI' }), { ready: true });
+    assert.deepEqual(await transport.executeJson([], { timeoutMs: 1000, outputLabel: '测试 CLI' }), { ready: true });
     assert.throws(() => parseLocalCliJsonOutput('not-json', '测试 CLI'), /测试 CLI 返回了无法解析的 JSON 数据/);
+    assert.deepEqual(parseLocalCliJsonOutput('日志 {"message":"括号 [] 不应截断"} 完成', '测试 CLI'), {
+        message: '括号 [] 不应截断',
+    });
+    assert.deepEqual(parseLocalCliJsonOutput('日志 [1,{"ok":true}] 完成', '测试 CLI'), [1, { ok: true }]);
 });
 
 test('LocalCliTransport 将非零退出和 stderr 转换为结构化错误', async () => {
