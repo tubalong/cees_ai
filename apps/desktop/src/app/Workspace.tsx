@@ -674,11 +674,12 @@ interface ConfirmableConnectorTool {
 /**
  * 连接器受控多步接力（连接器三期差距二）：循环由 Desktop 编排且有硬上限，不做开放式 Agent loop。
  * 第一轮规划并执行；只有模型明确提示 followUpMayBeNeeded 时才带着脱敏摘要进入第二轮，
- * 不确定就不进入（保守默认）。两轮合计调用数沿用既有的「单轮最多三个」。
+ * 不确定就不进入（保守默认）。两轮合计调用数上限 5，与契约 plan 结果 calls.maxItems、
+ * 各连接器 MAX_CALLS 保持一致；单轮上下文校验也复用同一个数字。
  */
 const MAX_CONNECTOR_RELAY_ROUNDS = 2;
-const MAX_CONNECTOR_CALLS_PER_TURN = 3;
-const MAX_CONNECTOR_PREVIOUS_STEPS = 3;
+const MAX_CONNECTOR_CALLS_PER_TURN = 5;
+const MAX_CONNECTOR_PREVIOUS_STEPS = 5;
 const CONNECTOR_PREVIOUS_STEP_DIGEST_MAX_LENGTH = 2000;
 
 interface RelayPlannedCall {
@@ -933,6 +934,12 @@ function recentRoutingMessages(
         .map((item) => ({ role: item.role, content: item.content.trim().slice(0, MAX_ROUTING_RECENT_MESSAGE_LENGTH) }))
         .filter((item) => item.content.length > 0);
 }
+
+/**
+ * 只在本轮可能生成或保存本机产物时才注入本机能力声明。判断覆盖自然说法：
+ * 「帮我生成一份周报」「导出成 PDF」「把它另存到桌面」都会命中，而查询类问题不会。
+ */
+const LOCAL_CAPABILITY_INTENT_PATTERN = /生成|制作|起草|编写|撰写|写一?份|产出|导出|下载|保存|另存|存到|存为|存进|文档|报告|周报|日报|方案|纪要|ppt|pptx|幻灯片|演示文稿|表格|excel|word|pdf|图片|配图|插画|海报|思维导图/i;
 
 function WeComAuthorizationCard({ request, retrying, onRetry }: {
     request: WeComAuthorizationRequest;
@@ -1392,6 +1399,9 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
             // 连接器语义路由：点名连接器或从连接器卡片进入对话时直接硬命中；否则只把
             // 「就绪连接器的一级能力摘要」交给服务端做一次语义路由，由模型判断该试哪些连接器。
             // 路由失败不阻断对话，也不激活任何连接器（等价于正则兜底：未点名时不试连接器）。
+            // 最近几轮对话同时用于语义路由与四个连接器规划：省略式追问（例如「那这个月的呢」）
+            // 只有带上上下文才能解析，否则规划器会把追问当成全新话题，规划出零个调用。
+            const planningRecentMessages = recentRoutingMessages(messages);
             const pinnedConnectors = detectNamedConnectors(content);
             if (preferredConnector) pinnedConnectors.add(preferredConnector);
             if (forcedConnector) pinnedConnectors.add(forcedConnector);
@@ -1404,7 +1414,7 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
                         await collectConnectorRoutingCandidates(window.cees.connectors),
                         {
                             previousProviders: lastRoutedProviders.current,
-                            recentMessages: recentRoutingMessages(messages),
+                            recentMessages: planningRecentMessages,
                         },
                     );
                     routing.providers.forEach((provider) => activeConnectors.add(ROUTING_CONNECTOR_ID_BY_PROVIDER[provider]));
@@ -1436,7 +1446,7 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
                             tools: [],
                             confirmBeforeExecute: false,
                             cancelMessage: '已取消钉钉操作',
-                            plan: async (previousSteps) => normalizeRelayPlan(await planDingTalkConnectorQueries(content, tools, previousSteps)),
+                            plan: async (previousSteps) => normalizeRelayPlan(await planDingTalkConnectorQueries(content, tools, previousSteps, planningRecentMessages)),
                             execute: (calls) => dingtalkConnector.execute(calls),
                             handleError: async (error, plannedCalls) => {
                                 const latestStatus = await dingtalkConnector.status().catch(() => undefined);
@@ -1464,7 +1474,7 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
                     tools,
                     confirmBeforeExecute: true,
                     cancelMessage: '已取消腾讯会议操作',
-                    plan: async (previousSteps) => normalizeRelayPlan(await planTencentMeetingConnectorQueries(content, tools, previousSteps)),
+                    plan: async (previousSteps) => normalizeRelayPlan(await planTencentMeetingConnectorQueries(content, tools, previousSteps, planningRecentMessages)),
                     execute: (calls) => genericConnectors.execute('tencent-meeting', calls.map((call) => ({ ...call, confirmed: true }))),
                 });
             }
@@ -1480,7 +1490,7 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
                     tools,
                     confirmBeforeExecute: true,
                     cancelMessage: '已取消企业微信操作',
-                    plan: async (previousSteps) => normalizeRelayPlan(await planWeComConnectorQueries(content, tools, previousSteps)),
+                    plan: async (previousSteps) => normalizeRelayPlan(await planWeComConnectorQueries(content, tools, previousSteps, planningRecentMessages)),
                     execute: (calls) => genericConnectors.execute('wecom', calls.map((call) => ({ ...call, confirmed: true }))),
                 });
             }
@@ -1494,7 +1504,7 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
                     tools,
                     confirmBeforeExecute: true,
                     cancelMessage: '已取消 GitHub 操作',
-                    plan: async (previousSteps) => normalizeRelayPlan(await planGitHubConnectorQueries(content, tools, previousSteps)),
+                    plan: async (previousSteps) => normalizeRelayPlan(await planGitHubConnectorQueries(content, tools, previousSteps, planningRecentMessages)),
                     execute: (calls) => genericConnectors.execute('github', calls.map((call) => ({ ...call, confirmed: true }))),
                 });
             }
@@ -1513,7 +1523,7 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
                     if (!plan) continue;
                     if (plan.followUpMayBeNeeded) followUpPending = true;
                     if (plan.calls.length > remainingCalls) {
-                        throw new Error('单轮最多执行三个连接器调用，请将多个连接器请求拆成多轮');
+                        throw new Error('单轮最多执行五个连接器调用，请将多个连接器请求拆成多轮');
                     }
                     if (plan.calls.length === 0) continue;
                     if (target.confirmBeforeExecute) {
@@ -1544,9 +1554,9 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
             }
             if (followUpPending && relayTargets.length > 0) {
                 // 达到轮数或调用上限仍未完成：如实告知，不静默重试、不换路径绕过。
-                message.info(t('连接器操作已达到上限（最多两轮，单轮最多 3 次调用），剩余步骤请拆成下一轮继续'));
+                message.info(t('连接器操作已达到上限（最多两轮，单轮最多 5 次调用），剩余步骤请拆成下一轮继续'));
             }
-            if (connectorContexts.length > 3) throw new Error('单轮连接器上下文不能超过三个');
+            if (connectorContexts.length > MAX_CONNECTOR_CALLS_PER_TURN) throw new Error('单轮连接器上下文不能超过五个');
             const weComAuthorizations = extractWeComAuthorizationRequests(connectorContexts, content);
             if (!isRetry) {
                 setInput('');
@@ -1556,7 +1566,9 @@ function AssistantPage({ permissions, authContext, landing = false, historyOnly 
             // 本机能力声明必须放在连接器分支**之后**：连接器分支会向 connectorContexts 追加条目，
             // 该上下文只说明「本机可把生成产物另存到用户选择的位置」，让模型据此正确引导用户，
             // 而不是回答「我无法保存到你的电脑」。它不构成任何执行授权。
-            if (window.cees?.localSystem?.saveGeneratedFile) {
+            // 它只在可能生成或保存本机产物的对话里注入：其它问题（例如查询考勤）里既没有用处，
+            // 又会被模型误当成「本轮连接器返回」，出现「本轮只返回了本机能力声明」这类答非所问。
+            if (window.cees?.localSystem?.saveGeneratedFile && LOCAL_CAPABILITY_INTENT_PATTERN.test(content)) {
                 connectorContexts.push({
                     provider: 'LOCAL_SYSTEM',
                     toolId: 'local_capabilities',

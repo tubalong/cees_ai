@@ -1663,10 +1663,16 @@ export async function planDingTalkConnectorQueries(
     query: string,
     tools: DingTalkConnectorTool[],
     previousSteps: ConnectorPreviousStep[] = [],
+    recentMessages: ConnectorRoutingRecentMessage[] = [],
 ): Promise<DingTalkConnectorPlan> {
     return authorizedRequest<DingTalkConnectorPlan>('v1/assistant/connectors/dingtalk/plan', {
         method: 'POST',
-        body: JSON.stringify({ query, tools, ...(previousSteps.length ? { previousSteps } : {}) }),
+        body: JSON.stringify({
+            query,
+            tools,
+            ...(previousSteps.length ? { previousSteps } : {}),
+            ...(recentMessages.length ? { recentMessages } : {}),
+        }),
     });
 }
 
@@ -1688,10 +1694,16 @@ export async function planTencentMeetingConnectorQueries(
     query: string,
     tools: TencentMeetingConnectorTool[],
     previousSteps: ConnectorPreviousStep[] = [],
+    recentMessages: ConnectorRoutingRecentMessage[] = [],
 ): Promise<TencentMeetingConnectorPlan> {
     return authorizedRequest<TencentMeetingConnectorPlan>('v1/assistant/connectors/tencent-meeting/plan', {
         method: 'POST',
-        body: JSON.stringify({ query, tools, ...(previousSteps.length ? { previousSteps } : {}) }),
+        body: JSON.stringify({
+            query,
+            tools,
+            ...(previousSteps.length ? { previousSteps } : {}),
+            ...(recentMessages.length ? { recentMessages } : {}),
+        }),
     });
 }
 
@@ -1713,10 +1725,16 @@ export async function planWeComConnectorQueries(
     query: string,
     tools: WeComConnectorTool[],
     previousSteps: ConnectorPreviousStep[] = [],
+    recentMessages: ConnectorRoutingRecentMessage[] = [],
 ): Promise<WeComConnectorPlan> {
     return authorizedRequest<WeComConnectorPlan>('v1/assistant/connectors/wecom/plan', {
         method: 'POST',
-        body: JSON.stringify({ query, tools, ...(previousSteps.length ? { previousSteps } : {}) }),
+        body: JSON.stringify({
+            query,
+            tools,
+            ...(previousSteps.length ? { previousSteps } : {}),
+            ...(recentMessages.length ? { recentMessages } : {}),
+        }),
     });
 }
 
@@ -1738,10 +1756,16 @@ export async function planGitHubConnectorQueries(
     query: string,
     tools: GitHubConnectorTool[],
     previousSteps: ConnectorPreviousStep[] = [],
+    recentMessages: ConnectorRoutingRecentMessage[] = [],
 ): Promise<GitHubConnectorPlan> {
     return authorizedRequest<GitHubConnectorPlan>('v1/assistant/connectors/github/plan', {
         method: 'POST',
-        body: JSON.stringify({ query, tools, ...(previousSteps.length ? { previousSteps } : {}) }),
+        body: JSON.stringify({
+            query,
+            tools,
+            ...(previousSteps.length ? { previousSteps } : {}),
+            ...(recentMessages.length ? { recentMessages } : {}),
+        }),
     });
 }
 

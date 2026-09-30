@@ -49,7 +49,8 @@ export const TENCENT_MEETING_PACKAGE_SHA256 = '51d0cbb69d8400e29e73e88a5e1a0a3b6
 const MAX_ARCHIVE_BYTES = 24 * 1024 * 1024;
 const MAX_BINARY_BYTES = 16 * 1024 * 1024;
 const MAX_CONTEXT_BYTES = 56 * 1024;
-const MAX_CALLS = 3;
+/** 单轮计划调用上限，与契约 plan 结果与 Desktop 单轮预算一致。 */
+const MAX_CALLS = 5;
 const AUTHORIZATION_TIMEOUT_MS = 330_000;
 const TOOL_DISCOVERY_CONCURRENCY = 6;
 const SENSITIVE_KEY_PATTERN = /(?:token|secret|cookie|authorization|credential|password|(?:^|_)pwd(?:$|_))/i;

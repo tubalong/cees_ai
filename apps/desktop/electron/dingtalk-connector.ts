@@ -36,7 +36,8 @@ const MAX_CONTEXT_BYTES = 56 * 1024;
 const MAX_VISIBLE_ORGANIZATION_CONTEXT_BYTES = 40 * 1024;
 const MAX_VISIBLE_ORGANIZATION_DEPARTMENT_BYTES = 16 * 1024;
 const MAX_TOOL_COUNT = 1500;
-const MAX_CALLS = 3;
+/** 单轮计划调用上限，与契约 plan 结果与 Desktop 单轮预算一致。 */
+const MAX_CALLS = 5;
 const TOOL_ID_PATTERN = /^dws_read_[a-f0-9]{16}$/;
 const UNSAFE_PARAMETER_PATTERN = /(?:token|secret|cookie|authorization|credential|password|app[-_]?key|app[-_]?secret)/i;
 /**

@@ -1,16 +1,22 @@
 import type { ToolCall } from '@cees/ai-service-client';
 import {
+  buildConnectorToolTurnMessages,
   buildConnectorFollowUpToolDefinition,
   buildConnectorModelToolDefinitions,
   clampModelToolDescription,
+  CONNECTOR_PLANNED_CALLS_MAX,
   CONNECTOR_PREVIOUS_STEPS_MAX,
   CONNECTOR_PREVIOUS_STEP_DIGEST_MAX_LENGTH,
+  CONNECTOR_RECENT_MESSAGES_MAX,
+  CONNECTOR_RECENT_MESSAGE_MAX_LENGTH,
+  connectorRecentMessagesInstructions,
   connectorPreviousStepsInstructions,
   MODEL_TOOL_LIMIT,
   MODEL_TOOL_DESCRIPTION_MAX_LENGTH,
   MODEL_TOOL_NAME_PATTERN,
   renderConnectorPreviousSteps,
   renderCurrentTimeInstructions,
+  sanitizeConnectorRecentMessages,
   splitConnectorFollowUpCalls,
 } from './model-tool-definition';
 
@@ -135,5 +141,41 @@ describe('renderCurrentTimeInstructions', () => {
     ).join('\n');
 
     expect(instructions).toContain('2026-09-01T00:30:00+08:00');
+  });
+});
+
+describe('连接器最近对话上下文', () => {
+  it('按上限收敛轮次与单条长度并丢弃空白轮次', () => {
+    const messages = sanitizeConnectorRecentMessages([
+      { role: 'user', content: '  帮我查询考勤  ' },
+      { role: 'assistant', content: '   ' },
+      ...Array.from({ length: 8 }, (_, index) => ({ role: 'assistant' as const, content: `第 ${index} 轮` })),
+    ]);
+    expect(messages).toHaveLength(CONNECTOR_RECENT_MESSAGES_MAX);
+    expect(messages[0]).toEqual({ role: 'user', content: '帮我查询考勤' });
+    expect(sanitizeConnectorRecentMessages([{ role: 'user', content: 'x'.repeat(3000) }])[0]!.content)
+      .toHaveLength(CONNECTOR_RECENT_MESSAGE_MAX_LENGTH);
+    expect(sanitizeConnectorRecentMessages(undefined)).toEqual([]);
+  });
+
+  it('历史轮次排在本轮之前，当前这句永远最后', () => {
+    expect(buildConnectorToolTurnMessages('那这个月的呢', [
+      { role: 'user', content: '帮我查询一下我的考勤记录呢' },
+      { role: 'assistant', content: '本轮没有取到考勤数据' },
+    ])).toEqual([
+      { role: 'user', content: [{ type: 'text', text: '帮我查询一下我的考勤记录呢' }] },
+      { role: 'assistant', content: [{ type: 'text', text: '本轮没有取到考勤数据' }] },
+      { role: 'user', content: [{ type: 'text', text: '那这个月的呢' }] },
+    ]);
+  });
+
+  it('注入指令把历史轮次声明为不可信数据并解释省略追问', () => {
+    const instructions = connectorRecentMessagesInstructions().join('\n');
+    expect(instructions).toContain('untrusted reference data');
+    expect(instructions).toContain('elliptical follow-ups');
+  });
+
+  it('单轮计划调用上限与回喂摘要条数上限保持一致', () => {
+    expect(CONNECTOR_PLANNED_CALLS_MAX).toBe(CONNECTOR_PREVIOUS_STEPS_MAX);
   });
 });

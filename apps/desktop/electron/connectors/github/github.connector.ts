@@ -27,7 +27,8 @@ export const GITHUB_MCP_TOOLSETS = 'context,issues,pull_requests,repos,users,act
 export const GITHUB_REQUIRED_OAUTH_SCOPE = 'repo read:org read:user user:email notifications offline_access';
 const GITHUB_OAUTH_CALLBACK_PATH = '/oauth/github/callback';
 const MAX_TOOLS = 256;
-const MAX_CALLS = 3;
+/** 单轮计划调用上限，与契约 plan 结果与 Desktop 单轮预算一致。 */
+const MAX_CALLS = 5;
 const MAX_CONTEXT_BYTES = 56 * 1024;
 const MAX_TOOL_SCHEMA_BYTES = 32 * 1024;
 const CONNECT_TIMEOUT_MS = 30_000;
