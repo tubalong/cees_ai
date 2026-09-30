@@ -10,7 +10,7 @@ CEES API 不保存腾讯会议凭据、不下载或启动 CLI，也不执行腾�
 
 ### `POST /assistant/connectors/tencent-meeting/plan`
 
-用途：根据用户问题和 Desktop 从固定版官方 CLI 帮助生成的工具目录，返回最多三条调用计划。
+用途：根据用户问题和 Desktop 从固定版官方 CLI 帮助生成的工具目录，返回最多五条调用计划。
 
 请求示例：
 
@@ -53,7 +53,7 @@ CEES API 不保存腾讯会议凭据、不下载或启动 CLI，也不执行腾�
 }
 ```
 
-受控多步接力（契约 `0.47.0`）：请求可带可选 `previousSteps`（最多 3 条、单条摘要 ≤ 2000 字，服务端按不可信数据注入规划指令），响应可带可选 `followUpMayBeNeeded`（缺省 `false`，只是「本轮调用可能不足以完成这次请求」的提示）。是否进入第二轮由 Desktop 决定：硬上限两轮、两轮合计 ≤ 3 次调用，且每一轮执行前仍各自确认。详见 [连接器语义路由、受控多步接力与调用审计](../architecture/connector-routing-and-iteration.md) §4。
+受控多步接力（契约 `0.47.0`）：请求可带可选 `previousSteps`（最多 5 条、单条摘要 ≤ 2000 字，服务端按不可信数据注入规划指令），响应可带可选 `followUpMayBeNeeded`（缺省 `false`，只是「本轮调用可能不足以完成这次请求」的提示）。是否进入第二轮由 Desktop 决定：硬上限两轮、两轮合计 ≤ 5 次调用，且每一轮执行前仍各自确认。详见 [连接器语义路由、受控多步接力与调用审计](../architecture/connector-routing-and-iteration.md) §4。
 
 约束：
 
@@ -63,7 +63,7 @@ CEES API 不保存腾讯会议凭据、不下载或启动 CLI，也不执行腾�
 - 参数 Schema 顶层必须为 `object` 并包含对象型 `properties`；
 - `READ` 必须对应 `requiresConfirmation=false`；`WRITE` 和 `DESTRUCTIVE` 必须对应 `true`；
 - 目录超过 31 项时先选择最多 31 个候选，再规划正式调用（ai-service 单次工具上限 32，其中 1 个留给「是否需要下一轮」控制工具）；
-- 返回调用只能引用请求目录中的工具，最多三条，完全重复调用会去重；
+- 返回调用只能引用请求目录中的工具，最多五条，完全重复调用会去重；
 - 上游模型流未完成时返回网关错误，不返回不完整计划。
 
 接口不接收 OAuth Token、RefreshToken、CLI 路径、环境变量、下载地址、HTTP Header 或任意腾讯会议凭据。Desktop 必须在执行前再次校验本地工具目录，并对写操作获取明确确认。

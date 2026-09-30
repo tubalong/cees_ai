@@ -297,6 +297,39 @@ describe('DingTalkConnectorPlannerService', () => {
     expect(instructions.split('</previous_steps>')).toHaveLength(3);
   });
 
+  it('把最近对话作为历史轮次注入规划请求，用于消解省略式追问', async () => {
+    const streamToolTurn = jest.fn().mockResolvedValueOnce(stream([
+      { type: 'completed', latency_ms: 1, finish_reason: 'stop' },
+    ]));
+    const service = createService(streamToolTurn);
+
+    await service.plan('我要整个月的', tools, [], [
+      { role: 'user', content: '帮我查询一下我的考勤记录呢' },
+      { role: 'assistant', content: '本轮只返回了本机能力声明' },
+    ]);
+
+    const request = streamToolTurn.mock.calls[0]![0];
+    expect(request.messages).toEqual([
+      { role: 'user', content: [{ type: 'text', text: '帮我查询一下我的考勤记录呢' }] },
+      { role: 'assistant', content: [{ type: 'text', text: '本轮只返回了本机能力声明' }] },
+      { role: 'user', content: [{ type: 'text', text: '我要整个月的' }] },
+    ]);
+    expect(request.instructions).toContain('elliptical follow-ups');
+  });
+
+  it('没有会话上下文时不注入历史轮次指令', async () => {
+    const streamToolTurn = jest.fn().mockResolvedValueOnce(stream([
+      { type: 'completed', latency_ms: 1, finish_reason: 'stop' },
+    ]));
+    const service = createService(streamToolTurn);
+
+    await service.plan('查我今天的日程', tools);
+
+    const request = streamToolTurn.mock.calls[0]![0];
+    expect(request.messages).toEqual([{ role: 'user', content: [{ type: 'text', text: '查我今天的日程' }] }]);
+    expect(request.instructions).not.toContain('elliptical follow-ups');
+  });
+
   function createService(streamToolTurn: jest.Mock): DingTalkConnectorPlannerService {
     return new DingTalkConnectorPlannerService(
       { streamToolTurn } as unknown as AiServiceGateway,

@@ -6,6 +6,8 @@
 
 公开契约 `0.54.0` 为同一端点补齐**对话上下文**：请求可选新增 `recentMessages`（≤6 条，每条 ≤2000 字）与 `previousProviders`（≤8 个，去重）。同样是兼容新增，响应 `ConnectorRoutingResult` 与 `connectorRoutingHint` 语义均未改变；`packages/api-client` 需重新生成。
 
+公开契约 `0.55.0` 把同一份**对话上下文**补到四个规划端点：`<provider>/plan` 请求可选新增 `recentMessages`（复用 `ConnectorRoutingRecentMessage`，≤6 条 × ≤2000 字），并把单轮计划调用上限（`previousSteps.maxItems` 与 plan 结果 `calls.maxItems`）由 3 放宽到 5、`connectorContexts.maxItems` 由 5 放宽到 7。原因与验收见 [连接器语义路由、受控多步接力与调用审计](../architecture/connector-routing-and-iteration.md) §12。
+
 路由只决定「本轮该试哪些连接器」，不改变任何既有 `POST /assistant/connectors/<provider>/plan` 的语义，也不放宽权限：被命中的连接器仍要走二级规划、目录校验、风险确认和 Desktop 本地执行。
 
 ## 2. `POST /assistant/connectors/route`
@@ -75,10 +77,31 @@ Desktop 在触发连接器规划前提交查询和一级能力摘要：
 
 1. 用户消息命中点名识别（钉钉 / 腾讯会议 / 企业微信 / GitHub 关键词），或从连接器卡片进入对话（`preferredConnector` / `forcedConnector`）→ 直接硬命中，不调用本接口；
 2. 否则调用本接口，并把最近 6 轮对话与上一轮尝试过的 provider 作为上下文一并提交；
-3. 只对返回的 `provider` 调用既有 `POST /assistant/connectors/<provider>/plan`；
+3. 只对返回的 `provider` 调用既有 `POST /assistant/connectors/<provider>/plan`，并把同样的最近 6 轮对话作为 `recentMessages` 一并提交，让规划器也能消解省略式追问；
 4. `clarification` 非空 → 不调用任何 `/plan`，把提示作为 `connectorRoutingHint` 提交给本轮对话。
 
-## 6. 相关文档
+## 6. 规划请求的对话上下文与单轮调用预算（`0.55.0`）
+
+四个规划端点（`dingtalk` / `tencent-meeting` / `wecom` / `github`）的请求新增可选 `recentMessages`：
+
+```json
+{
+  "query": "我要整个月的",
+  "tools": [],
+  "previousSteps": [],
+  "recentMessages": [
+    { "role": "user", "content": "帮我查询一下我的考勤记录呢" },
+    { "role": "assistant", "content": "你 9 月 30 日有一条上班打卡记录。" }
+  ]
+}
+```
+
+- `recentMessages` 缺省或为空时行为与升级前完全一致：只按当前这句规划，也不注入任何上下文指令。
+- 服务端把历史轮次按顺序放在当前问题**之前**交给模型，并在指令中声明它们是**不可信参考数据**、只用于消解代词与省略式追问。最多 6 条、单条 ≤2000 字，超出按契约上限截断并丢弃空白轮次。
+- `recentMessages` 不是业务事实、不是授权，也不改变二级规划的权限与逐轮确认口径。
+- 单轮计划调用上限由 3 放宽到 5：`previousSteps.maxItems` 与 plan 结果 `calls.maxItems` 同为 5，Desktop 单轮预算同为 5。超限仍沿用既有硬错误（提示拆成多轮），不做静默截断。
+
+## 7. 相关文档
 
 - [Desktop 连接器运行时](../architecture/connector-runtime.md)
 - [连接器语义路由、受控多步接力与调用审计（设计草案）](../architecture/connector-routing-and-iteration.md)

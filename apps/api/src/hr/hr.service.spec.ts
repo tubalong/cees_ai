@@ -235,12 +235,13 @@ describe('HrService', () => {
 
     it('keeps a future employee change approved until its effective date', async () => {
         const prisma = createPrismaMock();
+        const futureEffectiveDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
         prisma.hrEmployeeChange.findFirst.mockResolvedValue(employeeChangeRecord({
-            effectiveDate: new Date('2026-09-30T00:00:00.000Z'),
+            effectiveDate: futureEffectiveDate,
         }));
         prisma.hrEmployeeChange.updateMany.mockResolvedValue({ count: 1 });
         prisma.hrEmployeeChange.findUniqueOrThrow.mockResolvedValue(employeeChangeRecord({
-            effectiveDate: new Date('2026-09-30T00:00:00.000Z'),
+            effectiveDate: futureEffectiveDate,
             status: HrEmployeeChangeStatus.APPROVED,
             version: 2,
         }));
