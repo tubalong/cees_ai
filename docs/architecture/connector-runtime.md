@@ -159,7 +159,7 @@ GitHub Manifest 使用 `REMOTE_MCP`、`DESKTOP`、`OAUTH`，不自动安装第�
 6. 写入和破坏性操作先确认，再由持有凭据的 Desktop 执行；
 7. 结果脱敏、限长后作为 `ConnectorContext` 注入会话。
 
-工具超过模型单次可接受数量时，规划器先做候选选择，再规划实际调用。腾讯会议最多接收 128 个目录项，GitHub 和企业微信最多接收 256 个目录项；ai-service 单次最多接收 32 个模型工具，其中 1 个留给「是否需要下一轮」控制工具，因此各规划器最多选择 31 个真实候选并返回三条调用。
+工具超过模型单次可接受数量时，规划器先做候选选择，再规划实际调用。腾讯会议最多接收 128 个目录项，GitHub 和企业微信最多接收 256 个目录项；ai-service 单次最多接收 32 个模型工具，其中 1 个留给「是否需要下一轮」控制工具，因此各规划器最多选择 31 个真实候选并返回五条调用。
 
 规划器不能把连接器内部 toolId 直接当作模型工具名。ai-service 的 `ChatToolDefinition` 只接受匹配 `^[A-Za-z][A-Za-z0-9_-]*$` 且不超过 128 字符的 `name`，`description` 上限 2048 字符；腾讯会议官方 CLI 的 `meeting.list`、企业微信的 `calendar.schedules.list` 这类带点号的 ID 不满足该约束，会直接被 ai-service 请求校验拦成 422，整轮规划失败。因此各规划器统一通过 `buildConnectorModelToolDefinitions` 生成 `<命名空间>_tool_<序号>` 形式的模型工具名，把内部 toolId 与风险标记写进描述，超长描述按契约上限截断，并在规划结果里用模型名回映射成连接器内部 toolId。
 
