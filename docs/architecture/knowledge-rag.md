@@ -131,6 +131,8 @@ NestJS API   = 业务事实、权限、状态与审计层（apps/api）
 
 新增 `EmbeddingRouter`（`app/embeddings/`），与 LLMRouter 分离；`models.toml` 的 `rag` role 只用于答案生成，不承担 embedding 配置。块 2 落地了路由解析与维度校验，块 4 已接入真实 provider：`[embedding_profiles.*]` 声明 OpenAI-compatible embedding 模型（`embedding_profiles.primary`，默认禁用，启用后 `EMBEDDING_API_KEY` 必填），输出统一 L2 归一化；未启用任何外部 profile 时回退确定性 `deterministic` provider（开发/测试用）。OpenAI-compatible 客户端构造时关闭 langchain 的 `check_embedding_ctx_length`（开启会把文本转成 token ID 发给 `/embeddings`，自建服务如 BGE 只接受原始字符串，会以 422 拒绝）。
 
+维度以声明值为准：客户端把 `[embedding_profiles.*].dimension` 作为 OpenAI `dimensions` 参数发给上游，要求上游按该维度返回。支持 MRL 截断的模型（如 `Qwen/Qwen3-VL-Embedding-8B`，原生 4096 维）可据此稳定产出配置声明的 1536 维向量；忽略该参数的自建服务（如测试环境 `cees-embedding` 上的 `bge-small-zh-v1.5`）则要求声明维度等于模型原生维度。上游实际返回的维度始终由 `EmbeddingRouter` 与声明值交叉校验；声明值还需等于 `KNOWLEDGE_VECTOR_DIMENSION`，不一致时 `/ready` 前置校验直接拒绝该配置。
+
 版本三元组 `(chunking_version, embedding_profile, index_version)` 是索引身份的一部分：
 
 - 切换 embedding 模型或切分策略时创建新 `index_version`，完成重建后再切换读取版本，不覆盖旧向量；

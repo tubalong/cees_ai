@@ -104,7 +104,9 @@ max_retries = 1
 # Embedding 只服务知识库索引与检索。staging 使用 pgvector，且 .env.staging
 # 已声明 KNOWLEDGE_EMBEDDING_PROFILE=primary，因此这里必须有一个名为 primary
 # 的 profile 并指向测试环境的 BGE 服务；dimension 必须等于
-# KNOWLEDGE_VECTOR_DIMENSION（staging 为 512）。
+# KNOWLEDGE_VECTOR_DIMENSION（staging 为 512）。dimension 会作为 OpenAI
+# `dimensions` 参数发给上游：测试环境这套 BGE 服务会忽略该参数并返回原生
+# 512 维，所以这里必须填模型原生维度（只有支持 MRL 截断的模型才能填更小的值）。
 [embedding_profiles.primary]
 enabled = false
 provider = "openai_compatible"

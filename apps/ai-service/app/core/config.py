@@ -92,7 +92,9 @@ class EmbeddingProfile(BaseModel):
     """Embedding 配置。只服务知识库索引与检索，不参与答案生成。
 
     确定性 provider 由代码内置（开发/测试用），这里只声明外部 provider；
-    dimension 是契约级属性，配置必须与所声明模型的真实维度一致。
+    dimension 是契约级属性：客户端会把它作为 OpenAI `dimensions` 参数发送，
+    要求上游按该维度返回（支持 MRL 截断的模型可据此把原生维度压到配置值），
+    实际返回维度再与声明值交叉校验，并且必须等于 KNOWLEDGE_VECTOR_DIMENSION。
     """
 
     provider: Literal["openai_compatible"]

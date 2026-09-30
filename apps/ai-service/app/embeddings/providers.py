@@ -47,8 +47,8 @@ class OpenAICompatibleEmbeddingProvider:
     """OpenAI 兼容 Embedding provider，服务知识库索引与检索。
 
     返回向量统一做 L2 归一化，保证检索端余弦相似度取值与确定性
-    provider 一致；dimension 来自配置声明，与模型真实维度不符时由
-    EmbeddingRouter 的维度校验拦截。
+    provider 一致；dimension 来自配置声明，构造客户端时作为 OpenAI
+    `dimensions` 参数发给上游，实际返回维度再由 EmbeddingRouter 交叉校验。
     """
 
     def __init__(self, profile: EmbeddingProfile) -> None:
@@ -66,6 +66,11 @@ class OpenAICompatibleEmbeddingProvider:
             base_url=profile.base_url,
             timeout=profile.timeout_seconds,
             max_retries=profile.max_retries,
+            # 声明的 dimension 是契约的一部分，必须显式要求上游按该维度返回：
+            # 支持 MRL 截断的模型（如 Qwen3-Embedding 系列原生 4096 维）会按
+            # dimensions 截断；只接受原始字段的自建服务（如 BGE）会忽略它，
+            # 此时声明维度必须等于模型原生维度，由 EmbeddingRouter 的校验兜底。
+            dimensions=profile.dimension,
             # 关闭 langchain 的上下文长度检查：开启时会把文本转成 token ID
             # 再发给 /embeddings，OpenAI 兼容的自建服务（如 BGE）只接受
             # 原始字符串输入，会以 422 拒绝。

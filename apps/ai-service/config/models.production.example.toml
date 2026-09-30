@@ -104,6 +104,9 @@ max_retries = 1
 # Embedding 只服务知识库索引与检索。生产环境使用 pgvector 时，至少要有
 # 一个已启用的真实 embedding profile，否则 /ready 返回 503。
 # 所有已启用 profile 的 dimension 必须等于 KNOWLEDGE_VECTOR_DIMENSION。
+# dimension 会作为 OpenAI `dimensions` 参数发给上游：支持 MRL 截断的模型
+# 可以填小于原生维度的值（如原生 4096 维填 1536），忽略该参数的自建服务
+# 必须填模型原生维度；上游实际返回维度与声明值不符会在索引/检索时失败。
 [embedding_profiles.primary]
 enabled = false
 provider = "openai_compatible"

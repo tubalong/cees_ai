@@ -70,6 +70,24 @@ def test_openai_compatible_missing_api_key_raises(
         OpenAICompatibleEmbeddingProvider(make_embedding_profile())
 
 
+def test_openai_compatible_requests_declared_dimension(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """声明的 dimension 必须作为 OpenAI `dimensions` 参数发给上游。"""
+    monkeypatch.setenv("EMBEDDING_API_KEY", "test-key")
+    captured: dict[str, object] = {}
+
+    class _RecordingEmbeddings:
+        def __init__(self, **kwargs: object) -> None:
+            captured.update(kwargs)
+
+    monkeypatch.setattr("app.embeddings.providers.OpenAIEmbeddings", _RecordingEmbeddings)
+
+    OpenAICompatibleEmbeddingProvider(make_embedding_profile(dimension=1536))
+
+    assert captured["dimensions"] == 1536
+
+
 def test_build_embedding_router_registers_enabled_profiles(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
