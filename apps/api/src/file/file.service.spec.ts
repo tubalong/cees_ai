@@ -232,6 +232,7 @@ function createStorage(overrides: Partial<StorageProvider> = {}): StorageProvide
         headObject: jest.fn(),
         putObject: jest.fn(),
         createDownloadUrl: jest.fn(),
+        readObject: jest.fn(),
         deleteObject: jest.fn(),
         ...overrides,
     };

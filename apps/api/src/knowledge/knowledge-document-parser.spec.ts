@@ -29,6 +29,7 @@ function makeStorage(downloadUrl = 'https://cos.example.com/signed'): StoragePro
         createUploadUrl: jest.fn(),
         headObject: jest.fn(),
         putObject: jest.fn(),
+        readObject: jest.fn(),
         deleteObject: jest.fn(),
     };
 }
