@@ -102,9 +102,10 @@ IMAGE_GEN_BACKUP_API_KEY=change_me
 ## 5. Provider 行为
 
 - `mock` 返回固定测试字节，仅用于本地联调；编辑返回不同的固定测试字节。
-- `openai_compatible` 生成使用 OpenAI Images API 的 `b64_json` 输出。
-- `openai_compatible` 编辑使用 OpenAI Images API 的 `images.edit`，输入为 base64 解码后的源图片字节。
-- `content_type` 由请求的 `response_format` 映射为 `image/png`、`image/jpeg` 或 `image/webp`。
+- `openai_compatible` 生成按 OpenAI Images API 请求 `b64_json` 输出：上游返回 `b64_json` 时直接解码；上游忽略 `response_format`、只返回图片 URL 时（如硅基流动），ai-service 在服务端取回字节（单张上限 20 MiB；下载超时或 4xx 按永久失败处理，5xx 与网络错误按瞬时失败回退下一 profile）。
+- `openai_compatible` 编辑优先使用 OpenAI Images API 的 `images.edit`，输入为 base64 解码后的源图片字节；上游没有该端点（404/405，如硅基流动）时自动回退为 `/images/generations` + `image=<data URL>` 的多模态入参，由图生图模型（如 `Qwen/Qwen-Image-Edit`）同时接收文本与源图。回退路径不发送 `input_fidelity`（OpenAI 编辑接口专有参数），该参数只对支持 `images.edit` 的上游生效。
+- `content_type`：`b64_json` 响应按请求的 `response_format` 映射为 `image/png`、`image/jpeg` 或 `image/webp`；URL 响应以上游字节签名为准（上游不保证按 `response_format` 出图），无法识别时退回请求声明的格式。
+- 编辑回退依赖上游在图生图路径上真正使用 `image` 入参：若上游忽略该字段，请求会退化成"按提示词重新生成"而不会报错。选择 `[image_profiles.*]` 的模型时需确认它是图生图模型。
 
 ## 6. 边界
 
