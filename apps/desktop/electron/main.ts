@@ -18,6 +18,7 @@ import { SecureTokenStore } from './secure-store';
 import { scanDirectorySize, scanVolumes } from './local-tools/disk-scanner';
 import { CleanupManager, type PublicCleanupJob } from './local-tools/cleanup-manager';
 import { writeSelectedFile, assertSavableExtension, buildSuggestedFileName } from './local-tools/file-saver';
+import { installAppUpdater } from './app-updater';
 
 const connectorRegistry = new ConnectorRegistry();
 const dingtalkConnector = new DingTalkConnectorAdapter();
@@ -366,6 +367,7 @@ if (!app.requestSingleInstanceLock()) {
         });
         createWindow();
         installTray();
+        installAppUpdater();
         // macOS：窗口关闭后不退出应用，点击 Dock 图标需要重新创建窗口。
         app.on('activate', () => {
             if (BrowserWindow.getAllWindows().length === 0) createWindow();

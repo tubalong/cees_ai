@@ -9,6 +9,7 @@ import type {
     ConnectorStatus,
     ConnectorTool,
 } from '../electron/connectors/core/connector.types';
+import type { AppUpdateStatus } from '../electron/app-updater';
 
 declare global {
     interface Window {
@@ -18,6 +19,13 @@ declare global {
             setZoomFactor: (factor: number) => void;
             openDevTools: () => void;
             openExternal: (url: string) => Promise<boolean>;
+            appUpdate?: {
+                status: () => Promise<AppUpdateStatus>;
+                check: () => Promise<AppUpdateStatus>;
+                download: () => Promise<AppUpdateStatus>;
+                install: () => Promise<AppUpdateStatus>;
+                onStatusChanged: (listener: (status: AppUpdateStatus) => void) => () => void;
+            };
             localSystem?: {
                 scanVolumes: () => Promise<Array<{ label: string; totalBytes: number; freeBytes: number; usedBytes: number }>>;
                 chooseAndScanDirectory: () => Promise<{

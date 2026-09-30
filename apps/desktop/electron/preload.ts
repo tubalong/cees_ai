@@ -9,6 +9,7 @@ import type {
 } from './connectors/core/connector.types';
 import type { DingTalkDwsSnapshot, DingTalkDwsStatus } from './dingtalk-dws';
 import type { DingTalkConnectorContext, DingTalkConnectorPlannedCall, DingTalkConnectorReleaseStatus, DingTalkConnectorTool } from './dingtalk-connector';
+import type { AppUpdateStatus } from './app-updater';
 
 contextBridge.exposeInMainWorld('cees', {
     platform: process.platform,
@@ -16,6 +17,17 @@ contextBridge.exposeInMainWorld('cees', {
     setZoomFactor: (factor: number) => webFrame.setZoomFactor(factor),
     openDevTools: () => ipcRenderer.send('cees:open-devtools'),
     openExternal: (url: string): Promise<boolean> => ipcRenderer.invoke('cees:open-external', url),
+    appUpdate: {
+        status: (): Promise<AppUpdateStatus> => ipcRenderer.invoke('cees:app-update-status'),
+        check: (): Promise<AppUpdateStatus> => ipcRenderer.invoke('cees:app-update-check'),
+        download: (): Promise<AppUpdateStatus> => ipcRenderer.invoke('cees:app-update-download'),
+        install: (): Promise<AppUpdateStatus> => ipcRenderer.invoke('cees:app-update-install'),
+        onStatusChanged: (listener: (status: AppUpdateStatus) => void): (() => void) => {
+            const handler = (_event: Electron.IpcRendererEvent, status: AppUpdateStatus): void => listener(status);
+            ipcRenderer.on('cees:app-update-status', handler);
+            return () => ipcRenderer.removeListener('cees:app-update-status', handler);
+        },
+    },
     localSystem: {
         scanVolumes: (): Promise<import('./local-tools/disk-scanner').VolumeSummary[]> =>
             ipcRenderer.invoke('cees:local-disk-scan-volumes'),

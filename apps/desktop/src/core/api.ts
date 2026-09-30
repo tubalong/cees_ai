@@ -1,8 +1,8 @@
 import { toUserErrorMessage } from './user-error';
 
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000/api/';
+// export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000/api/';
 // export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://192.168.5.29:3000/api/';
-// export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://132.232.159.186:3000/api/';
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://132.232.159.186:3000/api/';
 // http://192.168.5.29:3000/api/
 // http://132.232.159.186:3000/api/
 const ACCESS_TOKEN_KEY = 'cees.accessToken';
